@@ -196,6 +196,7 @@ def _post_bill_lines(
     existing_transaction=None,
     retainage_held: Decimal = Decimal("0"),
     booked_use_tax_rates=None,
+    booked_accounts=None,
 ):
     """Write the bill's lines, post its journal (DR each line's account or
     Inventory, CR Accounts Payable) and record its inventory receipts. Used
@@ -205,10 +206,15 @@ def _post_bill_lines(
     `booked_use_tax_rates` (an edit's): the use-tax rate each of the bill's
     lines accrued at before the edit, by line id. A line sent with its id
     keeps its own rate wherever it sits now; a new line, or one that had
-    none, accrues at today's setting."""
+    none, accrues at today's setting.
+
+    `booked_accounts` (an edit's): the account each of the bill's lines was
+    saved on, by line id. A line sent with its id and that account keeps it
+    even when it is a control a new line is refused (#785)."""
     from app.services.currency import convert_lines
 
     booked_use_tax_rates = booked_use_tax_rates or {}
+    booked_accounts = booked_accounts or {}
 
     # A missing Accounts Payable account is the first thing to say (#119),
     # ahead of anything about one line.
@@ -280,6 +286,8 @@ def _post_bill_lines(
                 vendor=vendor,
                 cost_code_id=line_data.cost_code_id,
                 cost_type=eff_cost_type,
+                refuse_controls=True,
+                kept_account_id=booked_accounts.get(getattr(line_data, "id", None)),
             )
         else:
             # A description-only line (no amount) posts nothing; keep the
@@ -921,6 +929,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         # the rate each line's use tax was booked at, by line id, before the
         # lines are deleted: the re-post keeps it for a line sent with its id
         booked_use_tax_rates = {ln.id: ln.use_tax_rate for ln in bill.lines}
+        booked_accounts = {ln.id: ln.account_id for ln in bill.lines}
         if data.lines is not None:
             sent_ids = set()
             for sent in data.lines:
@@ -977,6 +986,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
             existing_transaction=txn,
             retainage_held=retainage_held,
             booked_use_tax_rates=booked_use_tax_rates,
+            booked_accounts=booked_accounts,
         )
         db.flush()
         db.refresh(bill)

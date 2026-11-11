@@ -15,6 +15,7 @@ from app.services.accounting import create_journal_entry, get_cc_account_id
 from app.services.bank_posting import void_document
 from app.services.bank_register import voided_transaction_ids
 from app.services.closing_date import check_closing_date
+from app.services.purchase_posting import refuse_control_account
 from app.models.transactions import Transaction
 
 router = APIRouter(prefix="/api/cc-charges", tags=["cc-charges"])
@@ -84,6 +85,8 @@ def create_cc_charge(data: CCChargeCreate, db: Session = Depends(get_db)):
     expense_account = db.query(Account).filter(Account.id == data.account_id).first()
     if not expense_account:
         raise HTTPException(status_code=404, detail="Expense account not found")
+    # never A/R, A/P, Undeposited Funds or Inventory (#785)
+    refuse_control_account(expense_account, "The card charge")
 
     amount = Decimal(str(data.amount))
     if amount <= 0:

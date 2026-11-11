@@ -30,7 +30,16 @@
 # the rest of the journal. The rate is kept on the bill line when the tax
 # first accrues (BillLine.use_tax_rate), and every re-post uses it: changing
 # the setting later never moves a bill already booked.
-# ============================================================================
+#
+# Controls (#785). A bill, quick entry, memorized bill, expense or card
+# charge line may post to a balance-sheet account (a loan, an escrow, an
+# owner's equity, #766), never to Accounts Receivable, Accounts Payable,
+# Undeposited Funds or Inventory: the documents that own those post to them.
+# A bill line on 1200 turned up in Make Deposits as a payment to deposit, and
+# one on 1300 raised the Balance Sheet's Inventory with no item received
+# (#785). A line already saved on one of them keeps it through an edit that
+# leaves the line's account alone; a bookkeeper moves it. Purchase orders
+# and vendor credits resolve as they did.
 
 from decimal import Decimal
 from typing import Optional, Sequence
@@ -96,6 +105,38 @@ def _line_label(line_no: int, description: Optional[str]) -> str:
     return f"Line {line_no} ({desc})" if desc else f"Line {line_no}"
 
 
+# the controls a purchase line may not post to: number -> where such a
+# posting belongs, said after the account's name
+PURCHASE_LINE_CONTROLS = {
+    "1100": "which only invoices and customer payments post to",
+    "2000": "which only bills and bill payments post to",
+    "1200": "which holds customer payments until they are deposited",
+    "1300": "which only an inventory item's purchases and sales post to",
+}
+
+
+def refuse_control_account(account: Account, label: str) -> None:
+    """Refuse (422) a purchase line posting to Accounts Receivable, Accounts
+    Payable, Undeposited Funds or Inventory, in one sentence that names the
+    account, where such a posting belongs, and what to do. `label` starts
+    the sentence ("Line 2 (Deposit)", "The card charge")."""
+    from app.services.control_accounts import is_control
+
+    number = account.account_number
+    where = PURCHASE_LINE_CONTROLS.get(str(number)) if number else None
+    if where is None or not is_control(number, account.account_type):
+        return
+    fix = (
+        "put the item on the line, or choose another account"
+        if str(number) == "1300"
+        else "choose another account"
+    )
+    raise HTTPException(
+        status_code=422,
+        detail=f"{label} can't post to {number} {account.name}, {where}; {fix}.",
+    )
+
+
 def expense_account_for(
     db: Session,
     *,
@@ -107,6 +148,8 @@ def expense_account_for(
     fix_hint: str = "Choose an account on the line",
     cost_code_id: Optional[int] = None,
     cost_type: Optional[str] = None,
+    refuse_controls: bool = False,
+    kept_account_id: Optional[int] = None,
 ) -> int:
     """The account a non-stock purchase line posts to.
 
@@ -115,9 +158,14 @@ def expense_account_for(
     code's account or the cost type's default account, else the vendor's
     default expense account. When none of them names one the line is refused
     (400) — never booked to a guessed account. A Business or Nonprofit
-    company's lines resolve as they always have."""
+    company's lines resolve as they always have.
+
+    `refuse_controls` (a bill's lines): an account chosen on the line that is
+    one of the controls (PURCHASE_LINE_CONTROLS) is refused, unless it is
+    `kept_account_id`, the account an edited line was already saved on."""
     if account_id:
-        if db.get(Account, account_id) is None:
+        acct = db.get(Account, account_id)
+        if acct is None:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -126,6 +174,8 @@ def expense_account_for(
                     "Nothing was saved."
                 ),
             )
+        if refuse_controls and account_id != kept_account_id:
+            refuse_control_account(acct, _line_label(line_no, description))
         return account_id
     if item is not None and item.expense_account_id:
         return item.expense_account_id

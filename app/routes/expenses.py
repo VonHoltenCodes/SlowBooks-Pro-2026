@@ -19,6 +19,7 @@ from app.services.job_costing import line_cost_type
 from app.services.bank_posting import assert_not_reconciled, release_statement_links
 from app.services.check_numbers import refuse_duplicate
 from app.services.closing_date import check_closing_date
+from app.services.purchase_posting import _line_label, refuse_control_account
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 
@@ -265,10 +266,19 @@ def create_expense(
     specs = _line_specs(data)
     amount = sum((sp["amount"] for sp in specs), Decimal("0"))
     expense_accounts = {}
-    for sp in specs:
+    for n, sp in enumerate(specs, 1):
         acct = db.query(Account).filter(Account.id == sp["account_id"]).first()
         if acct is None:
             raise HTTPException(status_code=404, detail="Expense account not found")
+        # never A/R, A/P, Undeposited Funds or Inventory (#785)
+        refuse_control_account(
+            acct,
+            (
+                "The expense"
+                if data.lines is None
+                else _line_label(n, sp["description"])
+            ),
+        )
         expense_accounts[acct.id] = acct
 
     paid_from = (
