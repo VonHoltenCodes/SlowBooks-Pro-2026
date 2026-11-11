@@ -46,9 +46,26 @@ What comes across:
 - **The chart** from the Balance Sheet and the Profit and Loss: every
   account with a figure, typed by the section it sits under (Bank Accounts
   are banks, Credit Cards are cards), sub-accounts named `Parent:Child` as
-  QuickBooks writes them elsewhere and placed under their parents.
-  QuickBooks Online accounts have no numbers, so these arrive without one;
-  give them numbers in Chart of Accounts afterwards if you like.
+  QuickBooks writes them elsewhere and placed under their parents. A
+  company with **account numbers** switched on has them on every statement
+  row ("1010 Operating Checking"), while the Journal and the Trial Balance
+  write the account's own number in front of the whole path ("1010
+  Operating:Operating Checking"): the number comes across as the account's
+  number and the rest as its name. A number the books already use on
+  another account, or one SlowBooks keeps for a control account (2000
+  Accounts Payable, 2200 Sales Tax Payable …), is left off and the dry run
+  names it; number those accounts in Chart of Accounts afterwards if you
+  like. An account with no balance that QuickBooks marked "(deleted)" is
+  off both statements and the Trial Balance; the General Ledger in the zip
+  lists it in chart order, so it is typed from its neighbours there, with
+  a note. Deleted accounts come across inactive, with their history. The
+  Balance Sheet and the Profit and Loss must be the ones from Export data:
+  a statement exported from the Reports page has no indentation, and the
+  dry run says so.
+- **The Account List report**, when you download it beside the zip
+  (Reports → Account List → Export to Excel) and upload it with the rest,
+  is the chart: every account's number, type and description in one
+  place, the statements adding only the deleted accounts it leaves out.
 - **Every transaction in the Journal** as a journal entry: invoices,
   payments, bills, checks, deposits, transfers and journal entries alike,
   with the date, type, number, name and memo, each block checked against

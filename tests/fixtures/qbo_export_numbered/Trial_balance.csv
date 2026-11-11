@@ -1,0 +1,22 @@
+Pinecrest Studio Rentals,,
+Trial Balance,,
+All Dates,,
+,,
+,Debit,Credit
+1000 Cash Box,=45.00,
+1010 Operating:Operating Checking,=1200.00,
+1011 Operating:Operating Savings,=300.00,
+2150 Company Visa,,=120.00
+2201 Long-term loans:Bank loan,,=500.00
+3050 Opening Balance Equity,,=1000.00
+4050 Memberships,,=100.00
+Memberships:Family Memberships,,=300.00
+Memberships:Student Memberships,,=200.00
+4350 Store Sales,,=50.00
+4351 Store Sales:Discounts Given,=5.00,
+Office expenses:Interest paid,=20.00,
+Office expenses:Rent,=700.00,
+TOTAL,=2270.00,=2270.00
+,,
+,,
+"Monday, Nov 9, 2026 06:00:00 AM GMT-8 - Accrual Basis",,

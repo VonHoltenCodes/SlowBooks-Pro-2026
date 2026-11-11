@@ -1,0 +1,68 @@
+Pinecrest Studio Rentals,,,,,,,,,
+General Ledger,,,,,,,,,
+All Dates,,,,,,,,,
+,,,,,,,,,
+,Date,Transaction Type,Num,Name,Memo/Description,Account,Debit,Credit,Balance
+1000 Cash Box,,,,,,,,,
+,01/08/2026,Sales Receipt,1001,Walk-in,Store sale,1000 Cash Box,=45.00,,=45.00
+Total for 1000 Cash Box,,,,,,,=45.00,,
+Operating,,,,,,,,,
+   1010 Operating Checking,,,,,,,,,
+,01/05/2026,Journal Entry,1,,Opening deposit,1010 Operating:Operating Checking,=1000.00,,=1000.00
+,01/06/2026,Deposit,,Reyes Family,Family dues,1010 Operating:Operating Checking,=300.00,,=1300.00
+,01/15/2026,Journal Entry,2,,Bank loan received,1010 Operating:Operating Checking,=500.00,,=1800.00
+,02/15/2026,Expense,,Company Visa,Card payment,1010 Operating:Operating Checking,,=580.00,=1220.00
+,02/20/2026,Expense,,First Ridge Bank,Loan interest,1010 Operating:Operating Checking,,=20.00,=1200.00
+   Total for 1010 Operating Checking,,,,,,,=1800.00,=600.00,
+   1011 Operating Savings,,,,,,,,,
+,01/07/2026,Deposit,,Ana Reyes,Student dues,1011 Operating:Operating Savings,=200.00,,=200.00
+,01/09/2026,Deposit,,,Guild dues,1011 Operating:Operating Savings,=100.00,,=300.00
+,01/20/2026,Journal Entry,3,,Cash advance,1011 Operating:Operating Savings,=40.00,,=340.00
+,01/25/2026,Journal Entry,4,,Advance paid back,1011 Operating:Operating Savings,,=40.00,=300.00
+   Total for 1011 Operating Savings,,,,,,,=340.00,=40.00,
+Total for Operating,,,,,,,=2140.00,=640.00,
+2150 Company Visa,,,,,,,,,
+,02/01/2026,Expense,,Pinecrest Plaza LLC,February rent,2150 Company Visa,,=700.00,=-700.00
+,02/15/2026,Expense,,Company Visa,Card payment,2150 Company Visa,=580.00,,=-120.00
+Total for 2150 Company Visa,,,,,,,=580.00,=700.00,
+2101 Old Store Card (deleted),,,,,,,,,
+,01/20/2026,Journal Entry,3,,Cash advance,2101 Old Store Card (deleted),,=40.00,=-40.00
+,01/25/2026,Journal Entry,4,,Advance paid back,2101 Old Store Card (deleted),=40.00,,=0.00
+Total for 2101 Old Store Card (deleted),,,,,,,=40.00,=40.00,
+2200 Long-term loans,,,,,,,,,
+   2201 Bank loan,,,,,,,,,
+,01/15/2026,Journal Entry,2,,Bank loan received,2201 Long-term loans:Bank loan,,=500.00,=-500.00
+   Total for 2201 Bank loan,,,,,,,,=500.00,
+Total for 2200 Long-term loans,,,,,,,,=500.00,
+3050 Opening Balance Equity,,,,,,,,,
+,01/05/2026,Journal Entry,1,,Opening deposit,3050 Opening Balance Equity,,=1000.00,=-1000.00
+Total for 3050 Opening Balance Equity,,,,,,,,=1000.00,
+4050 Memberships,,,,,,,,,
+,01/09/2026,Deposit,,,Guild dues,4050 Memberships,,=100.00,=-100.00
+Total for 4050 Memberships,,,,,,,,=100.00,
+   Family Memberships,,,,,,,,,
+,01/06/2026,Deposit,,Reyes Family,Family dues,Memberships:Family Memberships,,=300.00,=-300.00
+   Total for Family Memberships,,,,,,,,=300.00,
+   Student Memberships,,,,,,,,,
+,01/07/2026,Deposit,,Ana Reyes,Student dues,Memberships:Student Memberships,,=200.00,=-200.00
+   Total for Student Memberships,,,,,,,,=200.00,
+Total for 4050 Memberships with subs,,,,,,,,=600.00,
+4350 Store Sales,,,,,,,,,
+,01/08/2026,Sales Receipt,1001,Walk-in,Store sale,4350 Store Sales,,=50.00,=-50.00
+Total for 4350 Store Sales,,,,,,,,=50.00,
+   4351 Discounts Given,,,,,,,,,
+,01/08/2026,Sales Receipt,1001,Walk-in,Member discount,4351 Store Sales:Discounts Given,=5.00,,=5.00
+   Total for 4351 Discounts Given,,,,,,,=5.00,,
+Total for 4350 Store Sales with subs,,,,,,,=5.00,=50.00,
+Office expenses,,,,,,,,,
+   Interest paid,,,,,,,,,
+,02/20/2026,Expense,,First Ridge Bank,Loan interest,Office expenses:Interest paid,=20.00,,=20.00
+   Total for Interest paid,,,,,,,=20.00,,
+   Rent,,,,,,,,,
+,02/01/2026,Expense,,Pinecrest Plaza LLC,February rent,Office expenses:Rent,=700.00,,=700.00
+   Total for Rent,,,,,,,=700.00,,
+Total for Office expenses,,,,,,,=720.00,,
+Not Specified,,,,,,,,,
+Total for Not Specified,,,,,,,,,
+,,,,,,,,,
+"Monday, Nov 9, 2026 06:00:05 AM GMT-8 - Accrual Basis",,,,,,,,,
