@@ -253,6 +253,13 @@ class InvoiceResponse(BaseModel):
     # Filled by GET /invoices/{id} only: the invoice bills nothing but a
     # retainage release, so it reads as one (#751).
     release_only: bool = False
+    # The newest send of this invoice that went out (#780), from the email
+    # log: when, and to whom. Read-only and null until one has; a failed
+    # send leaves them as they were. Filled by the list, the read, an edit,
+    # Mark as Sent and a void (a new or duplicated invoice has none). An
+    # email does not change the status: Mark as Sent is its own action.
+    last_emailed_at: Optional[datetime] = None
+    last_emailed_to: Optional[str] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None

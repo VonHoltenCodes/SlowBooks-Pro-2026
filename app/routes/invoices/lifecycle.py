@@ -28,6 +28,7 @@ from app.services.closing_date import check_closing_date
 
 from app.routes.invoices._router import router
 from app.routes.invoices.helpers import (
+    fill_last_emailed,
     invoice_customer_name,
     _post_invoice_journal,
     confirm_credit_limit,
@@ -222,6 +223,7 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
     resp.notice = notice
+    fill_last_emailed(db, [resp])
     return resp
 
 
@@ -242,6 +244,7 @@ def mark_invoice_sent(invoice_id: int, db: Session = Depends(get_db)):
     DocumentTerms(db, "invoice").fill(resp, invoice)
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
+    fill_last_emailed(db, [resp])
     return resp
 
 

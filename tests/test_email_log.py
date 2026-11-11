@@ -84,10 +84,13 @@ def test_status_filter(client, db_session):
     assert both["total"] == 2
 
 
-def test_non_admin_sessions_refused(client, db_session):
+def test_non_admin_sessions_read_the_list_without_the_raw_error(client, db_session):
+    # #781: every role that reads the books reads the sends; only an
+    # administrator sees the raw SMTP text (tests/test_email_log_token_access_781.py)
     from app.models.users import ROLE_BOOKKEEPER, ROLE_READONLY, User
     from app.services import auth as auth_service
 
+    _seed(db_session, [("invoice", "b@x.com", "Inv", "failed", "535 nope", 0)])
     for name, role in [("keeper", ROLE_BOOKKEEPER), ("viewer", ROLE_READONLY)]:
         db_session.add(
             User(
@@ -104,16 +107,18 @@ def test_non_admin_sessions_refused(client, db_session):
         client.post(
             "/api/auth/login", json={"username": name, "password": "a-password-123"}
         )
-        assert client.get("/api/email-log").status_code == 403
+        r = client.get("/api/email-log")
+        assert r.status_code == 200
+        assert "535 nope" not in r.text
 
 
-def test_bookkeeper_token_refused(client):
+def test_a_bookkeeper_token_reads_the_list(client):
     created = client.post(
         "/api/tokens", json={"label": "keeper-bot", "role": "bookkeeper"}
     ).json()
     api = TestClient(app)
     api.headers["Authorization"] = f"Bearer {created['token']}"
-    assert api.get("/api/email-log").status_code == 403
+    assert api.get("/api/email-log").status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -284,13 +289,14 @@ def test_an_admin_is_pointed_at_recent_sends(client, seed_accounts, monkeypatch)
 def test_a_bookkeeper_is_told_an_administrator_can_see_why(
     client, db_session, seed_accounts, monkeypatch
 ):
-    # Recent sends is admin only, so a bookkeeper is not sent there.
+    # Recent sends is an administrator's section of Settings, so a
+    # bookkeeper is not sent there (the API answers them without the raw
+    # error since #781).
     inv = _invoice(client)
     _bookkeeper_login(client, db_session)
     detail = _failed_invoice_email(client, monkeypatch, inv)
     assert "An administrator can see why under Settings → Recent sends." in detail
     assert "Check the SMTP settings" not in detail
-    assert client.get("/api/email-log").status_code == 403
 
 
 def _failed_letters(client, monkeypatch):
