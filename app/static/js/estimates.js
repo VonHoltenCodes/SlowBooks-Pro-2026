@@ -443,7 +443,9 @@ const EstimatesPage = {
         </div>`;
     },
 
-    _r(x) { return Math.round((Number(x) + Number.EPSILON) * 100) / 100; },
+    // Every figure of the bid panel goes to the cent the way the server's
+    // _q does (half away from zero), on the rounded lines (#783).
+    _r(x) { return SalesLines.cents(x); },
 
     // The bid math the server computes (app/services/estimating.py), mirrored
     // for the live form panel. Lines stay at cost; the four markups are their

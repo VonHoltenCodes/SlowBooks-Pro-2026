@@ -8,6 +8,18 @@ const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 
+// The form's money rounding is the sales forms' own (SalesLines.cents in
+// invoices.js), loaded for real so the bid figures round as they do (#783).
+function salesLinesCents() {
+    const c = { console, window: {}, App: { settings: {} }, document: { addEventListener() {} } };
+    vm.createContext(c);
+    vm.runInContext(
+        fs.readFileSync(path.join(__dirname, '../../app/static/js/invoices.js'), 'utf8') + '\nthis.SalesLines = SalesLines;',
+        c,
+    );
+    return c.SalesLines.cents;
+}
+
 function estimatesContext(construction) {
     const context = {
         console,
@@ -20,7 +32,7 @@ function estimatesContext(construction) {
         formatCurrency: (v) => '$' + v,
         ItemQuickAdd: { options: () => '' },
         TaxDefault: { checked: () => '' },
-        SalesLines: { rate: (v) => '$' + v },
+        SalesLines: { rate: (v) => '$' + v, cents: salesLinesCents() },
     };
     vm.createContext(context);
     vm.runInContext(
