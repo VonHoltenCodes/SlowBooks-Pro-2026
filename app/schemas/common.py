@@ -107,6 +107,7 @@ def validate_non_negative_line(quantity, rate) -> None:
     negative balance_due. Anything that smells like a refund / discount /
     return belongs in a credit memo, not a negative invoice line.
     """
+    check_line_size(quantity, rate)
     q = Decimal(str(quantity if quantity is not None else 0))
     r = Decimal(str(rate if rate is not None else 0))
     if q < 0:
@@ -115,6 +116,35 @@ def validate_non_negative_line(quantity, rate) -> None:
         raise ValueError("rate must be non-negative; use a credit memo for refunds")
     if q != q.quantize(QUANTITY_PLACES):
         raise ValueError("Quantities are kept to four decimal places.")
+
+
+# A line's quantity is Numeric(12, 4) on invoices, estimates, bills, purchase
+# orders, credit memos, vendor credits and recurring and memorized lines; its
+# rate is Numeric(17, 4); an estimate line's unit cost is Numeric(12, 4). A
+# figure past its column overflows Postgres (a 500) or is stored wrong on
+# SQLite, and "1e40" at a rate of 0 passed the line check (it comes to 0)
+# and raised in the quantity rounding (#782). Each is held to its column
+# whatever the other figure is.
+MAX_QUANTITY = Decimal("99999999.9999")
+MAX_RATE = Decimal("9999999999999.9999")
+MAX_UNIT_COST = Decimal("99999999.9999")
+
+
+def _check_figure(value, limit: Decimal, label: str) -> None:
+    if value is None:
+        return
+    d = Decimal(str(value))
+    if not d.is_finite() or abs(d) > limit:
+        raise ValueError(f"{label} can be at most {limit:,}. Check the line.")
+
+
+def check_line_size(quantity, rate, unit_cost=None) -> None:
+    """Refuse a quantity, rate or unit cost too large for its column (or not a
+    number at all: "Infinity", "NaN") with a sentence, before anything rounds
+    it."""
+    _check_figure(quantity, MAX_QUANTITY, "A quantity")
+    _check_figure(rate, MAX_RATE, "A rate")
+    _check_figure(unit_cost, MAX_UNIT_COST, "A unit cost")
 
 
 # Money columns are Numeric(15, 2): a line or a document total past this

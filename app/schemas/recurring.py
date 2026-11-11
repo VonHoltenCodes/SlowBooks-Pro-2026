@@ -11,6 +11,7 @@ from pydantic import (
 from app.schemas.common import (
     StrictModel,
     TaxRateFloat,
+    check_line_fits,
     validate_non_negative_line,
     quantity_text,
 )
@@ -26,6 +27,7 @@ class RecurringLineCreate(StrictModel):
 
     @model_validator(mode="after")
     def _check_non_negative(self):
+        check_line_fits(self.quantity, self.rate)
         validate_non_negative_line(self.quantity, self.rate)
         return self
 

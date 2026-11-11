@@ -35,9 +35,10 @@ class VendorCreditLineCreate(StrictModel):
     def _check_non_negative(self):
         # A credit is entered as a positive amount, the same way a bill is.
         # The direction is the document's job, not the operator's.
-        validate_non_negative_line(self.quantity, self.rate)
         # quantity x rate past the money column raised in the rounding (a 500)
         check_line_fits(self.quantity, self.rate)
+        # and so did a quantity past its column at a rate of 0 (#782)
+        validate_non_negative_line(self.quantity, self.rate)
         return self
 
 
