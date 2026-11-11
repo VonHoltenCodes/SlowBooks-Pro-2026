@@ -34,6 +34,7 @@ from app.routes.invoices.helpers import (
     invoice_customer_name,
     confirm_credit_limit,
     confirm_zero_total,
+    fill_last_emailed,
     opening_status,
     refuse_due_before_date,
     resolve_line_taxable,
@@ -119,6 +120,7 @@ def list_invoices(
             # "Parent: Sub" for a sub-customer's, as the pickers say it
             resp.customer_name = invoice_customer_name(inv)
         results.append(resp)
+    fill_last_emailed(db, results)
     return results
 
 
@@ -133,6 +135,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
         resp.customer_name = invoice_customer_name(inv)
     resp.pay_application_number = pay_application_number(db, inv)
     resp.release_only = invoice_is_release_only(inv)
+    fill_last_emailed(db, [resp])
     return resp
 
 
@@ -741,4 +744,5 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
     resp.warnings = stock_warnings
+    fill_last_emailed(db, [resp])
     return resp
