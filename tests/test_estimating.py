@@ -1291,3 +1291,31 @@ def test_the_estimate_list_finds_lost_bids_by_the_uis_word(
     ]
     assert client.get("/api/estimates?status=pending").json() == []
     assert client.get("/api/estimates?status=bogus").status_code == 422
+
+
+def test_a_half_cent_deduct_alternate_totals_97_99_on_the_server(client, seed_customer):
+    # #783: the estimate form showed $98.00 for these lines while the saved
+    # estimate and its PDF said $97.99; the form now rounds as _q does. This
+    # pins the server's side of the same figure
+    # (tests/js/estimate_form_rounding_783.test.cjs pins the form's).
+    _set_construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [
+            {"description": "Base", "quantity": 1, "rate": 0, "unit_cost": 100},
+            {
+                "description": "Deduct",
+                "quantity": 1,
+                "rate": 0,
+                "unit_cost": -2.005,
+                "line_kind": "alternate",
+                "alternate_accepted": True,
+            },
+        ],
+    )
+    assert float(_lines(est)["Deduct"]["amount"]) == -2.01
+    assert float(est["total"]) == 97.99
+    totals = _totals(client, est["id"])
+    assert float(totals["subtotal"]) == 97.99
+    assert float(totals["bid_total"]) == 97.99

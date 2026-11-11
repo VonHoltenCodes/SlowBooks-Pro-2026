@@ -14,14 +14,20 @@
  * a total, and $0.00 documents were saved (2.17.3 exploratory, W-M1 / F14).
  */
 const SalesLines = {
-    // Half up to the cent. Shifting by exponent avoids binary drift:
-    // 1.005 * 100 is 100.49999... in floating point, Number('1.005e2') is 100.5.
+    // To the cent, half away from zero, as the server's _q rounds: -2.005
+    // is -2.01, never -2.00. The size is rounded and the sign put back, so a
+    // negative half goes away from zero (Math.round(-200.5) is -200). The
+    // value is read to 15 significant digits, all a double holds, and the
+    // point is moved in that decimal text rather than by multiplying: 1.005
+    // * 100 is 100.49999... in floating point, and 0.3 * 2.15 is
+    // 0.6449999999999999, which is 0.645 to 15 digits and so $0.65 (#783).
     cents(x) {
         const n = Number(x) || 0;
-        const a = Math.abs(n);
-        const shifted = Number(`${a}e2`);
-        const r = Number.isFinite(shifted) ? Math.round(shifted) : Math.round(a * 100);
-        return (n < 0 ? -1 : 1) * Number(`${r}e-2`);
+        if (!Number.isFinite(n)) return n;
+        const [digits, exp] = Math.abs(n).toPrecision(15).split('e');
+        const r = Math.round(Number(`${digits}e${Number(exp || 0) + 2}`));
+        const back = Number(`${r}e-2`); // NaN past 1e21, where r's text has an exponent
+        return (n < 0 && r ? -1 : 1) * (Number.isFinite(back) ? back : r / 100);
     },
 
     // Fill a line from the item picked in its .line-item select: description,
