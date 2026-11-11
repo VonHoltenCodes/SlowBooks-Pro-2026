@@ -37,9 +37,10 @@
 # Undeposited Funds or Inventory: the documents that own those post to them.
 # A bill line on 1200 turned up in Make Deposits as a payment to deposit, and
 # one on 1300 raised the Balance Sheet's Inventory with no item received
-# (#785). A line already saved on one of them keeps it through an edit that
-# leaves the line's account alone; a bookkeeper moves it. Purchase orders
-# and vendor credits resolve as they did.
+# (#785). A bill made from a purchase order (To Bill) is a new bill and is
+# refused the same way. A line already saved on one of them keeps it through
+# an edit that leaves the line's account alone; a bookkeeper moves it. A
+# purchase order itself and vendor credits resolve as they did.
 
 from decimal import Decimal
 from typing import Optional, Sequence

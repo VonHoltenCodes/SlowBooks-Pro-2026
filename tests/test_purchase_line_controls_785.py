@@ -12,8 +12,9 @@ bill tests are its tests.
 A bill or memorized bill already saved on one of them stays as it is and
 can still be edited; only a line newly set to a control is refused. An
 expense or card charge is changed by Void and Replace, which posts a new
-record, so its replacement is refused like a new one. Purchase orders keep
-their own accounts.
+record, so its replacement is refused like a new one. A bill made from a
+purchase order (To Bill) is a new bill and is refused the same way; the
+purchase order itself is unchanged.
 """
 
 from datetime import date
@@ -409,10 +410,8 @@ def test_a_memorized_bill_already_saved_on_undeposited_funds_can_still_be_edited
 # --- purchase orders ---------------------------------------------------------
 
 
-def test_a_purchase_order_still_turns_into_a_bill_on_its_cost_account(
-    client, seed_accounts, vendor
-):
-    po = client.post(
+def _po(client, vendor):
+    r = client.post(
         "/api/purchase-orders",
         json={
             "vendor_id": vendor.id,
@@ -420,8 +419,39 @@ def test_a_purchase_order_still_turns_into_a_bill_on_its_cost_account(
             "lines": [{"description": "Lumber", "quantity": 2, "rate": 50}],
         },
     )
-    assert po.status_code == 201, po.text
-    po = po.json()
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+@pytest.mark.parametrize("number", CONTROLS)
+def test_to_bill_with_a_control_account_on_a_line_is_refused(
+    client, db_session, seed_accounts, vendor, number
+):
+    po = _po(client, vendor)
+    r = client.post(
+        f"/api/purchase-orders/{po['id']}/convert-to-bill",
+        json={
+            "lines": [
+                {
+                    "line_id": po["lines"][0]["id"],
+                    "account_id": seed_accounts[number].id,
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == _sentence("Line 1 (Lumber)", number)
+    assert db_session.query(Bill).count() == 0
+    # the purchase order is as it was, open to turn into a bill
+    got = client.get(f"/api/purchase-orders/{po['id']}").json()
+    assert got["status"] == po["status"]
+    assert got["lines"] == po["lines"]
+
+
+def test_a_purchase_order_still_turns_into_a_bill_on_its_cost_account(
+    client, seed_accounts, vendor
+):
+    po = _po(client, vendor)
     r = client.post(
         f"/api/purchase-orders/{po['id']}/convert-to-bill",
         json={
@@ -436,3 +466,4 @@ def test_a_purchase_order_still_turns_into_a_bill_on_its_cost_account(
     assert r.status_code == 200, r.text
     bill = client.get(f"/api/bills/{r.json()['bill_id']}").json()
     assert [ln["account_id"] for ln in bill["lines"]] == [seed_accounts["5100"].id]
+    assert Decimal(str(bill["total"])) == Decimal("100")
