@@ -274,7 +274,11 @@ jobs:
           # test_browser_check_field_layout.py, a browser module that skips as
           # one where playwright is absent. 301 with the bottom layout's date
           # test (test_the_bottom_layouts_date_box_never_wraps, one render).
-          MAX_SKIPS: "301"
+          # 302 with the markup-per-line estimate form's browser test (#774,
+          # test_browser_estimate_line_markup.py, a browser module that skips
+          # as one where playwright is absent; its PDF tests read the print
+          # preview, so nothing new needs WeasyPrint).
+          MAX_SKIPS: "302"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
