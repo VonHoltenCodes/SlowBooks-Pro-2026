@@ -221,13 +221,6 @@ SETTINGS_TAKEN = {
     ),
     "Closing Date › Clear": ("PUT", "/api/settings", {"closing_date": ""}),
     "Email (SMTP) › Send Test Email": ("POST", "/api/settings/test-email", None),
-    # Recent sends reads the email_log (recipients, raw SMTP errors): admin
-    # only, like backups and tokens (#447).
-    "Recent sends › #email-log-failed-only": (
-        "GET",
-        "/api/email-log?status=failed",
-        None,
-    ),
     "Receipt Scanning › #ocr-engine-pref": (
         "PUT",
         "/api/settings",
@@ -398,13 +391,29 @@ MIGRATE_TAKEN = {
 
 
 KEPT = {**SETTINGS_KEPT}
+# What the page keeps for an administrator though the server answers a
+# bookkeeper: Recent sends is an administrator's section of Settings (#447),
+# but GET /api/email-log answers every role since #781, without the raw SMTP
+# error, so an integration can confirm a send went out.
+SETTINGS_TAKEN_ON_THE_PAGE_ONLY = {
+    "Recent sends › #email-log-failed-only": (
+        "GET",
+        "/api/email-log?status=failed",
+        None,
+    ),
+}
 TAKEN = {**SETTINGS_TAKEN, **COMPANIES_TAKEN, **MIGRATE_TAKEN}
 
 
 def _control(key, names):
     """The control a key is sent by: a field or a picker belongs to its
     button, and every named field of the Settings form to Save Settings."""
-    if key in KEPT or key in TAKEN or key in SETTINGS_TAKEN_FROM_A_SIGN_IN:
+    if (
+        key in KEPT
+        or key in TAKEN
+        or key in SETTINGS_TAKEN_FROM_A_SIGN_IN
+        or key in SETTINGS_TAKEN_ON_THE_PAGE_ONLY
+    ):
         return key
     for parts in (SETTINGS_KEPT_PARTS, SETTINGS_TAKEN_PARTS):
         if key in parts:
@@ -494,6 +503,7 @@ def test_settings_is_as_it_was_for_an_administrator():
         | set(SETTINGS_KEPT_PARTS)
         | set(SETTINGS_TAKEN)
         | set(SETTINGS_TAKEN_FROM_A_SIGN_IN)
+        | set(SETTINGS_TAKEN_ON_THE_PAGE_ONLY)
         | set(SETTINGS_TAKEN_PARTS)
     )
     assert sorted(everything - _yes(got["offered"])) == []
@@ -513,7 +523,8 @@ def test_a_read_only_sign_in_has_its_own_sentence_on_settings_not_two():
     got = _probe()["settings"]["readonly"]
     assert got["fields"]["enabled"] == []
     assert (got["readonly_notes"], got["notes"]) == (1, [])
-    assert _yes(got["offered"]) & set(SETTINGS_TAKEN) == set()
+    taken = set(SETTINGS_TAKEN) | set(SETTINGS_TAKEN_ON_THE_PAGE_ONLY)
+    assert _yes(got["offered"]) & taken == set()
 
 
 def test_companies_leaves_a_new_company_to_an_administrator():
@@ -665,7 +676,9 @@ def test_every_control_taken_from_a_bookkeeper_the_server_refuses(client, made):
     admin, keeper_pages = _pages(probe, "admin"), _pages(probe, "bookkeeper")
     taken = {page: admin[page] - keeper_pages[page] for page in admin}
     assert taken == {
-        "settings": set(SETTINGS_TAKEN) | set(SETTINGS_TAKEN_FROM_A_SIGN_IN),
+        "settings": set(SETTINGS_TAKEN)
+        | set(SETTINGS_TAKEN_FROM_A_SIGN_IN)
+        | set(SETTINGS_TAKEN_ON_THE_PAGE_ONLY),
         "companies": set(COMPANIES_TAKEN),
         "migrate": set(MIGRATE_TAKEN),
     }
@@ -673,6 +686,10 @@ def test_every_control_taken_from_a_bookkeeper_the_server_refuses(client, made):
     for control, (method, path, body) in TAKEN.items():
         r = _send(keeper, method, path, body, made)
         assert r.status_code == 403, (control, method, path, r.status_code, r.text)
+    # the page keeps these for an administrator; the server answers (#781)
+    for control, (method, path, body) in SETTINGS_TAKEN_ON_THE_PAGE_ONLY.items():
+        r = _send(keeper, method, path, body, made)
+        assert r.status_code == 200, (control, method, path, r.status_code, r.text)
     # users and tokens, from a bookkeeper's own sign-in: no API token may
     # manage either, whatever its role
     r = client.post(

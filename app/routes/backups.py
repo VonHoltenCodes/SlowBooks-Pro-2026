@@ -207,6 +207,12 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
                 f"restore (safety backup {safety['filename']})."
             ),
         )
+    # #778: the start-up's cash-basis catch-up for the restored file (the
+    # backfill, then the retainage pass a backup from before 2.31.14 has not
+    # had), so it reads right without a restart. It never fails the restore.
+    from app.services.cash_basis import catch_up_after_restore
+
+    catch_up_after_restore(db)
     # The books now carry the backup's company name. The company list (the
     # picker) kept the name from before the restore, so a backup made before
     # a rename left the two disagreeing until the next start (2.18.0 gate,

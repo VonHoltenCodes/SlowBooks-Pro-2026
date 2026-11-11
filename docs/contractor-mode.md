@@ -1981,7 +1981,11 @@ estimate list's `status` takes `lost` for the estimates marked lost (stored as
 whose quantity × rate (or amount) is past 9,999,999,999,999.99, or whose lines
 sum past it, is refused with a 422 sentence before anything is saved. So is an
 estimate, purchase order, invoice or bill whose subtotal, tax or total (after
-markups and tax) would not fit. Approving an
+markups and tax) would not fit. A line's quantity
+(at most 99,999,999.9999), rate (at most 9,999,999,999,999.9999) and an
+estimate line's unit cost (at most 99,999,999.9999) are each held to their own
+column too, whatever the other figure is, on credit memos, vendor credits and
+recurring and memorized lines as well. Approving an
 owner change order is refused the same way when the contract plus its sell
 total would not fit.
 

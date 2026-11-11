@@ -652,3 +652,32 @@ def _reverse_and_delete_journal(db: Session, transaction_id: int):
         .filter(TransactionLine.transaction_id == transaction_id)
         .execution_options(**everything),
     )
+
+
+def fill_last_emailed(db: Session, responses) -> None:
+    """Set last_emailed_at / last_emailed_to on invoice responses (#780):
+    the newest email_log row for each invoice that went out ("sent"). One
+    query for the whole list. Every send writes the row, the app's Email
+    button and the API alike, so this sees both."""
+    from app.models.email_log import EmailLog
+
+    by_id = {r.id: r for r in responses}
+    if not by_id:
+        return
+    rows = (
+        db.query(EmailLog.entity_id, EmailLog.recipient, EmailLog.sent_at)
+        .filter(
+            EmailLog.entity_type == "invoice",
+            EmailLog.status == "sent",
+            EmailLog.entity_id.in_(list(by_id)),
+        )
+        .order_by(EmailLog.sent_at.desc(), EmailLog.id.desc())
+        .all()
+    )
+    seen = set()
+    for entity_id, recipient, sent_at in rows:
+        if entity_id in seen:
+            continue
+        seen.add(entity_id)
+        by_id[entity_id].last_emailed_at = sent_at
+        by_id[entity_id].last_emailed_to = recipient

@@ -33,8 +33,8 @@ class POLineCreate(StrictModel):
 
     @model_validator(mode="after")
     def _check_non_negative(self):
-        validate_non_negative_line(self.quantity, self.rate)
         check_line_fits(self.quantity, self.rate)
+        validate_non_negative_line(self.quantity, self.rate)
         return self
 
 

@@ -19,6 +19,7 @@ from app.schemas.common import (
     clean_line_cost_type,
     validate_non_negative_line,
     check_line_fits,
+    check_line_size,
     check_lines_fit,
     check_markup_percent,
     quantity_text,
@@ -104,14 +105,12 @@ class EstimateLineCreate(StrictModel):
     def _check_non_negative(self):
         # a deduct alternate's negative figures must fit the column too
         check_line_fits(self.quantity, self.rate)
-        # a rate or cost too large to store refused even at quantity 0, which
-        # the line's amount alone lets through (a 500 in the rounding)
-        check_line_fits(Decimal("1"), self.rate)
         if self.unit_cost is not None:
-            check_line_fits(Decimal("1"), self.unit_cost)
             check_line_fits(self.quantity, self.unit_cost)
             # the marked-up rate is checked where the line is priced by it
             # (estimates._enforce_at_cost): a kept, unapplied markup is not
+        # each figure fits its own column too, whatever the other is (#782)
+        check_line_size(self.quantity, self.rate, self.unit_cost)
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":

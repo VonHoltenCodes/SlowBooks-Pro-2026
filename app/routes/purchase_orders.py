@@ -833,6 +833,8 @@ def convert_to_bill(
                 fix_hint="Choose an account for it when you turn the order into a bill",
                 cost_code_id=poline.cost_code_id,
                 cost_type=poline.cost_type,
+                # the bill it makes is a new bill: no control accounts (#785)
+                refuse_controls=True,
             )
         plan.append((poline, item, amt, tax_shares[i], posting_acct))
 

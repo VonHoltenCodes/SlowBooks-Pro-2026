@@ -17,6 +17,7 @@ from app.schemas.common import (
     TaxRate,
     TaxRateOut,
     check_line_fits,
+    check_line_size,
     check_lines_fit,
     validate_non_negative_line,
     quantity_text,
@@ -67,8 +68,9 @@ class InvoiceLineCreate(StrictModel):
         # A negative price is a discount; whether this line may carry one
         # depends on its item and on the invoice it is on, which the route
         # decides (routes/invoices/helpers.py, refuse_negative_lines).
-        validate_non_negative_line(self.quantity, None)
         check_line_fits(self.quantity, self.rate)
+        check_line_size(self.quantity, self.rate)
+        validate_non_negative_line(self.quantity, None)
         return self
 
 
@@ -251,6 +253,13 @@ class InvoiceResponse(BaseModel):
     # Filled by GET /invoices/{id} only: the invoice bills nothing but a
     # retainage release, so it reads as one (#751).
     release_only: bool = False
+    # The newest send of this invoice that went out (#780), from the email
+    # log: when, and to whom. Read-only and null until one has; a failed
+    # send leaves them as they were. Filled by the list, the read, an edit,
+    # Mark as Sent and a void (a new or duplicated invoice has none). An
+    # email does not change the status: Mark as Sent is its own action.
+    last_emailed_at: Optional[datetime] = None
+    last_emailed_to: Optional[str] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None
