@@ -326,12 +326,13 @@ def _estimate_body(customer_id, **extra):
 
 def test_an_estimate_total_with_markups_past_the_column_is_a_422(client, seed_customer):
     """One line of 9.9 trillion fits; with 8%, 1.5%, 5% and 1% compounded
-    the total is 11,508,948,990,000.00 and is refused with a sentence."""
+    the total is 11,508,948,990,000.00 and is refused with a sentence. (The
+    9.9 trillion is 100,000 at 99,000,000: a unit cost is Numeric(12, 4).)"""
     _construction(client)
     body = _estimate_body(
         seed_customer.id, gc_pct=8, insurance_pct=1.5, fee_pct=5, bond_pct=1
     )
-    body["lines"][0]["unit_cost"] = 9.9e12
+    body["lines"][0].update(quantity=100000, rate=99000000, unit_cost=99000000)
     r = client.post("/api/estimates", json=body)
     assert r.status_code == 422, r.text
     assert "more than a document can be" in r.json()["detail"]

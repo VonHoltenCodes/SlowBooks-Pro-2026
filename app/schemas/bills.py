@@ -20,6 +20,7 @@ from app.schemas.common import (
     clean_line_cost_type,
     validate_non_negative_line,
     check_line_fits,
+    check_line_size,
     check_lines_fit,
     quantity_text,
 )
@@ -66,6 +67,7 @@ class BillLineCreate(StrictModel):
     def _price_the_line(self):
         check_line_fits(1, self.amount)
         check_line_fits(1 if self.quantity is None else self.quantity, self.rate or 0)
+        check_line_size(self.quantity, self.rate)
         sent = None if self.amount is None else _cents(Decimal(str(self.amount)))
         if sent is not None and sent < 0:
             raise ValueError(

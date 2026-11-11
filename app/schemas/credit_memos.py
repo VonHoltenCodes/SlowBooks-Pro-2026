@@ -33,9 +33,10 @@ class CreditMemoLineCreate(StrictModel):
 
     @model_validator(mode="after")
     def _check_non_negative(self):
-        validate_non_negative_line(self.quantity, self.rate)
         # quantity x rate past the money column raised in the rounding (a 500)
         check_line_fits(self.quantity, self.rate)
+        # and so did a quantity past its column at a rate of 0 (#782)
+        validate_non_negative_line(self.quantity, self.rate)
         return self
 
 

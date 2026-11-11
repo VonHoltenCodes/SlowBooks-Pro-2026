@@ -19,6 +19,7 @@ from app.schemas.common import (
     clean_line_cost_type,
     validate_non_negative_line,
     check_line_fits,
+    check_line_size,
     check_lines_fit,
     check_markup_percent,
     quantity_text,
@@ -75,6 +76,8 @@ class EstimateLineCreate(StrictModel):
         check_line_fits(self.quantity, self.rate)
         if self.unit_cost is not None:
             check_line_fits(self.quantity, self.unit_cost)
+        # each figure fits its own column too, whatever the other is (#782)
+        check_line_size(self.quantity, self.rate, self.unit_cost)
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":
