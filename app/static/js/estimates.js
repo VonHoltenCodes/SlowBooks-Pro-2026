@@ -293,7 +293,7 @@ const EstimatesPage = {
         // A construction estimate's layout (#774): an estimate's own (the
         // server's presentation_style), the company's setting for a new one.
         EstimatesPage._style = !Terms.isConstruction() ? null
-            : (id ? (est.style || 'commercial_bid') : (settings.estimate_style === 'commercial_bid' ? 'commercial_bid' : 'line_markup'));
+            : (id ? (est.style || 'commercial_bid') : (settings.estimate_style === 'line_markup' ? 'line_markup' : 'commercial_bid'));
         EstimatesPage._defaultMarkup = settings.estimate_default_markup_pct || '';
         const lineMarkup = EstimatesPage.isLineMarkup();
         const classGroup = await classFormGroupHtml(est.class_id);

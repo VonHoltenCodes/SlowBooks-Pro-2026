@@ -1,7 +1,7 @@
 """The construction estimate form priced by a markup on each line (#774), in
 a real browser against the real routes.
 
-Markup per line shows no Package, Kind or Markups block; Price is cost ×
+Markup per line, chosen in Settings, shows no Package, Kind or Markups block; Price is cost ×
 (1 + markup) and the save carries the markup. A new row starts at the
 company's default markup. An estimate that uses bid tools opens in the
 commercial layout whatever the setting says, whose totals panel hides its
@@ -103,7 +103,9 @@ def _api_estimate(client, customer_id, line, **extra):
 
 
 def test_markup_per_line_prices_each_line_and_saves_its_markup(client, seed_customer):
-    _construction(client, estimate_default_markup_pct="25")
+    _construction(
+        client, estimate_style="line_markup", estimate_default_markup_pct="25"
+    )
     client.post("/api/cost-codes", json={"code": "32 31 00", "name": "Fences"})
 
     def test(page):

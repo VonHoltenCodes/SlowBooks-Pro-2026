@@ -1,15 +1,14 @@
 """construction estimates priced by a markup on each line (#774):
-estimate_lines.markup_pct, and the estimate_style setting for a company that
-already bids the commercial way
+estimate_lines.markup_pct
 
 A construction estimate was a commercial bid: lines at cost and four markups
 under the subtotal. A small contractor prices each line as cost plus a
 markup, so a line now carries its own markup percent. NULL is "no markup of
 its own", which is every line that exists today: it stays priced at cost.
 
-The estimate_style setting defaults to "line_markup". A construction company
-that already has estimates has been using the commercial bid screen, so it
-is written "commercial_bid" here and nothing changes under it.
+The estimate_style setting defaults to "commercial_bid", the screen every
+construction company has today, so nothing is written for it here; the
+downgrade removes a style a company saved.
 
 Revision ID: a4c8e2f6b1d3
 Revises: f3b9d2e6a1c7
@@ -27,30 +26,6 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _keep_commercial_bid(bind, tables) -> None:
-    """Write estimate_style = commercial_bid for a construction company that
-    has an estimate and no style saved."""
-    if "settings" not in tables or "estimates" not in tables:
-        return
-    company_type = bind.execute(
-        sa.text("SELECT value FROM settings WHERE key = 'company_type'")
-    ).scalar()
-    if company_type != "construction":
-        return
-    saved = bind.execute(
-        sa.text("SELECT 1 FROM settings WHERE key = 'estimate_style'")
-    ).first()
-    if saved is not None:
-        return
-    if bind.execute(sa.text("SELECT 1 FROM estimates LIMIT 1")).first() is None:
-        return
-    bind.execute(
-        sa.text(
-            "INSERT INTO settings (key, value) VALUES ('estimate_style', 'commercial_bid')"
-        )
-    )
-
-
 def upgrade() -> None:
     bind = op.get_bind()
     insp = sa.inspect(bind)
@@ -62,7 +37,6 @@ def upgrade() -> None:
                 "estimate_lines",
                 sa.Column("markup_pct", sa.Numeric(9, 4), nullable=True),
             )
-    _keep_commercial_bid(bind, tables)
 
 
 def downgrade() -> None:

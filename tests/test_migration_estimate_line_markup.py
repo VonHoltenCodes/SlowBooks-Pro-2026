@@ -1,8 +1,8 @@
 """a4c8e2f6b1d3 — estimates priced by a markup on each line (#774): the
-estimate_lines.markup_pct column, and estimate_style = commercial_bid written
-for a construction company that already has estimates, so its screen does not
-change under it. Exercised on a fresh SQLite migrated to the previous head,
-populated the way old installs are, then upgraded."""
+estimate_lines.markup_pct column. The estimate_style setting defaults to the
+commercial bid every construction company has today, so the upgrade writes no
+style. Exercised on a fresh SQLite at the previous revision, upgraded to this
+one and walked back."""
 
 import shutil
 import sqlite3
@@ -82,46 +82,25 @@ def _upgrade(db):
     command.upgrade(_cfg(db), REVISION)
 
 
-def test_upgrade_adds_the_column_and_keeps_a_bidding_company_on_the_bid(tmp_path):
+def test_upgrade_adds_the_column_and_writes_no_style(tmp_path):
     db = _old_books(tmp_path, [("company_type", "construction")], estimate=True)
     assert "markup_pct" not in _columns(db)
     _upgrade(db)
     assert "markup_pct" in _columns(db)
-    assert _style(db) == "commercial_bid"
-
-
-@pytest.mark.parametrize(
-    "settings, estimate",
-    [
-        # a construction company with no estimates gets the new default
-        ([("company_type", "construction")], False),
-        # a business company's estimates are not construction bids
-        ([("company_type", "business")], True),
-        ([], True),
-    ],
-    ids=["construction-no-estimates", "business", "no-company-type"],
-)
-def test_upgrade_leaves_other_companies_alone(tmp_path, settings, estimate):
-    db = _old_books(tmp_path, settings, estimate)
-    _upgrade(db)
     assert _style(db) is None
 
 
-def test_upgrade_keeps_a_style_already_saved(tmp_path):
-    db = _old_books(
-        tmp_path,
-        [("company_type", "construction"), ("estimate_style", "line_markup")],
-        estimate=True,
-    )
-    _upgrade(db)
-    assert _style(db) == "line_markup"
-
-
-def test_downgrade_drops_the_column(tmp_path):
+def test_downgrade_drops_the_column_and_a_saved_style(tmp_path):
     from alembic import command
 
-    db = _old_books(tmp_path, [("company_type", "construction")], estimate=True)
+    db = _old_books(tmp_path, estimate=True)
     _upgrade(db)
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO settings (key, value) VALUES ('estimate_style', 'line_markup')"
+    )
+    con.commit()
+    con.close()
     command.downgrade(_cfg(db), PREV)
     assert "markup_pct" not in _columns(db)
     assert _style(db) is None

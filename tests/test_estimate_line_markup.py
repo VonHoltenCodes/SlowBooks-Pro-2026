@@ -157,7 +157,7 @@ def test_the_totals_carry_cost_profit_and_margin(client, seed_customer):
 def test_the_layout_follows_the_estimate_then_the_setting(
     client, db_session, seed_customer
 ):
-    _construction(client, estimate_style="commercial_bid")
+    _construction(client)  # the default is the commercial bid
     at_cost = {"quantity": 1, "unit_cost": 50}
     assert _estimate(client, seed_customer.id, [FENCE])["style"] == "line_markup"
     assert _estimate(client, seed_customer.id, [at_cost])["style"] == "commercial_bid"
@@ -165,16 +165,18 @@ def test_the_layout_follows_the_estimate_then_the_setting(
     assert tools["style"] == "commercial_bid"
     orm = db_session.get(Estimate, tools["id"])
     assert presentation_style(orm, "line_markup") == "commercial_bid"
+    _construction(client, estimate_style="line_markup")
+    assert _estimate(client, seed_customer.id, [at_cost])["style"] == "line_markup"
 
 
 def test_the_settings(client):
     s = client.get("/api/settings").json()
     assert (s["estimate_style"], s["estimate_default_markup_pct"]) == (
-        "line_markup",
+        "commercial_bid",
         "",
     )
     for key, value, ok in [
-        ("estimate_style", "commercial_bid", True),
+        ("estimate_style", "line_markup", True),
         ("estimate_style", "simple", False),
         ("estimate_default_markup_pct", "33.3333", True),
         ("estimate_default_markup_pct", "33.33333", False),
@@ -200,7 +202,6 @@ def test_the_owner_sees_description_quantity_and_amount(client, seed_customer):
     for hidden in ("32 31 00", "$20.00", "16.0000", "Markup", "Profit", "Tax ("):
         assert hidden not in html, hidden
     # a commercial bid's print preview is main's, byte for byte round the rule
-    _construction(client, estimate_style="commercial_bid")
     est = _estimate(client, seed_customer.id, [{"quantity": 1, "unit_cost": 16}])
     html = _preview(client, est["id"])
     assert "priced-lines" not in html and "#f7f9fb; }\n    .totals {" in html

@@ -33,11 +33,11 @@ def _estimate(client, customer_id, lines, **extra):
     return r.json()
 
 
-def _html(db_session, est_id, company_type, **company):
+def _html(db_session, est_id, company_type):
     est = db_session.get(Estimate, est_id)
     return _render(
         "estimate_pdf.html",
-        {"company_name": "Keystone Builders", "company_type": company_type, **company},
+        {"company_name": "Keystone Builders", "company_type": company_type},
         est=est,
     )
 
@@ -146,9 +146,7 @@ def test_a_pre_551_estimate_has_no_construction_blocks(
         [{"description": "Logo design", "quantity": 1, "rate": 500}],
         tax_rate=0,
     )
-    # a company on the commercial bid (#774: markup per line prints this
-    # estimate as a priced list instead)
-    html = _html(db_session, est["id"], "construction", estimate_style="commercial_bid")
+    html = _html(db_session, est["id"], "construction")
     assert "Allowances" not in html
     assert "Alternates" not in html
     assert "Unit prices" not in html

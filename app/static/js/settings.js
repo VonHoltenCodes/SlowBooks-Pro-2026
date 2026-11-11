@@ -505,11 +505,11 @@ const SettingsPage = {
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate starts with this text; edit it on any estimate. It prints above the acceptance block on the owner's PDF.</div></div>
                         <div class="form-group"><label for="estimate-style">Estimate style</label>
                             <select id="estimate-style" name="estimate_style" onchange="SettingsPage._onEstimateStyleChange(this)">
-                                <option value="line_markup" ${s.estimate_style !== 'commercial_bid' ? 'selected' : ''}>Markup per line</option>
-                                <option value="commercial_bid" ${s.estimate_style === 'commercial_bid' ? 'selected' : ''}>Commercial bid (packages, allowances, alternates, markups under the subtotal)</option>
+                                <option value="line_markup" ${s.estimate_style === 'line_markup' ? 'selected' : ''}>Markup per line</option>
+                                <option value="commercial_bid" ${s.estimate_style !== 'line_markup' ? 'selected' : ''}>Commercial bid (packages, allowances, alternates, markups under the subtotal)</option>
                             </select>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">How a new estimate is laid out; an estimate that already uses packages, allowances, alternates or markups opens as a commercial bid.</div></div>
-                        <div class="form-group" id="estimate-default-markup-group" ${s.estimate_style === 'commercial_bid' ? 'hidden' : ''}><label for="estimate-default-markup">Default markup (%)</label>
+                        <div class="form-group" id="estimate-default-markup-group" ${s.estimate_style !== 'line_markup' ? 'hidden' : ''}><label for="estimate-default-markup">Default markup (%)</label>
                             <input id="estimate-default-markup" name="estimate_default_markup_pct" type="number" step="0.0001" min="0" max="1000" value="${escapeHtml(s.estimate_default_markup_pct || '')}">
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate line starts with this markup on its cost; change it on any line.</div></div>` : ''}
                         <div class="form-group full-width"><label for="company-type">Company Type</label>
@@ -2378,7 +2378,7 @@ const SettingsPage = {
     // The default markup belongs to Markup per line only (#774).
     _onEstimateStyleChange(sel) {
         const group = document.getElementById('estimate-default-markup-group');
-        if (group) group.hidden = sel.value === 'commercial_bid';
+        if (group) group.hidden = sel.value !== 'line_markup';
         SettingsPage._updateDirty();
     },
 

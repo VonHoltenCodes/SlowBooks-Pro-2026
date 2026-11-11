@@ -205,7 +205,7 @@ Settings → Company → Company Information as the **Estimate style** (key
 `estimate_style`, #774). A Business or Nonprofit company's estimate form and
 PDF are exactly as they were.
 
-- **Markup per line** (`line_markup`, the default for a new company) is how a
+- **Markup per line** (`line_markup`) is how a
   remodeler, a trade contractor or a small builder prices: each line is
   Item, Description, Cost Code, Cost Type, Qty, Unit, Cost, Markup % and
   Price, and the price is the cost plus that line's markup (a 25% markup on a
@@ -217,17 +217,14 @@ PDF are exactly as they were.
   and how many priced lines have no cost. The owner's PDF prints each line's
   description, quantity and amount: no cost, no markup, no unit rate, no cost
   code.
-- **Commercial bid** (`commercial_bid`) is the general contractor's bid
-  sheet described in the rest of this section: lines at cost, trade packages,
+- **Commercial bid** (`commercial_bid`, the default) is the general
+  contractor's bid sheet described in the rest of this section: lines at cost, trade packages,
   allowances, alternates and unit prices, and four markups under the
   subtotal.
 
-A construction company that already had estimates when this setting arrived
-was put on Commercial bid by the upgrade, so its screen did not change. A
-company that becomes construction later starts on Markup per line, and its
-earlier estimates print in that layout; choose Commercial bid in Settings to
-keep the rate column. An
-estimate that uses packages, a kind other than Base or any of the four
+Every construction company starts on Commercial bid, the screen it had
+before this setting arrived, and stays on it until it picks Markup per line.
+An estimate that uses packages, a kind other than Base or any of the four
 markups always opens as a commercial bid, whatever the setting says, so
 nothing on it is hidden; one whose lines carry their own markups opens as
 markup per line. Either way the job budget comes from each line's cost and the

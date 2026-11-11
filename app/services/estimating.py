@@ -71,7 +71,7 @@ def presentation_style(estimate, company_style) -> str:
         return COMMERCIAL_BID
     if any(getattr(ln, "markup_pct", None) is not None for ln in estimate.lines):
         return LINE_MARKUP
-    return COMMERCIAL_BID if company_style == COMMERCIAL_BID else LINE_MARKUP
+    return LINE_MARKUP if company_style == LINE_MARKUP else COMMERCIAL_BID
 
 
 def is_included_line(line) -> bool:
