@@ -36,6 +36,8 @@ from app.services.estimating import (
     estimate_totals,
     estimate_document_totals,
     is_included_line,
+    presentation_style,
+    priced_rate,
     uncoded_lines,
     uncoded_warning,
     markup_parts,
@@ -102,17 +104,23 @@ _MARKUP_PCTS = ("gc_pct", "insurance_pct", "fee_pct", "bond_pct")
 
 
 def _enforce_at_cost(lines, is_construction: bool) -> None:
-    """In a construction company the estimate lines stay AT COST (#551): a
-    base or alternate line that carries a unit cost gets rate = unit cost, so
-    its amount is quantity × unit cost and the markups are the only margin.
-    Allowances and unit-price lines keep their rate. Business and Nonprofit
-    estimates are untouched — their Cost column is the budget side and the
-    rate is what they charge."""
-    if not is_construction:
-        return
+    """The construction pricing rule, driven by the line alone. A base or
+    alternate line that carries a unit cost is priced from it: at cost (#551)
+    when it has no markup of its own, else unit cost × (1 + markup_pct / 100)
+    to the rate's four places (#774). Allowances and unit-price lines keep
+    their rate. A line with nothing to mark up stores no markup: no unit cost,
+    an allowance or unit price, or a Business or Nonprofit estimate (whose
+    Cost column is the budget side and whose rate is what they charge)."""
     for ln in lines:
-        if ln.line_kind in ("base", "alternate") and ln.unit_cost is not None:
-            ln.rate = Decimal(str(ln.unit_cost))
+        priced = (
+            is_construction
+            and ln.line_kind in ("base", "alternate")
+            and ln.unit_cost is not None
+        )
+        if not priced:
+            ln.markup_pct = None
+            continue
+        ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
 
 
 def _locked_a_budget(db: Session, estimate: Estimate) -> bool:
@@ -154,6 +162,7 @@ _LINE_FIELDS = (
     "cost_code_id",
     "cost_type",
     "unit_cost",
+    "markup_pct",
     "trade_package_id",
     "line_kind",
     "unit",
@@ -226,12 +235,14 @@ def _estimate_response(est: Estimate) -> EstimateResponse:
     resp.totals = totals_from_dict(estimate_totals(est))
     resp.uncoded_lines = uncoded_lines(est)
     db = object_session(est)
+    is_construction = db is not None and terms_from_db(db).is_construction
     resp.bills_by_pay_app = bool(
-        db is not None
+        is_construction
         and est.job_id is not None
-        and terms_from_db(db).is_construction
         and _pay_app_job_ids(db, [est.job_id])
     )
+    if is_construction:
+        resp.style = presentation_style(est, get_settings(db).get("estimate_style"))
     return resp
 
 
@@ -386,7 +397,8 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     elif data.terms is None:
         # a new construction estimate starts with the company's default terms
         data.terms = get_settings(db).get("estimate_terms") or None
-    # Construction lines stay at cost before anything is totalled (#551).
+    # Construction lines are priced from their cost (at cost, or plus their
+    # own markup) before anything is totalled (#551, #774).
     _enforce_at_cost(data.lines, is_construction)
     # The document totals cover the bought scope and the four markups: lines
     # at cost, the markups under the subtotal, tax on both. A unit-price line
@@ -460,6 +472,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             cost_code_id=line_data.cost_code_id,
             cost_type=line_cost_type(db, line_data.cost_code_id, line_data.cost_type),
             unit_cost=line_data.unit_cost,
+            markup_pct=line_data.markup_pct,
             trade_package_id=line_data.trade_package_id,
             line_kind=line_data.line_kind,
             unit=line_data.unit,
@@ -552,7 +565,8 @@ def update_estimate(
         # 2.17.3 exploratory fixes). The customer is the one the estimate
         # has after this edit.
         resolve_line_taxable(db, data.lines, db.get(Customer, estimate.customer_id))
-        # construction lines stay at cost before they are stored (#551)
+        # construction lines are priced from their cost before they are
+        # stored (#551, #774)
         _enforce_at_cost(data.lines, is_construction)
         # each old line leaves a DELETE event with its amounts (#289)
         audited_bulk_delete(
@@ -575,6 +589,7 @@ def update_estimate(
                     db, line_data.cost_code_id, line_data.cost_type
                 ),
                 unit_cost=line_data.unit_cost,
+                markup_pct=line_data.markup_pct,
                 # the bid shape rides the edit too (#551): without these a PUT
                 # stored every line as a base/unassigned line and dropped an
                 # accept, while the totals were computed from the sent kinds

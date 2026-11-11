@@ -34,6 +34,12 @@ _MARKUP_LABELS = dict(
 )
 
 
+# A line's own markup percent (#774): above -100 would price the work below
+# nothing; the column holds up to 99,999.9999.
+MIN_LINE_MARKUP = Decimal("-100")
+MAX_LINE_MARKUP = Decimal("10000")
+
+
 LINE_KINDS = ("base", "allowance", "alternate", "unit_price")
 _LINE_KIND_LABELS = dict(
     base="Base", allowance="Allowance", alternate="Alternate", unit_price="Unit price"
@@ -49,6 +55,9 @@ class EstimateLineCreate(StrictModel):
     cost_code_id: Optional[int] = None
     cost_type: Optional[str] = None
     unit_cost: Optional[Decimal] = None
+    # A construction line's markup on its unit cost, a percent (#774); the
+    # server prices the line from it. None is a line at cost.
+    markup_pct: Optional[Decimal] = None
     is_taxable: Optional[bool] = None
     class_name: Optional[str] = None
     job_id: Optional[int] = None
@@ -60,6 +69,16 @@ class EstimateLineCreate(StrictModel):
     line_order: int = 0
 
     _cost_type = field_validator("cost_type")(clean_line_cost_type)
+
+    @field_validator("markup_pct")
+    @classmethod
+    def _markup(cls, v):
+        if v is not None and not (MIN_LINE_MARKUP <= v <= MAX_LINE_MARKUP):
+            raise ValueError(
+                f"A line's markup must be between {MIN_LINE_MARKUP:f}% and "
+                f"{MAX_LINE_MARKUP:,f}%."
+            )
+        return v
 
     @field_validator("line_kind")
     @classmethod
@@ -75,6 +94,12 @@ class EstimateLineCreate(StrictModel):
         check_line_fits(self.quantity, self.rate)
         if self.unit_cost is not None:
             check_line_fits(self.quantity, self.unit_cost)
+            if self.markup_pct is not None:
+                # the marked-up rate the server will store fits too
+                check_line_fits(
+                    self.quantity,
+                    self.unit_cost * (1 + self.markup_pct / Decimal("100")),
+                )
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":
@@ -96,6 +121,7 @@ class EstimateLineResponse(BaseModel):
     cost_code_id: Optional[int] = None
     cost_type: Optional[str] = None
     unit_cost: Optional[Decimal] = None
+    markup_pct: Optional[Decimal] = None
     is_taxable: bool = True
     class_name: Optional[str]
     job_id: Optional[int] = None
@@ -225,6 +251,13 @@ class EstimateTotals(BaseModel):
     # The cost budget accepting locks: package costs, allowances at their
     # amount, and the general-conditions, insurance and bond costs.
     budget_cost: Decimal = Decimal("0")
+    # Markup per line (#774): Σ cost of the included lines (an allowance at its
+    # amount), bid_total − budget_cost, that profit as a percent of the bid,
+    # and whether the estimate uses any commercial bid tool.
+    cost_total: Decimal = Decimal("0")
+    profit: Decimal = Decimal("0")
+    margin_pct: Decimal = Decimal("0")
+    uses_bid_tools: bool = False
     bid_tax: Decimal
     bid_total_with_tax: Decimal
     by_package: list[EstimatePackageTotal] = []
@@ -275,6 +308,9 @@ class EstimateResponse(BaseModel):
     lines: list[EstimateLineResponse] = []
     customer_name: Optional[str] = None
     totals: Optional[EstimateTotals] = None
+    # A construction estimate's layout, "line_markup" or "commercial_bid"
+    # (estimating.presentation_style, #774); None outside construction.
+    style: Optional[str] = None
     # True when the estimate's job bills by pay application (a contract type, a
     # schedule of values or a pay application), so Convert is refused.
     bills_by_pay_app: bool = False
