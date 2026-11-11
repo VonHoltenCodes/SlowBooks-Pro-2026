@@ -200,8 +200,45 @@ resolve as they always have.
 
 ## Estimating
 
-In construction mode the estimate is a bid, not just a priced list (#551). A
-Business or Nonprofit company's estimate form and PDF are exactly as they were.
+A construction company prices its estimates one of two ways, chosen under
+Settings → Company → Company Information as the **Estimate style** (key
+`estimate_style`, #774). A Business or Nonprofit company's estimate form and
+PDF are exactly as they were.
+
+- **Markup per line** (`line_markup`, the default for a new company) is how a
+  remodeler, a trade contractor or a small builder prices: each line is
+  Item, Description, Cost Code, Cost Type, Qty, Unit, Cost, Markup % and
+  Price, and the price is the cost plus that line's markup (a 25% markup on a
+  $16.00 cost is a $20.00 price). **Default markup (%)** in Settings (key
+  `estimate_default_markup_pct`, 0 to 1000, blank is 0) fills in the markup
+  of each new line; change it on any line. A line with no cost takes a typed
+  price and no markup. The totals show Subtotal, Tax when it is charged and
+  Total, and under them, for you only, the estimate's cost, profit and margin
+  and how many priced lines have no cost. The owner's PDF prints each line's
+  description, quantity and amount: no cost, no markup, no unit rate, no cost
+  code.
+- **Commercial bid** (`commercial_bid`) is the general contractor's bid
+  sheet described in the rest of this section: lines at cost, trade packages,
+  allowances, alternates and unit prices, and four markups under the
+  subtotal.
+
+A construction company that already had estimates when this setting arrived
+was put on Commercial bid by the upgrade, so its screen did not change. An
+estimate that uses packages, a kind other than Base or any of the four
+markups always opens as a commercial bid, whatever the setting says, so
+nothing on it is hidden; one whose lines carry their own markups opens as
+markup per line. Either way the job budget comes from each line's cost and the
+contract and schedule of values from its price. On either form a costed
+estimate whose price equals its cost says *Priced at cost: there is no markup
+on this estimate*, and the totals panel leaves out any row that is $0.00.
+
+Through the API a line carries its markup as `markup_pct` (25 means 25%,
+−100 to 10,000); a base or alternate line with a unit cost and a markup is
+priced at unit cost × (1 + markup ÷ 100), to four places, and one with no
+markup at cost. The estimate's `style` says which layout it gets, and its
+totals carry `cost_total`, `profit` and `margin_pct`.
+
+The commercial bid is a bid, not just a priced list (#551).
 
 **Packages and sections.** Each line can belong to a **trade package** — the
 bid package a sub is awarded (Concrete, Electrical …) — and to a cost-code
