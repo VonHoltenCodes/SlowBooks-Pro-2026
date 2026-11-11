@@ -195,7 +195,7 @@ def test_the_migration_is_head_and_adds_a_unique_code(tmp_path):
     assert len(script.get_heads()) == 1
     # 2.29.0's migrations follow one line; this one is its last.
     assert script.get_revision(REVISION).down_revision == "c5e8a1d47b20"
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     insp = inspect(engine)
     cols = {c["name"]: c for c in insp.get_columns("items")}

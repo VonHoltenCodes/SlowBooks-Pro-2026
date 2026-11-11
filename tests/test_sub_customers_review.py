@@ -41,6 +41,8 @@ from app.models.jobs import Job
 from app.models.payments import Payment
 
 ROOT = Path(__file__).resolve().parents[1]
+BILL_TO_REVISION = "b4d8e2a6c7f1"  # invoices bill_to_* columns, after f3a9c7e1b5d4
+SHIP_TO_COUNTRY_REVISION = "d7b3f9a1c5e2"  # invoices.ship_to_country, after b4d8
 
 
 def _customer(client, name, **extra):
@@ -1136,7 +1138,7 @@ def test_the_bill_to_migration_backfills_from_the_customer_billed_to(tmp_path):
             )
     engine.dispose()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, BILL_TO_REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     with engine.connect() as conn:
         rows = conn.execute(
@@ -1153,7 +1155,6 @@ def test_the_bill_to_migration_backfills_from_the_customer_billed_to(tmp_path):
     ]
     engine.dispose()
 
-    # down from head through the Ship To's country (d7b3f9a1c5e2) and this
     command.downgrade(cfg, "f3a9c7e1b5d4")
     engine = create_engine(f"sqlite:///{db}")
     names = {c["name"] for c in inspect(engine).get_columns("invoices")}
@@ -2087,7 +2088,7 @@ def test_the_ship_to_country_migration_backfills_from_each_invoices_own_customer
             )
     engine.dispose()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, SHIP_TO_COUNTRY_REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     with engine.connect() as conn:
         rows = conn.execute(

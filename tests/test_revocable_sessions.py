@@ -398,6 +398,9 @@ def test_an_admin_still_sets_a_new_company_up_at_a_switch(served):
 # ---------------------------------------------------------------------------
 
 
+SESSION_VERSION_REVISION = "d3e4f5a6b7c8"  # users_session_version
+
+
 def _alembic_cfg(db):
     from alembic.config import Config
 
@@ -425,7 +428,7 @@ def test_migration_adds_and_drops_session_version(tmp_path):
     command.upgrade(cfg, "c2d3e4f5a6b7")  # the head before this fix
     assert "session_version" not in _user_columns(db)
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, SESSION_VERSION_REVISION)  # its own step, not the chain (#770)
     assert "session_version" in _user_columns(db)
     # Existing rows get a concrete value, never NULL.
     con = sqlite3.connect(db)

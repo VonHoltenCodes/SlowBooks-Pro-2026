@@ -355,7 +355,7 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert "f6a9d3c27e51" in {r.revision for r in script.walk_revisions()}
     assert script.get_revision(REVISION).down_revision == "e5c1a7d3f9b2"
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     insp = inspect(engine)
     for table in ("payments", "bill_payments"):
@@ -375,9 +375,9 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     engine.dispose()
     # up again; over books that already have the columns (stamped back, as
     # create_all books are) it is a no-op, not an error
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     command.stamp(cfg, "e5c1a7d3f9b2")
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
 
 
 # ── the forms ───────────────────────────────────────────────────────────

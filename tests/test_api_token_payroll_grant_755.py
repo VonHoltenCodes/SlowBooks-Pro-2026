@@ -310,7 +310,7 @@ def test_the_migration_adds_and_removes_the_two_columns(tmp_path):
     assert {"allow_payroll", "allow_imports"} <= columns()
     command.downgrade(cfg, "e2b6c4d8f0a3")
     assert not {"allow_payroll", "allow_imports"} & columns()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "f3b9d2e6a1c7")  # its own step, not the chain (#770)
     assert {"allow_payroll", "allow_imports"} <= columns()
 
 

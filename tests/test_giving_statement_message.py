@@ -430,6 +430,9 @@ def _alembic_cfg(url):
     return cfg
 
 
+KIND_REVISION = "f9a0b1c2d3e4"  # the invoice message kind migration
+
+
 def _check_kind_migration(url):
     from alembic import command
     from alembic.script import ScriptDirectory
@@ -451,7 +454,7 @@ def _check_kind_migration(url):
             )
         )
     # apply the kind migration
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, KIND_REVISION)  # its own step, not the chain (#770)
     insp = sa.inspect(engine)
     cols = {c["name"]: c for c in insp.get_columns("invoice_messages")}
     assert "kind" in cols
@@ -467,7 +470,7 @@ def _check_kind_migration(url):
     assert "kind" not in {
         c["name"] for c in sa.inspect(engine).get_columns("invoice_messages")
     }
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, KIND_REVISION)  # its own step, not the chain (#770)
     assert "kind" in {
         c["name"] for c in sa.inspect(engine).get_columns("invoice_messages")
     }

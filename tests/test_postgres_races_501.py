@@ -373,7 +373,7 @@ def _walk_migration(url):
                 {"i": bill_id, "n": number, "v": vendor},
             )
     engine.dispose()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = sa.create_engine(url)
     with engine.connect() as conn:
         got = dict(conn.execute(sa.text("SELECT id, bill_number FROM bills")).all())
@@ -405,7 +405,7 @@ def _walk_migration(url):
         i["name"] for i in sa.inspect(engine).get_indexes("bills")
     }
     engine.dispose()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
 
 
 def test_the_migration_renames_duplicates_then_indexes_on_sqlite(tmp_path):

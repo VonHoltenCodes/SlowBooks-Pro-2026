@@ -158,6 +158,28 @@ def _cached_upgrade(config, revision, sql=False, tag=None, **kw):
             dst.close()
             src.close()
         return None
+    # A target not yet kept starts from the nearest kept ancestor rather
+    # than from nothing (#770): every migration test walks to the revision
+    # before its own, a different one per file, and from an empty file each
+    # of those was a walk of up to a hundred steps; from the kept file of
+    # the nearest earlier revision it is the few steps between.
+    nearest = None
+    for ancestor in script.walk_revisions(base="base", head=targets[0].revision):
+        if ancestor.revision == targets[0].revision:
+            continue
+        kept_ancestor = _MIGRATION_CACHE.get((key[0], ancestor.revision))
+        if kept_ancestor is not None and kept_ancestor.exists():
+            nearest = kept_ancestor
+            break
+    if nearest is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        src = _cache_sqlite3.connect(nearest)
+        dst = _cache_sqlite3.connect(path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
     result = _real_upgrade(config, revision, sql=sql, tag=tag)
     if path.exists():
         _MIGRATION_CACHE_DIR.mkdir(parents=True, exist_ok=True)

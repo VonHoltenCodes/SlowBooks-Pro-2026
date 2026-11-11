@@ -1264,6 +1264,10 @@ def test_business_invoice_journal_unchanged_with_zero_retainage(
 # ── Migration ───────────────────────────────────────────────────────────
 
 
+# the review-fix migration (#576), the last of the two the test walks back
+REVIEW_REVISION = "b4d6f8a0c2e3"
+
+
 def test_migration_up_down_reverses(tmp_path):
     from alembic import command
     from alembic.config import Config
@@ -1273,7 +1277,7 @@ def test_migration_up_down_reverses(tmp_path):
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVIEW_REVISION)  # its own step, not the chain (#770)
     eng = create_engine("sqlite:///" + db.as_posix())
     insp = inspect(eng)
     assert "pay_applications" in insp.get_table_names()
@@ -2862,7 +2866,11 @@ def test_a_charge_owner_pay_app_still_reports_its_taxable_billing(
     assert r.json()["totals"]["tax_amount"] == 325.0
 
 
-TODAY = date.today()
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today()
 
 
 def _void_later(db, co_id, on):
@@ -2883,12 +2891,12 @@ def test_a_draft_pay_app_leaves_out_a_change_order_voided_since(
     co = _co(client, job["id"], [_sub_line("Added", 1000)])
     assert _submit_approve(client, co["id"]).status_code == 200
     assert client.post(f"/api/change-orders/{co['id']}/void").status_code == 200
-    _void_later(db_session, co["id"], TODAY + timedelta(days=5))
+    _void_later(db_session, co["id"], _today() + timedelta(days=5))
     db_session.expire_all()
     from app.models.jobs import Job
 
     row = db_session.get(Job, job["id"])
-    assert contract_changes_after(db_session, row, TODAY) == 0
+    assert contract_changes_after(db_session, row, _today()) == 0
 
 
 def _stored_job_with_a_draft(client, seed_customer):

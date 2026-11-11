@@ -258,6 +258,10 @@ def test_the_form_draws_the_invoice_forms_class_cell_on_every_line():
     assert '<option value="">Same as header</option>' in utils
 
 
+# the migration under test: credit_memo_lines gains class_id and job_id (#640)
+CM_LINE_CLASS_REVISION = "b1a26772cc4e"
+
+
 def test_the_migration_adds_and_removes_the_columns(tmp_path):
     from alembic import command
     from alembic.config import Config
@@ -268,7 +272,7 @@ def test_the_migration_adds_and_removes_the_columns(tmp_path):
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = url
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, CM_LINE_CLASS_REVISION)  # its own step, not the chain (#770)
     eng = create_engine(url)
     insp = inspect(eng)
     cols = {c["name"] for c in insp.get_columns("credit_memo_lines")}

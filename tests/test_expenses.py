@@ -513,7 +513,7 @@ def test_the_migration_adds_the_memo_column_and_drops_it(tmp_path):
         )
     engine.dispose()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, MEMO_REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     cols = {c["name"]: c for c in inspect(engine).get_columns("transactions")}
     assert cols["memo"]["nullable"] is True

@@ -23,7 +23,12 @@ from app.services import form_1099
 from app.services.accounting import create_journal_entry
 from app.services.safe_errors import DataProblem
 
-TODAY = date.today().isoformat()
+
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today().isoformat()
 
 
 def _vendor(client, name="Pier Lumber", **extra):
@@ -71,7 +76,7 @@ def test_a_payment_with_no_bank_and_no_1000_is_refused_whole(
     client, db_session, seed_accounts
 ):
     v = _vendor(client)
-    bill = _bill(client, v["id"], "300.00", TODAY, seed_accounts)
+    bill = _bill(client, v["id"], "300.00", _today(), seed_accounts)
     # a chart without 1000: the seeded account renumbered under the API's
     # control-account rules (the condition is a legacy or incomplete chart)
     checking = db_session.query(Account).filter(Account.account_number == "1000").one()
@@ -81,7 +86,7 @@ def test_a_payment_with_no_bank_and_no_1000_is_refused_whole(
     )
     db_session.commit()
 
-    r = _payment(client, v["id"], bill, "300.00", TODAY)
+    r = _payment(client, v["id"], bill, "300.00", _today())
     assert r.status_code == 409, r.text
     assert "1000" in r.text
     # nothing was written: no payment, no allocation, the bill still owed
@@ -92,7 +97,7 @@ def test_a_payment_with_no_bank_and_no_1000_is_refused_whole(
     )
 
     # a bank named explicitly still pays, with its journal
-    r = _payment(client, v["id"], bill, "300.00", TODAY, bank_id=checking.id)
+    r = _payment(client, v["id"], bill, "300.00", _today(), bank_id=checking.id)
     assert r.status_code == 201, r.text
     db_session.expire_all()
     assert db_session.query(BillPayment).one().transaction_id is not None
@@ -103,8 +108,8 @@ def test_a_payment_with_no_bank_defaults_to_1000_with_its_journal(
     client, db_session, seed_accounts
 ):
     v = _vendor(client)
-    bill = _bill(client, v["id"], "120.00", TODAY, seed_accounts)
-    r = _payment(client, v["id"], bill, "120.00", TODAY)
+    bill = _bill(client, v["id"], "120.00", _today(), seed_accounts)
+    r = _payment(client, v["id"], bill, "120.00", _today())
     assert r.status_code == 201, r.text
     db_session.expire_all()
     txn_id = db_session.query(BillPayment).one().transaction_id
@@ -140,7 +145,7 @@ def test_the_journal_api_takes_cents_only(client, seed_accounts):
     r = client.post(
         "/api/journal",
         json={
-            "date": TODAY,
+            "date": _today(),
             "description": "Sub-cent",
             "lines": [
                 {

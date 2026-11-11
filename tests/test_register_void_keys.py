@@ -19,7 +19,12 @@ from app.models.contacts import Customer
 from app.models.payments import Payment
 from app.models.transactions import Transaction, TransactionLine
 
-TODAY = date.today().isoformat()
+
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today().isoformat()
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -62,7 +67,9 @@ def _vendor(client, name="Pier Lumber"):
     return r.json()
 
 
-def _bill(client, vendor_id, amount, accounts, when=TODAY):
+def _bill(client, vendor_id, amount, accounts, when=None):
+    if when is None:
+        when = _today()
     r = client.post(
         "/api/bills",
         json={
@@ -82,7 +89,9 @@ def _bill(client, vendor_id, amount, accounts, when=TODAY):
     return r.json()
 
 
-def _bill_payment(client, vendor_id, bill, amount, bank_id, when=TODAY):
+def _bill_payment(client, vendor_id, bill, amount, bank_id, when=None):
+    if when is None:
+        when = _today()
     r = client.post(
         "/api/bill-payments",
         json={

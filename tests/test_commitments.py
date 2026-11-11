@@ -1085,6 +1085,7 @@ def test_migration_upgrades_downgrades_and_backfills(tmp_path):
             timeout=180,
         )
 
+    own = "f3b5d7e9a2c4"  # construction buyout and commitments (#553)
     # Up to the revision just before this one, seed a closed PO with a bill.
     assert run("upgrade", "e2a4c6d8f0b1").returncode == 0
     import sqlite3
@@ -1102,7 +1103,7 @@ def test_migration_upgrades_downgrades_and_backfills(tmp_path):
     con.commit()
     con.close()
 
-    up = run("upgrade", "head")
+    up = run("upgrade", own)  # its own step, not the chain (#770)
     assert up.returncode == 0, up.stderr
     con = sqlite3.connect(db)
     billed = con.execute(
@@ -1112,7 +1113,7 @@ def test_migration_upgrades_downgrades_and_backfills(tmp_path):
     assert Decimal(str(billed)) == Decimal("100")  # backfilled
 
     assert run("downgrade", "-1").returncode == 0
-    assert run("upgrade", "head").returncode == 0
+    assert run("upgrade", own).returncode == 0  # its own step, not the chain (#770)
 
 
 # ── Retainage follows a converted bill's edited lines (#553) ─────────────
@@ -1375,7 +1376,7 @@ def test_retainage_manual_migration_adds_the_column_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     assert script.get_revision(revision).down_revision == before
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, revision)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     cols = {c["name"]: c for c in inspect(engine).get_columns("bills")}
     assert "retainage_manual" in cols
@@ -1516,7 +1517,11 @@ def test_a_billed_supplier_po_says_to_void_the_bill_not_a_sub_change_order(con, 
     assert "void the bill" in message and "sub change order" not in message
 
 
-TODAY = date.today()
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today()
 
 
 def _void_later(db, co_id, on):
@@ -1543,7 +1548,7 @@ def _commitment_with_voided_sub(client, db, seed_accounts, customer_id):
     assert _submit_approve(client, owner["id"]).status_code == 200
     assert _submit_approve(client, sub["id"]).status_code == 200
     assert client.post(f"/api/change-orders/{sub['id']}/void").status_code == 200
-    _void_later(db, sub["id"], TODAY + timedelta(days=5))
+    _void_later(db, sub["id"], _today() + timedelta(days=5))
     db.expire_all()
     return job, po
 
@@ -1555,15 +1560,15 @@ def test_a_sub_co_voided_later_still_counts_on_an_earlier_date(
         client, db_session, seed_accounts, seed_customer.id
     )
 
-    report = job_reports.commitment_status(db_session, as_of=TODAY, job_id=job["id"])
+    report = job_reports.commitment_status(db_session, as_of=_today(), job_id=job["id"])
     row = report["jobs"][0]["rows"][0]
     assert row["committed"] == 7500.0
     assert row["remaining"] == 7500.0
-    lines = commitment_lines(db_session, [job["id"]], TODAY)
+    lines = commitment_lines(db_session, [job["id"]], _today())
     assert sorted(float(ln["remaining"]) for ln in lines) == [2500.0, 5000.0]
 
     # after the void it is gone from both
-    after = TODAY + timedelta(days=10)
+    after = _today() + timedelta(days=10)
     report = job_reports.commitment_status(db_session, as_of=after, job_id=job["id"])
     assert report["jobs"][0]["rows"][0]["committed"] == 5000.0
     assert [
