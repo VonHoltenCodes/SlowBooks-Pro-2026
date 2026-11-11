@@ -614,11 +614,18 @@ const PurchaseAccounts = {
     },
     // A balance-sheet account a purchase can post to (#766): a loan's
     // principal, an escrow or prepaid asset, equity. Not a bank or card
-    // account (those pay for things), nor Accounts Receivable or Payable
-    // (the controls the documents post to).
+    // account (those pay for things), nor a control asset whose figure a
+    // sub-ledger keeps: Accounts Receivable (the invoices), Undeposited
+    // Funds (Make Deposits: a bill line there showed as a payment waiting
+    // to be deposited) and Inventory (the items: a line there raised the
+    // asset with no item behind it), W-143; nor Accounts Payable, which
+    // the bill itself posts to. The control liabilities and equity stay:
+    // a bill can pay the sales tax owed. `is_control` is the server's
+    // registry (#122), so the picker keeps no list of numbers.
     isBalanceSheet(a) {
         return (a.account_type === 'asset' || a.account_type === 'liability' || a.account_type === 'equity')
             && !a.bank_kind
+            && !(a.account_type === 'asset' && a.is_control)
             && a.detail_type !== 'accounts_receivable' && a.detail_type !== 'accounts_payable';
     },
     // The cost accounts and the balance-sheet accounts (#766): what a bill,

@@ -294,3 +294,55 @@ def test_the_account_list_report_is_the_chart_with_the_statements_filling_in(
     )
     _, errors = qbo.parse_coa(text)
     assert any("Prepaid rent" in e and "Mystery" in e for e in errors), errors
+
+
+# ── a statement from the Reports page, through the route (W-142) ───────────
+
+
+def _flat_balance_sheet() -> bytes:
+    """The Balance Sheet as the Reports page exports it: every line's
+    indentation gone."""
+    return (
+        "\n".join(
+            line.lstrip(" ")
+            for line in (FIXTURES / "Balance_sheet.csv").read_text().splitlines()
+        )
+        + "\n"
+    ).encode()
+
+
+def test_a_reports_page_statement_stops_the_dry_run_at_its_one_sentence(
+    client, seed_accounts
+):
+    """W-142: with the Balance Sheet unread its accounts were not in the chart,
+    so every one the Journal names came back "not present" (six) and the Trial
+    Balance's balances on them were refused: eight errors behind the one that
+    says what to do, and the deleted card, typed from the Profit and Loss's
+    neighbours, was called "an income account". The refusal is the only error
+    now, nothing is typed from a statement that was not read, and the import
+    writes nothing."""
+    files = _files([n for n in BUNDLE if n != "Balance_sheet.csv"]) + [
+        ("files", ("Balance_sheet.csv", io.BytesIO(_flat_balance_sheet()), "text/csv"))
+    ]
+    resp = client.post("/api/migration/qbo_export/dry-run", files=files)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is False
+    assert len(data["errors"]) == 1, data["errors"]
+    (error,) = data["errors"]
+    assert "Balance Sheet" in error and "no indentation" in error
+    assert "Export data" in error
+    # the Profit and Loss beside it and the Journal are still read
+    assert data["accounts"] >= 5, data
+    assert data["journals"] == 11
+    assert not any(
+        "Old Store Card" in w or "income account" in w for w in data["warnings"]
+    ), data["warnings"]
+    # the import refuses on the same sentence and writes nothing
+    resp = client.post("/api/migration/qbo_export/import", files=files)
+    assert resp.status_code == 200, resp.text
+    refused = resp.json()
+    assert refused["ok"] is False and refused["errors"] == data["errors"]
+    assert refused["imported_accounts"] == 0 and refused["imported_journals"] == 0
+    # the right export afterwards still has everything to make
+    assert _dry_run(client)["new_accounts"] > 0

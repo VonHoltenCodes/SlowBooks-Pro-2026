@@ -266,6 +266,15 @@ def _missing_problem(missing: list[str]) -> str:
     )
 
 
+def is_unknown_account_error(error: str) -> bool:
+    """The dry run's sentence for a ledger account the chart lacks, one per
+    account. A dialect that could not read a statement drops these, since
+    that statement is where they would have been (W-142)."""
+    return error.startswith("GL references account ") and error.endswith(
+        " not present in the chart of accounts"
+    )
+
+
 # ── The engine ───────────────────────────────────────────────────────────
 
 

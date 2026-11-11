@@ -72,6 +72,7 @@ from app.services.migration_common import (
     _missing_problem,
     books_by_name,
     dry_run_bundle,
+    is_unknown_account_error,
     parse_amount,
     parse_date,
     planned_sub_account_note,
@@ -317,6 +318,11 @@ _COA_NOTES: list[str] = []
 # Trial-balance accounts with a balance that parse_coa could not place (no
 # parent the chart has): the import refuses them by name (#690, W-108).
 _COA_UNPLACED: list[str] = []
+# The statements parse_coa refused for their shape (a report exported from
+# the Reports page has no indentation): their accounts are not in the chart,
+# so the dry run stops at that one sentence instead of naming each account
+# the Journal and the Trial Balance then miss (W-142).
+_COA_UNREAD: list[str] = []
 # The export's payable account, mapped onto 2000, as (its path, the
 # control's name in a sentence), for the A/P note (W-117).
 _COA_PAYABLE: list[tuple[str, str]] = []
@@ -499,6 +505,8 @@ def parse_coa(
     notes.clear()
     unplaced = _COA_UNPLACED
     unplaced.clear()
+    unread = _COA_UNREAD
+    unread.clear()
     rows = _rows(csv_text)
     reports = _statement_reports(rows)
     listed, list_bares, list_errors = _account_list(rows)
@@ -532,6 +540,7 @@ def parse_coa(
 
     for report in reports:
         if report["rows"] and not report["indented"] and len(report["rows"]) >= 5:
+            unread.append(report["title"])
             errors.append(
                 f"The {report['title']} has no indentation, as a report exported "
                 f"from the Reports page has: upload the Balance Sheet and the "
@@ -626,6 +635,13 @@ def parse_coa(
                 # finds the account planned here and plans no second one
                 notes.append(planned_sub_account_note(path, parent_path, acct_type))
         else:
+            if unread:
+                # A statement the import could not read is where this account
+                # most likely sits: its neighbours are not all here to type it
+                # by (with the Balance Sheet unread, the deleted card came out
+                # "an income account" from the Profit and Loss's), and the
+                # refusal already says what to do (W-142).
+                continue
             balance = (amounts or {}).get(path, Decimal("0"))
             if amounts is not None and key in on_tb and balance != 0:
                 # A balance on an account with no parent the chart has: not
@@ -1311,11 +1327,13 @@ def _receivable_name(bundle: dict, groups: list[list[dict]]) -> str | None:
     invoices post to), else the account the invoices debit."""
     saved = list(_COA_NOTES)  # parse_coa keeps its notes for the dry run
     saved_unplaced = list(_COA_UNPLACED)
+    saved_unread = list(_COA_UNREAD)
     try:
         accounts, _ = parse_coa(bundle.get("coa", ""))
     finally:
         _COA_NOTES[:] = saved
         _COA_UNPLACED[:] = saved_unplaced
+        _COA_UNREAD[:] = saved_unread
     # the path, the name the Journal posts to (NEW-203)
     listed = [spec_path(a) for a in accounts if a.get("receivable")]
     used: dict[str, int] = {}
@@ -2301,6 +2319,15 @@ def dry_run(db: Session, bundle: dict) -> dict:
     verdict = dry_run_bundle(
         db, prepared, _parsers(prepared, db, plan), LABEL, SOURCE_TYPE
     )
+    if _COA_UNREAD:
+        # A statement refused for its shape leaves its accounts out of the
+        # chart, so every one of them the Journal names came back "not present
+        # in the chart of accounts", one error each (eight behind one Balance
+        # Sheet). The refusal is the one error; those wait for the re-export
+        # (W-142).
+        verdict["errors"] = [
+            e for e in verdict["errors"] if not is_unknown_account_error(e)
+        ]
     verdict["warnings"] = (
         notes + list(_COA_NOTES) + _payable_note(prepared) + verdict["warnings"]
     )
@@ -2342,6 +2369,20 @@ def run_import(db: Session, bundle: dict) -> dict:
         parsers["coa"](prepared["coa"])
         if _COA_UNPLACED:
             raise DataProblem(_missing_problem(list(_COA_UNPLACED)))
+        if _COA_UNREAD:
+            # a statement refused for its shape: the dry run's one sentence,
+            # and nothing written (W-142)
+            refused = dry_run(db, bundle)
+            refused.update(
+                imported_accounts=0,
+                imported_journals=0,
+                imported_customers=0,
+                imported_vendors=0,
+                imported_employees=0,
+            )
+            if plan["given"]:
+                refused.update(imported_open_invoices=0, imported_unapplied_payments=0)
+            return refused
     result = run_import_bundle(db, prepared, parsers, SOURCE_TYPE, LABEL)
     result["warnings"] = (
         notes
