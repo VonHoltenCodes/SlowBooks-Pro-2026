@@ -250,6 +250,8 @@ token can do the month-end and year-end work unattended, in this order:
    `send_year_end_statement`; `POST /api/jobs` for a grant.
 4. Gifts: `POST /api/sales-receipts` (with `fair_value_amount` /
    `fair_value_description` when goods were provided), `POST /api/recurring`
+   (`frequency` one of `daily`, `weekly`, `semimonthly`, `monthly`,
+   `quarterly`, `yearly`; any other word is a 422)
    + `POST /api/recurring/generate?as_of=` for pledges, `POST /api/payments`
    against them, `POST /api/in-kind-gifts` for property.
 5. Shared costs: post the line with `"function": null` (omit the key to take
