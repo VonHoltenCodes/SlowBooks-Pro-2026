@@ -672,7 +672,7 @@ const EstimatesPage = {
 
     markupHeadHtml() {
         return `<th scope="col">Item</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}<th scope="col" class="col-qty">Qty</th>`
-            + `<th scope="col" class="col-qty" title="Unit of measure">Unit</th><th scope="col" title="Unit cost">Cost</th><th scope="col" title="Markup on the cost, a percent">Markup %</th>`
+            + `<th scope="col" class="col-qty" title="Unit of measure">Unit</th><th scope="col" class="col-rate" title="Unit cost">Cost</th><th scope="col" class="col-rate" title="Markup on the cost, a percent">Markup %</th>`
             + `<th scope="col" class="col-rate" title="Cost plus the markup; typed when the line has no cost">Price</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>`;
     },
 
@@ -685,7 +685,7 @@ const EstimatesPage = {
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
             ${EstimatesPage.unitCell(line)}
             <td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" aria-label="Unit cost" oninput="EstimatesPage.recalc()"></td>
-            <td><input class="line-markup" type="number" step="0.01" min="-100" max="10000" style="width:64px" value="${escapeHtml(line.markup_pct ?? '')}" aria-label="Markup percent" oninput="EstimatesPage.recalc()"></td>
+            <td><input class="line-markup" type="number" step="0.01" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" aria-label="Markup percent" oninput="EstimatesPage.recalc()"></td>
             <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" aria-label="Price" oninput="EstimatesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
