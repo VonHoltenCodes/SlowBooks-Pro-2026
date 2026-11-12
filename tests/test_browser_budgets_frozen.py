@@ -169,6 +169,34 @@ def test_the_account_column_stays_put_while_the_months_scroll(browser, width):
         page.close()
 
 
+# Budget vs Actual's last columns (#797): December and the Total are in the
+# box at a normal window without scrolling; at a narrow one, scrolling to the
+# end brings them in, clear of the frozen account column.
+LAST_COLUMNS = """([toEnd]) => {
+    const box = document.querySelector('#modal-body .table-container--frozen');
+    if (toEnd) box.scrollLeft = box.scrollWidth;
+    const b = box.getBoundingClientRect();
+    const right = b.left + box.clientLeft + box.clientWidth;
+    const ths = [...box.querySelector('.budget-variance__table').querySelectorAll('thead th')];
+    const col = ths[0].getBoundingClientRect().right;
+    return ths.slice(-2).map(th => { const r = th.getBoundingClientRect();
+        return { text: th.textContent.trim(), inBox: r.left >= col - 1 && r.right <= right + 1 }; });
+}"""
+
+
+@pytest.mark.parametrize("width,scroll", [(1280, False), (900, True)])
+def test_budget_vs_actual_shows_december_and_the_total(browser, width, scroll):
+    page = _budgets(browser, width)
+    try:
+        page.evaluate("() => BudgetsPage.showVariance()")
+        page.wait_for_selector("#modal-body .budget-variance__table")
+        cols = page.evaluate(LAST_COLUMNS, [scroll])
+        assert [c["text"] for c in cols] == ["Dec", "Total"], cols
+        assert all(c["inBox"] for c in cols), (width, cols)
+    finally:
+        page.close()
+
+
 # A late month's box after Tab: wholly in the box, right of the frozen column
 # and below the month row.
 FOCUSED = """() => {
@@ -243,7 +271,9 @@ def test_the_frozen_cells_meet_aa_in_both_themes(browser, theme):
             # the frozen cell's ground is its row's, striped or hovered
             assert c["ground"] == c["row"], (theme, c)
 
-        # Budget vs Actual: the same frozen column, and its words at AA
+        # Budget vs Actual: the same frozen column, and its words at AA; at
+        # 900, where its months are wider than the wide dialog (#797)
+        page.set_viewport_size({"width": 900, "height": 800})
         page.evaluate("() => BudgetsPage.showVariance()")
         page.wait_for_selector("#modal-body .budget-variance__table")
         _theme(page, theme)
