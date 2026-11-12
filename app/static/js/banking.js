@@ -638,8 +638,12 @@ const BankingPage = {
     // 1000 Checking, the list's first, for every imported account).
     // `feedRow` ({source, row, rowName}): a bank feed row's + New bank
     // account (#718); the account the dialog makes is where it imports.
-    async showAccountForm(accountId = null, feedRow = null) {
+    // `importAfter`: the register's Import file asked for the feed, so
+    // Create goes back to that register and on to its import, not to
+    // Banking (2.31.2 gate, NEW-189's return, #813).
+    async showAccountForm(accountId = null, feedRow = null, importAfter = false) {
         BankingPage._accountFormFeedRow = feedRow;
+        BankingPage._accountFormImportFor = importAfter && accountId != null ? accountId : null;
         const [bankAccts, feeds] = await Promise.all([
             API.get('/accounts?bank=1&active_only=true'),
             API.get('/banking/accounts'),
@@ -764,6 +768,13 @@ const BankingPage = {
                 toast('Bank account created');
             }
             closeModal();
+            const importFor = BankingPage._accountFormImportFor;
+            BankingPage._accountFormImportFor = null;
+            if (importFor != null && parseInt(accountId, 10) === importFor) {
+                await BankingPage.go(`#/banking/${importFor}`);
+                await BankingPage.showOFXImport(importFor);
+                return;
+            }
             BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -1317,7 +1328,7 @@ const BankingPage = {
                     <td class="amount">${e.deposit > 0 ? formatCurrency(e.deposit) : ''}</td>
                     <td class="amount" style="font-weight:700;">${formatCurrency(e.balance)}</td>
                     <td style="text-align:center;">${BankingPage._clearedCell(e, id)}</td>
-                    <td style="white-space:nowrap;">${BankingPage._printCheckButton(e)}${BankingPage._editButton(e, id)}${e.voidable ? `<button data-destructive class="btn btn-sm btn-secondary" onclick="BankingPage.voidEntry('${e.source_type}', ${e.transaction_id}, ${id})">Void</button>` : ''}</td>
+                    <td style="white-space:nowrap;">${BankingPage._printCheckButton(e)}${BankingPage._editButton(e, id)}${BankingPage._voidedFilesButton(e)}${e.voidable ? `<button data-destructive class="btn btn-sm btn-secondary" onclick="BankingPage.voidEntry('${e.source_type}', ${e.transaction_id}, ${id})">Void</button>` : ''}</td>
                 </tr>`).join('');
             // oldest first, so the balance brought forward (a start date's
             // doing) opens the table (2.23.5 round 2, NEW-142); the entry
@@ -1429,6 +1440,21 @@ const BankingPage = {
         else if (e.source_type === 'deposit') onclick = `DepositsPage.editDeposit(${e.transaction_id})`;
         else onclick = `BankingPage.editEntry(${e.transaction_id}, ${accountId})`;
         return `<button class="btn btn-sm btn-secondary" onclick="${onclick}">Edit</button>`;
+    },
+
+    // A voided bank entry has no Edit, and Edit was the way to its
+    // attachments (#600): Files opens the ones it kept, to read (2.31.0
+    // gate, #813).
+    _voidedFilesButton(e) {
+        if (!e.voided || e.source_type !== 'bank_entry') return '';
+        return `<button type="button" class="btn btn-sm btn-secondary" data-readonly-ok onclick="BankingPage.showVoidedFiles(${e.transaction_id})" title="The files kept with this voided entry">Files</button>`;
+    },
+
+    async showVoidedFiles(id) {
+        openModal('Attachments (voided entry)', `
+            <div id="entry-attachments-list" style="margin-bottom:8px; font-size:11px;">Loading...</div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+        await BankingPage.loadAttachments(id, { keep: true });
     },
 
     // A check written here, or an expense paid from this account, prints
@@ -2122,7 +2148,8 @@ const BankingPage = {
         </div>`;
     },
 
-    async loadAttachments(id) {
+    // `opts.keep`: a voided entry's files, listed to open, without Delete.
+    async loadAttachments(id, opts = {}) {
         const el = $('#entry-attachments-list');
         if (!el) return;
         try {
@@ -2134,7 +2161,7 @@ const BankingPage = {
                     `<div style="display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; padding:2px 0;">
                         ${a.missing ? `<span>${escapeHtml(a.filename)}</span>` : `<a href="/api/attachments/download/${a.id}" target="_blank">${escapeHtml(a.filename)}</a>`}
                         ${a.file_size == null ? '' : `<span style="color:var(--gray-400);">(${formatFileSize(a.file_size)})</span>`}
-                        <button type="button" data-destructive aria-label="Delete attachment" class="btn btn-sm btn-danger" onclick="BankingPage.deleteAttachment(${a.id},${id})" style="padding:0 4px; font-size:10px;">X</button>
+                        ${opts.keep ? '' : `<button type="button" data-destructive aria-label="Delete attachment" class="btn btn-sm btn-danger" onclick="BankingPage.deleteAttachment(${a.id},${id})" style="padding:0 4px; font-size:10px;">X</button>`}
                         ${storedFileNote(a)}
                     </div>`
                 ).join('');
@@ -2186,7 +2213,7 @@ const BankingPage = {
         if (title) title.textContent = 'Edit entry';
         form.dataset.entryId = entry.id;
         form.dataset.jobId = entry.job_id || '';
-        form.date.value = entry.date;
+        form.date.defaultValue = form.date.value = entry.date;  // the saved date (TxnWarn.ok, #813)
         form.amount.value = Number(entry.amount).toFixed(2);
         form.payee.value = entry.payee || '';
         form.dataset.payee = (entry.payee || '').trim();
@@ -3270,7 +3297,7 @@ const BankingPage = {
         const feeds = await API.get('/banking/accounts');
         const feed = feeds.find(f => f.account_id === accountId);
         if (!feed) {
-            if (confirm('Importing needs a bank feed (statement identity) on this account. Create one now?')) BankingPage.showAccountForm(accountId);
+            if (confirm('Importing needs a bank feed (statement identity) on this account. Create one now?')) BankingPage.showAccountForm(accountId, null, true);
             return;
         }
         const feedId = feed.id;

@@ -2311,6 +2311,27 @@ def _payable_note(prepared: dict) -> list[str]:
     ]
 
 
+_NOT_ON_STATEMENTS = re.compile(
+    r"^Account ('.*'|\".*\") is in the books but not on the Balance Sheet "
+)
+_UNKNOWN_IN_GL = re.compile(r"^GL references account ('.*'|\".*\") not present ")
+
+
+def _named_once(errors: list[str]) -> list[str]:
+    """An account already refused as "in the books but not on the Balance
+    Sheet or the Profit and Loss" is not named again as one the chart lacks:
+    without the General Ledger the deleted card came back twice, the second
+    time in the import's own words (#813)."""
+    named = {m.group(1) for e in errors if (m := _NOT_ON_STATEMENTS.match(e))}
+    if not named:
+        return errors
+    return [
+        e
+        for e in errors
+        if not ((m := _UNKNOWN_IN_GL.match(e)) and m.group(1) in named)
+    ]
+
+
 def dry_run(db: Session, bundle: dict) -> dict:
     bundle = _fold_list(bundle)
     plan = _carry_plan(db, bundle)
@@ -2328,6 +2349,7 @@ def dry_run(db: Session, bundle: dict) -> dict:
         verdict["errors"] = [
             e for e in verdict["errors"] if not is_unknown_account_error(e)
         ]
+    verdict["errors"] = _named_once(verdict["errors"])
     verdict["warnings"] = (
         notes + list(_COA_NOTES) + _payable_note(prepared) + verdict["warnings"]
     )
