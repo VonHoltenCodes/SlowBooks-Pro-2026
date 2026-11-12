@@ -255,6 +255,11 @@
     /* -- Functional -- */
     --success:        #339966;
     --warning:        #cc9933;
+    /* a starred report's star: the warning gold reads 2.6:1 on a white
+       card and the Reports page's cards sit on the panel grey (#eef1f5),
+       so the pressed star takes a dark gold that reads 6.3:1 on white and
+       5.5:1 on the grey */
+    --star-on:        #7a5c00;
     --danger:         #cc3333;
 
     /* -- Gray scale (used by JS components and dark theme overrides) -- */
@@ -1299,7 +1304,7 @@ a.card-link:focus-visible { box-shadow: 0 0 0 8px var(--focus-halo); }
     color: var(--text-muted); font-size: 15px; cursor: pointer;
 }
 .card-pin:hover { border-color: var(--panel-border); }
-.card-pin[aria-pressed="true"] { color: var(--warning); }
+.card-pin[aria-pressed="true"] { color: var(--star-on); }
 
 /* ========================================================================
  * FORMS — Modal forms styled like QB2003 data entry windows

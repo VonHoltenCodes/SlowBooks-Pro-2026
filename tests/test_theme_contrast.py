@@ -470,6 +470,25 @@ def _theme(page, theme):
                    .forEach(a => a.finish())""")
 
 
+def _toggle_to(page, handled, theme):
+    """The theme switched on a page already drawn, as the toolbar's toggle
+    switches it: App.toggleTheme sets the attribute and sends
+    slowbooks:themechange, and a page that draws for its theme repaints on
+    it (the dashboard's aging bar picks ink or white for each slice's figure
+    in the theme it is drawn in, NEW-60). Setting the attribute alone left a
+    figure drawn for one theme to be measured in the other (#814): the page
+    opens on the dashboard, and a visit to the route it is already on draws
+    nothing again."""
+    page.evaluate(
+        """(t) => { const now = document.documentElement.getAttribute('data-theme')
+                                || 'light';
+                    if (now !== t) App.toggleTheme(); }""",
+        theme,
+    )
+    _theme(page, theme)
+    settle(page, handled)
+
+
 def test_the_gate_pages_and_the_splash_meet_aa_in_both_themes(browser, company):
     """The gate's sequence: its six pages, and the dashboard, in dark and
     then light, with the splash still up behind them as the gate leaves it;
@@ -478,13 +497,13 @@ def test_the_gate_pages_and_the_splash_meet_aa_in_both_themes(browser, company):
     try:
         pages = {}
         for theme in ("dark", "light"):
-            _theme(page, theme)
+            _toggle_to(page, handled, theme)
             for route in GATE_ROUTES + ("#/",):
                 _visit(page, handled, route)
                 pages[(theme, route)] = page.evaluate(SWEEP)
         splash = {}
         for theme in ("light", "dark"):
-            _theme(page, theme)
+            _toggle_to(page, handled, theme)
             page.evaluate(
                 """() => { document.getElementById('splash').classList.remove('hidden');
                            const t = document.getElementById('splash-terms');
@@ -536,20 +555,20 @@ def test_every_page_and_notice_meets_aa_in_both_themes(browser, company, books):
         for route in routes:
             _visit(page, handled, route)
             for theme in ("dark", "light"):
-                _theme(page, theme)
+                _toggle_to(page, handled, theme)
                 pages[(theme, route)] = page.evaluate(PAGE_SWEEP)
         # the global search's dropdown
         page.fill("#global-search", "an")
         page.wait_for_selector("#search-results .search-item")
         for theme in ("dark", "light"):
-            _theme(page, theme)
+            _toggle_to(page, handled, theme)
             pages[(theme, "search")] = page.evaluate(
                 sweep_of("document.getElementById('search-results')")
             )
         page.fill("#global-search", "")
         notices = {}
         for theme in ("light", "dark"):
-            _theme(page, theme)
+            _toggle_to(page, handled, theme)
             page.evaluate("""() => { toast('Invoice saved', 'success');
                            toast('Could not save the invoice', 'error');
                            toast('Opening the report', 'info'); }""")
