@@ -144,10 +144,31 @@
                 {% if inv.terms %}
                 <tr><td>Terms</td><td>{{ inv.terms }}</td></tr>
                 {% endif %}
-                {% if release_only %}
-                <tr><td>Retainage release{% if pay_application_number %}, {{ pay_application_number }}{% endif %}</td><td>{{ inv.retainage_released | currency(cur) }}</td></tr>
-                {% else %}
+                {# A pay application's invoice: the retainage arithmetic the PDF
+                   shows (#815). One with no lines names what it bills (the
+                   release, the retainage a lower percent gives back) in place
+                   of a $0.00 total (#751); one with lines shows its total, the
+                   retainage withheld and released, and the current payment due. #}
+                {% set lineless = (retainage_lines or []) | length > 0 %}
+                {% if not (lineless and not inv.total and not inv.tax_amount) %}
                 <tr><td>Invoice Total</td><td>{{ inv.total | currency(cur) }}</td></tr>
+                {% endif %}
+                {% if lineless %}
+                {% for row in retainage_lines %}
+                <tr><td>{{ row.description }}</td><td>{{ row.amount | currency(cur) }}</td></tr>
+                {% endfor %}
+                {% else %}
+                {% if inv.retainage_held and inv.retainage_held > 0 %}
+                <tr><td>Retainage withheld this period</td><td>-{{ inv.retainage_held | currency(cur) }}</td></tr>
+                {% elif inv.retainage_held and inv.retainage_held < 0 %}
+                <tr><td>Retainage reduction this period</td><td>{{ (-inv.retainage_held) | currency(cur) }}</td></tr>
+                {% endif %}
+                {% if inv.retainage_released and inv.retainage_released != 0 %}
+                <tr><td>Retainage released</td><td>{{ inv.retainage_released | currency(cur) }}</td></tr>
+                {% endif %}
+                {% endif %}
+                {% if ((inv.retainage_held and inv.retainage_held != 0) or (inv.retainage_released and inv.retainage_released != 0)) and not (lineless and inv.status.value == 'void') %}
+                <tr><td>Current payment due</td><td>{{ (inv.total - inv.retainage_held + inv.retainage_released) | currency(cur) }}</td></tr>
                 {% endif %}
                 {% if inv.amount_paid|float > 0 %}
                 <tr><td>Amount Paid</td><td>{{ inv.amount_paid | currency(cur) }}</td></tr>

@@ -309,13 +309,20 @@ const InvoicesPage = {
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
              <td class="amount">${SalesLines.rate(l.rate, inv.currency)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
-        // A pay application that only releases retainage posts no lines (#751):
-        // name the release, and drop the $0.00 subtotal, tax and total rows.
-        const releaseOnly = !!inv.release_only;  // the server's one test of it
-        if (releaseOnly) {
-            linesHtml = `<tr><td>Retainage release${inv.pay_application_number ? `, ${escapeHtml(inv.pay_application_number)}` : ''}</td><td class="amount">1</td>
-             <td class="amount">${money(inv.retainage_released)}</td><td class="amount">${money(inv.retainage_released)}</td></tr>`;
+        // A pay application's invoice with no lines (#751, #815): name what it
+        // bills (the release, the retainage a lower percent gives back), and
+        // drop the $0.00 subtotal, tax and total rows. The rows are the
+        // server's (GET /invoices/{id}), never re-derived here.
+        const retainageLines = inv.retainage_lines || [];
+        const lineless = retainageLines.length > 0;
+        if (lineless) {
+            linesHtml = retainageLines.map(r =>
+                `<tr><td>${escapeHtml(r.description)}</td><td class="amount">1</td>
+             <td class="amount">${money(r.amount)}</td><td class="amount">${money(r.amount)}</td></tr>`
+            ).join('');
         }
+        const zeroTotal = lineless && !Number(inv.total) && !Number(inv.tax_amount);
+        const held = Number(inv.retainage_held);
 
         openModal(`${T('Invoice')} #${inv.invoice_number}`, `
             ${InvoicesPage.logoOptionHtml(settings)}
@@ -333,12 +340,13 @@ const InvoicesPage = {
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
-                ${releaseOnly ? '' : `<div class="total-row"><span class="label">Subtotal</span><span class="value">${money(inv.subtotal)}</span></div>
+                ${zeroTotal ? '' : `<div class="total-row"><span class="label">Subtotal</span><span class="value">${money(inv.subtotal)}</span></div>
                 <div class="total-row"><span class="label">Tax</span><span class="value">${money(inv.tax_amount)}</span></div>
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(inv.total)}</span></div>`}
-                ${Number(inv.retainage_held) ? `<div class="total-row"><span class="label">Retainage withheld this period</span><span class="value">-${money(inv.retainage_held)}</span></div>` : ''}
-                ${Number(inv.retainage_released) && !releaseOnly ? `<div class="total-row"><span class="label">Retainage released</span><span class="value">${money(inv.retainage_released)}</span></div>` : ''}
-                ${(Number(inv.retainage_held) || Number(inv.retainage_released)) && !(releaseOnly && inv.status === 'void') ? `<div class="total-row"><span class="label">Current payment due</span><span class="value">${money((Number(inv.total) - Number(inv.retainage_held) + Number(inv.retainage_released)).toFixed(2))}</span></div>` : ''}
+                ${held > 0 && !lineless ? `<div class="total-row"><span class="label">Retainage withheld this period</span><span class="value">-${money(inv.retainage_held)}</span></div>` : ''}
+                ${held < 0 && !lineless ? `<div class="total-row"><span class="label">Retainage reduction this period</span><span class="value">${money((-held).toFixed(2))}</span></div>` : ''}
+                ${Number(inv.retainage_released) && !lineless ? `<div class="total-row"><span class="label">Retainage released</span><span class="value">${money(inv.retainage_released)}</span></div>` : ''}
+                ${(held || Number(inv.retainage_released)) && !(lineless && inv.status === 'void') ? `<div class="total-row"><span class="label">Current payment due</span><span class="value">${money((Number(inv.total) - Number(inv.retainage_held) + Number(inv.retainage_released)).toFixed(2))}</span></div>` : ''}
                 <div class="total-row"><span class="label">Paid</span><span class="value">${money(inv.amount_paid)}</span></div>
                 <div class="total-row grand-total"><span class="label">Balance Due</span><span class="value">${money(inv.balance_due)}</span></div>
             </div>

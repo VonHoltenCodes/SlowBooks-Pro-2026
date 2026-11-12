@@ -297,6 +297,7 @@ def render_invoice_html(invoice, company_settings: dict) -> str:
     from app.services.donor_documents import invoice_pdf_context
     from app.services.pay_applications import (
         invoice_is_release_only,
+        invoice_retainage_lines,
         pay_application_number,
     )
     from app.services.payment_terms import (
@@ -305,12 +306,16 @@ def render_invoice_html(invoice, company_settings: dict) -> str:
     )
 
     _db = object_session(invoice)
+    number = pay_application_number(_db, invoice)
     return _render(
         "invoice_pdf.html",
         company_settings,
         inv=invoice,
         release_only=invoice_is_release_only(invoice),
-        pay_application_number=pay_application_number(_db, invoice),
+        pay_application_number=number,
+        # what a line-less pay application invoice bills, in place of an
+        # empty table (#815)
+        retainage_lines=invoice_retainage_lines(invoice, number),
         discount_line=document_discount_line(invoice),
         # the discount already taken, shown in place of the offer (#664)
         discount_taken=(

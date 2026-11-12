@@ -208,6 +208,14 @@ class ZeroTotalConfirmation(StrictModel):
     allow_over_credit_limit: bool = False
 
 
+class RetainageLine(BaseModel):
+    """A row a pay application's invoice with no lines prints in place of an
+    empty table: a retainage release, reduction or hold (#815)."""
+
+    description: str
+    amount: Decimal
+
+
 class InvoiceResponse(BaseModel):
     id: int
     invoice_number: str
@@ -254,6 +262,10 @@ class InvoiceResponse(BaseModel):
     # Filled by GET /invoices/{id} only: the invoice bills nothing but a
     # retainage release, so it reads as one (#751).
     release_only: bool = False
+    # Filled by GET /invoices/{id} only: what a pay application's invoice with
+    # no lines bills (the release, the retainage given back by a lower
+    # percent, or held), the rows printed in place of an empty table (#815).
+    retainage_lines: list[RetainageLine] = []
     # The newest send of this invoice that went out (#780), from the email
     # log: when, and to whom. Read-only and null until one has; a failed
     # send leaves them as they were. Filled by the list, the read, an edit,
