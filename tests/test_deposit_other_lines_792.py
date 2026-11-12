@@ -532,9 +532,9 @@ def test_the_migration_adds_the_table_and_walks_back(tmp_path):
     db = tmp_path / "dep.db"
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_revision("c7e3a9d5f1b4").down_revision == "a4c8e2f6b0d3"
+    assert script.get_revision("c7e3a9d5f1b4").down_revision == "b6e1d4a8c2f5"
 
-    command.upgrade(cfg, "a4c8e2f6b0d3")  # the step below it (#795)
+    command.upgrade(cfg, "b6e1d4a8c2f5")  # the step below it (#795)
     command.upgrade(cfg, "c7e3a9d5f1b4")  # its own step, not the chain (#770)
     with sqlite3.connect(db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(deposit_other_lines)")}
@@ -551,7 +551,7 @@ def test_the_migration_adds_the_table_and_walks_back(tmp_path):
         "class_id",
         "job_id",
     } <= cols
-    command.downgrade(cfg, "a4c8e2f6b0d3")
+    command.downgrade(cfg, "b6e1d4a8c2f5")
     with sqlite3.connect(db) as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     assert "deposit_other_lines" not in tables

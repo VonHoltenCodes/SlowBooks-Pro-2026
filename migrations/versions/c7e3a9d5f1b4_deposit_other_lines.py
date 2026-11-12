@@ -8,7 +8,7 @@ entry); this table holds the line as the slip prints it. Books that already
 have the table (made by create_all and stamped back) keep it as it is.
 
 Revision ID: c7e3a9d5f1b4
-Revises: a4c8e2f6b0d3
+Revises: b6e1d4a8c2f5
 Create Date: 2026-11-12
 
 """
@@ -19,7 +19,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "c7e3a9d5f1b4"
-down_revision: Union[str, None] = "a4c8e2f6b0d3"
+down_revision: Union[str, None] = "b6e1d4a8c2f5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
