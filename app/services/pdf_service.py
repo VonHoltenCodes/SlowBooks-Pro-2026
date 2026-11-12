@@ -396,6 +396,10 @@ def deposit_slip_pages(deposit: dict, company_settings: dict) -> list:
     subtotal and the total; checks past the slip's lines continue on more
     pages at the same lines, with the date and account, for the slip's back
     or a second slip. Every payment that is not cash goes on a check line.
+    A deposit's other lines (#792) print with its payments, after them, by
+    their method the same way (#883): one with a check number is a check
+    line with that number. The total is the deposit's, which the figures
+    add up to.
     A void deposit prints its date, its account and VOID in the total's
     box, no figures."""
     from decimal import Decimal
@@ -429,9 +433,20 @@ def deposit_slip_pages(deposit: dict, company_settings: dict) -> list:
     head = [place("date", date_text), place("account", deposit.get("account_name"))]
     if deposit.get("voided"):
         return [[f for f in head + [place("total", "VOID")] if f]]
+    # the slip's lines: the payments taken, then the other lines (#792,
+    # #883) in deposit order, as the plain slip merges them
     payments = deposit.get("payments") or []
-    cash = [p for p in payments if p.get("method") == "Cash"]
-    checks = [p for p in payments if p.get("method") != "Cash"]
+    others = deposit.get("other_lines") or []
+    slip = [(p, False) for p in payments] + [(o, True) for o in others]
+
+    def is_cash(line, other):
+        # an other line with a check number is a check line with that number
+        if other and (line.get("check_number") or "").strip():
+            return False
+        return line.get("method") == "Cash"
+
+    cash = [p for p, other in slip if is_cash(p, other)]
+    checks = [p for p, other in slip if not is_cash(p, other)]
     cash_total = sum((Decimal(str(p.get("amount") or 0)) for p in cash), Decimal(0))
     checks_total = sum((Decimal(str(p.get("amount") or 0)) for p in checks), Decimal(0))
     per_page = int(layout["check_lines"]["count"])
