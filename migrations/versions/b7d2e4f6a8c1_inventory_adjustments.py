@@ -7,7 +7,7 @@ source_id this id) and it posts one journal entry for the lot. Nothing
 already posted changes: a one-item adjustment keeps source_type "adjustment".
 
 Revision ID: b7d2e4f6a8c1
-Revises: a4c8e2f6b0d3
+Revises: c7e3a9d5f1b4
 Create Date: 2026-11-12
 """
 
@@ -17,7 +17,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "b7d2e4f6a8c1"
-down_revision: Union[str, None] = "a4c8e2f6b0d3"
+down_revision: Union[str, None] = "c7e3a9d5f1b4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

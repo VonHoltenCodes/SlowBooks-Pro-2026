@@ -485,7 +485,7 @@ def test_the_migration_adds_the_table_and_walks_back(tmp_path):
     db = tmp_path / "adj.db"
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_revision("b7d2e4f6a8c1").down_revision == "a4c8e2f6b0d3"
+    assert script.get_revision("b7d2e4f6a8c1").down_revision == "c7e3a9d5f1b4"
 
     def tables():
         with sqlite3.connect(db) as conn:
@@ -496,12 +496,12 @@ def test_the_migration_adds_the_table_and_walks_back(tmp_path):
                 )
             }
 
-    command.upgrade(cfg, "a4c8e2f6b0d3")  # the step below it (#795)
+    command.upgrade(cfg, "c7e3a9d5f1b4")  # the step below it (#795)
     assert "inventory_adjustments" not in tables()
     command.upgrade(cfg, "b7d2e4f6a8c1")  # its own step, not the chain (#770)
     assert "inventory_adjustments" in tables()
     with sqlite3.connect(db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(inventory_adjustments)")}
     assert cols == {"id", "date", "memo", "transaction_id", "created_at"}
-    command.downgrade(cfg, "a4c8e2f6b0d3")
+    command.downgrade(cfg, "c7e3a9d5f1b4")
     assert "inventory_adjustments" not in tables()
