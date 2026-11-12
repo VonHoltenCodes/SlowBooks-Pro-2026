@@ -105,6 +105,9 @@ const BudgetsPage = {
 
     async showVariance(prefill) {
         const year = BudgetsPage._year;
+        // the wide dialog (#797): in the 700px one only January to June
+        // showed, at any window; twelve months and the Total fit the wide
+        // one at a normal window, and scroll under the account column below
         await ReportsPage.openPeriodModal(`Budget vs Actual — ${year}`, 'this_year', async () => {
             const data = await API.get(`/budgets/variance?year=${year}`);
             if (data.accounts.length === 0) {
@@ -135,6 +138,6 @@ const BudgetsPage = {
             }
             html += '</div></div>';
             return html;
-        }, "Dates", false, { view: 'budget-vs-actual', params: { year }, prefill, step: false });
+        }, "Dates", false, { view: 'budget-vs-actual', params: { year }, prefill, step: false, wide: true });
     },
 };

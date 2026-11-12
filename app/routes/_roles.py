@@ -8,7 +8,7 @@ no role and is the admin."""
 
 from fastapi import HTTPException, Request
 
-from app.models.users import ROLE_ADMIN
+from app.models.users import ROLE_ACCOUNTANT, ROLE_ADMIN, ROLE_READONLY
 
 
 def current_role(request: Request) -> str:
@@ -47,3 +47,10 @@ def may_download_backups(request: Request) -> bool:
         return True
     tp = getattr(getattr(request, "state", None), "token_principal", None)
     return bool(tp and tp.get("allow_backups"))
+
+
+def sees_estimate_cost(request: Request) -> bool:
+    """An estimate's cost side is the contractor's own (#824): a bookkeeper
+    and an administrator read it; a read-only or accountant sign-in or token
+    reads the estimate without it."""
+    return current_role(request) not in (ROLE_READONLY, ROLE_ACCOUNTANT)

@@ -290,15 +290,25 @@ const EstimatesPage = {
         if (id) est = await API.get(`/estimates/${id}`);
         // a new construction estimate starts with the company's default terms
         else est.terms = settings.estimate_terms || '';
+        // A construction estimate's layout (#774): an estimate's own (the
+        // server's presentation_style), the company's setting for a new one.
+        EstimatesPage._style = !Terms.isConstruction() ? null
+            : (id ? (est.style || 'commercial_bid') : (settings.estimate_style === 'line_markup' ? 'line_markup' : 'commercial_bid'));
+        EstimatesPage._defaultMarkup = settings.estimate_default_markup_pct || '';
+        const lineMarkup = EstimatesPage.isLineMarkup();
         const classGroup = await classFormGroupHtml(est.class_id);
         const jobGroup = await jobFormGroupHtml(est.job_id, 'est-customer-select');
         await CostCodes.load();
         await CostTypes.load();
         await TradePackages.load();
-        if (est.lines.length === 0) est.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
+        if (est.lines.length === 0) est.lines = [{ item_id: '', description: '', quantity: 1, rate: 0, ...EstimatesPage.newLine() }];
 
         EstimatesPage.lineCount = est.lines.length;
         EstimatesPage._items = items;
+        // a reader without the cost side (#824) is shown the server's bid
+        // figures: the form has no unit costs to compute them from
+        EstimatesPage._readTotals = EstimatesPage.showsCost() ? null : (est.totals || null);
+        EstimatesPage._readLines = est.lines;
 
         EstimatesPage._customers = customers;
         const custOpts = customers.map(c => `<option value="${c.id}" ${est.customer_id==c.id?'selected':''}>${escapeHtml(customerLabel(c))}</option>`).join('');
@@ -330,8 +340,8 @@ const EstimatesPage = {
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <div class="table-container table-container--scroll"><table class="line-items-table">
                     <thead><tr>
-                        <th scope="col">Item</th><th scope="col">Description</th>${EstimatesPage.pkgHead()}${EstimatesPage.kindHead()}${CostCodes.headHtml()}${CostTypes.headHtml()}<th scope="col" title='Unit cost (budget side)'>Cost</th>${EstimatesPage.unitHead()}<th scope="col" class="col-qty">Qty</th>
-                        <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>
+                        ${lineMarkup ? EstimatesPage.markupHeadHtml() : `<th scope="col">Item</th><th scope="col">Description</th>${EstimatesPage.pkgHead()}${EstimatesPage.kindHead()}${CostCodes.headHtml()}${CostTypes.headHtml()}${EstimatesPage.costHead()}${EstimatesPage.unitHead()}<th scope="col" class="col-qty">Qty</th>
+                        <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>`}
                     </tr></thead>
                     <tbody id="est-lines">
                         ${est.lines.map((l, i) => EstimatesPage.lineRowHtml(i, l, items)).join('')}
@@ -362,6 +372,19 @@ const EstimatesPage = {
     // and the Accept button all show in construction mode only; a Business or
     // Nonprofit company sees exactly the estimate form it always had.
     pkgHead() { return TradePackages.headHtml(); },
+
+    // An estimate's cost side is the contractor's own (#824): a read-only or
+    // accountant sign-in reads the estimate without it (the server leaves it
+    // out), so its form has no Cost column and no Cost of work row.
+    showsCost() {
+        const role = typeof App !== 'undefined' ? App.role : null;
+        return role !== 'readonly' && role !== 'accountant';
+    },
+    costHead() { return EstimatesPage.showsCost() ? `<th scope="col" title='Unit cost (budget side)'>Cost</th>` : ''; },
+    costCell(line) {
+        if (!EstimatesPage.showsCost()) return '';
+        return `<td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" title="Unit cost; in construction mode a base or alternate line is priced at cost (the markups are rows under the subtotal)" oninput="EstimatesPage.recalc()">${EstimatesPage.keptMarkupHtml(line)}</td>`;
+    },
     kindHead() { return Terms.isConstruction() ? '<th scope="col" title="Base, allowance, alternate or unit price">Kind</th>' : ''; },
     unitHead() { return Terms.isConstruction() ? '<th scope="col" class="col-qty" title="Unit of measure">Unit</th>' : ''; },
 
@@ -399,7 +422,7 @@ const EstimatesPage = {
     },
 
     markupsBlockHtml(est) {
-        if (!Terms.isConstruction()) return '';
+        if (!Terms.isConstruction() || EstimatesPage.isLineMarkup()) return '';
         const f = (name, val, label) =>
             `<div class="form-group"><label>${label} (%)</label><input name="${name}" type="number" step="0.0001" min="0" max="999.9999" value="${+(Number(val) || 0).toFixed(4)}" oninput="EstimatesPage.recalc()"></div>`;
         return `<h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Markups</h3>
@@ -425,8 +448,18 @@ const EstimatesPage = {
     bidTotalsPanelHtml() {
         if (!Terms.isConstruction()) return '';
         const row = (label, id) => `<div class="total-row"><span class="label">${label}</span><span class="value" id="${id}">$0.00</span></div>`;
+        // Markup per line (#774): the owner's three figures, then the
+        // contractor's own cost, profit and margin, muted (the form is never
+        // printed; the owner's PDF carries none of it).
+        if (EstimatesPage.isLineMarkup()) return `<div class="invoice-totals" id="est-bid-totals" style="margin-top:8px;">
+            ${row('Subtotal', 'est-bid-subtotal')}
+            ${row('Tax', 'est-bid-tax')}
+            <div class="total-row grand-total"><span class="label">Total</span><span class="value" id="est-bid-grand">$0.00</span></div>
+            <div id="est-bid-profit" style="margin-top:6px; font-size:11px; color:var(--text-muted);"></div>
+            ${EstimatesPage.atCostWarningHtml()}
+        </div>`;
         return `<div class="invoice-totals" id="est-bid-totals" style="margin-top:8px;">
-            ${row('Cost of work', 'est-bid-cost')}
+            ${EstimatesPage.showsCost() ? row('Cost of work', 'est-bid-cost') : ''}
             ${row('Priced direct', 'est-bid-direct')}
             ${row('Allowances', 'est-bid-allow')}
             ${row('Subtotal', 'est-bid-subtotal')}
@@ -438,9 +471,16 @@ const EstimatesPage = {
             ${row('Bid total', 'est-bid-total')}
             ${row('Tax', 'est-bid-tax')}
             <div class="total-row grand-total"><span class="label">Total</span><span class="value" id="est-bid-grand">$0.00</span></div>
+            ${EstimatesPage.atCostWarningHtml()}
             <div id="est-bid-alternates" style="margin-top:8px; font-size:11px;"></div>
             <div id="est-bid-unitprices" style="margin-top:4px; font-size:11px;"></div>
         </div>`;
+    },
+
+    // A costed estimate whose bid equals its cost says so, in both layouts,
+    // so a bid is not saved at cost by accident (#774). No dialog.
+    atCostWarningHtml() {
+        return `<div id="est-at-cost" role="status" style="display:none; margin-top:6px; padding:4px 8px; border-left:3px solid var(--warning, #b7791f); font-size:12px;">Priced at cost: there is no markup on this estimate.</div>`;
     },
 
     // Every figure of the bid panel goes to the cent the way the server's
@@ -459,6 +499,10 @@ const EstimatesPage = {
         const factor = (1 + m('gc_pct')) * (1 + m('insurance_pct')) * (1 + m('fee_pct')) * (1 + m('bond_pct'));
         const markupAllowances = !!(form && form.markup_allowances && form.markup_allowances.checked);
         let markupBase = 0, taxedMarkupBase = 0, allowanceTotal = 0, pricedDirect = 0, subtotal = 0, taxableSubtotal = 0, anyTaxable = false;
+        // the contractor's cost (an allowance at its amount, as the server's
+        // cost_total), whether any line carries a cost, and the priced lines
+        // that carry none (#774)
+        let costTotal = 0, anyCost = false, noCost = 0;
         const alternates = [], unitPrices = [];
         $$('#est-lines tr').forEach(row => {
             // the stable line index is the data attribute, not the row's
@@ -481,18 +525,21 @@ const EstimatesPage = {
                 // taking it adds); one with no cost shows its rate price. A
                 // TAKEN one shows its cost, the figure that sits in the scope
                 // and on the owner's PDF, its markups in the rows below.
-                const shown = hasCost && !accepted ? EstimatesPage._r(cost * factor) : amount;
+                const shown = hasCost && !accepted ? EstimatesPage._r(amount * factor) : amount;
                 alternates.push({ idx: eline, desc, amount: shown, accepted });
                 if (!accepted) return;
             }
             subtotal += amount;
             if (taxable) { taxableSubtotal += amount; anyTaxable = true; }
             let base = 0;
+            // the markup base is the line's price, as the server's (a line at
+            // cost prices at its cost; one with its own markup, above it)
             if (kind === 'allowance') {
                 allowanceTotal += amount;
+                costTotal += amount;
                 if (markupAllowances) base = amount;
-            } else if (hasCost) base = cost;
-            else pricedDirect += amount;
+            } else if (hasCost) { base = amount; costTotal += cost; anyCost = true; }
+            else { pricedDirect += amount; if (amount) noCost += 1; }
             markupBase += base;
             if (taxable) taxedMarkupBase += base;
         });
@@ -507,17 +554,65 @@ const EstimatesPage = {
         const markupShare = markupBase ? EstimatesPage._r(markupTotal * taxedMarkupBase / markupBase) : 0;
         const tax = anyTaxable ? EstimatesPage._r((taxableSubtotal + markupShare) * m('tax_rate')) : 0;
         const total = EstimatesPage._r(bid + tax);
-        return { markupAllowances, markupBase, gc, insurance, fee, bond, markupTotal, pricedDirect, allowanceTotal, subtotal, bid, tax, total, alternates, unitPrices };
+        costTotal = EstimatesPage._r(costTotal);
+        // what accepting budgets as cost: the lines' cost and the general
+        // conditions, insurance and bond (the fee is the margin)
+        const profit = EstimatesPage._r(bid - costTotal - gc - insurance - bond);
+        const margin = bid ? Math.round(profit / bid * 10000) / 100 : 0;
+        return { markupAllowances, markupBase, gc, insurance, fee, bond, markupTotal, pricedDirect, allowanceTotal, subtotal, bid, tax, total, alternates, unitPrices, costTotal, anyCost, noCost, profit, margin };
+    },
+
+    // The server's bid figures in bidTotals()'s shape, for a reader whose
+    // estimate came without the cost side (#824); an alternate's handle is
+    // its line's row index, as the live panel's is.
+    readerBidTotals(t, lines) {
+        const idx = id => (lines || []).findIndex(l => l.id === id);
+        return {
+            markupAllowances: !!t.markup_allowances,
+            gc: Number(t.gc) || 0, insurance: Number(t.insurance) || 0,
+            fee: Number(t.fee) || 0, bond: Number(t.bond) || 0,
+            markupTotal: Number(t.markup_total) || 0,
+            pricedDirect: Number(t.priced_direct) || 0,
+            allowanceTotal: Number(t.allowance_total) || 0,
+            subtotal: Number(t.subtotal) || 0,
+            bid: Number(t.bid_total) || 0,
+            tax: Number(t.bid_tax) || 0,
+            total: Number(t.bid_total_with_tax) || 0,
+            alternates: (t.alternates || []).map(a => ({ idx: idx(a.id), desc: a.description || '', amount: Number(a.amount) || 0, accepted: !!a.accepted })),
+            unitPrices: (t.unit_prices || []).map(u => ({ idx: idx(u.id), desc: u.description || '', unit: u.unit || '', rate: u.rate })),
+        };
     },
 
     renderBidTotals() {
         if (!Terms.isConstruction() || !$('#est-bid-totals')) return;
-        const t = EstimatesPage.bidTotals();
+        const t = EstimatesPage._readTotals
+            ? EstimatesPage.readerBidTotals(EstimatesPage._readTotals, EstimatesPage._readLines)
+            : EstimatesPage.bidTotals();
         const set = (id, v) => { const el = $(`#${id}`); if (el) el.textContent = formatCurrency(v); };
+        // a row shows only when it says something (#774)
+        const show = (id, on) => { const el = $(`#${id}`)?.closest('.total-row'); if (el) el.style.display = on ? '' : 'none'; };
+        const warn = $('#est-at-cost');
+        if (warn) warn.style.display = t.anyCost && EstimatesPage._r(t.bid) === t.costTotal ? '' : 'none';
+        if (EstimatesPage.isLineMarkup()) {
+            set('est-bid-subtotal', t.subtotal); set('est-bid-tax', t.tax); set('est-bid-grand', t.total);
+            show('est-bid-tax', t.tax !== 0);
+            const note = $('#est-bid-profit');
+            if (note && !EstimatesPage.showsCost()) note.textContent = '';
+            else if (note) note.textContent = `Cost ${formatCurrency(t.costTotal)} · Profit ${formatCurrency(t.profit)} · Margin ${t.margin.toFixed(2)}%`
+                + (t.noCost ? ` · ${t.noCost === 1 ? '1 line has' : `${t.noCost} lines have`} no cost` : '');
+            return;
+        }
         set('est-bid-cost', t.markupBase); set('est-bid-direct', t.pricedDirect); set('est-bid-allow', t.allowanceTotal);
         set('est-bid-subtotal', t.subtotal); set('est-bid-gc', t.gc); set('est-bid-ins', t.insurance);
         set('est-bid-fee', t.fee); set('est-bid-bond', t.bond); set('est-bid-total', t.bid);
         set('est-bid-tax', t.tax); set('est-bid-grand', t.total);
+        show('est-bid-direct', t.pricedDirect !== 0); show('est-bid-allow', t.allowanceTotal !== 0);
+        show('est-bid-gc', t.gc !== 0); show('est-bid-ins', t.insurance !== 0);
+        show('est-bid-fee', t.fee !== 0); show('est-bid-bond', t.bond !== 0);
+        show('est-bid-tax', t.tax !== 0);
+        show('est-bid-markup-allow', t.allowanceTotal !== 0);
+        show('est-bid-cost', EstimatesPage._r(t.markupBase) !== EstimatesPage._r(t.subtotal));
+        show('est-bid-total', EstimatesPage._r(t.bid) !== EstimatesPage._r(t.total) || t.markupTotal !== 0);
         const ma = $('#est-bid-markup-allow');
         if (ma) ma.textContent = t.markupAllowances ? 'On' : 'Off';
         const alt = $('#est-bid-alternates');
@@ -591,12 +686,13 @@ const EstimatesPage = {
     },
 
     lineRowHtml(idx, line, items) {
+        if (EstimatesPage.isLineMarkup()) return EstimatesPage.markupRowHtml(idx, line, items);
         return `<tr data-eline="${idx}">
             <td><select class="line-item" style="min-width:150px" onchange="EstimatesPage.itemSelected(${idx})">
                 ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             ${EstimatesPage.pkgCell(line)}${EstimatesPage.kindCell(line)}${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}${CostTypes.cellHtml('line-cost-type', line.cost_type || null)}
-            <td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" title="Unit cost; in construction mode a base or alternate line is priced at cost (the markups are rows under the subtotal)" oninput="EstimatesPage.recalc()"></td>
+            ${EstimatesPage.costCell(line)}
             ${EstimatesPage.unitCell(line)}<td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
             <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="EstimatesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="EstimatesPage.recalc()"></td>
@@ -605,10 +701,60 @@ const EstimatesPage = {
         </tr>`;
     },
 
+    // --- Markup per line (#774) ----------------------------------------------
+    // A construction estimate priced line by line: Item, Description, Cost
+    // Code, Cost Type, Qty, Unit, Cost, Markup %, Price, Tax, Amount. No
+    // package, kind or Markups block; the server prices each line from its
+    // cost and markup.
+    isLineMarkup() { return Terms.isConstruction() && EstimatesPage._style === 'line_markup'; },
+
+    // What a new row starts with: the company's default markup (blank is 0).
+    newLine() {
+        return EstimatesPage.isLineMarkup() ? { markup_pct: EstimatesPage._defaultMarkup !== '' ? EstimatesPage._defaultMarkup : '0' } : {};
+    },
+
+    // a reader without the cost side (#824) gets no Cost or Markup % column
+    markupHeadHtml() {
+        const cost = EstimatesPage.showsCost()
+            ? `<th scope="col" class="col-rate" title="Unit cost">Cost</th><th scope="col" class="col-rate" title="Markup on the cost, a percent">Markup %</th>` : '';
+        return `<th scope="col">Item</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}<th scope="col" class="col-qty">Qty</th>`
+            + `<th scope="col" class="col-qty" title="Unit of measure">Unit</th>${cost}`
+            + `<th scope="col" class="col-rate" title="Cost plus the markup; typed when the line has no cost">Price</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>`;
+    },
+
+    markupRowHtml(idx, line, items) {
+        return `<tr data-eline="${idx}">
+            <td><select class="line-item" style="min-width:150px" onchange="EstimatesPage.itemSelected(${idx})">
+                ${ItemQuickAdd.options(items, line.item_id)}</select></td>
+            <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
+            ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}${CostTypes.cellHtml('line-cost-type', line.cost_type || null)}
+            <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
+            ${EstimatesPage.unitCell(line)}
+            ${EstimatesPage.showsCost() ? `<td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" aria-label="Unit cost" oninput="EstimatesPage.recalc()"></td>
+            <td><input class="line-markup" type="number" step="0.0001" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" aria-label="Markup percent" oninput="EstimatesPage.recalc()"></td>` : ''}
+            <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" aria-label="Price" oninput="EstimatesPage.recalc()"></td>
+            <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="EstimatesPage.recalc()"></td>
+            <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
+            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="EstimatesPage.removeLine(${idx})">X</button></td>
+        </tr>`;
+    },
+
+    // A commercial-bid line that carries its own markup (made through the
+    // API) keeps it: the markup shows under the cost, and its rate shows the
+    // marked-up price read-only (#774).
+    keptMarkupHtml(line) {
+        // kept on every company's rows, so a Business or Nonprofit save does
+        // not drop the rule that priced the line in construction (#774);
+        // only construction prices by it, so only there is it shown
+        if (line.markup_pct == null) return '';
+        if (!Terms.isConstruction()) return `<input type="hidden" class="line-markup" value="${escapeHtml(line.markup_pct)}">`;
+        return `<label style="display:block; font-size:11px; color:var(--text-muted);">+<input class="line-markup" type="number" step="0.0001" min="-100" max="10000" style="width:64px;" value="${escapeHtml(line.markup_pct)}" aria-label="Markup percent" title="This line's own markup on its cost" oninput="EstimatesPage.recalc()">%</label>`;
+    },
+
     addLine() {
         const tbody = $('#est-lines');
         const idx = EstimatesPage.lineCount++;
-        tbody.insertAdjacentHTML('beforeend', EstimatesPage.lineRowHtml(idx, {}, EstimatesPage._items));
+        tbody.insertAdjacentHTML('beforeend', EstimatesPage.lineRowHtml(idx, EstimatesPage.newLine(), EstimatesPage._items));
         EstimatesPage.recalc();
     },
 
@@ -644,22 +790,27 @@ const EstimatesPage = {
     },
 
     // In construction mode a base/alternate row that carries a unit cost is
-    // priced AT COST: the rate box mirrors the cost, is read-only, and the
-    // amount follows (#551). Clearing the cost makes the rate editable again.
-    // Allowance and unit-price rows keep an editable rate. Runs after render,
-    // inside recalc, like liftAlternateMins — the pinned rate markup is
-    // untouched; everything here is a runtime change.
+    // priced from it: AT COST (#551), or at cost × (1 + markup / 100) when the
+    // row carries a markup (#774). The rate box shows that price, is
+    // read-only, and the amount follows. Clearing the cost makes the rate
+    // editable again and disables the row's Markup box. Allowance and
+    // unit-price rows keep an editable rate. Runs after render, inside
+    // recalc, like liftAlternateMins — the pinned rate markup is untouched;
+    // everything here is a runtime change.
     syncRatesToCost() {
         $$('#est-lines tr').forEach(row => {
             const kind = row.querySelector('.line-kind')?.value || 'base';
             const rate = row.querySelector('.line-rate');
             const ucEl = row.querySelector('.line-unit-cost');
             if (!rate || !ucEl) return;
+            const mk = row.querySelector('.line-markup');
             const atCost = (kind === 'base' || kind === 'alternate') && ucEl.value !== '' && ucEl.value != null;
+            if (mk && mk.type !== 'hidden') mk.disabled = !atCost;
             if (atCost) {
-                rate.value = ucEl.value;
+                const pct = mk && mk.value !== '' ? Number(mk.value) || 0 : null;
+                rate.value = pct === null ? ucEl.value : EstimatesPage.pricedRate(ucEl.value, mk.value);
                 rate.readOnly = true;
-                rate.title = 'At cost; the markups are lines under the subtotal';
+                rate.title = pct === null ? 'At cost; the markups are lines under the subtotal' : 'Cost plus the line\'s markup';
             } else {
                 // clearing the cost drops the mirrored rate to 0 before it
                 // unlocks, so the old cost is not left behind as a price
@@ -670,6 +821,43 @@ const EstimatesPage = {
         });
     },
 
+    // The server's priced_rate (#774) in exact arithmetic: cost and markup to
+    // four places, then cost × (1 + markup / 100) to four, half away from
+    // zero as Decimal's ROUND_HALF_UP. Floats put 3.51 at 12.5% at 3.9487.
+    _units4(text) {
+        const [whole, frac = ''] = Number(text).toFixed(8).split('.');
+        const neg = whole.startsWith('-');
+        let n = BigInt(whole.replace('-', '') + frac.slice(0, 4));
+        if (Number(frac[4]) >= 5) n += 1n;
+        return neg ? -n : n;
+    },
+    pricedRate(cost, markup) {
+        const c = EstimatesPage._units4(cost), m = EstimatesPage._units4(markup);
+        const num = c * (1000000n + m), den = 1000000n;
+        const abs = num < 0n ? -num : num;
+        let q = (abs * 2n + den) / (2n * den);
+        if (num < 0n) q = -q;
+        const neg = q < 0n, a = (neg ? -q : q).toString().padStart(5, '0');
+        return String(Number((neg ? '-' : '') + a.slice(0, -4) + '.' + a.slice(-4)));
+    },
+
+    // A line's quantity as the save sends it: 0 is a quantity (an unpriced
+    // placeholder line), only a blank box is 1.
+    qtyFromRow(row) {
+        const q = parseFloat(row.querySelector('.line-qty')?.value);
+        return Number.isFinite(q) ? q : 1;
+    },
+
+    // A line's markup as the save sends it: none when the row has no Markup
+    // box or it is blank.
+    markupFromRow(row) {
+        const mk = row.querySelector('.line-markup');
+        // a disabled box (the line has no cost) still sends what it holds:
+        // the server keeps a markup it does not price by (#774)
+        if (!mk || mk.value === '') return null;
+        return parseFloat(mk.value);
+    },
+
     async save(e, id) {
         e.preventDefault();
         const form = e.target;
@@ -678,12 +866,13 @@ const EstimatesPage = {
             lines.push({
                 item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 description: row.querySelector('.line-desc')?.value || '',
-                quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
+                quantity: EstimatesPage.qtyFromRow(row),
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 cost_code_id: CostCodes.fromRow(row, 'line-cost-code'),
                 cost_type: CostTypes.fromRow(row, 'line-cost-type'),
                 unit_cost: row.querySelector('.line-unit-cost')?.value ? parseFloat(row.querySelector('.line-unit-cost').value) : null,
+                markup_pct: EstimatesPage.markupFromRow(row),
                 trade_package_id: TradePackages.fromRow(row, 'line-package'),
                 line_kind: row.querySelector('.line-kind')?.value || 'base',
                 unit: row.querySelector('.line-unit')?.value || null,
@@ -702,8 +891,12 @@ const EstimatesPage = {
             job_id: jobIdFromForm(form),
             lines,
         };
-        // Compounding markups only exist on the construction form.
-        if (Terms.isConstruction()) {
+        // Compounding markups only exist on the commercial construction form;
+        // markup per line sends none of the bid tools (#774).
+        if (EstimatesPage.isLineMarkup()) {
+            Object.assign(data, { gc_pct: 0, insurance_pct: 0, fee_pct: 0, bond_pct: 0, markup_allowances: false, show_markup_rows: true });
+            data.terms = form.terms ? form.terms.value : null;
+        } else if (Terms.isConstruction()) {
             data.gc_pct = parseFloat(form.gc_pct?.value) || 0;
             data.insurance_pct = parseFloat(form.insurance_pct?.value) || 0;
             data.fee_pct = parseFloat(form.fee_pct?.value) || 0;

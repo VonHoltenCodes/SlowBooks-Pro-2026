@@ -181,7 +181,7 @@ def test_the_migration_fills_decided_at_from_what_the_estimate_shows(tmp_path):
     db = tmp_path / "est.db"
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
 
-    command.upgrade(cfg, "f3b9d2e6a1c7")
+    command.upgrade(cfg, "a4c8e2f6b1d3")  # the step below it (#774)
     with sqlite3.connect(db) as conn:
         conn.execute("INSERT INTO customers (id, name, is_active) VALUES (1, 'C', 1)")
         for n, status, accepted, notes in (
@@ -201,7 +201,7 @@ def test_the_migration_fills_decided_at_from_what_the_estimate_shows(tmp_path):
     assert got[1].startswith("2026-02-03")
     assert got[2].startswith("2026-02-09")
     assert got[3] is None
-    command.downgrade(cfg, "f3b9d2e6a1c7")
+    command.downgrade(cfg, "a4c8e2f6b1d3")
     with sqlite3.connect(db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(estimates)")}
     assert "decided_at" not in cols

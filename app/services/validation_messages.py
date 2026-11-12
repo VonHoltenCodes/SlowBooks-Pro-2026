@@ -32,6 +32,9 @@ _ACRONYMS = {
     "zip": "ZIP",
 }
 
+# Fields whose code name does not read as their label.
+_NAMES = {"markup_pct": "Markup"}
+
 _WHERE = {"body", "query", "path", "header", "cookie"}
 
 _DATE_KINDS = {
@@ -52,6 +55,8 @@ def field_label(name: str) -> str:
     """customer_id -> "Customer", bill_address1 -> "Bill address 1",
     ssn_last_four -> "SSN last four"."""
     name = str(name)
+    if name in _NAMES:
+        return _NAMES[name]
     if name.endswith("_id") and len(name) > 3:
         name = name[:-3]
     words = []

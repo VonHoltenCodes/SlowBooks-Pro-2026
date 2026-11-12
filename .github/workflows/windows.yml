@@ -46,6 +46,10 @@ jobs:
             if ($tagver -ne $ver) { Write-Error "Tag ${{ github.ref_name }} != app version $ver"; exit 1 }
           }
           "APP_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Build identity (#816), the way macos.yml does it: the spec bakes
+          # the commit into the bundle as app/BUILD_SHA, so About, the smoke
+          # test and Contact support's diagnostics show <version>+<sha>.
+          "APP_BUILD_SHA=$env:GITHUB_SHA" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Set up MSYS2 (WeasyPrint native DLL donor)
         uses: msys2/setup-msys2@v2
@@ -149,7 +153,13 @@ jobs:
           $log = "$env:SLOWBOOKS_DATA_DIR\launcher.log"
           if (Test-Path $log) { Get-Content $log } else { Write-Host "no launcher.log written" }
           if ($p.ExitCode -ne 0) { Write-Error "Smoke test failed (exit $($p.ExitCode))"; exit 1 }
-          Write-Host "Smoke test passed."
+          # Build identity (#816): the running bundle names the commit it was
+          # built from, the same <version>+<sha> the macOS bundle carries.
+          $build = "$env:APP_VERSION+$($env:GITHUB_SHA.Substring(0, 12))"
+          if (-not (Select-String -Path $log -SimpleMatch -Pattern "smoke: version $build" -Quiet)) {
+            Write-Error "The bundle does not name its build (expected smoke: version $build)"; exit 1
+          }
+          Write-Host "Smoke test passed ($build)."
 
       - name: Verify the exe's version resource (issue #106)
         shell: pwsh

@@ -300,7 +300,11 @@ jobs:
           # 339: the Sales Tax PDF's render (#806, test_reports_806.py)
           # landed in the same batch and was counted nowhere; main at 0885b09f
           # skips 339 on Windows.
-          MAX_SKIPS: "339"
+          # 340 with the markup-per-line estimate form's browser test (#774,
+          # test_browser_estimate_line_markup.py, a browser module that skips
+          # as one where playwright is absent; its PDF tests read the print
+          # preview, so nothing new needs WeasyPrint).
+          MAX_SKIPS: "340"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

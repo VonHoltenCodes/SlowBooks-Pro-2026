@@ -207,14 +207,6 @@ NO_PAYMENT_LINK = (
     "This invoice has no payment link yet. Copy Payment Link on the invoice "
     "makes it (POST on this path)."
 )
-NO_PAYMENT_LINK_CANNOT = (
-    "This invoice has no payment link yet, and {who} can't make one: ask an "
-    "administrator or bookkeeper."
-)
-_CANNOT_MAKE = {
-    "readonly": "a read-only sign-in",
-    "accountant": "an accountant's sign-in",
-}
 
 
 def _pay_url(request: Request, invoice: Invoice) -> dict:
@@ -226,19 +218,17 @@ def _pay_url(request: Request, invoice: Invoice) -> dict:
 def get_payment_link(invoice_id: int, request: Request, db: Session = Depends(get_db)):
     """The invoice's public payment URL as it stands. A read (#659): it used
     to make the link when the invoice had none, a write a bookkeeper's
-    token or an agent's read tool reached (a read-only sign-in was refused
-    there since 2.18.0). With none, ``url`` is null and ``note`` says who
-    can make one, the shape the employee portal-token read answers too;
-    POST on this path makes it."""
-    from app.routes._roles import current_role
-
+    token or an agent's read tool reached. With none, ``url`` is null and
+    ``note`` says how to make one; POST on this path makes it. The read is
+    a bookkeeper's or an administrator's (#822): the middleware refuses a
+    read-only or accountant sign-in or token before this runs
+    (app.main._SENDING_READ_RE), since copying the link is how the invoice
+    is sent."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if not invoice.payment_token:
-        who = _CANNOT_MAKE.get(current_role(request))
-        note = NO_PAYMENT_LINK_CANNOT.format(who=who) if who else NO_PAYMENT_LINK
-        return {"url": None, "note": note}
+        return {"url": None, "note": NO_PAYMENT_LINK}
     return _pay_url(request, invoice)
 
 

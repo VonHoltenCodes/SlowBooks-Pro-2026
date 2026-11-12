@@ -88,6 +88,12 @@ def test_reads_everything_the_audit_log_included(client, db_session, seed_accoun
         "/api/journal",
     ):
         assert client.get(path).status_code == 200, path
+    # ...but not an invoice's pay link: copying it sends the invoice (#822)
+    r = client.get("/api/payments/payment-link/1")
+    assert r.status_code == 403
+    assert r.json()["detail"] == (
+        "Copying a payment link is a bookkeeper's; ask one to send it."
+    )
 
 
 def test_posts_journal_entries_as_adjusting_in_its_own_name(
@@ -199,6 +205,12 @@ def test_an_api_token_can_wear_the_role(client, db_session, seed_accounts):
     client.post("/api/auth/logout")
     headers = {"Authorization": f"Bearer {secret}"}
     assert client.get("/api/audit", headers=headers).status_code == 200
+    # the invoice's pay link is a bookkeeper's to read (#822), token or not
+    r = client.get("/api/payments/payment-link/1", headers=headers)
+    assert r.status_code == 403
+    assert r.json()["detail"] == (
+        "Copying a payment link is a bookkeeper's; ask one to send it."
+    )
     r = client.post("/api/customers", json={"name": "Nope"}, headers=headers)
     assert r.status_code == 403 and r.json()["detail"] == ACCOUNTANT_REFUSAL
     r = (

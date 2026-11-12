@@ -257,12 +257,17 @@ _jinja_env.globals["terms"] = _Terms()
 # The construction estimate PDF (#551) groups and totals the bid through the
 # same pure function the route and tests use.
 from app.services.estimating import estimate_totals as _estimate_totals  # noqa: E402
+from app.services.estimating import (  # noqa: E402
+    presentation_style as _presentation_style,
+)
 from app.services.estimate_bid import (  # noqa: E402
     spread_markup_prices as _spread_markup_prices,
 )
 
 _jinja_env.globals["estimate_totals"] = _estimate_totals
 _jinja_env.globals["spread_markup_prices"] = _spread_markup_prices
+# Which layout a construction estimate prints in (#774), as the form picks it.
+_jinja_env.globals["presentation_style"] = _presentation_style
 
 
 def paper_size_of(company_settings: dict) -> str:
@@ -297,6 +302,7 @@ def render_invoice_html(invoice, company_settings: dict) -> str:
     from app.services.donor_documents import invoice_pdf_context
     from app.services.pay_applications import (
         invoice_is_release_only,
+        invoice_retainage_lines,
         pay_application_number,
     )
     from app.services.payment_terms import (
@@ -305,12 +311,16 @@ def render_invoice_html(invoice, company_settings: dict) -> str:
     )
 
     _db = object_session(invoice)
+    number = pay_application_number(_db, invoice)
     return _render(
         "invoice_pdf.html",
         company_settings,
         inv=invoice,
         release_only=invoice_is_release_only(invoice),
-        pay_application_number=pay_application_number(_db, invoice),
+        pay_application_number=number,
+        # what a line-less pay application invoice bills, in place of an
+        # empty table (#815)
+        retainage_lines=invoice_retainage_lines(invoice, number),
         discount_line=document_discount_line(invoice),
         # the discount already taken, shown in place of the offer (#664)
         discount_taken=(

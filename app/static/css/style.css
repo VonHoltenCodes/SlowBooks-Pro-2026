@@ -1906,7 +1906,8 @@ a:hover { text-decoration: underline; }
     body.prints-month-grid-dialog .modal-close,
     body.prints-month-grid-dialog #modal-body .report-toolbar,
     body.prints-month-grid-dialog #modal-body .form-actions { display: none; }
-    body.prints-month-grid-dialog #modal-body { padding: 0; }
+    body.prints-month-grid-dialog #modal-body,
+    body.prints-month-grid-dialog .modal--wide #modal-body { padding: 0; }
     body.prints-month-grid-dialog .budget-variance { max-height: none; }
 }
 

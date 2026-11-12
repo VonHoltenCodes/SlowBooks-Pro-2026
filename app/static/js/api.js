@@ -83,6 +83,32 @@ const API = {
             return out;
         }
     },
+    // A GET that asks whether its answer changed (#828): `tag` is the ETag
+    // of the copy held, sent as If-None-Match. Resolves to {status, etag,
+    // body}: a 304 has no body and keeps the tag, a 200 carries the new
+    // body and its tag. Quiet by design: a refusal (a 401 before sign-in,
+    // a lost server) resolves with its status and no body, asks nothing
+    // and shows nothing; the caller keeps what it has. no-store, so the
+    // browser hands the 304 to the page rather than answering from its
+    // own cache.
+    async revalidate(path, tag) {
+        const headers = {};
+        let companyId = null;
+        try { companyId = window.localStorage ? window.localStorage.getItem('slowbooks_company') : null; } catch (e) { companyId = null; }
+        if (companyId) headers['X-Company-Id'] = companyId;
+        if (tag) headers['If-None-Match'] = tag;
+        let res;
+        try {
+            res = await fetch(`/api${path}`, { method: 'GET', credentials: 'same-origin', cache: 'no-store', headers });
+        } catch (err) {
+            return { status: 0, etag: null, body: null };
+        }
+        const etag = res.headers && typeof res.headers.get === 'function' ? res.headers.get('ETag') : null;
+        if (res.status === 304) return { status: 304, etag: etag || tag || null, body: null };
+        if (!res.ok) return { status: res.status, etag: null, body: null };
+        const body = await res.json().catch(() => null);
+        return { status: res.status, etag: body ? etag : null, body };
+    },
     // A write went through: a report open on this page, or in another
     // window or tab of the same books, can run again (#482). Preferences
     // and signing in change nothing in the books.

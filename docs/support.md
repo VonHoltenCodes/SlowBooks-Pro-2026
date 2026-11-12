@@ -25,7 +25,8 @@ file in your mail program if they help.
 
 The body carries your text plus:
 
-- an **environment block** — version and commit, platform, Python version,
+- an **environment block** — the build (`v<version>+<sha>`, the bare version
+  when the commit is not known), platform, Python version,
   deployment kind (native / Server Edition / self-managed, which covers
   Docker and a plain source run), and the browser when
   relevant; and

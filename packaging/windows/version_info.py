@@ -10,7 +10,9 @@ without booting anything.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 PRODUCT_NAME = "SlowBooks Pro 2026"
@@ -74,6 +76,36 @@ VSVersionInfo(
   ],
 )
 """
+
+
+def build_sha(root: Path, env=None) -> str:
+    """The commit this build is made from, as the 12-character short SHA the
+    macOS bundle shows (#816). CI passes APP_BUILD_SHA (the workflow's
+    GITHUB_SHA); a local build reads the checkout. Empty when neither knows,
+    and the app then shows the bare version."""
+    env = os.environ if env is None else env
+    sha = str(env.get("APP_BUILD_SHA", "") or "").strip()
+    if not sha:
+        try:
+            sha = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        except Exception:
+            sha = ""
+    return sha.lower()[:12] if re.fullmatch(r"[0-9a-fA-F]{7,40}", sha) else ""
+
+
+def write_build_sha(sha: str, out_dir: Path) -> Path:
+    """Write the BUILD_SHA file the spec bundles as app/BUILD_SHA, which
+    app/build_info.py reads at runtime. An empty sha writes an empty file,
+    which the app reads as "commit unknown"."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / "BUILD_SHA"
+    out.write_text(sha + "\n" if sha else "", encoding="utf-8")
+    return out
 
 
 def write(app_init: Path, out: Path) -> str:

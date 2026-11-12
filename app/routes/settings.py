@@ -7,9 +7,13 @@ import logging
 
 from datetime import date
 
+import hashlib
+import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -93,6 +97,8 @@ ENUM_SETTINGS = {
     "warn_edit_transaction": frozenset({"true", "false"}),
     "inventory_refuse_oversell": frozenset({"true", "false"}),
     "auto_enter_on_open": frozenset({"true", "false"}),
+    # A construction estimate's layout (#774).
+    "estimate_style": frozenset({"line_markup", "commercial_bid"}),
 }
 
 
@@ -119,8 +125,13 @@ def _with_entity(db: Session) -> dict:
     return result
 
 
+def get_settings(db: Session) -> dict:
+    """The settings answer as a dict, for code in this process."""
+    return _with_entity(db)
+
+
 @router.get("")
-def get_settings(db: Session = Depends(get_db)):
+def read_settings(request: Request, db: Session = Depends(get_db)):
     """Every company setting, secrets redacted.
 
     Units to know before copying a value onto a document:
@@ -130,8 +141,42 @@ def get_settings(db: Session = Depends(get_db)):
     orders, recurring templates) is a FRACTION (0.089), kept to six places.
     Divide by 100 before posting; the API rejects a document `tax_rate`
     above 1.
+
+    The answer carries an `ETag`, a digest of the body. Send it back in
+    `If-None-Match` and an unchanged answer is a bare `304 Not Modified`:
+    the open window asks this on focus and on every page it opens (#828),
+    so a setting changed by another window, a script or an API token shows
+    without a Save, at the cost of one small request when nothing changed.
     """
-    return _with_entity(db)
+    body = jsonable_encoder(_with_entity(db))
+    tag = settings_etag(body)
+    if _tag_matches(request.headers.get("if-none-match"), tag):
+        return Response(status_code=304, headers={"ETag": tag})
+    return JSONResponse(body, headers={"ETag": tag})
+
+
+def settings_etag(body: dict) -> str:
+    """The settings answer's entity tag: a digest of exactly what was sent,
+    so any change to a value the body carries (from any route) changes it,
+    and nothing else does. Secrets are redacted before this sees them."""
+    raw = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    return '"' + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32] + '"'
+
+
+def _tag_matches(header: str | None, tag: str) -> bool:
+    """If-None-Match holds this tag: one of a comma-separated list, weak
+    (W/) or strong, or `*`."""
+    if not header:
+        return False
+    for candidate in header.split(","):
+        candidate = candidate.strip()
+        if candidate == "*":
+            return True
+        if candidate.startswith("W/"):
+            candidate = candidate[2:]
+        if candidate == tag:
+            return True
+    return False
 
 
 @router.get("/unreadable-secrets")

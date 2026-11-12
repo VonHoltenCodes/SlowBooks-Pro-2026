@@ -777,3 +777,27 @@ def invoice_is_release_only(invoice) -> bool:
         and not (invoice.retainage_held or 0)
         and (invoice.retainage_released or 0) > 0
     )
+
+
+def invoice_retainage_lines(invoice, number=None) -> list[dict]:
+    """What a pay application's invoice with no lines bills, as the rows its
+    PDF, view and pay page print in place of an empty table (#751, #815): the
+    retainage it releases, and the retainage it gives back (a lower percent
+    holds less than was held, so this period's hold is negative) or, the
+    other way, holds. Each row is {description, amount}; the amounts add up
+    to the current payment due less the invoice's own total. An invoice with
+    lines, or one with no retainage movement, has none: its lines say what it
+    bills, and the totals carry the retainage rows."""
+    if invoice.lines:
+        return []
+    suffix = f", {number}" if number else ""
+    held = _q(invoice.retainage_held or 0)
+    released = _q(invoice.retainage_released or 0)
+    rows = []
+    if released != 0:
+        rows.append({"description": f"Retainage release{suffix}", "amount": released})
+    if held < 0:
+        rows.append({"description": f"Retainage reduction{suffix}", "amount": -held})
+    elif held > 0:
+        rows.append({"description": f"Retainage withheld{suffix}", "amount": -held})
+    return rows

@@ -113,8 +113,11 @@ def public_payment_page(
 
     from app.services.pay_applications import (
         invoice_is_release_only,
+        invoice_retainage_lines,
         pay_application_number,
     )
+
+    number = pay_application_number(db, invoice)
 
     template = _jinja_env.get_template("public_pay.html")
     html = template.render(
@@ -122,7 +125,10 @@ def public_payment_page(
         # a pay application that only releases retainage reads as the
         # release, not a $0.00 total (#751)
         release_only=invoice_is_release_only(invoice),
-        pay_application_number=pay_application_number(db, invoice),
+        pay_application_number=number,
+        # a pay application's invoice with no lines names what it bills
+        # (#815); one with lines shows its retainage rows as the PDF does
+        retainage_lines=invoice_retainage_lines(invoice, number),
         company=settings,
         providers=providers,
         payment_status=payment_status,

@@ -7,7 +7,7 @@ its last "Lost YYYY-MM-DD: reason" note line when it was marked lost. The rest
 stay NULL and the report leaves them out of the average.
 
 Revision ID: a4c8e2f6b0d3
-Revises: f3b9d2e6a1c7
+Revises: a4c8e2f6b1d3
 Create Date: 2026-11-11
 """
 
@@ -19,7 +19,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "a4c8e2f6b0d3"
-down_revision: Union[str, None] = "f3b9d2e6a1c7"
+down_revision: Union[str, None] = "a4c8e2f6b1d3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

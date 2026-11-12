@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field
 from sqlalchemy.exc import IntegrityError
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
 from app.database import get_db
@@ -36,6 +36,8 @@ from app.services.estimating import (
     estimate_totals,
     estimate_document_totals,
     is_included_line,
+    presentation_style,
+    priced_rate,
     uncoded_lines,
     uncoded_warning,
     markup_parts,
@@ -55,8 +57,9 @@ from app.schemas.estimates import (
     EstimateAccept,
     EstimateLost,
     totals_from_dict,
+    without_cost_side,
 )
-from app.schemas.common import StrictModel
+from app.schemas.common import StrictModel, check_line_fits
 from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.numbering import next_estimate_number, next_invoice_number
@@ -66,6 +69,7 @@ from app.services.accounting import (
     _q,
     compute_line_totals,
 )
+from app.routes._roles import sees_estimate_cost
 from app.services.jobs_service import (
     own_job,
     refuse_other_customers_jobs,
@@ -101,18 +105,50 @@ def _customer_bill_to(customer) -> dict:
 _MARKUP_PCTS = ("gc_pct", "insurance_pct", "fee_pct", "bond_pct")
 
 
-def _enforce_at_cost(lines, is_construction: bool) -> None:
-    """In a construction company the estimate lines stay AT COST (#551): a
-    base or alternate line that carries a unit cost gets rate = unit cost, so
-    its amount is quantity × unit cost and the markups are the only margin.
-    Allowances and unit-price lines keep their rate. Business and Nonprofit
-    estimates are untouched — their Cost column is the budget side and the
-    rate is what they charge."""
-    if not is_construction:
-        return
-    for ln in lines:
-        if ln.line_kind in ("base", "alternate") and ln.unit_cost is not None:
-            ln.rate = Decimal(str(ln.unit_cost))
+def _enforce_at_cost(lines, is_construction: bool) -> list[str]:
+    """The construction pricing rule, driven by the line alone. A base or
+    alternate line that carries a unit cost is priced from it: at cost (#551)
+    when it has no markup of its own, else unit cost × (1 + markup_pct / 100)
+    to the rate's four places (#774). Allowances and unit-price lines keep
+    their rate. Any other line keeps the markup it carries without being
+    priced by it (no unit cost, an allowance or unit price, or a Business or
+    Nonprofit estimate, whose rate is what they charge), so a company that
+    switches type and back, or a line whose kind goes and comes back, still
+    has the rule that priced it. Returns a sentence for each line sent with a
+    price a cent or more above its cost and no markup, which is priced at
+    cost: a client written before markup_pct existed is told rather than
+    repriced quietly."""
+    warnings = []
+    for n, ln in enumerate(lines, start=1):
+        priced = (
+            is_construction
+            and ln.line_kind in ("base", "alternate")
+            and ln.unit_cost is not None
+        )
+        if not priced:
+            continue
+        # a rate left off is 0, never above cost, so it never warns
+        sent = ln.rate
+        if ln.markup_pct is not None:
+            # the rate the markup gives must fit, at any quantity (a markup
+            # kept on a line it does not price is never checked)
+            marked_up = Decimal(str(ln.unit_cost)) * (
+                1 + ln.markup_pct / Decimal("100")
+            )
+            try:
+                check_line_fits(Decimal("1"), marked_up)
+                check_line_fits(ln.quantity, marked_up)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Line {n}: {exc}")
+        ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
+        over = abs(Decimal(str(sent))) - abs(ln.rate)
+        if ln.markup_pct is None and over >= Decimal("0.01"):
+            warnings.append(
+                f"Line {n} came with no markup, so it is priced at its cost "
+                f"({ln.rate:,.2f}), not the {sent:,.2f} sent. Send its "
+                "markup_pct to price it above cost."
+            )
+    return warnings
 
 
 def _locked_a_budget(db: Session, estimate: Estimate) -> bool:
@@ -154,6 +190,7 @@ _LINE_FIELDS = (
     "cost_code_id",
     "cost_type",
     "unit_cost",
+    "markup_pct",
     "trade_package_id",
     "line_kind",
     "unit",
@@ -226,13 +263,28 @@ def _estimate_response(est: Estimate) -> EstimateResponse:
     resp.totals = totals_from_dict(estimate_totals(est))
     resp.uncoded_lines = uncoded_lines(est)
     db = object_session(est)
+    is_construction = db is not None and terms_from_db(db).is_construction
     resp.bills_by_pay_app = bool(
-        db is not None
+        is_construction
         and est.job_id is not None
-        and terms_from_db(db).is_construction
         and _pay_app_job_ids(db, [est.job_id])
     )
+    if is_construction:
+        resp.style = presentation_style(est, get_settings(db).get("estimate_style"))
     return resp
+
+
+def _shown_to(request: Request, shown):
+    """An estimate read (one or the list) as this sign-in or token may read
+    it: whole for a bookkeeper or an administrator; without the cost side
+    (ESTIMATE_COST_FIELDS) for a read-only or accountant one (#824)."""
+    if sees_estimate_cost(request):
+        return shown
+    if isinstance(shown, list):
+        data = [r.model_dump(mode="json") for r in shown]
+    else:
+        data = shown.model_dump(mode="json")
+    return JSONResponse(without_cost_side(data))
 
 
 def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
@@ -298,6 +350,7 @@ def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     dependencies=[Depends(refuse_unknown_filters)],
 )
 def list_estimates(
+    request: Request,
     status: str = None,
     customer_id: int = None,
     skip: int = 0,
@@ -339,11 +392,11 @@ def list_estimates(
             resp.customer_name = est.customer.name
         resp.bills_by_pay_app = est.job_id in pay_app_jobs
         results.append(resp)
-    return results
+    return _shown_to(request, results)
 
 
 @router.get("/{estimate_id}", response_model=EstimateResponse)
-def get_estimate(estimate_id: int, db: Session = Depends(get_db)):
+def get_estimate(request: Request, estimate_id: int, db: Session = Depends(get_db)):
     est = (
         db.query(Estimate)
         .options(
@@ -357,7 +410,7 @@ def get_estimate(estimate_id: int, db: Session = Depends(get_db)):
     )
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
-    return _estimate_response(est)
+    return _shown_to(request, _estimate_response(est))
 
 
 @router.post("", response_model=EstimateResponse, status_code=201)
@@ -386,8 +439,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     elif data.terms is None:
         # a new construction estimate starts with the company's default terms
         data.terms = get_settings(db).get("estimate_terms") or None
-    # Construction lines stay at cost before anything is totalled (#551).
-    _enforce_at_cost(data.lines, is_construction)
+    # Construction lines are priced from their cost (at cost, or plus their
+    # own markup) before anything is totalled (#551, #774).
+    priced_warnings = _enforce_at_cost(data.lines, is_construction)
     # The document totals cover the bought scope and the four markups: lines
     # at cost, the markups under the subtotal, tax on both. A unit-price line
     # is a rate card and an un-accepted alternate is not in the bid, so the
@@ -460,6 +514,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             cost_code_id=line_data.cost_code_id,
             cost_type=line_cost_type(db, line_data.cost_code_id, line_data.cost_type),
             unit_cost=line_data.unit_cost,
+            markup_pct=line_data.markup_pct,
             trade_package_id=line_data.trade_package_id,
             line_kind=line_data.line_kind,
             unit=line_data.unit,
@@ -479,7 +534,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(estimate)
-    return _estimate_response(estimate)
+    resp = _estimate_response(estimate)
+    resp.warnings = priced_warnings
+    return resp
 
 
 @router.put("/{estimate_id}", response_model=EstimateResponse)
@@ -490,6 +547,7 @@ def update_estimate(
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
 
+    priced_warnings: list[str] = []
     changes = reject_null_updates(
         Estimate, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
@@ -552,8 +610,9 @@ def update_estimate(
         # 2.17.3 exploratory fixes). The customer is the one the estimate
         # has after this edit.
         resolve_line_taxable(db, data.lines, db.get(Customer, estimate.customer_id))
-        # construction lines stay at cost before they are stored (#551)
-        _enforce_at_cost(data.lines, is_construction)
+        # construction lines are priced from their cost before they are
+        # stored (#551, #774)
+        priced_warnings = _enforce_at_cost(data.lines, is_construction)
         # each old line leaves a DELETE event with its amounts (#289)
         audited_bulk_delete(
             db, db.query(EstimateLine).filter(EstimateLine.estimate_id == estimate_id)
@@ -575,6 +634,7 @@ def update_estimate(
                     db, line_data.cost_code_id, line_data.cost_type
                 ),
                 unit_cost=line_data.unit_cost,
+                markup_pct=line_data.markup_pct,
                 # the bid shape rides the edit too (#551): without these a PUT
                 # stored every line as a base/unassigned line and dropped an
                 # accept, while the totals were computed from the sent kinds
@@ -638,7 +698,9 @@ def update_estimate(
 
     db.commit()
     db.refresh(estimate)
-    return _estimate_response(estimate)
+    resp = _estimate_response(estimate)
+    resp.warnings = priced_warnings
+    return resp
 
 
 @router.post("/{estimate_id}/accept", response_model=EstimateResponse)
@@ -711,7 +773,9 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{estimate_id}/print-preview")
 def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
-    """Render estimate as HTML page for browser print dialog (window.print())"""
+    """Render estimate as HTML page for browser print dialog (window.print()).
+    It is the owner's PDF, which prints none of the cost side, so it reads the
+    same for every role (#824)."""
     est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")

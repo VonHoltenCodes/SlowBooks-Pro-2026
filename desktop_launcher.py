@@ -5,7 +5,8 @@ anywhere Python does). What it does, in order:
 
   1. Prepares .env (copies .env.example on first run, generates a real
      PAYROLL_ENCRYPTION_SECRET, sets APP_DEBUG=true / FORCE_HTTPS=false /
-     APP_HOST=127.0.0.1 — correct for a loopback-only desktop install).
+     APP_HOST=127.0.0.1 — correct for a loopback-only desktop install;
+     --serve-lan writes SLOWBOOKS_SERVER_EDITION=1 and APP_DEBUG=false).
   2. Shows a company picker (like QuickBooks' "File → Open Company"):
      each company is its own SQLite file under
      the platform's per-user application-data directory, tracked in
@@ -239,8 +240,21 @@ def set_env_value(key: str, value: str) -> None:
     env_file().write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def prepare_env() -> None:
-    """Idempotent first-run .env preparation."""
+def _name_env_file() -> str:
+    """Name the .env app modules load (SLOWBOOKS_ENV_FILE) unless one is
+    named already (#812): a rig or a shell that points the app at its own
+    .env keeps it. An empty value names nothing."""
+    if not os.environ.get("SLOWBOOKS_ENV_FILE"):
+        os.environ["SLOWBOOKS_ENV_FILE"] = str(env_file())
+    return os.environ["SLOWBOOKS_ENV_FILE"]
+
+
+def prepare_env(server_edition: bool = False) -> None:
+    """Idempotent first-run .env preparation.
+
+    ``server_edition`` is a --serve-lan run that serves beyond loopback: its
+    .env gets SLOWBOOKS_SERVER_EDITION=1 with APP_DEBUG=false (#812) instead
+    of the window's APP_DEBUG=true."""
     env_file().parent.mkdir(parents=True, exist_ok=True)
     if not env_file().exists():
         if ENV_EXAMPLE.exists():
@@ -259,13 +273,26 @@ def prepare_env() -> None:
             print(f"WARNING: could not restrict permissions on {env_file()}")
 
     # Any app modules imported after this point must read the writable desktop
-    # environment, never a bundled .env.
-    os.environ["SLOWBOOKS_ENV_FILE"] = str(env_file())
+    # environment, never a bundled .env -- unless an env file is named
+    # already, which is kept (#812).
+    _name_env_file()
 
-    # APP_DEBUG=true is correct here because this deployment only ever talks
-    # to 127.0.0.1: it disables the HTTPS/TLS production gates (which don't
-    # apply to loopback traffic) and nothing else security-critical.
-    set_env_value("APP_DEBUG", "true")
+    if server_edition:
+        # Server Edition (#812): plain HTTP to the office network is the one
+        # production check it needs waived, and SLOWBOOKS_SERVER_EDITION=1
+        # waives that alone; debug stays off. A host set up before 2.32.0
+        # has APP_DEBUG=true here, which this replaces.
+        set_env_value("SLOWBOOKS_SERVER_EDITION", "1")
+        set_env_value("APP_DEBUG", "false")
+    else:
+        # APP_DEBUG=true is correct here because this deployment only ever
+        # talks to 127.0.0.1: it disables the HTTPS/TLS production gates
+        # (which don't apply to loopback traffic) and nothing else
+        # security-critical. A quick trial's --serve-lan shares this .env
+        # with the window, so its switch is put back to 0.
+        set_env_value("APP_DEBUG", "true")
+        if get_env_value("SLOWBOOKS_SERVER_EDITION") is not None:
+            set_env_value("SLOWBOOKS_SERVER_EDITION", "0")
     set_env_value("FORCE_HTTPS", "false")
     # Loopback only — the desktop app is single-user, never a LAN server.
     set_env_value("APP_HOST", "127.0.0.1")
@@ -337,10 +364,15 @@ def _server_env(
         env[desktop_window.SECRET_ENV] = _WINDOW_ENV["secret"]
         if _WINDOW_ENV.get("recovery"):
             env[desktop_window.RECOVERY_OPENED_ENV] = "1"
+    # Beyond loopback is Server Edition (#812): its switch waives the HTTPS
+    # start-up check alone and debug stays off. The window's loopback
+    # server keeps APP_DEBUG=true.
+    lan = bind_host != "127.0.0.1"
     env.update(
         {
             "DATABASE_URL": db_url,
-            "APP_DEBUG": "true",
+            "APP_DEBUG": "false" if lan else "true",
+            "SLOWBOOKS_SERVER_EDITION": "1" if lan else "0",
             "FORCE_HTTPS": "false",
             "APP_HOST": bind_host,
             # Server Edition groundwork: anything beyond loopback flips the
@@ -351,7 +383,9 @@ def _server_env(
             # Where app/config.py loads .env from (the install dir is
             # read-only when frozen), and the flag the frontend uses to
             # enable desktop-only behavior like the update check.
-            "SLOWBOOKS_ENV_FILE": str(env_file()),
+            # An env file already named is kept (#812).
+            "SLOWBOOKS_ENV_FILE": os.environ.get("SLOWBOOKS_ENV_FILE")
+            or str(env_file()),
             "SLOWBOOKS_DESKTOP": "1",
         }
     )
@@ -3052,6 +3086,20 @@ def _serve() -> int:
     return 0
 
 
+def _smoke_build_identity() -> bool:
+    """Print ``smoke: version <version>+<sha>``. A frozen bundle with no
+    commit baked in fails: two builds of one release could not be told
+    apart in the field (#816). A source run may have none."""
+    from app import build_info
+
+    sha = build_info.build_sha()
+    print(f"smoke: version {build_info.version_string(sha=sha or '')}")
+    if getattr(sys, "frozen", False) and not sha:
+        print("smoke: FAIL the bundle carries no build commit (app/BUILD_SHA)")
+        return False
+    return True
+
+
 def run_smoke_test(port: int = 3999) -> int:
     """Headless self-test for CI: prove the frozen bundle can prepare an
     environment, create + migrate a company database, serve the app, and —
@@ -3069,6 +3117,13 @@ def run_smoke_test(port: int = 3999) -> int:
 
     prepare_env()
     os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
+
+    # Build identity (#816): the workflows read this line and refuse a bundle
+    # that does not say which commit it is; About and Contact support show
+    # the same string.
+    if not _smoke_build_identity():
+        return 1
+
     from app.services import company_service
 
     print("smoke: creating company...")
@@ -3405,12 +3460,15 @@ def main() -> int:
             log_fh = None  # best effort; proceed without file logging
 
     try:
-        prepare_env()
+        prepare_env(
+            server_edition=bool(args.serve_lan)
+            and (args.bind or "0.0.0.0") != "127.0.0.1"
+        )
         # Pin the data dir for this process and every child (uvicorn,
         # alembic), so the app's company_service resolves the same
         # location.
         os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
-        os.environ.setdefault("SLOWBOOKS_ENV_FILE", str(env_file()))
+        _name_env_file()
         if FROZEN:
             # app.config bakes DATABASE_URL into a constant at import time
             # and app.database builds its engine from it. This launcher

@@ -502,7 +502,16 @@ const SettingsPage = {
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Printed in the header of the estimate PDF.</div></div>
                         <div class="form-group full-width"><label for="estimate-terms">Default estimate terms, inclusions and exclusions</label>
                             <textarea id="estimate-terms" name="estimate_terms" rows="5">${escapeHtml(s.estimate_terms || '')}</textarea>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate starts with this text; edit it on any estimate. It prints above the acceptance block on the owner's PDF.</div></div>` : ''}
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate starts with this text; edit it on any estimate. It prints above the acceptance block on the owner's PDF.</div></div>
+                        <div class="form-group"><label for="estimate-style">Estimate style</label>
+                            <select id="estimate-style" name="estimate_style" onchange="SettingsPage._onEstimateStyleChange(this)">
+                                <option value="line_markup" ${s.estimate_style === 'line_markup' ? 'selected' : ''}>Markup per line</option>
+                                <option value="commercial_bid" ${s.estimate_style !== 'line_markup' ? 'selected' : ''}>Commercial bid (packages, allowances, alternates, markups under the subtotal)</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">How a new estimate is laid out; an estimate that already uses packages, allowances, alternates or markups opens as a commercial bid.</div></div>
+                        <div class="form-group" id="estimate-default-markup-group" ${s.estimate_style !== 'line_markup' ? 'hidden' : ''}><label for="estimate-default-markup">Default markup (%)</label>
+                            <input id="estimate-default-markup" name="estimate_default_markup_pct" type="number" step="0.0001" min="0" max="1000" value="${escapeHtml(s.estimate_default_markup_pct || '')}">
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate line starts with this markup on its cost; change it on any line.</div></div>` : ''}
                         <div class="form-group full-width"><label for="company-type">Company Type</label>
                             <select id="company-type" name="company_type" data-prev="${s.company_type === 'nonprofit' ? 'nonprofit' : (s.company_type === 'construction' ? 'construction' : 'business')}" onchange="SettingsPage.changeCompanyType(this)">
                                 <option value="business" ${(s.company_type !== 'nonprofit' && s.company_type !== 'construction') ? 'selected' : ''}>Business</option>
@@ -1501,6 +1510,40 @@ const SettingsPage = {
             e.preventDefault();
             e.returnValue = '';
         });
+        window.addEventListener('slowbooks:settings-changed', e => {
+            SettingsPage._changedElsewhere(e && e.detail);
+        });
+    },
+
+    // The settings changed outside this window while the page is open (#828):
+    // the shell found it on focus (App.refreshSettings). A page with no
+    // unsaved edits draws again from the saved values, in place. Unsaved
+    // edits are not drawn over unasked: when a field the change reached is
+    // on the form, the page asks first, as leaving it does; Cancel keeps
+    // the edits (a Save then writes them over the other change). A change
+    // that reached no field on the form leaves the edits alone. A page
+    // opening reads the settings afresh anyway, so only focus counts here.
+    _changedElsewhere(detail) {
+        const d = detail || {};
+        if (d.reason !== 'focus') return false;
+        const form = document.getElementById('settings-form');
+        if (!form || !String(location.hash || '').startsWith('#/settings')) return false;
+        const before = d.previous || {};
+        const after = d.settings || {};
+        const changed = Object.keys(after).filter(k => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+        if (!changed.length) return false;
+        if (SettingsPage.isDirty()) {
+            const snap = SettingsPage._snapshot || {};
+            const named = k => Object.prototype.hasOwnProperty.call(snap, k)
+                || !!(form.elements && typeof form.elements.namedItem === 'function' && form.elements.namedItem(k));
+            if (!changed.some(named)) return false;
+            if (!confirm('These settings were changed somewhere else (another window, a script or an API token) '
+                + 'while you had unsaved changes here. Show the saved settings? Your unsaved changes on this page will be lost.'
+                + '\n\nCancel keeps your changes; saving them then replaces the other change.')) return false;
+        }
+        SettingsPage._snapshot = null;
+        App.navigate('#/settings');
+        return true;
     },
 
     // ------------------------------------------------------------------
@@ -2363,6 +2406,13 @@ const SettingsPage = {
         const group = document.getElementById('llc-election-group');
         if (group) group.hidden = sel.value !== 'llc';
         SettingsPage._toggleSCorpNote();
+        SettingsPage._updateDirty();
+    },
+
+    // The default markup belongs to Markup per line only (#774).
+    _onEstimateStyleChange(sel) {
+        const group = document.getElementById('estimate-default-markup-group');
+        if (group) group.hidden = sel.value !== 'line_markup';
         SettingsPage._updateDirty();
     },
 
