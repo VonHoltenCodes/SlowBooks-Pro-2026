@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.audit import AuditLog
 from app.services.audit_redaction import REDACTED, is_secret_column, redact_values
-from app.services.request_context import acting_username
+from app.services.request_context import acting_source, acting_username
 
 
 def _actor(session) -> str | None:
@@ -165,6 +165,14 @@ def _after_flush(session, flush_context):
     info = getattr(session, "info", None)
     if isinstance(info, dict) and info.get("_closing_override_recorded"):
         source = "closing_date_override"
+    else:
+        # a request running an import (#894): "import:<its name>", so a
+        # document's Activity says which import made it
+        source = (
+            (info.get("audit_source") if isinstance(info, dict) else None)
+            or acting_source.get()
+            or source
+        )
 
     # New objects (INSERT)
     for obj in session.new:
@@ -269,6 +277,24 @@ def _after_flush(session, flush_context):
         session.add(entry)
 
 
+# Log-style tables that keep their own actor column (#894): the audit log
+# skips them, so the row itself says who did it. Stamped here, once, for
+# every place that writes one.
+_ACTOR_STAMPED_TABLES = {"email_log"}
+
+
+def _before_flush(session, flush_context, instances):
+    """Name the actor on a new email-log row that does not name one."""
+    for obj in session.new:
+        if getattr(obj, "__tablename__", None) not in _ACTOR_STAMPED_TABLES:
+            continue
+        if getattr(obj, "username", None) is None:
+            try:
+                obj.username = _actor(session)
+            except Exception:
+                pass  # attribution must never break a write
+
+
 _HOOKED_FLAG = "_slowbooks_audit_hook_attached"
 
 
@@ -290,5 +316,6 @@ def register_audit_hooks(session_factory):
     """
     if getattr(session_factory, _HOOKED_FLAG, False):
         return
+    event.listen(session_factory, "before_flush", _before_flush)
     event.listen(session_factory, "after_flush", _after_flush)
     setattr(session_factory, _HOOKED_FLAG, True)

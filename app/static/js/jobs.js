@@ -233,7 +233,8 @@ const JobsPage = {
                     <button class="btn btn-sm btn-secondary" onclick="JobsPage.clearPeriod()" title="${T('Job')} to date">JTD</button>
                 </span>
             </div>
-            <div id="job-tab-body">${await JobsPage.tabHtml()}</div>`;
+            <div id="job-tab-body">${await JobsPage.tabHtml()}</div>
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('job', job.id)}`;
     },
 
     async setTab(tab) {
@@ -1149,7 +1150,8 @@ const JobsPage = {
                 <button type="submit" class="btn btn-primary">${co.id ? 'Save change order' : 'Create change order'}</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('changeorders')">Cancel</button>
             </div>`}
-        </form>`;
+        </form>
+        ${co.id && typeof activityPanelHtml !== 'undefined' ? activityPanelHtml('change_order', co.id) : ''}`;
     },
 
     coLineRowHtml(line, i) {
@@ -1583,7 +1585,8 @@ const JobsPage = {
                 <button type="button" class="btn btn-danger" data-write data-destructive onclick="JobsPage.paDelete(${a.id}, false)">Delete</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
             </div>`}
-        </form>`;
+        </form>
+        ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('pay_application', a.id)}`;
     },
 
     // The grid: one row per SOV line, the totals block mirroring the pay

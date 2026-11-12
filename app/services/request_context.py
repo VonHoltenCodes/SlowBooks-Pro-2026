@@ -21,3 +21,44 @@ acting_username: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 closing_date_password: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "closing_date_password", default=None
 )
+
+# What an import's writes are recorded as (#894): "import:<the import's
+# name>" while a request runs one of the import routes, so the audit rows it
+# writes say which import made them (the Activity panel then reads "by the
+# system, in the IIF import"). None for every other request: its rows keep
+# the ordinary source.
+acting_source: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "acting_source", default=None
+)
+
+IMPORT_SOURCE_PREFIX = "import:"
+
+# The import routes, by path prefix, and the import's name as a person says it
+_IMPORT_PATHS = (
+    ("/api/iif/import", "IIF"),
+    ("/api/csv/import/", "CSV"),
+    ("/api/bank-import/", "bank statement"),
+    ("/api/fixed-assets/import-csv", "fixed asset CSV"),
+    ("/api/cost-codes/import", "cost code"),
+    ("/api/payroll/opening-ytd/import", "opening payroll"),
+)
+
+
+def import_source(method: str, path: str) -> str | None:
+    """The audit source for a request that runs an import, or None."""
+    if (method or "").upper() != "POST" or not path:
+        return None
+    if path.startswith("/api/migration/") and path.endswith("/import"):
+        key = path[len("/api/migration/") : -len("/import")].strip("/")
+        name = key.replace("_", " ")
+        try:
+            from app.routes.migration import SOURCES
+
+            name = SOURCES[key][0]
+        except Exception:
+            pass
+        return IMPORT_SOURCE_PREFIX + name
+    for prefix, name in _IMPORT_PATHS:
+        if path.startswith(prefix):
+            return IMPORT_SOURCE_PREFIX + name
+    return None

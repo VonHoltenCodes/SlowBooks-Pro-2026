@@ -425,6 +425,7 @@ const ExpensesPage = {
                     <button class="btn btn-sm btn-secondary" onclick="ExpensesPage.uploadAttachment(${x.id})">Attach</button>
                 </div>
             </div>
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('expense', x.id)}
             <div class="form-actions">
                 ${x.printable ? `<button type="button" class="btn btn-secondary" onclick="window.open('/api/checks/print?transaction_id=${x.id}','_blank')">Print Check</button>` : ''}
                 ${isVoid ? '' : `<button data-write type="button" class="btn btn-secondary" title="Edit this expense: saving voids it and posts the new one in its place" onclick="ExpensesPage.replace(${x.id})">Edit</button>`}

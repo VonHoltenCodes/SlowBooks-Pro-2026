@@ -65,6 +65,7 @@ const CreditMemosPage = {
             </div>
             ${cm.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(cm.notes)}</p>` : ''}
             ${typeof Replace === 'undefined' ? '' : Replace.links(cm, 'credit_memo', n => `#/credit-memos/${n}`)}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('credit_memo', cm.id)}
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/credit-memos/${cm.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/credit-memos/${cm.id}/print-preview','_blank')">Print</button>

@@ -218,7 +218,7 @@ const VendorsPage = {
 
         // The page's own address (#/vendors/3, App.routes): Back from a
         // report opened below returns here, a reload keeps the page.
-        openModal(`Vendor — ${vendor.name}`, html);
+        openModal(`Vendor — ${vendor.name}`, html + (typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('vendor', vendor.id)));
         App.documentAddress(`#/vendors/${vendor.id}`);  // after the dialog: it marks it as its own
     },
 
