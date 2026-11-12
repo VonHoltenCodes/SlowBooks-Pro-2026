@@ -195,6 +195,34 @@ async def csv_import_accounts(
     return import_chart(db, content, replace=replace, dry_run=dry_run)
 
 
+@router.get("/import/invoices/template")
+def csv_invoice_template(request: Request):
+    """The invoice import's layout (#882): the header row and an example
+    of two invoices, the first of two lines."""
+    from app.services.csv_invoice_import import invoice_template_csv
+
+    return _csv_response(invoice_template_csv(), "invoices-template.csv", request)
+
+
+@router.post("/import/invoices")
+async def csv_import_invoices(
+    file: UploadFile = File(...),
+    dry_run: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    """Import invoices in SlowBooks' own layout (#882; the template above):
+    one row per invoice line, rows sharing an invoice_number one invoice.
+    Each is made by the invoice form's own path. `dry_run=true` (the
+    default) makes them and rolls them back, answering with what would
+    post; `dry_run=false` posts them, and only when no row is refused."""
+    from app.services.csv_invoice_import import import_invoices
+
+    content = _decode_csv_upload(await read_limited(file, label="CSV file"))
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="The file is empty.")
+    return import_invoices(db, content, dry_run=dry_run)
+
+
 @router.post("/import/qb-report")
 async def csv_import_qb_report(
     request: Request,
