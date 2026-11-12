@@ -1127,7 +1127,7 @@ const App = {
         'FieldTickets.del', 'FieldTickets.voidTicket', 'FieldTickets.deleteAttachment', 'FieldTickets.upload',
         'SalesReceiptsPage.void', 'CreditMemosPage.void', 'CreditMemosPage.showApply',
         'CreditMemosPage.doApply', 'PaymentsPage.void', 'PaymentsPage.doVoid', 'PaymentsPage.showApplyCredit', 'DepositsPage.voidDeposit',
-        'DepositsPage.makeDeposit', 'DepositsPage.editDeposit', 'DepositsPage.saveEdit', 'JournalPage.editEntry',
+        'DepositsPage.makeDeposit', 'DepositsPage.editDeposit', 'DepositsPage.saveEdit', 'DepositsPage.addOtherLine', 'DepositsPage.removeOtherLine', 'JournalPage.editEntry',
         'BillsPage.void', 'BillsPage.voidBillPayment', 'BillsPage.uploadAttachment',
         'BillsPage.deleteAttachment', 'BillsPage.showPayForm', 'BillsPage.saveLienWaiver', 'VendorCreditsPage.void', 'VendorCreditsPage.showApply',
         'VendorCreditsPage.doApply', 'PurchaseOrdersPage.convertToBill', 'PurchaseOrdersPage.doConvert',
