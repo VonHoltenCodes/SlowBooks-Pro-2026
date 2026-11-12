@@ -476,6 +476,15 @@ def test_the_opening_quarters_fit_the_employee_dialog(browser):
             assert seen["q2_net_in_body"] is True, (theme, seen)
             assert seen["state_inputs_outside"] == [], (theme, seen)
             assert seen["wraps_scroll"] == 0, (theme, seen)
+        # a seven-figure amount shows whole in a state cell: no stepper
+        # over its last digit (2.29.0 gate, #813)
+        fits = page.evaluate(
+            """() => [...document.querySelectorAll('[data-opening-state] input[type=number]')]
+                .map(el => { el.value = '1234567.89';
+                    return [el.scrollWidth <= el.clientWidth, getComputedStyle(el).appearance]; })"""
+        )
+        assert fits and all(ok for ok, _ in fits), fits
+        assert {look for _, look in fits} == {"textfield"}, fits
         # Tab walks each state row left to right: State, the six amounts,
         # then its Remove
         for n in (1, 2):

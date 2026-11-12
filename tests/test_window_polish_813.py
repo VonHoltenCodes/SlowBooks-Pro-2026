@@ -22,3 +22,19 @@ def test_dark_placeholders_are_dimmer_than_typed_text_and_still_read():
     for field in ("#14161c", "#1a1e28"):
         assert _ratio(hint, _hex(field)) >= 4.5, field
         assert _ratio(typed, _hex(field)) - _ratio(hint, _hex(field)) > 5, field
+
+
+STYLE = (ROOT / "app/static/css/style.css").read_text(encoding="utf-8")
+
+
+def test_the_opening_ytd_cells_have_no_stepper_over_the_figure():
+    """A seven-figure amount (1234567.89) lost its last digit under the
+    number box's stepper in the opening-YTD dialog's narrow cells, and
+    WITHHOLDING ran into SUTA WAGES."""
+    m = re.search(r'\.opening-states input\[type="number"\]\s*\{([^}]*)\}', STYLE)
+    assert m and "appearance: textfield" in m.group(1)
+    assert re.search(
+        r'\.opening-states input\[type="number"\]::-webkit-inner-spin-button', STYLE
+    )
+    head = re.search(r"\.opening-states thead th\s*\{([^}]*)\}", STYLE).group(1)
+    assert "overflow-wrap: anywhere" in head

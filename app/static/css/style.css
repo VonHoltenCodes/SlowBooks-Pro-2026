@@ -1964,6 +1964,9 @@ a:hover { text-decoration: underline; }
 .opening-states thead th {
     white-space: normal;
     padding: 4px 5px;
+    /* a long one-word heading (WITHHOLDING) breaks in its own cell
+       rather than running into the next (#813) */
+    overflow-wrap: anywhere;
 }
 .opening-states tbody td { padding: 3px 4px; }
 .opening-states input {
@@ -1971,6 +1974,17 @@ a:hover { text-decoration: underline; }
     min-width: 0;
     box-sizing: border-box;
     padding: 4px 3px;
+}
+/* The narrow cells have no room for a stepper: 1234567.89 lost its last
+   digit under it (2.29.0 gate, #813). The arrow keys still step. */
+.opening-states input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+.opening-states input[type="number"]::-webkit-inner-spin-button,
+.opening-states input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 /* ========================================================================
