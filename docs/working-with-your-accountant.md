@@ -54,7 +54,9 @@ the list; revoke it and make a new one). It wears the same limits as the
 role, every change it makes is attributed to `token:<label>` in the audit
 log, and on a server with several companies its requests name the company
 with `X-SlowBooks-Company`. Details in [server-edition.md](server-edition.md),
-"API tokens".
+"API tokens". An accountant's sign-in or token reads your estimates without
+their cost side (each line's unit cost, the packages' cost, the cost of work
+and the budget cost): those are yours as the contractor.
 
 If your accountant is not on your network, give them a way onto it rather
 than opening the server: a VPN (Tailscale is the simplest) that puts their

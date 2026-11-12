@@ -41,6 +41,29 @@ _LINE_KIND_LABELS = dict(
 )
 
 
+# The contractor's own side of an estimate (#824): each line's unit cost, a
+# package's cost, the cost of work the markups build on and the cost budget
+# accepting locks. An estimate read by a read-only or accountant sign-in or
+# token leaves every field named here out, wherever it sits (a line, the
+# totals, a package); the owner's PDF and the print preview print none of
+# them. A later cost figure joins this one set.
+ESTIMATE_COST_FIELDS = frozenset({"unit_cost", "cost", "markup_base", "budget_cost"})
+
+
+def without_cost_side(data):
+    """An estimate's JSON (one, or a list) with ESTIMATE_COST_FIELDS left out
+    at every depth."""
+    if isinstance(data, dict):
+        return {
+            k: without_cost_side(v)
+            for k, v in data.items()
+            if k not in ESTIMATE_COST_FIELDS
+        }
+    if isinstance(data, list):
+        return [without_cost_side(v) for v in data]
+    return data
+
+
 class EstimateLineCreate(StrictModel):
     item_id: Optional[int] = None
     description: Optional[str] = None
