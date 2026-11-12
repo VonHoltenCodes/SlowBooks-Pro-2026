@@ -902,6 +902,40 @@ async function createCompany() {
   setStatus('Created. Opening…');
   await openCompany(result.file);
 }
+// Text size (#813): the size the company's pages keep, as CSS zoom, and
+// Ctrl + / Ctrl − / Ctrl 0 (Cmd on a Mac) and Ctrl + wheel step it here
+// as they do there (text_size.js, desktop_shim.js).
+var SIZES = [100, 115, 125, 150], textSize = 100;
+function applyTextSize(size) {
+  textSize = SIZES.indexOf(size) >= 0 ? size : 100;
+  document.documentElement.style.zoom = textSize === 100 ? '' : String(textSize / 100);
+}
+function stepTextSize(direction) {
+  var i = direction === 0 ? 0 : Math.max(0, Math.min(SIZES.length - 1, SIZES.indexOf(textSize) + direction));
+  applyTextSize(SIZES[i]);
+  try { window.pywebview.api.set_text_size(textSize); } catch (e) {}
+}
+document.addEventListener('keydown', function (e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  var d = (e.key === '=' || e.key === '+' || e.code === 'NumpadAdd') ? 1
+    : (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') ? -1 : e.key === '0' ? 0 : null;
+  if (d === null) return;
+  e.preventDefault();
+  stepTextSize(d);
+}, true);
+var wheelAt = 0;
+window.addEventListener('wheel', function (e) {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  if (Date.now() - wheelAt < 250 || !e.deltaY) return;
+  wheelAt = Date.now();
+  stepTextSize(e.deltaY < 0 ? 1 : -1);
+}, { passive: false, capture: true });
+window.addEventListener('pywebviewready', function () {
+  try {
+    window.pywebview.api.text_size().then(function (r) { applyTextSize(r && r.size); }, function () {});
+  } catch (e) {}
+});
 window.addEventListener('pywebviewready', refresh);
 </script>
 </body>
@@ -1609,6 +1643,19 @@ class PickerApi:
     def _set_startup_status(self, text: str) -> None:
         self._startup_status = text
 
+    def text_size(self) -> dict:
+        """The Text size setting for the company picker (#813). The picker
+        is the launcher's own page, with no origin, so it cannot read the
+        size the company's pages keep in their storage; the pages hand it
+        to the window (set_text_size) and the picker reads it here."""
+        return {"size": load_text_size()}
+
+    def set_text_size(self, size) -> dict:
+        """Keep the Text size for the picker: text_size.js sends it from
+        the company's pages, and the picker's own Ctrl + / Ctrl − send it
+        too. Anything but one of the four sizes is refused."""
+        return {"success": save_text_size(size)}
+
     def startup_status(self) -> dict:
         """What the server is doing while a company opens (#693): the
         picker shows it under the list while open_company is waiting."""
@@ -2207,6 +2254,55 @@ def _announce_serve_lan(port: int) -> None:
                 pass
 
         threading.Thread(target=_popup, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# Text size for the company picker (#813)
+# ---------------------------------------------------------------------------
+# The company's pages keep Text size in their own storage (text_size.js);
+# the picker, loaded as HTML with no origin, can't read it, so the pages
+# hand it to the window and it is kept beside the window's geometry.
+
+TEXT_SIZE_FILE = "text-size.json"
+TEXT_SIZES = (100, 115, 125, 150)
+
+
+def text_size_path() -> Path:
+    return get_data_dir() / TEXT_SIZE_FILE
+
+
+def load_text_size(path: Path | None = None) -> int:
+    """The kept size, or 100 when there is none or it is not one of the
+    four."""
+    path = path or text_size_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 100
+    size = raw.get("size") if isinstance(raw, dict) else None
+    if isinstance(size, bool) or size not in TEXT_SIZES:
+        return 100
+    return int(size)
+
+
+def save_text_size(size, path: Path | None = None) -> bool:
+    """Keep one of the four sizes. Never raises: the picker at 100% is no
+    reason for an error."""
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        return False
+    if size not in TEXT_SIZES:
+        return False
+    path = path or text_size_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps({"size": size}), encoding="utf-8")
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
 
 
 # ---------------------------------------------------------------------------

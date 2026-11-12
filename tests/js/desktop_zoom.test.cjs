@@ -191,3 +191,17 @@ test('ratio() is 1 where nothing can be measured', () => {
     assert.equal(sizes.nearest(1.375), 150);
     assert.equal(sizes.nearest(1.37), 125);
 });
+
+test('the size reaches the window for the company picker (#813)', () => {
+    const page = load({ stored: { [KEY]: '125' } });
+    const told = [];
+    page.window.pywebview.api.set_text_size = (n) => told.push(n);
+    // the bridge arrives after <head>: the size in use is handed over then
+    page.fire('pywebviewready');
+    assert.deepEqual(told, [125]);
+    page.sizes.step(1);
+    assert.deepEqual(told, [125, 150]);
+    // in a browser there is no bridge and nothing breaks
+    const browser = load({ desktop: false, shim: false });
+    assert.equal(browser.sizes.apply(115), 115);
+});
