@@ -429,6 +429,7 @@ const JournalPage = {
             `<option value="${a.id}">${accountLabel(a)}</option>`
         ).join('');
 
+        PendingFiles.reset();  // files attached before the first save (#881)
         openModal(entry ? `Edit Journal Entry #${entry.id}` : 'New Journal Entry', `
             <form aria-labelledby="modal-title" data-accountant-ok data-skip-to="#je-lines" data-skip-text="Skip to the lines" onsubmit="JournalPage.save(event)">
                 <div class="form-grid">
@@ -479,6 +480,7 @@ const JournalPage = {
                     </tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="JournalPage.addLine()">+ Add Line</button>
+                ${entry || (App.isAccountant && App.isAccountant()) ? '' : PendingFiles.stripHtml()}
                 <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <span id="je-totals" style="font-size:11px;">Debits: $0.00 | Credits: $0.00</span>
@@ -489,7 +491,7 @@ const JournalPage = {
                         <button type="submit" class="btn btn-primary" id="je-submit">Create Entry</button>
                     </div>
                 </div>
-            </form>`);
+            </form>`, { onClose: () => PendingFiles.discard() });
         if (entry) JournalPage._fillForm(entry);
     },
 
@@ -669,7 +671,8 @@ const JournalPage = {
         const entryId = form.dataset.entryId ? parseInt(form.dataset.entryId, 10) : null;
         if (entryId) { await JournalPage._putEntry(entryId, data); return; }
         try {
-            await API.post('/journal', data);
+            await API.post('/journal', { ...data, pending_attachments: PendingFiles.ids() });
+            PendingFiles.saved();
             toastPosted(form.is_adjusting && form.is_adjusting.checked ? 'Adjusting entry created' : 'Journal entry created');
             closeModal();
             App.navigate('#/journal');

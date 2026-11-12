@@ -292,6 +292,12 @@ FOUND_IN_DIALOGS = {
     "ExpensesPage.showDetail({expense})": {"file"},
     # a card charge's Files (#796)
     "CCChargesPage.showFiles({cc_charge})": {"file"},
+    # a saved sales receipt's, estimate's, purchase order's and vendor
+    # credit's Attachments (#881)
+    "SalesReceiptsPage.view({receipt})": {"file"},
+    "EstimatesPage.view({estimate})": {"file"},
+    "PurchaseOrdersPage.view({po})": {"file"},
+    "VendorCreditsPage.view({vendor_credit})": {"file"},
     "ReportsPage.arAging()": {
         "Apply Late Fees",
         "Email All Overdue",

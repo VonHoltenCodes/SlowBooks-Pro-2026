@@ -34,6 +34,9 @@ const BillQuickEntry = {
         BillQuickEntry._defaultAccountId = null;
         BillQuickEntry._lineCount = 0;
         BillQuickEntry._batch = [];
+        // files attached before the save (#881): this page's form holds
+        // them, and leaving the page discards what is left (the route's mount)
+        PendingFiles.reset();
         return `
             <div class="page-header">
                 <h2>Bill Quick Entry</h2>
@@ -63,6 +66,7 @@ const BillQuickEntry = {
                     <tbody id="bqe-lines">${BillQuickEntry.lineHtml(BillQuickEntry._lineCount++)}</tbody>
                 </table></div>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="BillQuickEntry.addLine()">+ Add Line</button>
+                ${PendingFiles.stripHtml()}
                 <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                     <div id="bqe-total" aria-live="polite" style="font-size:16px; font-weight:700; color:var(--qb-navy);">Total: $0.00</div>
                     <div class="form-actions" style="margin:0;">
@@ -181,7 +185,11 @@ const BillQuickEntry = {
                 date: form.date.value,
                 terms: form.terms.value,
                 lines,
+                pending_attachments: PendingFiles.ids(),
             });
+            // the files are the bill's now; the next one starts with none
+            PendingFiles.saved();
+            PendingFiles.render();
             BillQuickEntry._logged(bill);
             toastPosted(`Bill ${bill.bill_number} saved`);
             BillQuickEntry._next(form);

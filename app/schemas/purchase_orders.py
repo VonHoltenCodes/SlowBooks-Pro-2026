@@ -14,6 +14,7 @@ from app.schemas.common import (
     quantity_text,
 )
 from app.schemas.invoices import RateOut
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class POLineCreate(StrictModel):
@@ -106,6 +107,9 @@ class POCreate(StrictModel):
     retainage_pct: Optional[Decimal] = None
     scope_notes: Optional[str] = None
     lines: list[POLineCreate] = []
+    # Files attached on the form before this first save (#881, as #796):
+    # the ids POST /api/attachments/pending gave.
+    pending_attachments: PendingAttachmentIds = []
 
     _ctype = field_validator("commitment_type")(_check_commitment_type)
     _ret = field_validator("retainage_pct")(_check_retainage_pct)

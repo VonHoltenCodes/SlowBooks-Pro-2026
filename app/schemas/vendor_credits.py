@@ -15,6 +15,7 @@ from app.schemas.common import (
     WholeCents,
 )
 from app.schemas.invoices import RateOut
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class VendorCreditLineCreate(StrictModel):
@@ -78,6 +79,9 @@ class VendorCreditCreate(StrictModel):
     class_id: Optional[int] = None
     job_id: Optional[int] = None
     lines: list[VendorCreditLineCreate] = []
+    # Files attached on the form before this first save (#881, as #796):
+    # the ids POST /api/attachments/pending gave.
+    pending_attachments: PendingAttachmentIds = []
 
     @field_validator("lines")
     @classmethod

@@ -35,6 +35,8 @@ function estimatesContext(construction) {
         ItemQuickAdd: { options: () => '' },
         TaxDefault: { checked: () => '' },
         SalesLines: { rate: (v) => '$' + v, cents: salesLinesCents() },
+        // a saved estimate's Attachments panel (#881) is invoices.js's
+        InvoicesPage: { attachmentsPanelHtml: () => '', loadAttachments() {} },
     };
     vm.createContext(context);
     vm.runInContext(

@@ -68,6 +68,8 @@ function load(file, name, { accounts, settings = {}, routes = {} }) {
     };
     context.fetchAllPages = url => context.API.get(url);
     vm.createContext(context);
+    // the files a new document holds before its first save (#881): not this test's
+    context.PendingFiles = { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} };
     vm.runInContext(fs.readFileSync(path.join(JS, file), 'utf8') + `\nthis.${name} = ${name};`, context);
     return { page: context[name], modal: () => modal, context, fields };
 }
@@ -160,6 +162,8 @@ function settingsPage() {
         toast() {}, document: { getElementById: () => null },
     };
     vm.createContext(context);
+    // the files a new document holds before its first save (#881): not this test's
+    context.PendingFiles = { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} };
     vm.runInContext(fs.readFileSync(path.join(JS, 'payment_terms.js'), 'utf8'), context);
     vm.runInContext(fs.readFileSync(path.join(JS, 'settings.js'), 'utf8') + '\nthis.page = SettingsPage;', context);
     return context.page;

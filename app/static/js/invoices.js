@@ -352,12 +352,7 @@ const InvoicesPage = {
             </div>
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
             <div id="inv-credit-note"></div>
-            <div style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
-                <h3 style="font-size:13px; margin-bottom:8px;">Attachments</h3>
-                <div id="inv-attachments-list" style="margin-bottom:8px; font-size:11px;">Loading...</div>
-                <input type="file" id="inv-attach-file" aria-label="File to attach" style="font-size:11px;">
-                <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.uploadAttachment(${inv.id})" style="margin-left:4px;">Upload</button>
-            </div>
+            ${InvoicesPage.attachmentsPanelHtml('invoice', inv.id)}
             <div class="form-actions">
                 <button class="btn btn-secondary" data-invoice-logo-action onclick="window.open('/api/invoices/${inv.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" data-invoice-logo-action onclick="window.open('/api/invoices/${inv.id}/print-preview','_blank')">Print</button>
@@ -785,6 +780,7 @@ const InvoicesPage = {
 
         const custOpts = customers.map(c => `<option value="${c.id}" ${inv.customer_id==c.id?'selected':''}>${escapeHtml(customerLabel(c))}</option>`).join('');
 
+        PendingFiles.reset();  // files attached before the first save (#881)
         openModal(Terms.text(id ? 'Edit Invoice' : 'New Invoice'), `
             <form id="invoice-form" aria-labelledby="modal-title" data-skip-to="#inv-lines" data-skip-text="Skip to the line items" onsubmit="InvoicesPage.save(event, ${id})">
                 ${InvoicesPage.logoOptionHtml(settings)}
@@ -845,12 +841,13 @@ const InvoicesPage = {
                     </select></div>` : ''}
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes">${escapeHtml(inv.notes || '')}</textarea></div>
+                ${id ? '' : PendingFiles.stripHtml()}
                 ${id ? '' : `<div class="hint" id="inv-create-note">Creating this ${T('invoice')} posts it to the books now; Draft means not yet marked sent. Items tracked in inventory come out of stock when it is created.</div>`}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary" data-invoice-logo-action${id ? '' : ' aria-describedby="inv-create-note"'}>${id ? 'Update' : 'Create'} ${T('Invoice')}</button>
                 </div>
-            </form>`);
+            </form>`, { onClose: () => PendingFiles.discard() });
         if (!id && inv.customer_id) InvoicesPage.customerSelected(inv.customer_id);
         // the totals carry the document's currency; follow a change of it
         $('#invoice-form [name="currency"]')?.addEventListener('change', () => InvoicesPage.recalc());
@@ -1070,9 +1067,12 @@ const InvoicesPage = {
         try {
             const saved = await SalesLines.sendAllowingZero(flags => {
                 const body = { ...data, ...flags };
+                // a new invoice carries the files attached before its first save (#881)
+                if (!id) body.pending_attachments = PendingFiles.ids();
                 return id ? API.put(`/invoices/${id}`, body) : API.post('/invoices', body);
             }, InvoicesPage._overLimitOk ? { allow_over_credit_limit: true } : {});
             if (!saved) return; // $0.00 and the user said no: the form stays open
+            if (!id) PendingFiles.saved();
             toastPosted(Terms.text(id ? 'Invoice updated' : 'Invoice created'));
             // a stock item sold past what is on hand (#642): posted, and said
             for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
@@ -1108,6 +1108,22 @@ const InvoicesPage = {
         return InvoicesPage._overLimitOk;
     },
 
+    // A saved document's Attachments panel: an invoice's, and (#881) a
+    // sales receipt's (its invoice), an estimate's, a purchase order's and a
+    // vendor credit's, each under its own record type. The view calls
+    // loadAttachments(entityType, id) once it is open.
+    attachmentsPanelHtml(entityType, entityId) {
+        const id = Number(entityId);
+        const type = escapeHtml(entityType);
+        return `
+            <div style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
+                <h3 style="font-size:13px; margin-bottom:8px;">Attachments</h3>
+                <div id="inv-attachments-list" style="margin-bottom:8px; font-size:11px;">Loading...</div>
+                <input type="file" id="inv-attach-file" aria-label="File to attach" style="font-size:11px;">
+                <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.uploadAttachment(${id}, '${type}')" style="margin-left:4px;">Upload</button>
+            </div>`;
+    },
+
     async loadAttachments(entityType, entityId) {
         const el = $('#inv-attachments-list');
         if (!el) return;
@@ -1128,17 +1144,17 @@ const InvoicesPage = {
         } catch (e) { el.innerHTML = ''; }
     },
 
-    async uploadAttachment(entityId) {
+    async uploadAttachment(entityId, entityType = 'invoice') {
         const fileInput = $('#inv-attach-file');
         if (!fileInput?.files[0]) { toast('Select a file first', 'error'); return; }
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
         try {
-            const resp = await fetch(`/api/attachments/invoice/${entityId}`, { method: 'POST', body: formData });
+            const resp = await fetch(`/api/attachments/${encodeURIComponent(entityType)}/${entityId}`, { method: 'POST', body: formData });
             if (!resp.ok) throw new Error(await API.responseError(resp, 'Upload failed'));
             toast('Attachment uploaded');
             fileInput.value = '';
-            InvoicesPage.loadAttachments('invoice', entityId);
+            InvoicesPage.loadAttachments(entityType, entityId);
         } catch (err) { toast(err.message, 'error'); }
     },
 

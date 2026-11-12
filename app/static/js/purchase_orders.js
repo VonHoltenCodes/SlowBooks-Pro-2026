@@ -86,6 +86,7 @@ const PurchaseOrdersPage = {
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${formatCurrency(po.total)}</span></div>
             </div>
             ${po.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(po.notes)}</p>` : ''}
+            ${InvoicesPage.attachmentsPanelHtml('purchase_order', po.id)}
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/print-preview','_blank')">Print</button>
@@ -94,6 +95,7 @@ const PurchaseOrdersPage = {
                 ${con && (po.retainage_pct || Number(po.retainage_released)) ? `<button class="btn btn-secondary" onclick="PurchaseOrdersPage.releaseRetainage(${po.id})">Release retainage</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+        InvoicesPage.loadAttachments('purchase_order', po.id);
     },
 
     // Issue a draft commitment (draft -> sent): until it is issued it is in no
@@ -147,6 +149,7 @@ const PurchaseOrdersPage = {
             .filter(v => v.is_active !== false || v.id == po.vendor_id)
             .map(v => `<option value="${v.id}" ${po.vendor_id==v.id?'selected':''}>${escapeHtml(v.name)}</option>`).join('');
 
+        PendingFiles.reset();  // files attached before the first save (#881)
         openModal(id ? 'Edit Purchase Order' : 'New Purchase Order', `
             <form id="po-form" onsubmit="PurchaseOrdersPage.save(event, ${id})">
                 <div class="form-grid">
@@ -179,11 +182,12 @@ const PurchaseOrdersPage = {
                 </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes">${escapeHtml(po.notes || '')}</textarea></div>
+                ${id ? '' : PendingFiles.stripHtml()}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">${id ? 'Update' : 'Create'} PO</button>
                 </div>
-            </form>`);
+            </form>`, { onClose: () => PendingFiles.discard() });
         typeof LineOrder !== 'undefined' && LineOrder.attach('#po-lines', { add: () => PurchaseOrdersPage.addLine(), changed: () => PurchaseOrdersPage.recalc() });
         PurchaseOrdersPage.recalc();
     },
@@ -328,7 +332,11 @@ const PurchaseOrdersPage = {
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         try {
             if (id) { await API.put(`/purchase-orders/${id}`, data); toast('PO updated'); }
-            else { await API.post('/purchase-orders', data); toast('PO created'); }
+            else {
+                await API.post('/purchase-orders', { ...data, pending_attachments: PendingFiles.ids() });
+                PendingFiles.saved();
+                toast('PO created');
+            }
             closeModal();
             App.navigate('#/purchase-orders');
         } catch (err) { toast(err.message, 'error'); }

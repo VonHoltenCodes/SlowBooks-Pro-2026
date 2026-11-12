@@ -70,6 +70,7 @@ from app.services.bank_register import (
     voided_transaction_ids,
 )
 from app.services.closing_date import check_closing_date
+from app.services import pending_attachments
 from app.services.dimensions import require_dimensions
 from app.services.entry_text import BANK_ENTRY_HEADER
 
@@ -890,6 +891,13 @@ def _category_and_splits(
     return category, splits
 
 
+TRANSFER_TAKES_NO_FILES = (
+    "A transfer between two of your accounts keeps no attachments. Remove "
+    "the files from the form, or choose a category that is not a bank or "
+    "card account."
+)
+
+
 @router.post("/transactions", response_model=BankEntryResponse, status_code=201)
 def create_bank_transaction(
     data: BankTransactionCreate,
@@ -902,8 +910,15 @@ def create_bank_transaction(
     already has is a 409 the person answers (#481): keep the number (send
     it again with allow_duplicate_check_number=true) or edit it."""
     check_closing_date(db, data.date)
+    # files attached on the form before this save (#881): checked before
+    # anything is written, attached with the entry below
+    pending = pending_attachments.take(db, data.pending_attachments)
     account = _resolve_account(db, data.account_id, data.bank_account_id)
     category, splits = _category_and_splits(db, account, data)
+    # a bank or card category makes the entry a transfer, which keeps no
+    # files: said before anything is written, the files still on the form
+    if pending and not splits and category.bank_kind:
+        raise HTTPException(status_code=400, detail=TRANSFER_TAKES_NO_FILES)
     vendor = _entry_vendor(db, data.vendor_id, data.payee)
     customer_id = _entry_customer(db, data.customer_id)
     require_dimensions(db, data.class_id, data.job_id, customer_id)
@@ -926,6 +941,8 @@ def create_bank_transaction(
         customer_id=None if splits else customer_id,
     )
     _link_vendor(txn, vendor)
+    db.flush()
+    pending_attachments.bind(db, pending, "bank_entry", txn.id)
     db.commit()
     db.refresh(txn)
     return _entry_out(txn, account.id, db)

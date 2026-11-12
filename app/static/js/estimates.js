@@ -90,6 +90,7 @@ const EstimatesPage = {
             ${bodyHtml}
             ${construction && est.terms ? `<p style="margin-top:12px;white-space:pre-wrap;"><strong>Terms, inclusions and exclusions</strong>\n${escapeHtml(est.terms)}</p>` : ''}
             ${est.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(est.notes)}</p>` : ''}
+            ${InvoicesPage.attachmentsPanelHtml('estimate', est.id)}
             <div class="form-actions">
                 ${EstimatesPage.acceptButtonHtml(est)}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Save PDF</button>
@@ -99,6 +100,7 @@ const EstimatesPage = {
                 ${est.status !== 'converted' && !(construction && (est.bills_by_pay_app || est.status === 'rejected')) ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+        InvoicesPage.loadAttachments('estimate', est.id);
     },
 
     // The bid, grouped by package with its allowances, alternates and unit
@@ -313,6 +315,7 @@ const EstimatesPage = {
         EstimatesPage._customers = customers;
         const custOpts = customers.map(c => `<option value="${c.id}" ${est.customer_id==c.id?'selected':''}>${escapeHtml(customerLabel(c))}</option>`).join('');
 
+        PendingFiles.reset();  // files attached before the first save (#881)
         openModal(id ? 'Edit Estimate' : 'New Estimate', `
             <form id="est-form" onsubmit="EstimatesPage.save(event, ${id})">
                 <div class="form-grid">
@@ -358,11 +361,12 @@ const EstimatesPage = {
                 ${EstimatesPage.termsBlockHtml(est)}
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes">${escapeHtml(est.notes || '')}</textarea></div>
+                ${id ? '' : PendingFiles.stripHtml()}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">${id ? 'Update' : 'Create'} Estimate</button>
                 </div>
-            </form>`, { wide: true });
+            </form>`, { wide: true, onClose: () => PendingFiles.discard() });
         typeof LineOrder !== 'undefined' && LineOrder.attach('#est-lines', { add: () => EstimatesPage.addLine(), changed: () => EstimatesPage.recalc() });
         EstimatesPage.recalc();
     },
@@ -910,7 +914,11 @@ const EstimatesPage = {
         if (!(await ClassWarn.ok(form))) return;
         try {
             if (id) { await API.put(`/estimates/${id}`, data); toast('Estimate updated'); }
-            else { await API.post('/estimates', data); toast('Estimate created'); }
+            else {
+                await API.post('/estimates', { ...data, pending_attachments: PendingFiles.ids() });
+                PendingFiles.saved();
+                toast('Estimate created');
+            }
             App.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },

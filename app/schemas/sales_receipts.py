@@ -8,6 +8,7 @@ from app.schemas.common import StrictModel, TaxRate
 
 from app.schemas.invoices import InvoiceLineCreate, InvoiceResponse
 from app.schemas.payments import PaymentResponse
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class SalesReceiptCreate(StrictModel):
@@ -33,6 +34,9 @@ class SalesReceiptCreate(StrictModel):
     fair_value_amount: Optional[Decimal] = None
     fair_value_description: Optional[str] = None
     lines: list[InvoiceLineCreate] = []
+    # Files attached on the form before this first save (#881, as #796):
+    # the ids POST /api/attachments/pending gave.
+    pending_attachments: PendingAttachmentIds = []
 
     @field_validator("lines")
     @classmethod

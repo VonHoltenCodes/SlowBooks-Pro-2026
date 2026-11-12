@@ -67,6 +67,8 @@ function page({ customers = [], settings = {}, rows = [] } = {}) {
         },
     };
     vm.createContext(ctx);
+    // the files a new document holds before its first save (#881): not this test's
+    ctx.PendingFiles = { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} };
     // TaxExempt alone: the rest of utils.js brings its own $ and $$
     const utils = read('utils.js');
     const exempt = utils.slice(utils.indexOf('const TaxExempt = {'), utils.indexOf('window.TaxExempt = TaxExempt;'));

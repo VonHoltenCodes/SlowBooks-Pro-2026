@@ -41,6 +41,8 @@ const ctx = {
   todayISO: () => '2026-09-26',
   statusBadge: (s) => s,
   T: (s) => s,
+  // the files a new document holds before its first save (#881): not this probe's
+  PendingFiles: { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} },
   Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   App: { settings: { home_currency: 'USD' }, navigate() {} },
   toast() {},

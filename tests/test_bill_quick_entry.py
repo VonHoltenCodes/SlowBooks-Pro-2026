@@ -15,7 +15,7 @@ INDEX = (ROOT / "index.html").read_text(encoding="utf-8")
 def test_the_page_has_a_route_a_sidebar_link_and_a_top_bar_button():
     assert (
         "'/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',"
-        "   render: () => BillQuickEntry.render() }," in APP
+        "   render: () => BillQuickEntry.render()," in APP
     )
     assert (
         '<button class="tb-btn" data-nav="#/bill-entry">Bill Quick Entry</button>'

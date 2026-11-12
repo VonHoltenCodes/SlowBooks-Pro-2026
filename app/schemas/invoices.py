@@ -22,6 +22,7 @@ from app.schemas.common import (
     validate_non_negative_line,
     quantity_text,
 )
+from app.schemas.attachments import PendingAttachmentIds
 
 
 def _rate_json(value) -> str:
@@ -136,6 +137,9 @@ class InvoiceCreate(StrictModel):
     # An invoice that takes the customer past their credit limit is saved
     # only with this; otherwise 409 "credit_limit" (#256).
     allow_over_credit_limit: bool = False
+    # Files attached on the form before this first save (#881, as #796):
+    # the ids POST /api/attachments/pending gave.
+    pending_attachments: PendingAttachmentIds = []
 
     @field_validator("lines")
     @classmethod

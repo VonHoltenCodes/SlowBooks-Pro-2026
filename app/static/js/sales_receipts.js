@@ -66,6 +66,7 @@ const SalesReceiptsPage = {
                 <div class="total-row"><span class="label">Deductible portion</span><span class="value">${money(sr.total - sr.fair_value_amount)}</span></div>` : ''}
             </div>
             ${sr.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(sr.notes)}</p>` : ''}
+            ${InvoicesPage.attachmentsPanelHtml('invoice', sr.id)}
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/print-preview','_blank')">Print</button>
@@ -74,6 +75,8 @@ const SalesReceiptsPage = {
                 ${sr.status !== 'void' ? `<button data-destructive class="btn btn-danger" onclick="SalesReceiptsPage.void(${sr.id})">Void Receipt</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+        // the receipt's files are its invoice's (a scan, or attached before saving, #881)
+        InvoicesPage.loadAttachments('invoice', sr.id);
     },
 
     // A sales receipt is an invoice + its payment; the payment is found by
@@ -151,6 +154,7 @@ const SalesReceiptsPage = {
         const startBank = !undeposited && typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(depositBanks) : '';
         const bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
 
+        PendingFiles.reset();  // files attached before the first save (#881)
         openModal(Terms.text('Enter Sales Receipt'), `
             <form id="sales-receipt-form" onsubmit="SalesReceiptsPage.save(event)">
                 ${ScanHelper.scanRowHtml()}
@@ -215,11 +219,12 @@ const SalesReceiptsPage = {
                 </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
+                ${PendingFiles.stripHtml()}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="ScanHelper.discard(); closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Record ${T('Sales Receipt')}</button>
                 </div>
-            </form>`);
+            </form>`, { onClose: () => PendingFiles.discard() });
         typeof LineOrder !== 'undefined' && LineOrder.attach('#sr-lines', { add: () => SalesReceiptsPage.addLine(), changed: () => SalesReceiptsPage.recalc() });
         // the totals carry the receipt's currency; follow a change of it
         $('#sales-receipt-form [name="currency"]')?.addEventListener('change', () => SalesReceiptsPage.recalc());
@@ -435,7 +440,8 @@ const SalesReceiptsPage = {
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {
-            const result = await API.post('/sales-receipts', data);
+            const result = await API.post('/sales-receipts', { ...data, pending_attachments: PendingFiles.ids() });
+            PendingFiles.saved();
             await ScanHelper.attachAfterSave('invoice', result.invoice.id);
             toastPosted(`${T('Sales Receipt')} #${result.invoice.invoice_number} recorded`);
             // a stock item sold past what is on hand (#642): posted, and said
