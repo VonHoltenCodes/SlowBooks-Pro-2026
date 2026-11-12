@@ -46,6 +46,35 @@ from app.services.voids import TRANSACTION_KEYED_VOIDS as _VOIDS_KEYED_BY_TRANSA
 
 ZERO = Decimal("0")
 
+# The postings of a purchase (#821): a bill (bills, Bill Quick Entry, a
+# memorized bill's entered bills, To Bill, an IIF bill), an expense, a card
+# charge (the route and an IIF CREDIT CARD block), a check from a QuickBooks
+# Desktop check register report, a vendor credit, and their voids. Since
+# 2.31.14 (#785) none of them may put a line on 1200 or 1300; one saved
+# before keeps it. A debit such a posting left on 1200 is not customer money
+# and is never a payment waiting for deposit. Listed by exclusion: QuickBooks
+# Online ledger imports post customer money to 1200 as qbo_ledger and
+# qbo_journal, and an allowlist of payment and manual would hide it.
+PURCHASE_SOURCES = frozenset(
+    {
+        "bill",
+        "bill_edit",
+        "bill_void",
+        "expense",
+        "expense_void",
+        "cc_charge",
+        "cc_charge_void",
+        "check",
+        "vendor_credit",
+        "vendor_credit_void",
+    }
+)
+
+
+def is_purchase_posting(txn: Transaction) -> bool:
+    """True when `txn` is the posting of a purchase (PURCHASE_SOURCES)."""
+    return (txn.source_type or "") in PURCHASE_SOURCES
+
 
 def uf_account_id(db: Session) -> Optional[int]:
     """Undeposited Funds, or None for a chart without one (then nothing
