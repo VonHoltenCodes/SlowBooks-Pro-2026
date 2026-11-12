@@ -157,6 +157,15 @@ def _check_fair_value(fair_value_amount, total) -> None:
 
 @router.post("", response_model=InvoiceResponse, status_code=201)
 def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
+    return post_invoice(data, db)
+
+
+def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None):
+    """The one path an invoice is made by: the New Invoice form, the API,
+    sales receipts, billed tickets and the CSV invoice import (#882), which
+    gives `number`, the number the invoice already had in the program it
+    came from. Without it the next number in the company's series is
+    assigned."""
     words = terms_from_db(db)
     check_closing_date(db, data.date)
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
@@ -214,8 +223,8 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     # or refused here when Settings says so. Nothing is written yet.
     stock_warnings = warn_or_refuse_oversell(db, data.lines)
 
-    for _ in range(10):
-        invoice_number = next_invoice_number(db)
+    for _ in range(1 if number else 10):
+        invoice_number = number or next_invoice_number(db)
         invoice = Invoice(
             invoice_number=invoice_number,
             currency=doc_currency,
@@ -249,6 +258,15 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         except IntegrityError as e:
             if "invoice_number" not in str(e.orig).lower():
                 raise
+            if number:
+                # a number given is that invoice's own; another one is
+                # never put in its place
+                db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{document_reference(face, number)} is already in "
+                    "the books.",
+                ) from e
             last_err = e
             db.rollback()
             invoice = None

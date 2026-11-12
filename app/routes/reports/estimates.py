@@ -33,6 +33,14 @@ _TYPE_Q = Annotated[
     Query(description='Only this job type; "" for estimates with no job type'),
 ]
 
+_TAX_Q = Annotated[
+    bool,
+    Query(
+        description="Count each estimate before sales tax (its subtotal and "
+        "markups), the bid amount, rather than its total"
+    ),
+]
+
 _TITLE = "Estimate Closing Rate"
 
 
@@ -43,18 +51,25 @@ def estimate_closing_rate(
     db: Session = Depends(get_db),
     customer_id: _CUST_Q = None,
     job_type: _TYPE_Q = None,
+    before_tax: _TAX_Q = False,
 ):
     """Estimates dated in the period: sent, won (accepted or converted), lost
     and open, by count and by dollars, with the closing rate (won ÷ won +
     lost) and the average days from sent to decision; in total, per customer
-    and per job type. Reading it posts nothing."""
-    return estimate_closing_report(db, start_date, end_date, customer_id, job_type)
+    and per job type. `before_tax=true` counts the dollars without sales
+    tax. Reading it posts nothing."""
+    return estimate_closing_report(
+        db, start_date, end_date, customer_id, job_type, before_tax
+    )
 
 
 def _period_words(data: dict) -> str:
-    """The period, and when some decisions have no date, that the average
-    leaves them out (the screen says the same)."""
+    """The period, that the dollars are before sales tax when they are, and
+    when some decisions have no date, that the average leaves them out (the
+    screen says the same)."""
     words = f"{data['start_date']} — {data['end_date']}"
+    if data.get("before_tax"):
+        words += " (dollars before sales tax)"
     undated = data["totals"]["undated"]
     if undated:
         words += f" ({undated} decided with no decision date, left out of the average)"
@@ -88,8 +103,11 @@ def estimate_closing_rate_pdf(
     db: Session = Depends(get_db),
     customer_id: _CUST_Q = None,
     job_type: _TYPE_Q = None,
+    before_tax: _TAX_Q = False,
 ):
-    data = estimate_closing_report(db, start_date, end_date, customer_id, job_type)
+    data = estimate_closing_report(
+        db, start_date, end_date, customer_id, job_type, before_tax
+    )
     cols = data["columns"]
     t = terms_from_db(db)
     sections = []
@@ -127,8 +145,11 @@ def estimate_closing_rate_csv(
     db: Session = Depends(get_db),
     customer_id: _CUST_Q = None,
     job_type: _TYPE_Q = None,
+    before_tax: _TAX_Q = False,
 ):
-    data = estimate_closing_report(db, start_date, end_date, customer_id, job_type)
+    data = estimate_closing_report(
+        db, start_date, end_date, customer_id, job_type, before_tax
+    )
     cols = data["columns"]
     t = terms_from_db(db)
     out = io.StringIO()

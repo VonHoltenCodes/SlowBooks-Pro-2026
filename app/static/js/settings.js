@@ -903,6 +903,36 @@ const SettingsPage = {
                     </div>
                 </div>
 
+                <!-- SlowBooks Switchboard (#829): words and links only. The
+                     program is its own public repository; nothing of it runs
+                     inside SlowBooks Pro, and this block has no setting. -->
+                <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
+                    <h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
+                        Model Context Protocol work this company's books. It is a free program of its own,
+                        <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
+                        with a <strong>bookkeeper API token</strong> you make under Users and security, API Tokens
+                        (read-only for an agent that only reports). It does only what that token's role allows,
+                        and every change it makes is in the audit log as <code>token:&lt;label&gt;</code>.
+                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        The token stays on this computer, and Switchboard sends nothing anywhere but this
+                        SlowBooks Pro. For Claude on the web it has a self-hosted door, <code>sbplive serve-http</code>,
+                        behind your own Cloudflare Tunnel; nothing of the books can be reached from outside this
+                        computer unless you set that door up. What Claude reads from the books goes to Claude,
+                        as with any agent.
+                    </div>
+                    <div style="font-size:11px;">
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md" target="_blank" rel="noopener">The guide</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md" target="_blank" rel="noopener">Claude on the web: the self-hosted door</a>
+                    </div>
+                </div>
+
                 <div class="settings-section" data-group="connections" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
                     <h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -1229,6 +1259,7 @@ const SettingsPage = {
                             <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges, field layout and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account's.</div>
                         </div>
+                        ${SettingsPage._depositSlipHtml(s)}
                     </div>
                 </div>
 
@@ -1299,7 +1330,10 @@ const SettingsPage = {
                         benefits, deductions, and employees added and edited, never
                         deleted, with no portal logins, bank accounts or documents)
                         or <em>import</em> (the migration imports). A revoked token
-                        stays revoked: make a new one instead.
+                        stays revoked: make a new one instead. A bookkeeper token is
+                        what <code>sbplive setup</code> asks for, to let Claude work
+                        the books through SlowBooks Switchboard (Connections, Claude
+                        and agents); make a read-only one for an agent that only reports.
                     </p>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
@@ -3410,6 +3444,148 @@ const SettingsPage = {
         });
         SettingsPage.syncCheckFieldLayout();
         SettingsPage._updateDirty();
+    },
+
+    // ----- the deposit slip on pre-printed stock (#798) ------------------
+    // Deposit slip stock and its nudges are named fields of the form; the
+    // layout table's inputs carry no name and are kept, as the JSON the
+    // server stores (only what differs from the defaults below), in the
+    // hidden deposit_slip_layout field, which the form saves and the test
+    // slip sends. Positions are inches from the slip's top-left: a text
+    // field's x is where it starts, an amount's where it ends.
+    // [key, label, x, y, kind] -- the defaults of
+    // settings_service.DEPOSIT_SLIP_DEFAULTS
+    DEPOSIT_SLIP_FIELDS: [
+        ['date', 'Date', 1, 0.9, 'text'],
+        ['account', 'Account', 1, 0.55, 'text'],
+        ['cash', 'Cash', 7.9, 0.55, 'amount'],
+        ['check_number', 'Check number (first line)', 4.9, 0.85, 'text'],
+        ['check_amount', 'Check amount (first line)', 7.9, 0.85, 'amount'],
+        ['checks_subtotal', 'Checks subtotal', 7.9, 2.9, 'amount'],
+        ['total', 'Total', 7.9, 3.2, 'amount'],
+    ],
+    DEPOSIT_SLIP_SIZE: 10,
+    DEPOSIT_SLIP_LINES: { count: 8, spacing: 0.25 },
+
+    _depositSlipHtml(s) {
+        s = s || {};
+        const layout = SettingsPage._parseCheckLayout(s.deposit_slip_layout);
+        const num = (v, d) => (typeof v === 'number' && isFinite(v) ? String(v) : String(d));
+        const rows = SettingsPage.DEPOSIT_SLIP_FIELDS.map(([key, label, x, y, kind]) => {
+            const a = layout[key] || {};
+            const id = 'deposit-slip-' + key.replace(/_/g, '-');
+            const where = kind === 'amount' ? 'right end' : 'left edge';
+            const show = a.show !== false;
+            return `<tr>
+                <th scope="row" id="${id}-h" style="text-align:left; font-weight:normal;">${label}</th>
+                <td><input type="number" id="${id}-x" data-slip-field="${key}" data-attr="x" data-default="${x}" data-admin min="0" max="11" step="0.01" style="width:70px;"
+                    aria-label="${label}: ${where}, inches from the left" value="${num(a.x, x)}" oninput="SettingsPage.syncDepositSlipLayout()"></td>
+                <td><input type="number" id="${id}-y" data-slip-field="${key}" data-attr="y" data-default="${y}" data-admin min="0" max="11" step="0.01" style="width:70px;"
+                    aria-label="${label}: inches from the top" value="${num(a.y, y)}" oninput="SettingsPage.syncDepositSlipLayout()"></td>
+                <td><input type="number" id="${id}-size" data-slip-field="${key}" data-attr="size" data-default="${SettingsPage.DEPOSIT_SLIP_SIZE}" data-admin min="6" max="18" step="0.1" style="width:70px;"
+                    aria-label="${label} text size (pt)" value="${num(a.size, SettingsPage.DEPOSIT_SLIP_SIZE)}" oninput="SettingsPage.syncDepositSlipLayout()"></td>
+                <td style="text-align:center;"><input type="checkbox" id="${id}-show" data-slip-field="${key}" data-attr="show" data-admin style="width:auto; margin:0;"
+                    aria-label="Print the ${label.toLowerCase()}" ${show ? 'checked' : ''} onchange="SettingsPage.syncDepositSlipLayout()"></td>
+            </tr>`;
+        }).join('');
+        const lines = layout.check_lines || {};
+        const L = SettingsPage.DEPOSIT_SLIP_LINES;
+        const pre = s.deposit_slip_stock === 'preprinted';
+        return `<div class="form-group full-width" id="settings-deposit-slip" role="group" aria-labelledby="settings-deposit-slip-h">
+                            <h4 id="settings-deposit-slip-h" style="margin:12px 0 4px; font-size:12px;">Deposit slips</h4>
+                            <div class="form-grid">
+                                <div class="form-group full-width"><label for="settings-deposit-slip-stock">Deposit slip stock</label>
+                                    <select name="deposit_slip_stock" id="settings-deposit-slip-stock" aria-describedby="settings-deposit-slip-stock-help">
+                                        <option value="plain" ${pre ? '' : 'selected'}>Plain paper: SlowBooks' own deposit slip</option>
+                                        <option value="preprinted" ${pre ? 'selected' : ''}>Pre-printed deposit slips from the bank: figures only</option>
+                                    </select>
+                                    <div id="settings-deposit-slip-stock-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Pre-printed slips already carry the bank's labels, boxes and MICR line. Choose them to have Print on a deposit lay only the figures (the date, the account, the cash, each check's number and amount, the checks subtotal and the total) where the layout below puts them, with no labels, no MICR line and no routing or account numbers. Checks past the slip's lines continue on another page at the same lines, for the back of the slip or a second one. Plain paper prints the deposit slip as it always has.</div>
+                                </div>
+                                <div class="form-group"><label for="settings-deposit-slip-nudge-x">Deposit slip left/right nudge (in)</label>
+                                    <input name="deposit_slip_nudge_x_in" id="settings-deposit-slip-nudge-x" type="number" min="-0.5" max="0.5" step="0.01"
+                                        title="Inches, -0.5 to 0.5, in 0.01 steps" value="${escapeHtml(s.deposit_slip_nudge_x_in || '0')}"></div>
+                                <div class="form-group"><label for="settings-deposit-slip-nudge-y">Deposit slip up/down nudge (in)</label>
+                                    <input name="deposit_slip_nudge_y_in" id="settings-deposit-slip-nudge-y" type="number" min="-0.5" max="0.5" step="0.01"
+                                        title="Inches, -0.5 to 0.5, in 0.01 steps" value="${escapeHtml(s.deposit_slip_nudge_y_in || '0')}"></div>
+                                <div class="form-group full-width" id="settings-deposit-slip-fields" role="group" aria-labelledby="settings-deposit-slip-fields-h">
+                                    <div id="settings-deposit-slip-fields-h" style="font-weight:bold; font-size:12px; margin-bottom:4px;">Deposit slip layout</div>
+                                    <div id="settings-deposit-slip-fields-help" style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Where each figure prints on your bank's slip, in inches from the slip's top-left corner as it feeds into the printer (0 to 11). Left is where a date, the account or a check number starts and where an amount ends, so the cents line up; top is the top of the figure. Amounts print without a dollar sign. Measure your slip with a ruler, then print a test slip and hold it against one. The check number and amount rows place the first check line; the rest follow at the spacing below. Clear Print to leave a figure off.</div>
+                                    <input type="hidden" name="deposit_slip_layout" id="settings-deposit-slip-layout" value="${escapeHtml(SettingsPage._checkLayoutJson(layout))}">
+                                    <table class="data-table" style="font-size:11px; width:auto;" aria-describedby="settings-deposit-slip-fields-help">
+                                        <thead><tr><th scope="col">Figure</th><th scope="col">Left (in)</th><th scope="col">Top (in)</th><th scope="col">Size (pt)</th><th scope="col">Print</th></tr></thead>
+                                        <tbody>${rows}</tbody>
+                                    </table>
+                                    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; font-size:11px;">
+                                        <label for="deposit-slip-lines-count" style="font-weight:normal;">Check lines on the slip
+                                            <input type="number" id="deposit-slip-lines-count" data-slip-lines="count" data-default="${L.count}" data-admin min="1" max="30" step="1" style="width:60px;"
+                                                value="${num(lines.count, L.count)}" oninput="SettingsPage.syncDepositSlipLayout()"></label>
+                                        <label for="deposit-slip-lines-spacing" style="font-weight:normal;">Line spacing (in)
+                                            <input type="number" id="deposit-slip-lines-spacing" data-slip-lines="spacing" data-default="${L.spacing}" data-admin min="0.1" max="1" step="0.01" style="width:60px;"
+                                                value="${num(lines.spacing, L.spacing)}" oninput="SettingsPage.syncDepositSlipLayout()"></label>
+                                    </div>
+                                    <div style="margin-top:6px;" data-write>
+                                        <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.resetDepositSlipLayout()">Reset deposit slip layout to defaults</button>
+                                    </div>
+                                </div>
+                                <div class="form-group full-width">
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintDepositSlip()">Print a test slip</button>
+                                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample deposit (two checks and some cash, made-up figures) laid out for pre-printed slips, using the layout and nudges as set here, saved or not. Print it on plain paper and hold it against a slip, or print it on a spare slip.</div>
+                                </div>
+                            </div>
+                        </div>`;
+    },
+
+    // The layout table's inputs, as the hidden field's JSON: a figure at
+    // its default place and size, and Print left on, are left out.
+    syncDepositSlipLayout() {
+        const hidden = document.getElementById('settings-deposit-slip-layout');
+        if (!hidden) return;
+        const layout = {};
+        const take = (group, attr, el) => {
+            let v;
+            if (attr === 'show') {
+                if (el.checked) return;
+                v = false;
+            } else {
+                const t = String(el.value || '').trim();
+                if (t === '') return;
+                // what is not a number is sent as typed, so saving says why
+                v = isFinite(Number(t)) ? Number(t) : t;
+                if (v === Number(el.getAttribute('data-default'))) return;
+            }
+            (layout[group] = layout[group] || {})[attr] = v;
+        };
+        document.querySelectorAll('#settings-deposit-slip-fields [data-slip-field]').forEach(el => {
+            take(el.getAttribute('data-slip-field'), el.getAttribute('data-attr'), el);
+        });
+        document.querySelectorAll('#settings-deposit-slip-fields [data-slip-lines]').forEach(el => {
+            take('check_lines', el.getAttribute('data-slip-lines'), el);
+        });
+        hidden.value = SettingsPage._checkLayoutJson(layout);
+    },
+
+    // Every figure back at its default place and size, printed. Saved with
+    // Save Settings like the rest.
+    resetDepositSlipLayout() {
+        document.querySelectorAll('#settings-deposit-slip-fields [data-slip-field], #settings-deposit-slip-fields [data-slip-lines]').forEach(el => {
+            if (el.getAttribute('data-attr') === 'show') el.checked = true;
+            else el.value = el.getAttribute('data-default');
+        });
+        SettingsPage.syncDepositSlipLayout();
+        SettingsPage._updateDirty();
+    },
+
+    // Opens the sample deposit on pre-printed slip stock (#798) in a new
+    // tab, with the layout and nudges as they stand in the form.
+    testPrintDepositSlip() {
+        const form = document.getElementById('settings-form');
+        const params = new URLSearchParams();
+        for (const name of ['deposit_slip_layout', 'deposit_slip_nudge_x_in', 'deposit_slip_nudge_y_in']) {
+            const el = form && form.querySelector(`[name="${name}"]`);
+            if (el) params.set(name, el.value);
+        }
+        const qs = params.toString();
+        window.open('/api/deposits/test-slip' + (qs ? `?${qs}` : ''), '_blank');
     },
 
     // ----- a bank account's details for blank check stock (#739) --------

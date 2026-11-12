@@ -66,7 +66,7 @@ function sourceWord(type, kind) {
         job_cost: () => `${T('Job')} cost`, payroll: 'Pay run', pto: 'Time off accrual',
         in_kind_gift: 'In-kind gift', restriction_release: 'Release from restriction',
         functional_allocation: 'Functional allocation', late_fee: 'Late fee',
-        adjustment: 'Inventory adjustment', sales_tax_payment: 'Sales tax payment',
+        adjustment: 'Inventory adjustment', inventory_adjustment: 'Inventory adjustment', sales_tax_payment: 'Sales tax payment',
         iif_import: 'IIF import', depreciation: 'Depreciation',
         asset_acquisition: 'Asset acquisition', asset_disposal: 'Asset disposal',
         qbo_ledger: 'QuickBooks import', qbo_journal: 'QuickBooks journal', qbo_cogs: 'QuickBooks cost of goods',
@@ -2774,5 +2774,90 @@ const Replace = {
     set(form, name, value) {
         const el = form && form.querySelector(`[name="${name}"]`);
         if (el && value !== undefined && value !== null) el.value = String(value);
+    },
+};
+
+/**
+ * Attachments on a new document before its first save (#796). Enter Bill,
+ * Enter Expense and Enter Credit Card Charge show the Attachments strip a
+ * saved document shows. A file attached here is held by the server
+ * (POST /api/attachments/pending) and its id goes on the create call as
+ * `pending_attachments`, so the document and its files save together.
+ * Cancel, the dialog's ×, or Escape discards them; a form lost with its tab
+ * leaves them to age out after a day. One form is open at a time, so the
+ * list is module state: the form calls reset() before it opens, ids() into
+ * its body, and saved() once the create has answered.
+ */
+const PendingFiles = {
+    _files: [],
+
+    reset() { PendingFiles._files = []; },
+    ids() { return PendingFiles._files.map(f => f.id); },
+
+    stripHtml() {
+        return `
+        <div class="pending-files" data-write style="margin-top:12px; border-top:1px solid var(--gray-300); padding-top:8px;">
+            <div style="font-weight:700; font-size:12px; margin-bottom:4px;">Attachments</div>
+            <div id="pending-files-list" style="margin-bottom:8px; font-size:11px;">${PendingFiles.listHtml(PendingFiles._files)}</div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                <input type="file" id="pending-attach-file" aria-label="File to attach" style="font-size:11px;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="PendingFiles.add()">Attach</button>
+                <span style="font-size:11px; color:var(--gray-600);">Attached when you save.</span>
+            </div>
+        </div>`;
+    },
+
+    // the files on the form, each with its size and a Remove
+    listHtml(files) {
+        if (!files || !files.length) return '<span style="color:var(--text-muted);">No attachments</span>';
+        return files.map(f =>
+            `<div style="display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; padding:2px 0;">
+                <span>${escapeHtml(f.filename)}</span>
+                ${f.file_size == null ? '' : `<span style="color:var(--gray-400);">(${formatFileSize(f.file_size)})</span>`}
+                <button type="button" data-destructive aria-label="Remove ${escapeHtml(f.filename)}" class="btn btn-sm btn-danger" data-pending-id="${escapeHtml(f.id)}" onclick="PendingFiles.remove(this.dataset.pendingId)" style="padding:0 4px; font-size:10px;">X</button>
+            </div>`
+        ).join('');
+    },
+
+    render() {
+        const el = $('#pending-files-list');
+        if (el) el.innerHTML = PendingFiles.listHtml(PendingFiles._files);
+    },
+
+    async add() {
+        const input = $('#pending-attach-file');
+        if (!input?.files[0]) { toast('Select a file first', 'error'); return; }
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        try {
+            let resp;
+            try { resp = await fetch('/api/attachments/pending', { method: 'POST', body: fd }); }
+            catch (err) { throw new Error("SlowBooks isn't responding (network error) — if this keeps happening, close and relaunch SlowBooks Pro."); }
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Upload failed'));
+            PendingFiles._files.push(await resp.json());
+            input.value = '';
+            PendingFiles.render();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // taken off the form: gone from the list at once; the server's copy is
+    // dropped, or ages out if that request fails
+    async remove(id) {
+        PendingFiles._files = PendingFiles._files.filter(f => f.id !== id);
+        PendingFiles.render();
+        try { await API.del(`/attachments/pending/${encodeURIComponent(id)}`); } catch (e) { /* ages out */ }
+    },
+
+    // the create answered: the files are the document's now
+    saved() { PendingFiles._files = []; },
+
+    // the form closed without saving. Runs as the dialog closes, so it
+    // never throws or waits.
+    discard() {
+        const ids = PendingFiles.ids();
+        PendingFiles._files = [];
+        for (const id of ids) {
+            try { API.del(`/attachments/pending/${encodeURIComponent(id)}`).catch(() => {}); } catch (e) { /* ages out */ }
+        }
     },
 };

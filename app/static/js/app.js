@@ -1127,11 +1127,12 @@ const App = {
         'FieldTickets.del', 'FieldTickets.voidTicket', 'FieldTickets.deleteAttachment', 'FieldTickets.upload',
         'SalesReceiptsPage.void', 'CreditMemosPage.void', 'CreditMemosPage.showApply',
         'CreditMemosPage.doApply', 'PaymentsPage.void', 'PaymentsPage.doVoid', 'PaymentsPage.showApplyCredit', 'DepositsPage.voidDeposit',
-        'DepositsPage.makeDeposit', 'DepositsPage.editDeposit', 'DepositsPage.saveEdit', 'JournalPage.editEntry',
+        'DepositsPage.makeDeposit', 'DepositsPage.editDeposit', 'DepositsPage.saveEdit', 'DepositsPage.addOtherLine', 'DepositsPage.removeOtherLine', 'JournalPage.editEntry',
         'BillsPage.void', 'BillsPage.voidBillPayment', 'BillsPage.uploadAttachment',
         'BillsPage.deleteAttachment', 'BillsPage.showPayForm', 'BillsPage.saveLienWaiver', 'VendorCreditsPage.void', 'VendorCreditsPage.showApply',
         'VendorCreditsPage.doApply', 'PurchaseOrdersPage.convertToBill', 'PurchaseOrdersPage.doConvert',
         'ExpensesPage.void', 'ExpensesPage.uploadAttachment', 'ExpensesPage.deleteAttachment', 'CCChargesPage.voidCharge',
+        'CCChargesPage.uploadAttachment', 'CCChargesPage.deleteAttachment',
         'JournalPage.void', 'JournalPage.uploadAttachment', 'JournalPage.deleteAttachment',
         'JobCostsPage.voidEntry', 'JobCostsPage.showAllocate', 'JobsPage.postTime', 'JobsPage.remove',
         'JobsPage.saveBudget', 'JobsPage.seedBudget', 'JobsPage.saveContract', 'JobsPage.saveSov', 'JobsPage.buildSov',
@@ -1151,7 +1152,7 @@ const App = {
         'BenefitsPage.retireCode', 'BenefitsPage.seedStandard', 'BenefitsPage.setupAccounts', 'BenefitsPage.rebuildYTD',
         'BenefitsPage.createRemittanceBill', 'BenefitsPage.deleteRate', 'BenefitsPage.deleteGroup',
         'OnboardingPage.completeTask', 'FixedAssetsPage.showPostPurchaseForm', 'FixedAssetsPage.showDisposeForm',
-        'FixedAssetsPage.showDepreciationForm', 'FixedAssetsPage.showImportForm', 'ItemsPage.showAdjust',
+        'FixedAssetsPage.showDepreciationForm', 'FixedAssetsPage.showImportForm', 'ItemsPage.showAdjust', 'ItemsPage.showAdjustMany',
         'BankingPage.voidEntry', 'BankingPage.toggleRegCleared', 'BankingPage.editEntry', 'BankingPage.uploadAttachment', 'BankingPage.deleteAttachment', 'BankingPage.saveEntryAnyway', 'BankingPage.voidTransfer', 'BankingPage.showEntryForm', 'BankingPage.showTransferForm',
         'BankingPage.showAccountForm', 'BankingPage.showOFXImport', 'BankingPage.confirmOFXImport', 'BankingPage.startReconcile',
         'BankingPage.finishReconcile', 'BankingPage.abandonReconcile', 'BankingPage.matchLine', 'BankingPage.showMatch',
@@ -2163,8 +2164,9 @@ const App = {
                                 <option value="vendors">Vendors</option>
                                 <option value="items">Items</option>
                                 <option value="accounts">Chart of Accounts</option>
+                                <option value="invoices">${T('Invoices')}</option>
                             </select></div>
-                        <p class="hint" id="csv-import-help" aria-live="polite" style="font-size:11px; margin-bottom:10px;">${App._csvImportHelpHtml('customers')}</p>
+                        <div class="hint" id="csv-import-help" aria-live="polite" style="font-size:11px; margin-bottom:10px;">${App._csvImportHelpHtml('customers')}</div>
                         <div class="form-group"><label>CSV File</label>
                             <input type="file" name="file" accept=".csv" required></div>
                         <button type="submit" class="btn btn-primary">Import</button>
@@ -2199,11 +2201,36 @@ const App = {
             // a Name written Parent:Child with Parent blank is a sub-account (W-119)
             columns: 'Number, Name (a sub-account may be written Parent:Child, its type left blank to take the parent\'s), Type, Parent, Description, Active',
         },
+        // SlowBooks' own invoice layout (#882; app/services/csv_invoice_import.py):
+        // the headings exactly, one row per line, a note per column.
+        invoices: {
+            templateUrl: '/api/csv/import/invoices/template',
+            notes: () => [
+                ['invoice_number', `required. Rows that share a number are one ${T('invoice')}, their lines in row order. A number already in the books is refused, never given another.`],
+                ['date', 'required. 2026-11-02 or 11/02/2026.'],
+                ['due_date', `optional. Blank, it comes from the ${T('customer')}'s terms.`],
+                ['customer', `required: the name as it is on the ${T('Customers')} list ("Parent: Sub" for a sub-${T('customer')}). It must already exist; nothing posts until every one is found.`],
+                ['item', 'optional: the item\'s code or name. Blank, the line posts to the default income account, as a description-only line on the form does.'],
+                ['description', 'the line\'s text. Blank, the item\'s description.'],
+                ['quantity', 'required, 0 or more. Blank is 1.'],
+                ['rate', 'required: the price of one. Blank, the item\'s rate.'],
+                ['taxable', `optional: yes or no. Blank, the item's or the ${T('customer')}'s rule.`],
+                ['memo', `optional: the ${T('invoice')}'s memo.`],
+                ['class', `optional: a name on the ${T('Classes')} list.`],
+                ['job', `optional: one of the ${T('customer')}'s ${T('jobs')}, by name.`],
+            ],
+        },
     },
 
     _csvImportHelpHtml(entity) {
         const spec = App._CSV_IMPORT_COLUMNS[entity];
         if (!spec) return '';
+        if (spec.notes) {
+            const items = spec.notes().map(([column, note]) => `<li><code>${escapeHtml(column)}</code>: ${escapeHtml(note)}</li>`).join('');
+            return `Columns, with these headings, in any order: <ul style="margin:4px 0 4px 18px;">${items}</ul>`
+                + `A dry run comes first and shows what would post; nothing posts while any row is refused. `
+                + `<a href="${spec.templateUrl}" download>Download the template</a>.`;
+        }
         const required = entity === 'accounts' ? '' : ' Only Name is required; headings match in any case, and other columns are ignored.';
         const columns = typeof spec.columns === 'function' ? spec.columns() : spec.columns;
         return `Columns read: ${escapeHtml(columns)}.${required} `
@@ -2219,6 +2246,7 @@ const App = {
         e.preventDefault();
         const form = e.target;
         const entity = form.entity_type.value;
+        if (entity === 'invoices') return App._importInvoices(form.file.files[0], true);
         const formData = new FormData();
         formData.append('file', form.file.files[0]);
         try {
@@ -2236,6 +2264,60 @@ const App = {
         } catch (err) {
             $('#csv-import-results').innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
         }
+    },
+
+    // The invoice import (#882): a dry run first, its report, and a button
+    // that posts the same file once nothing in it is refused.
+    async _importInvoices(file, dryRun) {
+        const out = $('#csv-import-results');
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const resp = await fetch(`/api/csv/import/invoices?dry_run=${dryRun ? 1 : 0}`, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
+            const data = await resp.json();
+            App._csvInvoiceFile = dryRun ? file : null;
+            out.innerHTML = App._invoiceImportReportHtml(data);
+        } catch (err) {
+            out.innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
+        }
+    },
+
+    postInvoiceImport() {
+        if (App._csvInvoiceFile) return App._importInvoices(App._csvInvoiceFile, false);
+    },
+
+    _invoiceImportReportHtml(d) {
+        const errors = d.errors || [];
+        const docs = d.documents || [];
+        const word = n => (n === 1 ? T('invoice') : T('invoices'));
+        let head;
+        if (d.posted) {
+            head = `<div style="color:var(--text-success);">Posted ${docs.length} ${word(docs.length)}, ${formatCurrency(d.total)}.</div>`;
+        } else if (d.dry_run) {
+            head = `<div><strong>Dry run</strong>: nothing was posted.</div>`;
+        } else {
+            head = `<div style="color:var(--danger);">Nothing was posted: fix the rows below and import the file again.</div>`;
+        }
+        const unknown = d.customers_unknown || [];
+        const summary = `<div style="margin-top:4px;">${d.invoices} ${word(d.invoices)}, ${d.lines} ${d.lines === 1 ? 'line' : 'lines'}; `
+            + `${d.customers_matched} ${d.customers_matched === 1 ? T('customer') : T('customers')} matched`
+            + `${unknown.length ? `, ${unknown.length} not found (${unknown.map(n => escapeHtml(n)).join(', ')})` : ''}; `
+            + `${d.items_matched} ${d.items_matched === 1 ? 'item' : 'items'} matched. `
+            + `Subtotal ${formatCurrency(d.subtotal)}, tax ${formatCurrency(d.tax)}, total ${formatCurrency(d.total)}.</div>`;
+        const rows = docs.map(x => `<tr><td>${escapeHtml(String(x.row))}</td><td>${escapeHtml(x.invoice_number)}</td><td>${escapeHtml(x.customer)}</td>`
+            + `<td>${escapeHtml(formatDate(x.date))}</td><td>${escapeHtml(x.due_date ? formatDate(x.due_date) : '')}</td><td class="amount">${escapeHtml(String(x.lines))}</td>`
+            + `<td class="amount">${formatCurrency(x.total)}</td></tr>`).join('');
+        const table = rows ? `<div class="table-container" style="max-height:320px; overflow:auto; margin-top:6px;"><table>
+            <thead><tr><th scope="col">Row</th><th scope="col">Number</th><th scope="col">${T('Customer')}</th><th scope="col">Date</th><th scope="col">Due</th><th scope="col" class="amount">Lines</th><th scope="col" class="amount">Total</th></tr></thead>
+            <tbody>${rows}</tbody></table></div>` : '';
+        const refused = errors.length
+            ? `<div style="color:var(--danger); margin-top:6px;">Refused (${errors.length}):<br>${errors.map(e => escapeHtml(e)).join('<br>')}</div>`
+            : '';
+        const post = d.dry_run && !errors.length && docs.length
+            ? `<button type="button" class="btn btn-primary" style="margin-top:8px;" onclick="App.postInvoiceImport()">Post ${docs.length} ${word(docs.length)}</button>`
+            : '';
+        return `<div style="font-size:11px;">${head}${summary}${table}${refused}${post}</div>`;
     },
 
     // Quick Entry mode — batch invoice entry for paper invoice backlog

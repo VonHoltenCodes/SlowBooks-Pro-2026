@@ -33,6 +33,7 @@ from app.services.accounting import (
     get_ap_account_id,
     reversing_lines,
 )
+from app.services import pending_attachments
 from app.services.audit import audited_bulk_delete
 from app.services.compliance import vendor_compliance
 from app.services.early_pay_discounts import discounted_on
@@ -496,6 +497,9 @@ def _resync_po_status(db: Session, po_ids) -> None:
 def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
     _reject_po_line_links(data.lines)
+    # files attached on the form before this save (#796): checked before
+    # anything is written, attached with the bill below
+    pending = pending_attachments.take(db, data.pending_attachments)
 
     vendor = db.query(Vendor).filter(Vendor.id == data.vendor_id).first()
     if not vendor:
@@ -607,6 +611,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         data.date,
         retainage_held=retainage_held,
     )
+    db.flush()
+    pending_attachments.bind(db, pending, "bill", bill.id)
 
     db.commit()
     db.refresh(bill)

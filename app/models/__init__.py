@@ -121,7 +121,7 @@ from app.models.email_templates import EmailTemplate
 from app.models.invoice_messages import InvoiceMessage
 
 # Phase 11: Inventory + Saved Reports
-from app.models.items import InventoryMovement
+from app.models.items import InventoryAdjustment, InventoryMovement
 from app.models.saved_reports import SavedReport
 
 # Possible Duplicates report (#414): groups kept as "not a duplicate"
@@ -202,6 +202,7 @@ __all__ = [
     "InvoiceMessage",
     # Phase 11
     "InventoryMovement",
+    "InventoryAdjustment",
     "SavedReport",
     # Auth audit
     "LoginAttempt",
@@ -232,3 +233,4 @@ from app.models.collections import (  # noqa: F401 — registers the tables
     InvoiceReminderRule,
 )
 from app.models.bank_check_details import BankCheckDetails  # noqa: E402,F401
+from app.models.deposit_lines import DepositOtherLine  # noqa: E402,F401

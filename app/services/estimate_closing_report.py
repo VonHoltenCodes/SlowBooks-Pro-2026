@@ -6,7 +6,8 @@
 #
 # An estimate is in the period by its date. The closing rate is won ÷
 # decided (won + lost): an open bid is not counted either way. Dollars are
-# the estimate's total as it stands. "Sent" is the first time the estimate
+# the estimate's total as it stands, or with before_tax the total less its
+# sales tax (the subtotal and the markups: the bid amount). "Sent" is the first time the estimate
 # was emailed from SlowBooks, else its date; the decision is decided_at,
 # which the status change stamps (app/models/estimates.py). An estimate
 # decided before decided_at existed and with nothing to date it from is
@@ -42,7 +43,7 @@ COLUMNS = [
     {"key": "expired_count", "label": "Expired (open)", "kind": "int"},
     {"key": "closing_rate", "label": "Closing rate", "kind": "pct"},
     {"key": "closing_rate_amount", "label": "Closing rate $", "kind": "pct"},
-    {"key": "avg_days", "label": "Avg days to decision", "kind": "num"},
+    {"key": "avg_days", "label": "Avg days to decision", "kind": "num1"},
 ]
 
 
@@ -115,10 +116,12 @@ def estimate_closing_report(
     end_date: Optional[date] = None,
     customer_id: Optional[int] = None,
     job_type: Optional[str] = None,
+    before_tax: bool = False,
 ) -> dict:
     """Estimates dated in the period, won, lost and open, by count and by
     dollars, in total, per customer and per job type. `job_type` "" (or the
-    "No job type" label) picks the estimates with no job or no job type."""
+    "No job type" label) picks the estimates with no job or no job type.
+    `before_tax` counts each estimate's dollars without its sales tax."""
     today = date.today()
     start_date = start_date or fiscal_year_start(db, today)
     end_date = end_date or today
@@ -147,6 +150,8 @@ def estimate_closing_report(
     by_type: dict[str, dict] = {}
     for e in estimates:
         amount = Decimal(str(e.total or 0))
+        if before_tax:
+            amount -= Decimal(str(e.tax_amount or 0))
         names[e.customer_id] = e.customer.name if e.customer else ""
         buckets = (
             total,
@@ -188,6 +193,7 @@ def estimate_closing_report(
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "as_of": today.isoformat(),
+        "before_tax": before_tax,
         "columns": COLUMNS,
         "totals": _figures(total),
         "by_customer": customer_rows,

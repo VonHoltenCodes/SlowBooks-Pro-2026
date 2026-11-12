@@ -51,7 +51,7 @@ const ReportsPage = {
         'field-ticket-log':     { label: 'Field Ticket Log',   open: (p) => ReportsPage.fieldTicketLog(p), asOf: true, construction: true },
         'retainage':            { label: 'Retainage',          open: (p) => ReportsPage.retainage(p), asOf: true, construction: true },
         'compliance':           { label: 'Sub Compliance',     open: (p) => ReportsPage.subCompliance(p), asOf: true, construction: true },
-        'estimate-closing-rate': { label: 'Estimate Closing Rate', open: (p) => ReportsPage.estimateClosingRate(p), keep: ['customer_id', 'job_type'] },
+        'estimate-closing-rate': { label: 'Estimate Closing Rate', open: (p) => ReportsPage.estimateClosingRate(p), keep: ['customer_id', 'job_type', 'before_tax'] },
         'budget-vs-actual':     { label: 'Budget vs Actual',   open: (p) => { if (/^\d{4}$/.test(p.year || '')) BudgetsPage._year = parseInt(p.year, 10); return BudgetsPage.showVariance(p); } },
         'financial-statements': { label: 'Financial Statements Pack', open: (p) => ReportsPage.financialStatementsPdf(p) },
         'fixed-asset-reconciliation': { label: 'Fixed Asset Reconciliation', open: () => ReportsPage.fixedAssetReconciliation() },
@@ -4800,6 +4800,10 @@ ReportsPage.estimateClosingRate = async function (prefill) {
     const params = {};
     if (prefill && prefill.customer_id) params.customer_id = prefill.customer_id;
     if (prefill && prefill.job_type) params.job_type = prefill.job_type;
+    // Before sales tax: the dollars as the bid amounts (subtotal and markups,
+    // no tax); rides on the address, the exports and a saved report
+    const taxOff = !!(prefill && ['true', '1', true].includes(prefill.before_tax));
+    if (taxOff) params.before_tax = 'true';
     const types = [...new Set(jobs.map(j => (j.job_type || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const opt = (v, label, cur) => `<option value="${escapeHtml(String(v))}" ${String(cur || '') === String(v) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
     const toolbar = `<div class="form-group">
@@ -4813,11 +4817,18 @@ ReportsPage.estimateClosingRate = async function (prefill) {
             <select id="ecr-job-type" data-no-search onchange="ReportsPage.setParam('job_type', this.value)">
                 ${opt('', 'All', params.job_type)}${types.map(t => opt(t, t, params.job_type)).join('')}${opt('No job type', Terms.text('No job type'), params.job_type)}
             </select>
+        </div>
+        <div class="form-group">
+            <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
+                <input type="checkbox" id="ecr-before-tax" ${taxOff ? 'checked' : ''} onchange="ReportsPage.setParam('before_tax', this.checked ? 'true' : '')">
+                Before sales tax
+            </label>
         </div>`;
     await ReportsPage.openPeriodModal('Estimate Closing Rate', ReportsPage.defaultPeriod(), async (_period, range, p) => {
         const qs = new URLSearchParams({ start_date: range.start, end_date: range.end });
         if (p.customer_id) qs.set('customer_id', p.customer_id);
         if (p.job_type) qs.set('job_type', p.job_type);
+        if (p.before_tax) qs.set('before_tax', 'true');
         const data = await API.get(`/reports/estimate-closing-rate?${qs}`);
         const m = ReportsPage._money;
         const pct = (v) => (v === null || v === undefined ? '—' : `${Number(v).toFixed(1)}%`);
@@ -4839,7 +4850,7 @@ ReportsPage.estimateClosingRate = async function (prefill) {
                 ${foot}</table></div>`;
         const undated = t.undated ? ` ${t.undated} decided estimate${t.undated === 1 ? ' has' : 's have'} no decision date (decided before this report existed) and ${t.undated === 1 ? 'is' : 'are'} left out of the average.` : '';
         return `${ReportsPage._exportButtons('estimate-closing-rate', qs.toString())}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Estimates dated ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, by status today. Won is accepted or converted; the closing rate is won ÷ (won + lost), so open bids count neither way. Dollars are the estimate totals. Days run from the first time the estimate was emailed (else its date) to the decision.${undated}</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Estimates dated ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, by status today. Won is accepted or converted; the closing rate is won ÷ (won + lost), so open bids count neither way. ${data.before_tax ? 'Dollars are the estimates before sales tax (subtotal and markups).' : 'Dollars are the estimate totals, sales tax included.'} Days run from the first time the estimate was emailed (else its date) to the decision.${undated}</div>
             <div style="display:flex; gap:24px; margin-bottom:6px; font-size:13px;">
                 <div><strong>${pct(t.closing_rate)}</strong> closing rate (${t.won_count} of ${t.won_count + t.lost_count} decided)</div>
                 <div><strong>${pct(t.closing_rate_amount)}</strong> by dollars</div>
@@ -4847,6 +4858,6 @@ ReportsPage.estimateClosingRate = async function (prefill) {
             </div>
             ${grid(`By ${T('Customer').toLowerCase()}`, T('Customer'), data.by_customer)}
             ${grid(`By ${T('Job').toLowerCase()} type`, `${T('Job')} type`, data.by_job_type)}`;
-    }, "Dates", false, { view: 'estimate-closing-rate', prefill, params, toolbar, wide: true, spotlight: false });
+    }, "Dates", false, { reportType: 'estimate_closing_rate', view: 'estimate-closing-rate', prefill, params, toolbar, wide: true, spotlight: false });
 };
 

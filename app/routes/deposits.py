@@ -9,9 +9,10 @@
 # ============================================================================
 
 from app.routes._print import print_html
+from collections import Counter
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -37,6 +38,7 @@ from app.services.bank_posting import (
 )
 from app.services.bank_register import date_text
 from app.services.closing_date import check_closing_date
+from app.services import deposit_other_lines as other
 from app.services.donor_documents import document_label
 from app.services.terminology import document_reference, terms_from_db
 from app.services.undeposited_funds import (
@@ -190,6 +192,7 @@ def list_deposits(skip: int = 0, limit: int = 25, db: Session = Depends(get_db))
         .all()
     )
     dead = dead_transaction_ids(db, txns)
+    other_counts = other.counts(db, ids)
     bank_ids = {ln.account_id for t in txns for ln in t.lines if ln.debit > 0}
     names = {
         a.id: a.name for a in db.query(Account).filter(Account.id.in_(bank_ids)).all()
@@ -206,11 +209,63 @@ def list_deposits(skip: int = 0, limit: int = 25, db: Session = Depends(get_db))
                 account_name=names.get(bank.account_id, "") if bank else "",
                 amount=Decimal(str(bank.debit)) if bank else Decimal("0"),
                 items=counts.get(t.id),
+                other_items=other_counts.get(t.id, 0),
                 voided=t.id in dead,
                 reconciled=reconciled(t),
             )
         )
     return out
+
+
+@router.get("/test-slip")
+def test_print_deposit_slip(
+    deposit_slip_layout: str = Query(default=None),
+    deposit_slip_nudge_x_in: str = Query(default=None),
+    deposit_slip_nudge_y_in: str = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """A sample deposit laid onto pre-printed slip stock (#798): made-up
+    figures (two checks, some cash, today's date, "Sample Checking") at the
+    places the layout gives, through the same renderer as a real deposit,
+    so the layout can be lined up by holding the sheet against a slip.
+
+    The Settings page passes the form's current (unsaved) layout and
+    nudges, each checked the way saving it would be; any left out reads the
+    saved setting. It is always the pre-printed slip, whatever the stock
+    setting says, since that is what it lines up. Nothing is stored."""
+    from datetime import date
+
+    from fastapi.responses import Response
+
+    from app.services.pdf_service import SAMPLE_DEPOSIT, generate_deposit_pdf
+    from app.services.request_utils import content_disposition
+    from app.services.settings_service import (
+        SettingValueError,
+        clean_setting_value,
+        get_all_settings,
+    )
+
+    company = dict(get_all_settings(db))
+    for key, value in (
+        ("deposit_slip_layout", deposit_slip_layout),
+        ("deposit_slip_nudge_x_in", deposit_slip_nudge_x_in),
+        ("deposit_slip_nudge_y_in", deposit_slip_nudge_y_in),
+    ):
+        if value is not None:
+            try:
+                company[key] = clean_setting_value(key, value)
+            except SettingValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+    company["deposit_slip_stock"] = "preprinted"
+    sample = {**SAMPLE_DEPOSIT, "date": date.today()}
+    pdf = generate_deposit_pdf(sample, company)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": content_disposition("Deposit_slip_test_print.pdf")
+        },
+    )
 
 
 @router.get("/{deposit_id}", response_model=DepositDetailResponse)
@@ -235,6 +290,10 @@ def get_deposit(deposit_id: int, db: Session = Depends(get_db)):
     details = _payment_details(db, [t for _, t in taken])
     bank = next((ln for ln in txn.lines if ln.debit > 0), None)
     account = db.get(Account, bank.account_id) if bank else None
+    # the lines for money never invoiced (#792); a void deposit keeps them
+    # listed (they were never Undeposited Funds' to give back)
+    others = other.describe(db, other.stored(db, txn.id))
+    payments = [_payment_line(tl, t, details.get(t.id, {})) for tl, t in taken]
     return DepositDetailResponse(
         id=txn.id,
         date=txn.date,
@@ -243,9 +302,17 @@ def get_deposit(deposit_id: int, db: Session = Depends(get_db)):
         account_name=account.name if account else "",
         amount=Decimal(str(bank.debit)) if bank else Decimal("0"),
         items=len(taken) or None,
+        other_items=len(others),
         voided=txn.id in dead_transaction_ids(db, [txn]),
         reconciled=reconciled(txn),
-        payments=[_payment_line(tl, t, details.get(t.id, {})) for tl, t in taken],
+        payments=payments,
+        other_lines=others,
+        payments_total=float(
+            _q(sum((Decimal(str(p.amount)) for p in payments), Decimal("0")))
+        ),
+        other_total=float(
+            _q(sum((Decimal(str(o["amount"])) for o in others), Decimal("0")))
+        ),
     )
 
 
@@ -306,6 +373,12 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
             status_code=400, detail="Undeposited Funds account not found"
         )
 
+    # Money that was never invoiced, on the same slip (#792): checked
+    # before anything is read off Undeposited Funds, so a refused line
+    # posts nothing.
+    others = other.validate(db, data.other_lines, uf_id)
+    other_total = other.total(others)
+
     chosen: list[TransactionLine] = []
     if data.line_ids:
         # The deposit is the payments ticked, each still waiting — not a
@@ -325,13 +398,21 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
                 )
             chosen.append(line)
         _lock_taken(db, chosen)
-        total = _q(sum((Decimal(str(ln.debit)) for ln in chosen), Decimal("0")))
-        if data.total is not None and _q(data.total) != total:
+        paid = _q(sum((Decimal(str(ln.debit)) for ln in chosen), Decimal("0")))
+        if data.total is not None and _q(data.total) != paid + other_total:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"The payments ticked add up to ${total:,.2f}, not "
-                    f"${_q(data.total):,.2f}. Reload Make Deposits and try again."
+                    (
+                        f"The payments ticked and the other lines add up to "
+                        f"${paid + other_total:,.2f}, not ${_q(data.total):,.2f}. "
+                        "Reload Make Deposits and try again."
+                    )
+                    if others
+                    else (
+                        f"The payments ticked add up to ${paid:,.2f}, not "
+                        f"${_q(data.total):,.2f}. Reload Make Deposits and try again."
+                    )
                 ),
             )
         # A typed (lump) deposit nets only against whole items, so after one
@@ -339,49 +420,67 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
         # total is capped by the live balance too, or ticking it would take
         # the part already deposited a second time.
         waiting_total = _q(waiting_balance(db, uf_id))
-        if total > waiting_total:
+        if paid > waiting_total:
             raise HTTPException(
-                status_code=400, detail=_over_waiting(total, waiting_total)
+                status_code=400, detail=_over_waiting(paid, waiting_total)
+            )
+    elif others:
+        # Other lines and no payments ticked: the deposit is those lines,
+        # and takes nothing from Undeposited Funds.
+        paid = Decimal("0")
+        if data.total is not None and _q(data.total) != other_total:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"The other lines add up to ${other_total:,.2f}, not "
+                    f"${_q(data.total):,.2f}. Reload Make Deposits and try again."
+                ),
             )
     else:
         # No payments ticked: a typed lump sum. Cap it at what is actually
         # waiting in Undeposited Funds — the waiting items less what an
         # earlier partial lump deposit already took from them — otherwise a
         # number the page added up can post more than ever came in.
-        total = _q(data.total or 0)
+        paid = _q(data.total or 0)
         waiting_total = _q(waiting_balance(db, uf_id))
-        if total > waiting_total:
+        if paid > waiting_total:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Only ${waiting_total:,.2f} is waiting in Undeposited "
-                    f"Funds; you asked to deposit ${total:,.2f}. Reload Make "
+                    f"Funds; you asked to deposit ${paid:,.2f}. Reload Make "
                     f"Deposits and try again."
                 ),
             )
 
+    total = paid + other_total
     if total <= 0:
         raise HTTPException(status_code=400, detail="Deposit amount must be positive")
 
+    label = f"Deposit to {bank_account.name}"
     journal_lines = [
         {
             "account_id": data.deposit_to_account_id,
             "debit": total,
             "credit": Decimal("0"),
-            "description": f"Deposit to {bank_account.name}",
-        },
-        {
-            "account_id": uf_id,
-            "debit": Decimal("0"),
-            "credit": total,
-            "description": f"Deposit to {bank_account.name}",
+            "description": label,
         },
     ]
+    if paid > 0:
+        journal_lines.append(
+            {
+                "account_id": uf_id,
+                "debit": Decimal("0"),
+                "credit": paid,
+                "description": label,
+            }
+        )
+    journal_lines += other.posting_lines(others, label)
 
     txn = create_journal_entry(
         db,
         data.date,
-        f"Deposit to {bank_account.name}",
+        label,
         journal_lines,
         source_type="deposit",
         reference=data.reference or "",
@@ -390,6 +489,7 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
     )
     for line in chosen:
         line.deposit_transaction_id = txn.id
+    other.store(db, txn.id, others)
 
     db.commit()
     return {
@@ -397,6 +497,7 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
         "transaction_id": txn.id,
         "amount": float(total),
         "items": len(chosen),
+        "other_items": len(others),
     }
 
 
@@ -404,8 +505,9 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
 def update_deposit(deposit_id: int, data: DepositUpdate, db: Session = Depends(get_db)):
     """Edit a deposit in place from the register (#388), the way the
     bank-entry edit rewrites a register entry: the same journal entry, its
-    date, slip reference, class and job, and which undeposited payments it
-    takes. The two ledger lines (DR bank / CR Undeposited Funds) are
+    date, slip reference, class and job, which undeposited payments it
+    takes, and its lines for money never invoiced (#792). The ledger lines
+    (DR bank / CR Undeposited Funds / CR each other line's account) are
     reposted through `replace_journal_lines` — not mutated by hand — so the
     deposit's statement match and audit trail stay with it; the payments it
     no longer takes go back on the Make Deposits list and the new ones are
@@ -437,8 +539,14 @@ def update_deposit(deposit_id: int, data: DepositUpdate, db: Session = Depends(g
         .filter(TransactionLine.deposit_transaction_id == txn.id)
         .all()
     )
+    own_others = other.stored(db, txn.id)
+    old_other_total = _q(
+        sum((Decimal(str(o.amount)) for o in own_others), Decimal("0"))
+    )
+    old_paid = old_total - old_other_total
     # A deposit Make Deposits posted is exactly DR bank / CR Undeposited
-    # Funds, and only that shape is reposted from the payments it takes. An
+    # Funds for the payments / CR each of its other lines (#792), and only
+    # that shape is reposted from the payments it takes and its lines. An
     # IIF or QuickBooks-report import posts deposits with their own splits —
     # straight to income or other accounts, with classes and memos — and
     # rewriting one as bank / Undeposited Funds would take its income off
@@ -446,26 +554,32 @@ def update_deposit(deposit_id: int, data: DepositUpdate, db: Session = Depends(g
     # Sales 0, Undeposited Funds -500 after a reference fix). Such a deposit
     # keeps every line; only its date, reference, class and job change.
     others = [ln for ln in txn.lines if ln is not bank_line]
+    expected = Counter((o.account_id, _q(o.amount)) for o in own_others)
+    if old_paid > 0:
+        expected[(uf_id, old_paid)] += 1
     standard = (
-        len(others) == 1
-        and others[0].account_id == uf_id
-        and _q(others[0].credit) == old_total
-        and _q(others[0].debit) == 0
+        old_paid >= 0
+        and bool(expected)
+        and all(_q(ln.debit) == 0 for ln in others)
+        and Counter((ln.account_id, _q(ln.credit)) for ln in others) == expected
     )
-    if not standard and data.line_ids and set(data.line_ids) != {ln.id for ln in held}:
-        accts = [db.get(Account, ln.account_id) for ln in others]
-        names = ", ".join(
-            dict.fromkeys(a.name for a in accts if a is not None and a.id != uf_id)
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"This deposit posts to {names or 'its own accounts'}, not only "
-                "Undeposited Funds (it was imported that way), so the payments "
-                "it takes and its amount cannot be changed here. Its date and "
-                "reference can; to change the amount, void it and deposit again."
-            ),
-        )
+    if not standard:
+        moved = data.line_ids and set(data.line_ids) != {ln.id for ln in held}
+        if moved or data.other_lines:
+            accts = [db.get(Account, ln.account_id) for ln in others]
+            names = ", ".join(
+                dict.fromkeys(a.name for a in accts if a is not None and a.id != uf_id)
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This deposit posts to {names or 'its own accounts'}, not only "
+                    "Undeposited Funds (it was imported that way), so the payments "
+                    "it takes, its lines and its amount cannot be changed here. Its "
+                    "date and reference can; to change the amount, void it and "
+                    "deposit again."
+                ),
+            )
     # An empty or omitted `line_ids` leaves the payments alone — a legacy
     # deposit that named none (imported, or an amount posted by hand) can
     # still have its date or reference fixed, and the form omits `line_ids`
@@ -488,21 +602,38 @@ def update_deposit(deposit_id: int, data: DepositUpdate, db: Session = Depends(g
                 )
             chosen.append(line)
         _lock_taken(db, chosen, allow_deposit_id=txn.id)
-        new_total = _q(sum((Decimal(str(ln.debit)) for ln in chosen), Decimal("0")))
-        if new_total <= 0:
+        new_paid = _q(sum((Decimal(str(ln.debit)) for ln in chosen), Decimal("0")))
+        if new_paid <= 0:
             raise HTTPException(
                 status_code=400, detail="A deposit takes at least one payment"
             )
         # What this deposit may take: what is waiting now plus what it holds
         # (released, those wait again) — never more than came in.
-        available = _q(waiting_balance(db, uf_id)) + old_total
-        if new_total > available:
+        available = _q(waiting_balance(db, uf_id)) + max(old_paid, Decimal("0"))
+        if new_paid > available:
             raise HTTPException(
-                status_code=400, detail=_over_waiting(new_total, available)
+                status_code=400, detail=_over_waiting(new_paid, available)
             )
     else:
         chosen = held
-        new_total = old_total
+        new_paid = old_paid
+
+    # The other lines (#792): a list sent is the whole new list (an empty
+    # one takes them off); left out, the deposit keeps the ones it has. A
+    # line it already has keeps an account or name made inactive since.
+    if standard and data.other_lines is not None:
+        new_others = other.validate(db, data.other_lines, uf_id, own=own_others)
+    else:
+        new_others = other.as_dicts(db, own_others)
+    new_total = new_paid + other.total(new_others) if standard else old_total
+    if new_total <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A deposit takes at least one payment or one other line; to "
+                "take everything off, void it."
+            ),
+        )
 
     new_date = data.date if data.date is not None else txn.date
     new_ref = data.reference if "reference" in data.model_fields_set else txn.reference
@@ -536,13 +667,17 @@ def update_deposit(deposit_id: int, data: DepositUpdate, db: Session = Depends(g
                 "credit": Decimal("0"),
                 "description": label,
             },
-            {
-                "account_id": uf_id,
-                "debit": Decimal("0"),
-                "credit": new_total,
-                "description": label,
-            },
         ]
+        if new_paid > 0:
+            lines.append(
+                {
+                    "account_id": uf_id,
+                    "debit": Decimal("0"),
+                    "credit": new_paid,
+                    "description": label,
+                }
+            )
+        lines += other.posting_lines(new_others, label)
     else:
         # every line as it stands, each dimension named so nothing is
         # re-derived: the amounts, memos, classes, jobs and cost codes stay
@@ -578,6 +713,8 @@ def update_deposit(deposit_id: int, data: DepositUpdate, db: Session = Depends(g
             ln.deposit_transaction_id = None
     for ln in chosen:
         ln.deposit_transaction_id = txn.id
+    if standard and data.other_lines is not None:
+        other.store(db, txn.id, new_others)
     db.commit()
     out = get_deposit(txn.id, db)
     # a new total takes the cleared mark off the bank line: say so, as the
@@ -629,6 +766,7 @@ def void_deposit(deposit_id: int, db: Session = Depends(get_db)):
         account_name=account.name if account else "",
         amount=Decimal(str(bank.debit)) if bank else Decimal("0"),
         items=len(items) or None,
+        other_items=len(other.stored(db, txn.id)),
         voided=True,
         reconciled=False,
     )

@@ -53,7 +53,10 @@ const ItemsPage = {
         let html = `
             <div class="page-header">
                 <h2>Items & Services</h2>
-                <button class="btn btn-primary" onclick="ItemsPage.showForm()">+ New Item</button>
+                <div>
+                    <button class="btn btn-secondary" onclick="ItemsPage.showAdjustMany()" title="One adjustment for several items: a physical count, shrinkage, a correction">Adjust Inventory</button>
+                    <button class="btn btn-primary" onclick="ItemsPage.showForm()">+ New Item</button>
+                </div>
             </div>
             <div class="toolbar">${ActiveLists.pickerHtml('items')} ${reorderBtn}
                 <input type="search" id="items-search" placeholder="Search name or code" aria-label="Search items by name or code" value="${escapeHtml(ItemsPage._query)}" oninput="ItemsPage.filter(this.value)"></div>`;
@@ -334,9 +337,15 @@ const ItemsPage = {
             const [label, cls] = typeLabel[m.movement_type] || [m.movement_type, 'badge-draft'];
             const qty = Number(m.quantity);
             const qtyStr = (qty > 0 ? '+' : '') + qty.toLocaleString();
-            const src = m.source_type
-                ? `${escapeHtml(m.source_type)}${m.source_id ? ' #' + m.source_id : ''}`
-                : '';
+            // an adjustment of several items (#801) is named as one, with
+            // its number, so the line says which adjustment it was part of;
+            // its name opens the adjustment whole, every item's line
+            const srcWord = m.source_type === 'inventory_adjustment' ? 'Inventory adjustment' : m.source_type;
+            const src = m.source_type === 'inventory_adjustment' && m.source_id
+                ? `<button type="button" class="btn btn-sm btn-secondary" onclick="ItemsPage.showAdjustment(${Number(m.source_id)}, ${Number(id)})" title="Open this adjustment: every item it changed">Inventory adjustment #${Number(m.source_id)}</button>`
+                : m.source_type
+                    ? `${escapeHtml(srcWord)}${m.source_id ? ' #' + m.source_id : ''}`
+                    : '';
             return `<tr>
                 <td style="white-space:nowrap;font-size:11px;">${formatDate(m.date)}</td>
                 <td><span class="badge ${cls}">${label}</span></td>
@@ -364,6 +373,45 @@ const ItemsPage = {
                 <tbody>${rows}</tbody>
             </table></div>
             <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+    },
+
+    // ----- #801: one adjustment, read back -----
+    // GET /inventory/adjustments/{id}: the item history names the adjustment
+    // a movement was part of; this opens it whole, a line per item, with
+    // what each change cost and what it left on hand.
+    async showAdjustment(id, itemId) {
+        const adj = await API.get(`/inventory/adjustments/${id}`);
+        let rows = (adj.lines || []).map(l => {
+            const qty = Number(l.quantity_delta);
+            return `<tr>
+                <td>${escapeHtml(l.item_name)}</td>
+                <td class="amount" style="${qty < 0 ? 'color:var(--qb-red);' : ''}">${(qty > 0 ? '+' : '') + qty.toLocaleString()}</td>
+                <td class="amount">${formatCurrency(l.unit_cost)}</td>
+                <td class="amount">${formatCurrency(l.amount)}</td>
+                <td class="amount"><strong>${Number(l.balance_qty).toLocaleString()}</strong></td>
+                <td style="font-size:11px;color:var(--text-muted);">${l.memo ? escapeHtml(l.memo) : ''}</td>
+            </tr>`;
+        }).join('');
+        if (!rows) {
+            rows = '<tr><td colspan="6" style="text-align:center;color:var(--gray-400);">No lines</td></tr>';
+        }
+        openModal(`Inventory Adjustment #${adj.id}`, `
+            <div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">
+                ${formatDate(adj.date)} &nbsp;·&nbsp; ${adj.line_count} item${adj.line_count === 1 ? '' : 's'}
+                &nbsp;·&nbsp; Net: <strong>${formatCurrency(adj.net_amount)}</strong>
+                ${adj.memo ? '<br>' + escapeHtml(adj.memo) : ''}
+            </div>
+            <div class="table-container" style="max-height:calc(60vh / var(--ui-scale, 1));overflow:auto;"><table>
+                <thead><tr>
+                    <th scope="col">Item</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Unit Cost</th>
+                    <th scope="col" class="amount">Amount</th><th scope="col" class="amount">On Hand After</th><th scope="col">Memo</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table></div>
+            <div class="form-actions">
+                ${itemId ? `<button type="button" class="btn btn-secondary" onclick="ItemsPage.showMovements(${Number(itemId)})">Back to History</button>` : ''}
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>`);
     },
 
     async showAdjust(id) {
@@ -488,6 +536,192 @@ const ItemsPage = {
             toast('Inventory adjusted');
             App.refresh();
         } catch (err) {
+            toast(err.message || 'Adjustment failed', 'error');
+        }
+    },
+
+    // ----- #801: one adjustment of several items -----
+    // POST /inventory/adjustments takes {memo, lines: [{item_id,
+    // quantity_delta | new_quantity, unit_cost?, memo?}]}: one journal entry
+    // for the lot, one movement per item. Each row thinks in the one-item
+    // form's three modes; "Set to count" sends new_quantity, so the server
+    // works the change out from the count as it stands when it posts.
+    _adjustItems: [],
+
+    adjustRowHtml() {
+        const options = ItemsPage._adjustItems.map(it =>
+            `<option value="${it.id}">${escapeHtml(it.code ? `${it.code} — ${it.name}` : it.name)} (${Number(it.quantity_on_hand || 0).toLocaleString()} on hand)</option>`
+        ).join('');
+        return `<tr class="adjust-line">
+            <td><select class="adj-item" aria-label="Item" onchange="ItemsPage.syncAdjustRow(this)"><option value="">Choose an item</option>${options}</select></td>
+            <td><select class="adj-mode" aria-label="Mode" onchange="ItemsPage.syncAdjustRow(this)">
+                <option value="add">Add</option>
+                <option value="remove">Remove</option>
+                <option value="set">Set to count</option>
+            </select></td>
+            <td><input class="adj-qty" type="number" step="any" min="0" aria-label="Quantity" oninput="ItemsPage.syncAdjustRow(this)" style="width:90px;"></td>
+            <td><input class="adj-cost" type="number" step="0.0001" min="0" aria-label="Unit cost" placeholder="Average" style="width:100px;"></td>
+            <td><input class="adj-memo" aria-label="Line memo" placeholder="Memo"></td>
+            <td class="adj-after amount" style="font-size:11px; white-space:nowrap;"></td>
+            <td><button type="button" class="btn btn-sm btn-secondary" aria-label="Remove line" onclick="ItemsPage.removeAdjustLine(this)">×</button></td>
+        </tr>`;
+    },
+
+    async showAdjustMany() {
+        const items = await API.get('/items?active_only=true');
+        ItemsPage._adjustItems = items.filter(it => it.track_inventory);
+        if (!ItemsPage._adjustItems.length) {
+            toast('No item is inventory-tracked yet, so there is no count to adjust.', 'error');
+            return;
+        }
+        openModal('Adjust Inventory', `
+            <form id="adjust-many-form" onsubmit="ItemsPage.submitAdjustMany(event)">
+                <div class="form-group full-width">
+                    <label for="adjust-many-memo">Memo</label>
+                    <input id="adjust-many-memo" name="memo" placeholder="e.g. Year-end physical count">
+                </div>
+                <div class="table-container" style="max-height:calc(50vh / var(--ui-scale, 1));overflow:auto;"><table id="adjust-many-lines">
+                    <thead><tr>
+                        <th scope="col">Item</th><th scope="col">Mode</th><th scope="col">Quantity</th>
+                        <th scope="col">Unit cost</th><th scope="col">Memo</th><th scope="col" class="amount">After</th><th scope="col"><span class="visually-hidden">Remove</span></th>
+                    </tr></thead>
+                    <tbody>${ItemsPage.adjustRowHtml()}</tbody>
+                </table></div>
+                <div style="margin:8px 0;">
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="ItemsPage.addAdjustLine()">+ Add line</button>
+                    <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">A unit cost applies to stock added; left blank, the item's average cost is used.</span>
+                </div>
+                <div id="adjust-many-problems" role="alert" style="font-size:12px; color:var(--text-danger);"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Post Adjustment</button>
+                </div>
+            </form>`);
+    },
+
+    addAdjustLine() {
+        const body = document.querySelector('#adjust-many-lines tbody');
+        if (!body) return;
+        body.insertAdjacentHTML('beforeend', ItemsPage.adjustRowHtml());
+        const rows = body.querySelectorAll('tr.adjust-line');
+        const last = rows[rows.length - 1];
+        const pick = last && last.querySelector('.adj-item');
+        if (pick) pick.focus();
+    },
+
+    removeAdjustLine(btn) {
+        const row = btn.closest('tr');
+        const body = row && row.parentElement;
+        if (!row || !body) return;
+        // the last row stays, emptied, so there is always a line to fill
+        if (body.querySelectorAll('tr.adjust-line').length > 1) row.remove();
+        else row.querySelectorAll('input').forEach(i => { i.value = ''; });
+    },
+
+    // The count a row leaves, beside it; the cost box only where stock comes in.
+    syncAdjustRow(el) {
+        const row = el.closest('tr');
+        if (!row) return;
+        const read = ItemsPage.readAdjustRow(row);
+        const item = ItemsPage._adjustItems.find(it => String(it.id) === String(read.item_id));
+        const cost = row.querySelector('.adj-cost');
+        if (cost) cost.disabled = read.mode === 'remove';
+        const after = row.querySelector('.adj-after');
+        if (!after) return;
+        const qty = parseFloat(read.quantity);
+        if (!item || !isFinite(qty)) { after.textContent = ''; return; }
+        const onHand = Number(item.quantity_on_hand || 0);
+        const next = read.mode === 'add' ? onHand + qty : read.mode === 'remove' ? onHand - qty : qty;
+        after.textContent = `${onHand.toLocaleString()} → ${next.toLocaleString()}`;
+    },
+
+    readAdjustRow(row) {
+        const val = (sel) => { const el = row.querySelector(sel); return el ? String(el.value || '').trim() : ''; };
+        return { item_id: val('.adj-item'), mode: val('.adj-mode') || 'add', quantity: val('.adj-qty'), unit_cost: val('.adj-cost'), memo: val('.adj-memo') };
+    },
+
+    // The rows as the request's lines, or the sentences that stop it: the
+    // server's own sentences, numbered as it numbers the lines it is sent
+    // (a row with no item and no quantity is left out, not counted).
+    adjustLinesFrom(rows, items) {
+        const byId = Object.fromEntries((items || []).map(it => [String(it.id), it]));
+        const sent = rows.filter(r => r.item_id || r.quantity);
+        const problems = [];
+        const lines = [];
+        const seen = {};
+        sent.forEach((r, i) => {
+            const n = i + 1;
+            const item = byId[String(r.item_id)];
+            if (!item) { problems.push(`Line ${n}: choose an item.`); return; }
+            const where = `Line ${n} (${item.name})`;
+            if (seen[item.id]) {
+                problems.push(`${where}: ${item.name} is on line ${seen[item.id]} already; put its whole change on one line.`);
+                return;
+            }
+            seen[item.id] = n;
+            const qty = Number(r.quantity);
+            if (r.quantity === '' || !isFinite(qty)) {
+                problems.push(`${where}: give the change or the new quantity, one of the two.`);
+                return;
+            }
+            if (qty < 0) {
+                problems.push(r.mode === 'set'
+                    ? `${where}: a new quantity cannot be below zero.`
+                    : `${where}: a quantity to ${r.mode === 'remove' ? 'remove' : 'add'} cannot be below zero.`);
+                return;
+            }
+            const line = { item_id: item.id };
+            if (r.mode === 'set') {
+                const onHand = Number(item.quantity_on_hand || 0);
+                if (qty === onHand) {
+                    problems.push(`${where}: the count is ${onHand} already; take the line out or enter the new count.`);
+                    return;
+                }
+                line.new_quantity = qty;
+            } else {
+                if (qty === 0) {
+                    problems.push(`${where}: the change is zero; take the line out or enter the change.`);
+                    return;
+                }
+                line.quantity_delta = r.mode === 'remove' ? -qty : qty;
+            }
+            if (r.mode !== 'remove' && r.unit_cost !== '' && r.unit_cost != null) {
+                const cost = Number(r.unit_cost);
+                if (!isFinite(cost) || cost < 0) {
+                    problems.push(`${where}: a unit cost cannot be below zero.`);
+                    return;
+                }
+                line.unit_cost = cost;
+            }
+            if (r.memo) line.memo = r.memo;
+            lines.push(line);
+        });
+        if (!sent.length) problems.push('An adjustment needs at least one line: an item and its change or new quantity.');
+        return { lines, problems };
+    },
+
+    async submitAdjustMany(e) {
+        e.preventDefault();
+        const form = e.target;
+        const box = document.getElementById('adjust-many-problems');
+        const rows = [...form.querySelectorAll('tr.adjust-line')].map(r => ItemsPage.readAdjustRow(r));
+        const { lines, problems } = ItemsPage.adjustLinesFrom(rows, ItemsPage._adjustItems);
+        if (problems.length) {
+            if (box) box.textContent = 'Nothing was posted. ' + problems.join(' ');
+            toast(problems[0], 'error');
+            return;
+        }
+        if (box) box.textContent = '';
+        const payload = { lines };
+        const memo = form.memo.value.trim();
+        if (memo) payload.memo = memo;
+        try {
+            const adj = await API.post('/inventory/adjustments', payload);
+            toast(`Inventory adjustment #${adj.id} posted: ${adj.line_count} item${adj.line_count === 1 ? '' : 's'}`);
+            closeModal();
+            App.refresh();
+        } catch (err) {
+            if (box) box.textContent = err.message || 'The adjustment was not posted.';
             toast(err.message || 'Adjustment failed', 'error');
         }
     },

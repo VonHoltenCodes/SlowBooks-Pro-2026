@@ -81,6 +81,7 @@ const ExpensesPage = {
         const paidFrom = ExpensesPage.paidFromAccounts(accounts);
         const acctOpt = a => `<option value="${a.id}">${accountLabel(a)}</option>`;
         const checking = paidFrom.find(a => /checking/i.test(a.name || '')) || paidFrom[0];
+        PendingFiles.reset();  // files attached before the first save (#796)
 
         openModal('Enter Expense', `
             <form id="expense-form" data-skip-to="#expense-lines" data-skip-text="Skip to the lines" onsubmit="ExpensesPage.save(event)">
@@ -111,11 +112,12 @@ const ExpensesPage = {
                     <div class="total-row grand-total"><span class="label">Amount Paid</span><span class="value" id="expense-paid-total">$0.00</span></div>
                     <div class="total-row"><span class="label">Left to assign</span><span class="value" id="expense-left">$0.00</span></div>
                 </div>
+                ${PendingFiles.stripHtml()}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="ScanHelper.discard(); closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Expense</button>
                 </div>
-            </form>`, { wide: true });
+            </form>`, { wide: true, onClose: () => PendingFiles.discard() });
         const pf = document.querySelector('#expense-form [name="paid_from_account_id"]');
         if (pf && checking) pf.value = checking.id;
         ScanHelper.wire(ExpensesPage._applyScan, ExpensesPage._applyScanField, ExpensesPage._scanFieldTarget);
@@ -372,11 +374,13 @@ const ExpensesPage = {
                 memo: form.memo.value || null,
                 class_id: classIdFromForm(form),
                 job_id: jobIdFromForm(form),
+                pending_attachments: PendingFiles.ids(),
             };
             // a check number the bank account already has (#481)
             const result = await CheckNumberWarn.send(
                 q => API.post('/expenses' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), body, q ? { query: q } : undefined), form.reference);
             if (!result) return;
+            PendingFiles.saved();
             await ScanHelper.attachAfterSave('expense', result.id);
             if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Expense voided and replaced by expense #${result.id}`);
             else toastPosted('Expense recorded');

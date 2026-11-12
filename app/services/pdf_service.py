@@ -351,8 +351,145 @@ def render_deposit_html(deposit: dict, company_settings: dict) -> str:
     """A deposit slip (#260): the bank account, the date, each check or
     payment the deposit took (who, number, amount) and the total, for the
     envelope that walks to the bank. `deposit` is the deposit detail as
-    GET /api/deposits/{id} answers it."""
+    GET /api/deposits/{id} answers it. With deposit slip stock set to
+    pre-printed (#798) it is the figures alone, laid onto the bank's slip."""
+    if deposit_slip_stock(company_settings) == "preprinted":
+        return render_deposit_slip_stock_html(deposit, company_settings)
     return _render("deposit_pdf.html", company_settings, deposit=deposit)
+
+
+def deposit_slip_stock(company_settings: dict) -> str:
+    """What the deposit slip prints on (#798): "plain" paper, SlowBooks'
+    own slip (the default), or the bank's "preprinted" slip."""
+    stock = company_settings.get("deposit_slip_stock")
+    return "preprinted" if stock == "preprinted" else "plain"
+
+
+def _slip_amount(value) -> str:
+    """An amount as a deposit slip's box takes it: digits, commas and the
+    cents, no dollar sign (the slip's box carries its own)."""
+    from decimal import Decimal
+
+    return f"{Decimal(str(value or 0)):,.2f}"
+
+
+def _slip_inches(company_settings: dict, key: str) -> float:
+    try:
+        return float(company_settings.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _slip_date(value) -> str:
+    """The date as a slip's small box takes it: 09/12/2026."""
+    import datetime
+
+    if isinstance(value, str) and value:
+        try:
+            value = datetime.date.fromisoformat(value[:10])
+        except ValueError:
+            return value
+    return value.strftime("%m/%d/%Y") if hasattr(value, "strftime") else ""
+
+
+# an amount's box: the amount ends at the field's x, inside this width
+_SLIP_AMOUNT_WIDTH_IN = 2.5
+
+
+def deposit_slip_pages(deposit: dict, company_settings: dict) -> list:
+    """The figures of a deposit on pre-printed slip stock (#798), as pages
+    of [{"field", "text", "left", "top", "size", "amount"}] in inches from
+    the sheet's top-left, the nudges already added. The first page carries
+    the date, the account, the cash, the first check lines, the checks
+    subtotal and the total; checks past the slip's lines continue on more
+    pages at the same lines, with the date and account, for the slip's back
+    or a second slip. Every payment that is not cash goes on a check line.
+    A void deposit prints its date, its account and VOID in the total's
+    box, no figures."""
+    from decimal import Decimal
+
+    from app.services.settings_service import (
+        DEPOSIT_SLIP_AMOUNTS,
+        deposit_slip_layout,
+    )
+
+    layout = deposit_slip_layout(company_settings.get("deposit_slip_layout"))
+    nx = _slip_inches(company_settings, "deposit_slip_nudge_x_in")
+    ny = _slip_inches(company_settings, "deposit_slip_nudge_y_in")
+
+    def place(field, text, line=0):
+        spot = layout[field]
+        if not spot.get("show", True) or text in (None, ""):
+            return None
+        amount = field in DEPOSIT_SLIP_AMOUNTS
+        x = float(spot["x"]) + nx
+        y = float(spot["y"]) + ny + line * float(layout["check_lines"]["spacing"])
+        return {
+            "field": field,
+            "text": str(text),
+            "left": round(x - _SLIP_AMOUNT_WIDTH_IN if amount else x, 4),
+            "top": round(y, 4),
+            "size": float(spot["size"]),
+            "amount": amount,
+        }
+
+    date_text = _slip_date(deposit.get("date"))
+    head = [place("date", date_text), place("account", deposit.get("account_name"))]
+    if deposit.get("voided"):
+        return [[f for f in head + [place("total", "VOID")] if f]]
+    payments = deposit.get("payments") or []
+    cash = [p for p in payments if p.get("method") == "Cash"]
+    checks = [p for p in payments if p.get("method") != "Cash"]
+    cash_total = sum((Decimal(str(p.get("amount") or 0)) for p in cash), Decimal(0))
+    checks_total = sum((Decimal(str(p.get("amount") or 0)) for p in checks), Decimal(0))
+    per_page = int(layout["check_lines"]["count"])
+    chunks = [checks[i : i + per_page] for i in range(0, len(checks), per_page)]
+    pages = []
+    for index, chunk in enumerate(chunks or [[]]):
+        fields = list(head)
+        if index == 0:
+            fields.append(place("cash", _slip_amount(cash_total) if cash else ""))
+        for line, p in enumerate(chunk):
+            number = (
+                p.get("check_number")
+                or p.get("payment_reference")
+                or p.get("reference")
+                or ""
+            )
+            fields.append(place("check_number", number, line))
+            fields.append(place("check_amount", _slip_amount(p.get("amount")), line))
+        if index == 0:
+            if checks:
+                fields.append(place("checks_subtotal", _slip_amount(checks_total)))
+            fields.append(place("total", _slip_amount(deposit.get("amount"))))
+        pages.append([f for f in fields if f])
+    return pages
+
+
+def render_deposit_slip_stock_html(deposit: dict, company_settings: dict) -> str:
+    """The deposit on the bank's pre-printed slip (#798): the figures alone,
+    each at its place on the slip (deposit_slip_pages), with no labels, no
+    logo, no MICR line and no routing or account digits, which the slip
+    already carries."""
+    return _jinja_env.get_template("deposit_slip_stock.html").render(
+        pages=deposit_slip_pages(deposit, company_settings),
+        paper_size=paper_size_of(company_settings),
+        amount_width=_SLIP_AMOUNT_WIDTH_IN,
+    )
+
+
+# The test slip's figures (#798): two checks and some cash, made-up numbers
+# on a made-up account, so a test print is never a real deposit.
+SAMPLE_DEPOSIT = {
+    "account_name": "Sample Checking",
+    "voided": False,
+    "payments": [
+        {"method": "Check", "check_number": "1001", "amount": "1234.56"},
+        {"method": "Check", "check_number": "1002", "amount": "250.00"},
+        {"method": "Cash", "amount": "75.00"},
+    ],
+    "amount": "1559.56",
+}
 
 
 def generate_deposit_pdf(deposit: dict, company_settings: dict) -> bytes:
