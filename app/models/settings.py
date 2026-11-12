@@ -186,6 +186,18 @@ DEFAULT_SETTINGS = {
     # differs from today's face (settings_service._clean_check_field_layout).
     # "" is today's layout, so a company that never sets it sees no change.
     "check_field_layout": "",
+    # Deposit slip stock (#798): "plain" prints SlowBooks' own deposit slip
+    # (#260) on plain paper, as it always has. "preprinted" prints only the
+    # figures — the date, the account, the cash, each check's number and
+    # amount, the checks subtotal and the total — onto the bank's
+    # pre-printed slip, each where deposit_slip_layout puts it (JSON of what
+    # differs from settings_service.DEPOSIT_SLIP_DEFAULTS, "" for none), with
+    # no labels, no MICR line and no routing or account digits. The nudges
+    # shift the whole slip, in inches from -0.5 to +0.5.
+    "deposit_slip_stock": "plain",
+    "deposit_slip_layout": "",
+    "deposit_slip_nudge_x_in": "0",
+    "deposit_slip_nudge_y_in": "0",
     # Opening-balance wizard readiness metadata
     "chart_setup_source": "",
     "chart_setup_ready_at": "",
