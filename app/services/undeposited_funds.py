@@ -12,8 +12,9 @@ voided payment as waiting and hid a live one.
 
 Now:
 
-- an ITEM is a debit on 1200 from a transaction that is not void and is
-  not itself a void's reversal;
+- an ITEM is a debit on 1200 from a transaction that is not void, is
+  not itself a void's reversal, and is not a purchase (#821, see
+  PURCHASE_SOURCES);
 - a deposit made from the list stamps each item's line with its journal
   entry (``TransactionLine.deposit_transaction_id``); voiding the deposit
   clears the stamp, and the payments are waiting again;
@@ -74,6 +75,50 @@ PURCHASE_SOURCES = frozenset(
 def is_purchase_posting(txn: Transaction) -> bool:
     """True when `txn` is the posting of a purchase (PURCHASE_SOURCES)."""
     return (txn.source_type or "") in PURCHASE_SOURCES
+
+
+def purchase_lines_on_controls(db: Session) -> int:
+    """How many purchase lines sit on Undeposited Funds (1200) or Inventory
+    (1300), for the start-up note (#821). A purchase line is one #785 now
+    refuses: a bill line whose account was chosen on it (an inventory item's
+    line posts to Inventory by right and is not counted), or the expense
+    side of an expense, card charge or imported check. Void and draft bills
+    post nothing and are not counted."""
+    from app.models.bills import Bill, BillLine, BillStatus
+    from app.models.items import Item
+    from app.services.control_accounts import find, is_control
+
+    ids = []
+    for number in ("1200", "1300"):
+        acct_id = find(db, number)
+        acct = db.get(Account, acct_id) if acct_id else None
+        if acct is not None and is_control(number, acct.account_type):
+            ids.append(acct.id)
+    if not ids:
+        return 0
+    bill_lines = (
+        db.query(BillLine.id)
+        .join(Bill, BillLine.bill_id == Bill.id)
+        .outerjoin(Item, BillLine.item_id == Item.id)
+        .filter(
+            BillLine.account_id.in_(ids),
+            Bill.status.notin_((BillStatus.VOID, BillStatus.DRAFT)),
+            (Item.id.is_(None)) | (Item.track_inventory.is_(False)),
+        )
+        .count()
+    )
+    rows = (
+        db.query(TransactionLine, Transaction)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(
+            TransactionLine.account_id.in_(ids),
+            TransactionLine.debit > 0,
+            Transaction.source_type.in_(("expense", "cc_charge", "check")),
+        )
+        .all()
+    )
+    dead = dead_transaction_ids(db, (t for _, t in rows))
+    return bill_lines + sum(1 for _, t in rows if t.id not in dead)
 
 
 def uf_account_id(db: Session) -> Optional[int]:
@@ -159,11 +204,13 @@ def _waiting_and_pool(
         for ln, _ in rows
         if ln.deposit_transaction_id and ln.deposit_transaction_id not in dead
     }
+    # a purchase's debit stays on 1200 but is never waiting (#821)
     items = [
         (ln, t)
         for ln, t in rows
         if ln.debit > 0
         and t.id not in dead
+        and not is_purchase_posting(t)
         and not (ln.deposit_transaction_id and ln.deposit_transaction_id not in dead)
     ]
     pool = sum(

@@ -676,6 +676,16 @@ async def lifespan(app: FastAPI):
                     "for each. They are tried again at the next start",
                     redone["failed"],
                 )
+            # #821: a purchase line saved on 1200 or 1300 before 2.31.14
+            # keeps its account; the bookkeeper moves it.
+            from app.services.undeposited_funds import purchase_lines_on_controls
+
+            stuck = purchase_lines_on_controls(_db)
+            if stuck:
+                print(
+                    f"{stuck} purchase lines sit on Undeposited Funds or "
+                    "Inventory; open each bill and move the line."
+                )
         finally:
             _db.close()
             startup_progress.clear()

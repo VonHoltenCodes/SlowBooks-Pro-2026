@@ -1107,7 +1107,9 @@ def _append_at_cost(
 
 
 def current_valuation(db: Session) -> dict:
-    """Return aggregate inventory valuation: total_value, item_count, low_stock_count."""
+    """Return aggregate inventory valuation: total_value, item_count,
+    low_stock_count, and the ledger's side: ledger_balance, difference and a
+    note (None when the two agree)."""
     items = db.query(Item).filter(Item.track_inventory, Item.is_active).all()  # noqa
     total_value = Decimal("0")
     item_count = 0
@@ -1121,8 +1123,49 @@ def current_valuation(db: Session) -> dict:
             str(it.reorder_point)
         ):
             low_stock += 1
+    # #821: the Balance Sheet's Inventory can move with no item moving (a
+    # purchase line saved on 1300 before 2.31.14, a hand journal entry), so
+    # the ledger side is given beside the valuation: 1300 plus each tracked
+    # item's own asset account, each counted once.
+    valuation = _q(total_value)
+    ledger = inventory_ledger_balance(db)
+    difference = _q(ledger - valuation)
+    note = None
+    if difference != 0:
+        note = (
+            f"The ledger's Inventory balance is ${ledger:,.2f}, the valuation "
+            f"${valuation:,.2f}; the difference is on postings that moved no item."
+        )
     return {
-        "total_value": float(_q(total_value)),
+        "total_value": float(valuation),
         "item_count": item_count,
         "low_stock_count": low_stock,
+        "ledger_balance": float(ledger),
+        "difference": float(difference),
+        "note": note,
     }
+
+
+def inventory_ledger_balance(db: Session) -> Decimal:
+    """The ledger balance (debits less credits) of the inventory asset
+    accounts in use: 1300 and every tracked item's own asset account."""
+    ids = {
+        acct_id
+        for (acct_id,) in db.query(Item.asset_account_id).filter(
+            Item.track_inventory.is_(True), Item.asset_account_id.isnot(None)
+        )
+    }
+    inv = db.query(Account.id).filter(Account.account_number == "1300").first()
+    if inv:
+        ids.add(inv[0])
+    if not ids:
+        return Decimal("0.00")
+    dr, cr = (
+        db.query(
+            func.coalesce(func.sum(TransactionLine.debit), 0),
+            func.coalesce(func.sum(TransactionLine.credit), 0),
+        )
+        .filter(TransactionLine.account_id.in_(ids))
+        .one()
+    )
+    return _q(Decimal(str(dr)) - Decimal(str(cr)))

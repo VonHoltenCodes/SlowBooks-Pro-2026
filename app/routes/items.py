@@ -187,7 +187,8 @@ def low_stock_items(db: Session = Depends(get_db)):
 
 @router.get("/valuation")
 def inventory_valuation(db: Session = Depends(get_db)):
-    """Total inventory value (sum of qty * avg_cost across tracked items)."""
+    """Total inventory value (sum of qty * avg_cost across tracked items),
+    and the ledger's Inventory balance beside it (#821)."""
     return current_valuation(db)
 
 
