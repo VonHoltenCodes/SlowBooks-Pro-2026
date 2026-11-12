@@ -91,6 +91,7 @@ ENUM_SETTINGS = {
     "check_position": frozenset({"bottom", "top"}),
     "check_blank_stock": frozenset({"true", "false"}),
     "check_micr_amount": frozenset({"true", "false"}),
+    "check_amount_no_dollar_sign": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),
