@@ -5,6 +5,7 @@
 # ============================================================================
 
 import enum
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -17,6 +18,7 @@ from sqlalchemy import (
     Text,
     Enum,
     ForeignKey,
+    event,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -75,6 +77,9 @@ class Estimate(Base):
     terms = Column(Text, nullable=True)
     # When the estimate was accepted and its job budget locked (#551).
     accepted_at = Column(DateTime(timezone=True), nullable=True)
+    # When the bid was decided, won or lost (#795): set by the status change
+    # itself (see _stamp_decision), read by the Estimate Closing Rate report.
+    decided_at = Column(DateTime(timezone=True), nullable=True)
 
     notes = Column(Text, nullable=True)
     converted_invoice_id = Column(
@@ -100,6 +105,31 @@ class Estimate(Base):
     )
     converted_invoice = relationship("Invoice", foreign_keys=[converted_invoice_id])
     job = relationship("Job", foreign_keys=[job_id])
+
+
+WON_STATUSES = (EstimateStatus.ACCEPTED, EstimateStatus.CONVERTED)
+
+
+def estimate_outcome(status):
+    """'won', 'lost' or None (still open) for a status."""
+    if status in WON_STATUSES:
+        return "won"
+    if status == EstimateStatus.REJECTED:
+        return "lost"
+    return None
+
+
+@event.listens_for(Estimate.status, "set")
+def _stamp_decision(target, value, oldvalue, initiator):
+    """Every path that moves an estimate's status (accept, mark lost,
+    convert, a PUT, an import) dates the decision here. Accepted then
+    converted is one win and keeps its first date; back to pending clears it;
+    won to lost, or lost to won, is a new decision."""
+    new = estimate_outcome(value)
+    if new is None:
+        target.decided_at = None
+    elif target.decided_at is None or estimate_outcome(oldvalue) != new:
+        target.decided_at = datetime.now(timezone.utc)
 
 
 class EstimateLine(Base):
