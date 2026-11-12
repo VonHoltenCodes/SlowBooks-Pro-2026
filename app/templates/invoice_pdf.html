@@ -166,14 +166,25 @@
                 <td class="r">{{ line.amount | currency(cur) }}</td>
             </tr>
         {% endfor %}
-        {# A pay application that only releases retainage posts no lines (#751): name the release so the page says what the money is for. #}
+        {# A pay application that only gives retainage back posts no lines: name the release (#751) and a lower percent's reduction (#815) so the page says what the money is for. #}
         {% if release_only %}
+            {% set pa_suffix %}{% if pay_application_number %}, {{ pay_application_number }}{% endif %}{% endset %}
+            {% if inv.retainage_released and inv.retainage_released > 0 %}
             <tr>
-                <td>Retainage release{% if pay_application_number %}, {{ pay_application_number }}{% endif %}</td>
+                <td>Retainage release{{ pa_suffix }}</td>
                 <td class="r">1</td>
                 <td class="r">{{ inv.retainage_released | currency(cur) }}</td>
                 <td class="r">{{ inv.retainage_released | currency(cur) }}</td>
             </tr>
+            {% endif %}
+            {% if inv.retainage_held and inv.retainage_held < 0 %}
+            <tr>
+                <td>Retainage reduction{{ pa_suffix }}</td>
+                <td class="r">1</td>
+                <td class="r">{{ (-inv.retainage_held) | currency(cur) }}</td>
+                <td class="r">{{ (-inv.retainage_held) | currency(cur) }}</td>
+            </tr>
+            {% endif %}
         {% endif %}
         </tbody>
     </table>
@@ -189,8 +200,11 @@
             <tr><td class="label grand">{% if kind == 'DonationReceipt' %}Contribution{% elif kind == 'Pledge' %}Pledge Amount{% else %}Total{% endif %}</td><td class="r grand">{{ inv.total | currency(cur) }}</td></tr>
             {% endif %}
             {# Construction progress billing (#555): retainage held / released and the current payment due. #}
-            {% if inv.retainage_held and inv.retainage_held != 0 %}
+            {% if inv.retainage_held and inv.retainage_held > 0 %}
             <tr><td class="label">Retainage withheld this period</td><td class="r">-{{ inv.retainage_held | currency(cur) }}</td></tr>
+            {# A lower percent gives retainage back: it adds to what is due, so it never prints as a double minus (#815). A retainage-only invoice shows it as its line. #}
+            {% elif inv.retainage_held and inv.retainage_held < 0 and not release_only %}
+            <tr><td class="label">Retainage reduction this period</td><td class="r">{{ (-inv.retainage_held) | currency(cur) }}</td></tr>
             {% endif %}
             {# A release-only invoice already shows the release as its line (#751). #}
             {% if inv.retainage_released and inv.retainage_released != 0 and not release_only %}

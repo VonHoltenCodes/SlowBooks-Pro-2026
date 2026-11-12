@@ -144,10 +144,32 @@
                 {% if inv.terms %}
                 <tr><td>Terms</td><td>{{ inv.terms }}</td></tr>
                 {% endif %}
+                {# A retainage-only invoice names what comes back (#751, #815); any
+                   other pay application shows its retainage arithmetic under the
+                   total, as the invoice PDF does (#815). #}
+                {% set pa_suffix %}{% if pay_application_number %}, {{ pay_application_number }}{% endif %}{% endset %}
+                {% set held = inv.retainage_held or 0 %}
+                {% set released = inv.retainage_released or 0 %}
                 {% if release_only %}
-                <tr><td>Retainage release{% if pay_application_number %}, {{ pay_application_number }}{% endif %}</td><td>{{ inv.retainage_released | currency(cur) }}</td></tr>
+                {% if released > 0 %}
+                <tr><td>Retainage release{{ pa_suffix }}</td><td>{{ released | currency(cur) }}</td></tr>
+                {% endif %}
+                {% if held < 0 %}
+                <tr><td>Retainage reduction{{ pa_suffix }}</td><td>{{ (-held) | currency(cur) }}</td></tr>
+                {% endif %}
                 {% else %}
                 <tr><td>Invoice Total</td><td>{{ inv.total | currency(cur) }}</td></tr>
+                {% if held > 0 %}
+                <tr><td>Retainage withheld this period</td><td>-{{ held | currency(cur) }}</td></tr>
+                {% elif held < 0 %}
+                <tr><td>Retainage reduction this period</td><td>{{ (-held) | currency(cur) }}</td></tr>
+                {% endif %}
+                {% if released != 0 %}
+                <tr><td>Retainage released</td><td>{{ released | currency(cur) }}</td></tr>
+                {% endif %}
+                {% if held != 0 or released != 0 %}
+                <tr><td>Current payment due</td><td>{{ (inv.total - held + released) | currency(cur) }}</td></tr>
+                {% endif %}
                 {% endif %}
                 {% if inv.amount_paid|float > 0 %}
                 <tr><td>Amount Paid</td><td>{{ inv.amount_paid | currency(cur) }}</td></tr>

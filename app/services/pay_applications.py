@@ -766,14 +766,18 @@ def pay_application_number(db, invoice):
 
 
 def invoice_is_release_only(invoice) -> bool:
-    """A pay application's invoice that bills only released retainage: no
-    lines, a zero total, no tax and no retainage held, and a positive release
-    (#751). A voided one still qualifies, as a voided invoice keeps printing
-    its lines."""
+    """A pay application's invoice that bills only retainage coming back: no
+    lines, a zero total, no tax, and a positive release (#751) or a negative
+    hold, the retainage a lower percent gives back (#815), or both. Each
+    prints as a row of its own in place of the empty line table. A voided one
+    still qualifies, as a voided invoice keeps printing its lines."""
+    held = invoice.retainage_held or 0
+    released = invoice.retainage_released or 0
     return (
         not invoice.lines
         and not (invoice.total or 0)
         and not (invoice.tax_amount or 0)
-        and not (invoice.retainage_held or 0)
-        and (invoice.retainage_released or 0) > 0
+        and held <= 0
+        and released >= 0
+        and (held < 0 or released > 0)
     )

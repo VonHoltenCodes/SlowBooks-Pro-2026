@@ -251,8 +251,9 @@ class InvoiceResponse(BaseModel):
     pay_application_id: Optional[int] = None
     # Filled by GET /invoices/{id} only: the pay application's number (#751).
     pay_application_number: Optional[str] = None
-    # Filled by GET /invoices/{id} only: the invoice bills nothing but a
-    # retainage release, so it reads as one (#751).
+    # Filled by GET /invoices/{id} only: the invoice bills nothing but
+    # retainage coming back, a release (#751) or a lower percent's reduction
+    # (#815), so it reads as that.
     release_only: bool = False
     # The newest send of this invoice that went out (#780), from the email
     # log: when, and to whom. Read-only and null until one has; a failed

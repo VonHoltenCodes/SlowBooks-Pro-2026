@@ -1136,7 +1136,11 @@ posts its own A/R debit and is part of the invoice's balance from the day it pos
 edit of the invoice keeps it, and an aging dated before that day reads the invoice
 without it, so A/R Aging ties to 1100 on every date. The statement takes
 `as_of_date` only; it has no start date. A dropped retainage percent makes the retainage this period negative and
-the 1150 leg a credit; the entry still balances. **Void** reverses the
+the 1150 leg a credit; the entry still balances. The invoice, its PDF and the
+pay page show it as a *Retainage reduction* that adds to the payment due; an
+application with no new work prints it as its one line, the way a release-only
+invoice prints its release. The pay page shows any invoice's retainage withheld,
+released and current payment due under its total, as the PDF does. **Void** reverses the
 invoice (and the 1150 entries), and later applications stay correct because
 each reads its *previous* and *retainage to date* from the approved history
 live. The Pay apps tab offers Void only on the application that can be voided:

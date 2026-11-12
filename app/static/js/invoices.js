@@ -309,12 +309,18 @@ const InvoicesPage = {
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
              <td class="amount">${SalesLines.rate(l.rate, inv.currency)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
-        // A pay application that only releases retainage posts no lines (#751):
-        // name the release, and drop the $0.00 subtotal, tax and total rows.
+        // A pay application that only gives retainage back posts no lines: name
+        // the release (#751) and a lower percent's reduction (#815), and drop
+        // the $0.00 subtotal, tax and total rows.
         const releaseOnly = !!inv.release_only;  // the server's one test of it
+        const held = Number(inv.retainage_held);
+        const released = Number(inv.retainage_released);
         if (releaseOnly) {
-            linesHtml = `<tr><td>Retainage release${inv.pay_application_number ? `, ${escapeHtml(inv.pay_application_number)}` : ''}</td><td class="amount">1</td>
-             <td class="amount">${money(inv.retainage_released)}</td><td class="amount">${money(inv.retainage_released)}</td></tr>`;
+            const pa = inv.pay_application_number ? `, ${escapeHtml(inv.pay_application_number)}` : '';
+            const row = (label, v) => `<tr><td>${label}${pa}</td><td class="amount">1</td>
+             <td class="amount">${money(v)}</td><td class="amount">${money(v)}</td></tr>`;
+            linesHtml = (released > 0 ? row('Retainage release', inv.retainage_released) : '')
+                + (held < 0 ? row('Retainage reduction', (-held).toFixed(2)) : '');
         }
 
         openModal(`${T('Invoice')} #${inv.invoice_number}`, `
@@ -336,7 +342,8 @@ const InvoicesPage = {
                 ${releaseOnly ? '' : `<div class="total-row"><span class="label">Subtotal</span><span class="value">${money(inv.subtotal)}</span></div>
                 <div class="total-row"><span class="label">Tax</span><span class="value">${money(inv.tax_amount)}</span></div>
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(inv.total)}</span></div>`}
-                ${Number(inv.retainage_held) ? `<div class="total-row"><span class="label">Retainage withheld this period</span><span class="value">-${money(inv.retainage_held)}</span></div>` : ''}
+                ${held > 0 ? `<div class="total-row"><span class="label">Retainage withheld this period</span><span class="value">-${money(inv.retainage_held)}</span></div>` : ''}
+                ${held < 0 && !releaseOnly ? `<div class="total-row"><span class="label">Retainage reduction this period</span><span class="value">${money((-held).toFixed(2))}</span></div>` : ''}
                 ${Number(inv.retainage_released) && !releaseOnly ? `<div class="total-row"><span class="label">Retainage released</span><span class="value">${money(inv.retainage_released)}</span></div>` : ''}
                 ${(Number(inv.retainage_held) || Number(inv.retainage_released)) && !(releaseOnly && inv.status === 'void') ? `<div class="total-row"><span class="label">Current payment due</span><span class="value">${money((Number(inv.total) - Number(inv.retainage_held) + Number(inv.retainage_released)).toFixed(2))}</span></div>` : ''}
                 <div class="total-row"><span class="label">Paid</span><span class="value">${money(inv.amount_paid)}</span></div>

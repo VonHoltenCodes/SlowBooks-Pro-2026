@@ -131,6 +131,8 @@ test('the invoice view shows the retainage lines', () => {
     assert.match(inv, /Retainage withheld this period/);
     assert.match(inv, /Retainage released/);
     assert.match(inv, /Current payment due/);
+    // a lower percent's give-back reads as a reduction, never a double minus (#815)
+    assert.match(inv, /Retainage reduction this period/);
 });
 
 test('the application form carries the tax toggle and the waivers screen lists each type', () => {
