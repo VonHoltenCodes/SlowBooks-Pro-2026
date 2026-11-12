@@ -126,10 +126,6 @@ CHART_OF_ACCOUNTS = [
     {"account_number": "4100", "name": "Product Sales", "account_type": "income"},
     {"account_number": "4200", "name": "Material Income", "account_type": "income"},
     {"account_number": "4300", "name": "Labor Income", "account_type": "income"},
-    # where the early-payment discounts a customer takes post (#664): with
-    # none in the chart, a new company's first discount stopped at "Pick
-    # the account the discount posts to" (#813)
-    {"account_number": "4750", "name": "Discounts Given", "account_type": "income"},
     # 4400 In-Kind Contributions, like the net-asset accounts, is a nonprofit
     # account: it is created when the company switches to nonprofit, or by
     # the first in-kind gift (accounting.ensure_nonprofit_accounts), never

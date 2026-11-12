@@ -317,7 +317,9 @@ def test_the_register_row_and_the_expense_view_offer_print_check():
     assert got["register"]["62"] == [print_btn.format(id=62)]
     assert got["register"]["63"] == ["Void"]
     assert got["register"]["64"] == ["Void"]
-    assert got["register"]["65"] == []
+    # a voided bank entry keeps the way to its attachments (#813)
+    assert len(got["register"]["65"]) == 1
+    assert "showVoidedFiles(65)" in got["register"]["65"][0]
     # the expense's view: Print Check beside Void when it was paid by check
     assert any("transaction_id=62" in b for b in got["expense_check"])
     assert any("ExpensesPage.void(62)" in b for b in got["expense_check"])

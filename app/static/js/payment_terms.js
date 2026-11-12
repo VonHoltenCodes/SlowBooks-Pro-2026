@@ -180,10 +180,11 @@ const PaymentTerms = {
             && a.is_active !== false && /discount/i.test(a.name) && !other.test(a.name));
     },
 
-    // A company made before 2.32 has no Discounts Given (a new one is
-    // seeded with 4750): the discount picker offers to make it, rather
-    // than stop the first discount at "Pick the account" (#813). Sales
-    // side only; nothing for a sign-in that can't write.
+    // A company with no discount account for the customers' side (the
+    // seeded chart has none) is offered to make Discounts Given from the
+    // discount picker, rather than stop the first discount at "Pick the
+    // account" (#813). Sales side only; nothing for a sign-in that can't
+    // write.
     DISCOUNTS_GIVEN: { name: 'Discounts Given', account_number: '4750', account_type: 'income' },
 
     createDiscountAccountHtml(accounts, side, selectId) {
