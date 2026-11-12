@@ -128,3 +128,39 @@ test('the window is a write: hidden from a read-only sign-in', () => {
 test('an item\'s history names the adjustment a line was part of', () => {
     assert.match(js('items.js'), /m\.source_type === 'inventory_adjustment' \? 'Inventory adjustment'/);
 });
+
+test('an item\'s history opens the adjustment a line was part of, whole', async () => {
+    const opened = [];
+    const answers = {
+        '/items/1': { id: 1, name: 'Widget', quantity_on_hand: 8, avg_cost: 2 },
+        '/items/1/movements': [
+            { date: '2026-11-12', movement_type: 'adjustment', quantity: -2, unit_cost: 2, balance_qty: 8, balance_avg_cost: 2, source_type: 'inventory_adjustment', source_id: 12, memo: 'count' },
+            { date: '2026-11-11', movement_type: 'purchase', quantity: 10, unit_cost: 2, balance_qty: 10, balance_avg_cost: 2, source_type: 'bill', source_id: 4 },
+        ],
+        '/inventory/adjustments/12': {
+            id: 12, date: '2026-11-12', memo: 'Year-end count', line_count: 2, net_amount: -9,
+            lines: [
+                { line: 1, item_id: 1, item_name: 'Widget', quantity_delta: -2, unit_cost: 2, amount: -4, balance_qty: 8, balance_avg_cost: 2, memo: 'count' },
+                { line: 2, item_id: 3, item_name: 'Gear', quantity_delta: -1, unit_cost: 5, amount: -5, balance_qty: 4, balance_avg_cost: 5 },
+            ],
+        },
+    };
+    const page = itemsPage({
+        API: { get: async (p) => answers[p] },
+        openModal: (title, html) => opened.push({ title, html }),
+        formatDate: (d) => d,
+    });
+    await page.showMovements(1);
+    const history = opened.pop();
+    // the adjustment's name is the way in; another source stays words
+    assert.match(history.html, /<button type="button" class="btn btn-sm btn-secondary" onclick="ItemsPage\.showAdjustment\(12, 1\)"[^>]*>Inventory adjustment #12<\/button>/);
+    assert.match(history.html, /bill #4/);
+    await page.showAdjustment(12, 1);
+    const adj = opened.pop();
+    assert.equal(adj.title, 'Inventory Adjustment #12');
+    assert.match(adj.html, /Year-end count/);
+    assert.match(adj.html, /2 items/);
+    assert.match(adj.html, /<td>Widget<\/td>/);
+    assert.match(adj.html, /<td>Gear<\/td>/);
+    assert.match(adj.html, /onclick="ItemsPage\.showMovements\(1\)">Back to History</);
+});

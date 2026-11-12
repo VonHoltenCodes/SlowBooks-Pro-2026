@@ -338,11 +338,14 @@ const ItemsPage = {
             const qty = Number(m.quantity);
             const qtyStr = (qty > 0 ? '+' : '') + qty.toLocaleString();
             // an adjustment of several items (#801) is named as one, with
-            // its number, so the line says which adjustment it was part of
+            // its number, so the line says which adjustment it was part of;
+            // its name opens the adjustment whole, every item's line
             const srcWord = m.source_type === 'inventory_adjustment' ? 'Inventory adjustment' : m.source_type;
-            const src = m.source_type
-                ? `${escapeHtml(srcWord)}${m.source_id ? ' #' + m.source_id : ''}`
-                : '';
+            const src = m.source_type === 'inventory_adjustment' && m.source_id
+                ? `<button type="button" class="btn btn-sm btn-secondary" onclick="ItemsPage.showAdjustment(${Number(m.source_id)}, ${Number(id)})" title="Open this adjustment: every item it changed">Inventory adjustment #${Number(m.source_id)}</button>`
+                : m.source_type
+                    ? `${escapeHtml(srcWord)}${m.source_id ? ' #' + m.source_id : ''}`
+                    : '';
             return `<tr>
                 <td style="white-space:nowrap;font-size:11px;">${formatDate(m.date)}</td>
                 <td><span class="badge ${cls}">${label}</span></td>
@@ -370,6 +373,45 @@ const ItemsPage = {
                 <tbody>${rows}</tbody>
             </table></div>
             <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+    },
+
+    // ----- #801: one adjustment, read back -----
+    // GET /inventory/adjustments/{id}: the item history names the adjustment
+    // a movement was part of; this opens it whole, a line per item, with
+    // what each change cost and what it left on hand.
+    async showAdjustment(id, itemId) {
+        const adj = await API.get(`/inventory/adjustments/${id}`);
+        let rows = (adj.lines || []).map(l => {
+            const qty = Number(l.quantity_delta);
+            return `<tr>
+                <td>${escapeHtml(l.item_name)}</td>
+                <td class="amount" style="${qty < 0 ? 'color:var(--qb-red);' : ''}">${(qty > 0 ? '+' : '') + qty.toLocaleString()}</td>
+                <td class="amount">${formatCurrency(l.unit_cost)}</td>
+                <td class="amount">${formatCurrency(l.amount)}</td>
+                <td class="amount"><strong>${Number(l.balance_qty).toLocaleString()}</strong></td>
+                <td style="font-size:11px;color:var(--text-muted);">${l.memo ? escapeHtml(l.memo) : ''}</td>
+            </tr>`;
+        }).join('');
+        if (!rows) {
+            rows = '<tr><td colspan="6" style="text-align:center;color:var(--gray-400);">No lines</td></tr>';
+        }
+        openModal(`Inventory Adjustment #${adj.id}`, `
+            <div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">
+                ${formatDate(adj.date)} &nbsp;·&nbsp; ${adj.line_count} item${adj.line_count === 1 ? '' : 's'}
+                &nbsp;·&nbsp; Net: <strong>${formatCurrency(adj.net_amount)}</strong>
+                ${adj.memo ? '<br>' + escapeHtml(adj.memo) : ''}
+            </div>
+            <div class="table-container" style="max-height:calc(60vh / var(--ui-scale, 1));overflow:auto;"><table>
+                <thead><tr>
+                    <th scope="col">Item</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Unit Cost</th>
+                    <th scope="col" class="amount">Amount</th><th scope="col" class="amount">On Hand After</th><th scope="col">Memo</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table></div>
+            <div class="form-actions">
+                ${itemId ? `<button type="button" class="btn btn-secondary" onclick="ItemsPage.showMovements(${Number(itemId)})">Back to History</button>` : ''}
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>`);
     },
 
     async showAdjust(id) {
