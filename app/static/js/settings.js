@@ -613,8 +613,8 @@ const SettingsPage = {
                             <textarea name="invoice_notes">${escapeHtml(s.invoice_notes || '')}</textarea></div>
                         <div class="form-group full-width"><label>${`${T('Invoice')} Footer`}</label>
                             <input name="invoice_footer" value="${escapeHtml(s.invoice_footer || '')}"></div>
-                        <div class="form-group"><label>Report PDF Paper Size</label>
-                            <select name="pdf_paper_size">
+                        <div class="form-group"><label>PDF Paper Size</label>
+                            <select name="pdf_paper_size" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
                             </select></div>

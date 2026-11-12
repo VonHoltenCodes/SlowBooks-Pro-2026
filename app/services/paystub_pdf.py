@@ -15,7 +15,7 @@ import json
 from decimal import Decimal
 
 from app.services.accounting import _q
-from app.services.pdf_service import _jinja_env, render_pdf
+from app.services.pdf_service import _jinja_env, paper_size_of, render_pdf
 
 # detail_json keys that are deductions (withheld from the employee). Anything
 # else in the blob is an employer-side or informational line we skip on the
@@ -249,6 +249,7 @@ def generate_paystub_pdf(
         "doubletime_hours": _q(stub.doubletime_hours),
         "total_hours": _q(stub.hours),
     }
+    ctx["paper_size"] = paper_size_of(company or {})  # Letter or A4 (#807)
     template = _jinja_env.get_template("paystub_pdf.html")
     html_str = template.render(**ctx)
     return render_pdf(html_str)

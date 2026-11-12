@@ -265,6 +265,14 @@ _jinja_env.globals["estimate_totals"] = _estimate_totals
 _jinja_env.globals["spread_markup_prices"] = _spread_markup_prices
 
 
+def paper_size_of(company_settings: dict) -> str:
+    """'letter' or 'a4', from the pdf_paper_size setting (#807): every
+    document's @page reads it, as the report PDFs always have. Checks,
+    labels and the tax forms keep Letter, the stock they print on."""
+    size = str((company_settings or {}).get("pdf_paper_size") or "letter").lower()
+    return "a4" if size == "a4" else "letter"
+
+
 def _render(template_name: str, company_settings: dict, **context) -> str:
     """Render a template with the company settings and its vocabulary
     (``terms('Invoice')`` in a template reads Pledge for a nonprofit)."""
@@ -275,6 +283,8 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
     # #108: only the analytics PDF and the new-hire report ever received it).
     if "company_logo_data_uri" not in context:
         context["company_logo_data_uri"] = _company_logo_data_uri(company_settings)
+    # Letter or A4, from the setting (#807)
+    context.setdefault("paper_size", paper_size_of(company_settings))
     return template.render(
         company=company_settings, terms=terms_for(company_settings), **context
     )
@@ -451,8 +461,6 @@ def generate_statement_pdf(
         customer=customer,
         activity=activity,
         as_of_date=as_of_date,
-        # Letter or A4 from the pdf_paper_size setting, as the reports (#807)
-        paper_size=(company_settings.get("pdf_paper_size") or "letter").lower(),
     )
     return render_pdf(html_str)
 
@@ -470,6 +478,7 @@ def generate_analytics_pdf(
         company=company_settings,
         terms=terms_for(company_settings),
         company_logo_data_uri=_company_logo_data_uri(company_settings),
+        paper_size=paper_size_of(company_settings),
     )
     return render_pdf(html_str)
 
@@ -797,7 +806,7 @@ def render_report_html(
         "report_pdf.html",
         company_settings,
         sections=sections,
-        paper_size=(company_settings.get("pdf_paper_size") or "letter").lower(),
+        paper_size=paper_size_of(company_settings),
         landscape=landscape,
         generated_on=date.today().isoformat(),
     )

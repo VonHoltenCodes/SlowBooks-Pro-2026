@@ -5,7 +5,7 @@
     <title>Slowbooks Analytics — {{ period.name|upper }}</title>
     <style>
         @page {
-            size: letter;
+            size: {{ 'A4' if paper_size == 'a4' else 'letter' }};
             margin: 0.75in 0.6in;
             @bottom-center {
                 content: "Slowbooks Pro 2026 · Page " counter(page) " of " counter(pages);
