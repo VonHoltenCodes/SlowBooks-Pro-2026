@@ -117,6 +117,12 @@ const scenarios = {
     await p.get('ExpensesPage').uploadAttachment(1);
     return last(p.toasts);
   },
+  // a card charge's Files (#796)
+  async 'cc_charges.js attachment'() {
+    const p = page(['app/static/js/cc_charges.js']);
+    await p.get('CCChargesPage').uploadAttachment(1);
+    return last(p.toasts);
+  },
   async 'journal.js attachment'() {
     const p = page(['app/static/js/journal.js']);
     await p.get('JournalPage').uploadAttachment(1);

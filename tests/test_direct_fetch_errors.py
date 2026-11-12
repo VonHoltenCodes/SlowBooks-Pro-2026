@@ -51,8 +51,9 @@ def test_a_refused_upload_shows_the_servers_sentence(client):
     # connector's two cases left with it in 2.23.2; the Accountant's Copy's
     # two (the copy opened, the changes file previewed) joined in 2.24.0;
     # the pay run's direct deposit file (discussion #211) after 2.25.0; a
-    # field ticket's attachment with the construction overhaul
-    assert len(shown) == 23
+    # field ticket's attachment with the construction overhaul; a card
+    # charge's (#796)
+    assert len(shown) == 24
     for path, message in shown.items():
         assert message == "File is required.", path
 

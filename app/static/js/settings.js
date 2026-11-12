@@ -628,7 +628,8 @@ const SettingsPage = {
                             <select name="pdf_paper_size" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
-                            </select></div>
+                            </select>
+                            <div class="form-hint" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Checks, mailing labels and the IRS forms print on Letter whatever this says: they are measured for that stock.</div></div>
                         <div class="form-group"><label>Report Basis</label>
                             <select name="report_basis" title="${escapeHtml(`The basis the ${T('Profit & Loss')}, ${T('Balance Sheet')}, Trial Balance, General Ledger and related reports run on unless the report says otherwise`)}">
                                 <option value="accrual" ${s.report_basis !== 'cash' ? 'selected' : ''}>Accrual (income when billed)</option>
@@ -788,6 +789,33 @@ const SettingsPage = {
                     ${SettingsPage._payrollAccountsHtml(payrollAccounts)}
                 </div>
 
+                <div class="settings-section" data-group="payroll" id="settings-leave-employer-share" role="group" aria-labelledby="settings-h-leave-employer-share">
+                    <h3 id="settings-h-leave-employer-share">Paid Leave Employer Share</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Washington PFML and Paid Leave Oregon charge the employer share only from a size of employer.
+                        A pay run counts the active employees when it is figured; the agency counts over its own period.
+                        The employee's share is withheld either way, and the stub says which applied and why.
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group full-width"><label for="settings-wa-pfml-employer-share">Washington PFML: Employer share applies (as the agency determined)</label>
+                            <select name="payroll_wa_pfml_employer_share" id="settings-wa-pfml-employer-share" aria-describedby="settings-wa-pfml-employer-share-help">
+                                <option value="headcount" ${!['yes', 'no'].includes(s.payroll_wa_pfml_employer_share) ? 'selected' : ''}>Follow the headcount at each pay run (50 or more employees working in Washington)</option>
+                                <option value="yes" ${s.payroll_wa_pfml_employer_share === 'yes' ? 'selected' : ''}>Yes: ESD determined the employer share applies</option>
+                                <option value="no" ${s.payroll_wa_pfml_employer_share === 'no' ? 'selected' : ''}>No: ESD determined it does not apply</option>
+                            </select>
+                            <div id="settings-wa-pfml-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">ESD tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
+                        </div>
+                        <div class="form-group full-width"><label for="settings-or-paid-leave-employer-share">Paid Leave Oregon: Employer share applies (as the agency determined)</label>
+                            <select name="payroll_or_paid_leave_employer_share" id="settings-or-paid-leave-employer-share" aria-describedby="settings-or-paid-leave-employer-share-help">
+                                <option value="headcount" ${!['yes', 'no'].includes(s.payroll_or_paid_leave_employer_share) ? 'selected' : ''}>Follow the headcount at each pay run (25 or more employees)</option>
+                                <option value="yes" ${s.payroll_or_paid_leave_employer_share === 'yes' ? 'selected' : ''}>Yes: OED determined the employer share applies</option>
+                                <option value="no" ${s.payroll_or_paid_leave_employer_share === 'no' ? 'selected' : ''}>No: OED determined it does not apply</option>
+                            </select>
+                            <div id="settings-or-paid-leave-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">OED tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="settings-section" data-group="connections" id="settings-deposits" role="group" aria-labelledby="settings-h-deposits">
                     <h3 id="settings-h-deposits">Deposits</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -875,6 +903,36 @@ const SettingsPage = {
                     </div>
                 </div>
 
+                <!-- SlowBooks Switchboard (#829): words and links only. The
+                     program is its own public repository; nothing of it runs
+                     inside SlowBooks Pro, and this block has no setting. -->
+                <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
+                    <h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
+                        Model Context Protocol work this company's books. It is a free program of its own,
+                        <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
+                        with a <strong>bookkeeper API token</strong> you make under Users and security, API Tokens
+                        (read-only for an agent that only reports). It does only what that token's role allows,
+                        and every change it makes is in the audit log as <code>token:&lt;label&gt;</code>.
+                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        The token stays on this computer, and Switchboard sends nothing anywhere but this
+                        SlowBooks Pro. For Claude on the web it has a self-hosted door, <code>sbplive serve-http</code>,
+                        behind your own Cloudflare Tunnel; nothing of the books can be reached from outside this
+                        computer unless you set that door up. What Claude reads from the books goes to Claude,
+                        as with any agent.
+                    </div>
+                    <div style="font-size:11px;">
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md" target="_blank" rel="noopener">The guide</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md" target="_blank" rel="noopener">Claude on the web: the self-hosted door</a>
+                    </div>
+                </div>
+
                 <div class="settings-section" data-group="connections" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
                     <h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -957,8 +1015,8 @@ const SettingsPage = {
                     </div>
                     <h4 id="settings-h-reminder-rules" style="margin:12px 0 4px; font-size:12px;">Reminder rules</h4>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached.
-                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ company_name }}
+                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached. On or before the due date, "0 days overdue" is written as due today (or tomorrow, or in so many days).
+                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ due_status }} {{ company_name }}
                     </div>
                     <div id="reminder-rules-list"></div>
                 </div>
@@ -1138,6 +1196,14 @@ const SettingsPage = {
                             </select>
                             <div id="settings-check-position-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Where the check sits on the sheet. Check at the bottom prints two stubs and then the check. Check on top prints the check first and two vouchers below it, the way QuickBooks Desktop's standard voucher checks are laid out, so that stock can be used. The stock and the nudges apply to the check either way.</div>
                         </div>
+                        <div class="form-group full-width"><label for="settings-check-memo">Check memo</label>
+                            <select name="check_memo" id="settings-check-memo" aria-describedby="settings-check-memo-help">
+                                <option value="reference" ${!['memo', 'none'].includes(s.check_memo) ? 'selected' : ''}>The bill's number (196132)</option>
+                                <option value="memo" ${s.check_memo === 'memo' ? 'selected' : ''}>The bill's memo</option>
+                                <option value="none" ${s.check_memo === 'none' ? 'selected' : ''}>Nothing</option>
+                            </select>
+                            <div id="settings-check-memo-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">What Pay Bills puts on the memo line of the check: the number the bill was entered under (the vendor's own numbering), the bill's whole memo, or nothing. A check paying several bills lists their numbers (196132, 196140). A bill numbered by SlowBooks because its number was left blank has no reference, so its memo is used instead. The memo can still be changed on the payment before the check prints, and a memo typed there is kept.</div>
+                        </div>
                         <div class="form-group"><label>Horizontal nudge (in)</label>
                             <input name="check_nudge_x_in" type="number" min="-0.5" max="0.5" step="0.01"
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
@@ -1147,6 +1213,13 @@ const SettingsPage = {
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
                                 value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
                         ${SettingsPage._checkFieldLayoutHtml(s.check_field_layout, s.check_position)}
+                        <div class="form-group full-width">
+                            <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
+                                <input type="checkbox" id="settings-check-amount-no-dollar-sign" name="check_amount_no_dollar_sign" value="true" data-bool aria-describedby="settings-check-amount-no-dollar-sign-help" style="width:auto; margin:0;" ${s.check_amount_no_dollar_sign === 'true' ? 'checked' : ''}>
+                                <label for="settings-check-amount-no-dollar-sign" style="font-weight:normal; margin:0;">Leave the dollar sign off the amount</label>
+                            </div>
+                            <div id="settings-check-amount-no-dollar-sign-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">For check stock that prints its own dollar sign beside the amount box: the amount prints as 1,234.56 instead of $1,234.56. The amount in words and the stubs are unchanged.</div>
+                        </div>
                         <div class="form-group full-width">
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
                                 <input type="checkbox" id="settings-check-blank-stock" name="check_blank_stock" value="true" data-bool aria-describedby="settings-check-blank-stock-help" style="width:auto; margin:0;" ${s.check_blank_stock === 'true' ? 'checked' : ''}>
@@ -1186,6 +1259,7 @@ const SettingsPage = {
                             <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges, field layout and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account's.</div>
                         </div>
+                        ${SettingsPage._depositSlipHtml(s)}
                     </div>
                 </div>
 
@@ -1256,7 +1330,10 @@ const SettingsPage = {
                         benefits, deductions, and employees added and edited, never
                         deleted, with no portal logins, bank accounts or documents)
                         or <em>import</em> (the migration imports). A revoked token
-                        stays revoked: make a new one instead.
+                        stays revoked: make a new one instead. A bookkeeper token is
+                        what <code>sbplive setup</code> asks for, to let Claude work
+                        the books through SlowBooks Switchboard (Connections, Claude
+                        and agents); make a read-only one for an agent that only reports.
                     </p>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
@@ -3230,15 +3307,18 @@ const SettingsPage = {
     },
 
     // Opens a sample check PDF in a new tab (#440) with the stock, check
-    // position (#727), nudge and field layout (#749) as they stand in the form — saved or not — so a nudge can be tried
+    // position (#727), nudge, field layout (#749) and dollar sign (#799) as they stand in the form — saved or not — so a nudge can be tried
     // before it is saved.
     testPrintCheck() {
         const form = document.getElementById('settings-form');
         const params = new URLSearchParams();
-        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout']) {
+        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout', 'check_amount_no_dollar_sign']) {
             const el = form && form.querySelector(`[name="${name}"]`);
             if (el) params.set(name, el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value);
         }
+        // the sample memo follows the Check memo choice (#800)
+        const memoChoice = form && form.querySelector('[name="check_memo"]');
+        if (memoChoice) params.set('check_memo', memoChoice.value);
         const qs = params.toString();
         window.open('/api/checks/test-print' + (qs ? `?${qs}` : ''), '_blank');
     },
@@ -3364,6 +3444,148 @@ const SettingsPage = {
         });
         SettingsPage.syncCheckFieldLayout();
         SettingsPage._updateDirty();
+    },
+
+    // ----- the deposit slip on pre-printed stock (#798) ------------------
+    // Deposit slip stock and its nudges are named fields of the form; the
+    // layout table's inputs carry no name and are kept, as the JSON the
+    // server stores (only what differs from the defaults below), in the
+    // hidden deposit_slip_layout field, which the form saves and the test
+    // slip sends. Positions are inches from the slip's top-left: a text
+    // field's x is where it starts, an amount's where it ends.
+    // [key, label, x, y, kind] -- the defaults of
+    // settings_service.DEPOSIT_SLIP_DEFAULTS
+    DEPOSIT_SLIP_FIELDS: [
+        ['date', 'Date', 1, 0.9, 'text'],
+        ['account', 'Account', 1, 0.55, 'text'],
+        ['cash', 'Cash', 7.9, 0.55, 'amount'],
+        ['check_number', 'Check number (first line)', 4.9, 0.85, 'text'],
+        ['check_amount', 'Check amount (first line)', 7.9, 0.85, 'amount'],
+        ['checks_subtotal', 'Checks subtotal', 7.9, 2.9, 'amount'],
+        ['total', 'Total', 7.9, 3.2, 'amount'],
+    ],
+    DEPOSIT_SLIP_SIZE: 10,
+    DEPOSIT_SLIP_LINES: { count: 8, spacing: 0.25 },
+
+    _depositSlipHtml(s) {
+        s = s || {};
+        const layout = SettingsPage._parseCheckLayout(s.deposit_slip_layout);
+        const num = (v, d) => (typeof v === 'number' && isFinite(v) ? String(v) : String(d));
+        const rows = SettingsPage.DEPOSIT_SLIP_FIELDS.map(([key, label, x, y, kind]) => {
+            const a = layout[key] || {};
+            const id = 'deposit-slip-' + key.replace(/_/g, '-');
+            const where = kind === 'amount' ? 'right end' : 'left edge';
+            const show = a.show !== false;
+            return `<tr>
+                <th scope="row" id="${id}-h" style="text-align:left; font-weight:normal;">${label}</th>
+                <td><input type="number" id="${id}-x" data-slip-field="${key}" data-attr="x" data-default="${x}" data-admin min="0" max="11" step="0.01" style="width:70px;"
+                    aria-label="${label}: ${where}, inches from the left" value="${num(a.x, x)}" oninput="SettingsPage.syncDepositSlipLayout()"></td>
+                <td><input type="number" id="${id}-y" data-slip-field="${key}" data-attr="y" data-default="${y}" data-admin min="0" max="11" step="0.01" style="width:70px;"
+                    aria-label="${label}: inches from the top" value="${num(a.y, y)}" oninput="SettingsPage.syncDepositSlipLayout()"></td>
+                <td><input type="number" id="${id}-size" data-slip-field="${key}" data-attr="size" data-default="${SettingsPage.DEPOSIT_SLIP_SIZE}" data-admin min="6" max="18" step="0.1" style="width:70px;"
+                    aria-label="${label} text size (pt)" value="${num(a.size, SettingsPage.DEPOSIT_SLIP_SIZE)}" oninput="SettingsPage.syncDepositSlipLayout()"></td>
+                <td style="text-align:center;"><input type="checkbox" id="${id}-show" data-slip-field="${key}" data-attr="show" data-admin style="width:auto; margin:0;"
+                    aria-label="Print the ${label.toLowerCase()}" ${show ? 'checked' : ''} onchange="SettingsPage.syncDepositSlipLayout()"></td>
+            </tr>`;
+        }).join('');
+        const lines = layout.check_lines || {};
+        const L = SettingsPage.DEPOSIT_SLIP_LINES;
+        const pre = s.deposit_slip_stock === 'preprinted';
+        return `<div class="form-group full-width" id="settings-deposit-slip" role="group" aria-labelledby="settings-deposit-slip-h">
+                            <h4 id="settings-deposit-slip-h" style="margin:12px 0 4px; font-size:12px;">Deposit slips</h4>
+                            <div class="form-grid">
+                                <div class="form-group full-width"><label for="settings-deposit-slip-stock">Deposit slip stock</label>
+                                    <select name="deposit_slip_stock" id="settings-deposit-slip-stock" aria-describedby="settings-deposit-slip-stock-help">
+                                        <option value="plain" ${pre ? '' : 'selected'}>Plain paper: SlowBooks' own deposit slip</option>
+                                        <option value="preprinted" ${pre ? 'selected' : ''}>Pre-printed deposit slips from the bank: figures only</option>
+                                    </select>
+                                    <div id="settings-deposit-slip-stock-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Pre-printed slips already carry the bank's labels, boxes and MICR line. Choose them to have Print on a deposit lay only the figures (the date, the account, the cash, each check's number and amount, the checks subtotal and the total) where the layout below puts them, with no labels, no MICR line and no routing or account numbers. Checks past the slip's lines continue on another page at the same lines, for the back of the slip or a second one. Plain paper prints the deposit slip as it always has.</div>
+                                </div>
+                                <div class="form-group"><label for="settings-deposit-slip-nudge-x">Deposit slip left/right nudge (in)</label>
+                                    <input name="deposit_slip_nudge_x_in" id="settings-deposit-slip-nudge-x" type="number" min="-0.5" max="0.5" step="0.01"
+                                        title="Inches, -0.5 to 0.5, in 0.01 steps" value="${escapeHtml(s.deposit_slip_nudge_x_in || '0')}"></div>
+                                <div class="form-group"><label for="settings-deposit-slip-nudge-y">Deposit slip up/down nudge (in)</label>
+                                    <input name="deposit_slip_nudge_y_in" id="settings-deposit-slip-nudge-y" type="number" min="-0.5" max="0.5" step="0.01"
+                                        title="Inches, -0.5 to 0.5, in 0.01 steps" value="${escapeHtml(s.deposit_slip_nudge_y_in || '0')}"></div>
+                                <div class="form-group full-width" id="settings-deposit-slip-fields" role="group" aria-labelledby="settings-deposit-slip-fields-h">
+                                    <div id="settings-deposit-slip-fields-h" style="font-weight:bold; font-size:12px; margin-bottom:4px;">Deposit slip layout</div>
+                                    <div id="settings-deposit-slip-fields-help" style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Where each figure prints on your bank's slip, in inches from the slip's top-left corner as it feeds into the printer (0 to 11). Left is where a date, the account or a check number starts and where an amount ends, so the cents line up; top is the top of the figure. Amounts print without a dollar sign. Measure your slip with a ruler, then print a test slip and hold it against one. The check number and amount rows place the first check line; the rest follow at the spacing below. Clear Print to leave a figure off.</div>
+                                    <input type="hidden" name="deposit_slip_layout" id="settings-deposit-slip-layout" value="${escapeHtml(SettingsPage._checkLayoutJson(layout))}">
+                                    <table class="data-table" style="font-size:11px; width:auto;" aria-describedby="settings-deposit-slip-fields-help">
+                                        <thead><tr><th scope="col">Figure</th><th scope="col">Left (in)</th><th scope="col">Top (in)</th><th scope="col">Size (pt)</th><th scope="col">Print</th></tr></thead>
+                                        <tbody>${rows}</tbody>
+                                    </table>
+                                    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; font-size:11px;">
+                                        <label for="deposit-slip-lines-count" style="font-weight:normal;">Check lines on the slip
+                                            <input type="number" id="deposit-slip-lines-count" data-slip-lines="count" data-default="${L.count}" data-admin min="1" max="30" step="1" style="width:60px;"
+                                                value="${num(lines.count, L.count)}" oninput="SettingsPage.syncDepositSlipLayout()"></label>
+                                        <label for="deposit-slip-lines-spacing" style="font-weight:normal;">Line spacing (in)
+                                            <input type="number" id="deposit-slip-lines-spacing" data-slip-lines="spacing" data-default="${L.spacing}" data-admin min="0.1" max="1" step="0.01" style="width:60px;"
+                                                value="${num(lines.spacing, L.spacing)}" oninput="SettingsPage.syncDepositSlipLayout()"></label>
+                                    </div>
+                                    <div style="margin-top:6px;" data-write>
+                                        <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.resetDepositSlipLayout()">Reset deposit slip layout to defaults</button>
+                                    </div>
+                                </div>
+                                <div class="form-group full-width">
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintDepositSlip()">Print a test slip</button>
+                                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample deposit (two checks and some cash, made-up figures) laid out for pre-printed slips, using the layout and nudges as set here, saved or not. Print it on plain paper and hold it against a slip, or print it on a spare slip.</div>
+                                </div>
+                            </div>
+                        </div>`;
+    },
+
+    // The layout table's inputs, as the hidden field's JSON: a figure at
+    // its default place and size, and Print left on, are left out.
+    syncDepositSlipLayout() {
+        const hidden = document.getElementById('settings-deposit-slip-layout');
+        if (!hidden) return;
+        const layout = {};
+        const take = (group, attr, el) => {
+            let v;
+            if (attr === 'show') {
+                if (el.checked) return;
+                v = false;
+            } else {
+                const t = String(el.value || '').trim();
+                if (t === '') return;
+                // what is not a number is sent as typed, so saving says why
+                v = isFinite(Number(t)) ? Number(t) : t;
+                if (v === Number(el.getAttribute('data-default'))) return;
+            }
+            (layout[group] = layout[group] || {})[attr] = v;
+        };
+        document.querySelectorAll('#settings-deposit-slip-fields [data-slip-field]').forEach(el => {
+            take(el.getAttribute('data-slip-field'), el.getAttribute('data-attr'), el);
+        });
+        document.querySelectorAll('#settings-deposit-slip-fields [data-slip-lines]').forEach(el => {
+            take('check_lines', el.getAttribute('data-slip-lines'), el);
+        });
+        hidden.value = SettingsPage._checkLayoutJson(layout);
+    },
+
+    // Every figure back at its default place and size, printed. Saved with
+    // Save Settings like the rest.
+    resetDepositSlipLayout() {
+        document.querySelectorAll('#settings-deposit-slip-fields [data-slip-field], #settings-deposit-slip-fields [data-slip-lines]').forEach(el => {
+            if (el.getAttribute('data-attr') === 'show') el.checked = true;
+            else el.value = el.getAttribute('data-default');
+        });
+        SettingsPage.syncDepositSlipLayout();
+        SettingsPage._updateDirty();
+    },
+
+    // Opens the sample deposit on pre-printed slip stock (#798) in a new
+    // tab, with the layout and nudges as they stand in the form.
+    testPrintDepositSlip() {
+        const form = document.getElementById('settings-form');
+        const params = new URLSearchParams();
+        for (const name of ['deposit_slip_layout', 'deposit_slip_nudge_x_in', 'deposit_slip_nudge_y_in']) {
+            const el = form && form.querySelector(`[name="${name}"]`);
+            if (el) params.set(name, el.value);
+        }
+        const qs = params.toString();
+        window.open('/api/deposits/test-slip' + (qs ? `?${qs}` : ''), '_blank');
     },
 
     // ----- a bank account's details for blank check stock (#739) --------

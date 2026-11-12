@@ -68,6 +68,28 @@ def _connected(db: Session) -> str:
     return access_url
 
 
+def _refuse_a_second_feed(db: Session, mapping: dict[str, int]) -> None:
+    """Two SimpleFIN feeds into one account would bring every line of that
+    register in twice (#819), so each feed needs an account of its own, as
+    Mercury's mapping already insists. Two feed records on one chart account
+    are one register, so they count as one. The map is replaced whole, so a
+    feed saved again onto the account it already has is never a second feed."""
+    seen: set[tuple[str, int]] = set()
+    for bank_account_id in mapping.values():
+        ba = db.get(BankAccount, bank_account_id)
+        key = (
+            ("acct", ba.account_id)
+            if ba and ba.account_id
+            else ("feed", bank_account_id)
+        )
+        if key in seen:
+            raise HTTPException(
+                status_code=400,
+                detail="Map each SimpleFIN account to a separate bank account",
+            )
+        seen.add(key)
+
+
 @router.get("/status")
 def status(db: Session = Depends(get_db)):
     access_url = get_setting_raw(db, "simplefin_access_url") or ""
@@ -128,6 +150,7 @@ def save_mapping(payload: MapRequest, request: Request, db: Session = Depends(ge
             continue
         feed = feed_for_ledger_account(db, int(ledger_account_id))
         clean[str(sf_id)] = feed.id
+    _refuse_a_second_feed(db, clean)
     set_setting(db, "simplefin_account_map", json.dumps(clean))
     if payload.reversed is not None:
         reversed_ids = sorted({str(sf_id) for sf_id in payload.reversed})

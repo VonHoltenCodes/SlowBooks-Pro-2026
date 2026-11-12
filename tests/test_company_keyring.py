@@ -197,6 +197,11 @@ class _Proc:
 def _launch_stubs(monkeypatch, path):
     started = []
     monkeypatch.setattr(company_service, "company_db_path", lambda f: path)
+    # the launcher keeps its .env beside itself in a checkout, so an unlock
+    # here wrote DATABASE_URL into the repository's .env, and a test that
+    # watches that file for stray writes (test_server_mode) failed when the
+    # two ran at once; the .env goes beside the company file instead
+    monkeypatch.setattr(dl, "_config_dir", lambda: Path(path).parent)
     monkeypatch.setattr(dl, "_server_already_running", lambda port: False)
     monkeypatch.setattr(
         dl,

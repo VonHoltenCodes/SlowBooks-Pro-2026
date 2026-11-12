@@ -4,6 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 from app.schemas.common import StrictModel
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class CCChargeCreate(StrictModel):
@@ -18,6 +19,8 @@ class CCChargeCreate(StrictModel):
     class_id: Optional[int] = None
     job_id: Optional[int] = None
     function: Optional[str] = None  # nonprofit: program | management | fundraising
+    # Files attached on the form before this first save (#796)
+    pending_attachments: PendingAttachmentIds = []
 
 
 class CCChargeResponse(BaseModel):

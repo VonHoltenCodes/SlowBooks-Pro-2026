@@ -25,6 +25,7 @@ from app.schemas.common import (
     quantity_text,
 )
 from app.schemas.invoices import DiscountTaken, RateOut
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class BillLineCreate(StrictModel):
@@ -170,6 +171,9 @@ class BillCreate(StrictModel):
     retainage_held: Decimal = Decimal("0")
     lien_waiver_status: Optional[str] = None
     lines: list[BillLineCreate] = []
+    # Files attached on the form before this first save (#796): the ids
+    # POST /api/attachments/pending gave, attached to the new bill.
+    pending_attachments: PendingAttachmentIds = []
 
     _lien = field_validator("lien_waiver_status")(_check_lien_waiver)
 

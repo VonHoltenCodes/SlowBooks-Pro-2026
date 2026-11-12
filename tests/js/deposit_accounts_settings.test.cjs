@@ -217,7 +217,10 @@ test('editing a deposit offers no account to change: it keeps its own', async ()
     });
     await p.page.editDeposit(31);
     assert.ok(p.modal().includes('DepositsPage.saveEdit(31)'));
-    assert.ok(!/deposit_to_account_id|deposit-bank-acct|<select/.test(p.modal()));
+    assert.ok(!/deposit_to_account_id|deposit-bank-acct/.test(p.modal()));
+    // the only pickers are the other lines' own (#792): never a bank account's
+    const selects = [...p.modal().matchAll(/<select([^>]*)>/g)].map(m => m[1]);
+    assert.ok(selects.every(attrs => /class="dep-other-/.test(attrs)), selects.join(' | '));
 });
 
 for (const [file, name, open] of forms) {

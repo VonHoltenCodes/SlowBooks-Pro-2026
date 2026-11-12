@@ -25,8 +25,8 @@ from app.models.invoices import Invoice
 from app.models.purchase_orders import PurchaseOrder
 from app.models.vendor_credits import VendorCredit
 from app.models.transactions import Transaction
-from app.schemas.attachments import AttachmentResponse
-from app.services import file_store
+from app.schemas.attachments import AttachmentResponse, PendingAttachmentResponse
+from app.services import file_store, pending_attachments
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
@@ -53,6 +53,9 @@ _ENTITY_TYPE_DIRS = {
     # receipt too, keyed by the entry's id, so it need not be re-entered as
     # an Expense just to hold the file (#600).
     "bank_entry": "bank_entry",
+    # A charge entered on Credit Card Charges: its receipt is kept with it,
+    # attached before the first save or after (#796).
+    "cc_charge": "cc_charge",
     # A field ticket's photo of the signed paper (construction mode): v1's
     # signature is the typed name and date plus this.
     "field_ticket": "field_ticket",
@@ -137,6 +140,15 @@ _RECORD_TABLES = {
 }
 
 
+# The record types that are a transaction: an expense and a card charge of
+# their own kind, a journal entry any transaction.
+_TRANSACTION_LABELS = {
+    "expense": "Expense",
+    "cc_charge": "Card charge",
+    "journal_entry": "Journal entry",
+}
+
+
 def _check_record(db: Session, entity_type: str, entity_id: int) -> None:
     """A register entry's id must be a register entry's: 404 for any other
     transaction (an invoice's posting, a transfer) or none at all."""
@@ -158,12 +170,12 @@ def _check_upload_record(db: Session, entity_type: str, entity_id: int) -> None:
     still takes a file. An expense or a journal entry is a transaction of
     its kind."""
     _check_record(db, entity_type, entity_id)
-    if entity_type in ("expense", "journal_entry"):
+    if entity_type in _TRANSACTION_LABELS:
         query = db.query(Transaction.id).filter(Transaction.id == entity_id)
-        if entity_type == "expense":
-            query = query.filter(Transaction.source_type == "expense")
+        if entity_type in ("expense", "cc_charge"):
+            query = query.filter(Transaction.source_type == entity_type)
         if query.first() is None:
-            label = "Expense" if entity_type == "expense" else "Journal entry"
+            label = _TRANSACTION_LABELS[entity_type]
             raise HTTPException(status_code=404, detail=f"{label} not found")
         return
     if entity_type not in _RECORD_TABLES:
@@ -188,18 +200,9 @@ def _record_attachment(db: Session, attachment_id: int) -> Attachment | None:
     )
 
 
-@router.post(
-    "/{entity_type}/{entity_id}", response_model=AttachmentResponse, status_code=201
-)
-async def upload_attachment(
-    entity_type: str,
-    entity_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-):
-    _entity_type(entity_type)
-    _check_upload_record(db, entity_type, entity_id)
-
+async def _read_upload(file: UploadFile) -> tuple[str, bytes]:
+    """The upload's safe name and bytes, or the 400 that says what is wrong
+    with it: the same refusals for a saved record and a form not yet saved."""
     safe_filename = _sanitize_filename(file.filename or "")
     extension = Path(safe_filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
@@ -216,6 +219,52 @@ async def upload_attachment(
     content = await file.read()
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+    return safe_filename, content
+
+
+# A file for a new bill, expense or card charge, before its first save
+# (#796): held until the create call names its id, then attached to the
+# record it made. Declared above the catch-all routes, like download below.
+@router.post("/pending", response_model=PendingAttachmentResponse, status_code=201)
+async def upload_pending_attachment(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    safe_filename, content = await _read_upload(file)
+    row = pending_attachments.hold(
+        db, filename=safe_filename, content_type=file.content_type, data=content
+    )
+    db.commit()
+    return PendingAttachmentResponse(
+        id=row.token,
+        filename=row.original_name,
+        mime_type=row.content_type,
+        file_size=row.size,
+        expires_at=pending_attachments.expires_at(row),
+    )
+
+
+@router.delete("/pending/{pending_id}")
+def discard_pending_attachment(pending_id: str, db: Session = Depends(get_db)):
+    """Taken off the form before it was saved, or the form was cancelled.
+    Idempotent: a file already gone (saved, swept) is not an error."""
+    pending_attachments.discard(db, pending_id)
+    db.commit()
+    return {"status": "deleted"}
+
+
+@router.post(
+    "/{entity_type}/{entity_id}", response_model=AttachmentResponse, status_code=201
+)
+async def upload_attachment(
+    entity_type: str,
+    entity_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    _entity_type(entity_type)
+    _check_upload_record(db, entity_type, entity_id)
+    safe_filename, content = await _read_upload(file)
 
     # A row of its own every time: a second "receipt.pdf" on the same record
     # is a second file, and the first is kept.

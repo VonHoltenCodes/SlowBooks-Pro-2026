@@ -131,6 +131,11 @@ SETTINGS_KEPT = {
     "Check Printing › Print a test check": [
         ("GET", "/api/checks/test-print", None, 200)
     ],
+    # and deposits, so the test slip of pre-printed deposit slips (#798) is
+    # theirs too
+    "Check Printing › Print a test slip": [
+        ("GET", "/api/deposits/test-slip", None, 200)
+    ],
     "Equipment › Add Equipment": [
         ("POST", "/api/equipment", {"name": "Mini excavator", "hourly_rate": 95}, 201)
     ],
@@ -242,6 +247,12 @@ SETTINGS_TAKEN = {
         "/api/settings",
         {"check_field_layout": ""},
     ),
+    # the deposit slip layout (#798) is a company setting the same way
+    "Check Printing › Reset deposit slip layout to defaults": (
+        "PUT",
+        "/api/settings",
+        {"deposit_slip_layout": ""},
+    ),
     "Backup / Restore › Create Backup": ("POST", "/api/backups", None),
     "Backup / Restore › Restore…": (
         "POST",
@@ -352,6 +363,29 @@ SETTINGS_TAKEN_PARTS = {
         )
         for attr in ("x", "y", "size", "bold")
     },
+    # the deposit slip layout table (#798): seven figures, each with its
+    # place, size and Print, and the slip's check lines
+    **{
+        f"Check Printing › #deposit-slip-{field}-{attr}": (
+            "Check Printing › Reset deposit slip layout to defaults"
+        )
+        for field in (
+            "date",
+            "account",
+            "cash",
+            "check-number",
+            "check-amount",
+            "checks-subtotal",
+            "total",
+        )
+        for attr in ("x", "y", "size", "show")
+    },
+    "Check Printing › #deposit-slip-lines-count": (
+        "Check Printing › Reset deposit slip layout to defaults"
+    ),
+    "Check Printing › #deposit-slip-lines-spacing": (
+        "Check Printing › Reset deposit slip layout to defaults"
+    ),
     "AI Insights › #ai-settings-provider": "AI Insights › Save AI settings",
     "AI Insights › #ai-settings-model-select": "AI Insights › Save AI settings",
     "AI Insights › #ai-settings-key": "AI Insights › Save AI settings",
@@ -641,9 +675,17 @@ def made(client, db_session, seed_accounts, seed_customer):
     }
 
 
-def test_every_control_a_bookkeeper_is_offered_the_server_answers(client, made):
+def test_every_control_a_bookkeeper_is_offered_the_server_answers(
+    client, made, monkeypatch
+):
     """Each control the pages leave a bookkeeper, sent as it sends it with a
     bookkeeper's API token: none is refused, and each gets its answer."""
+    # the test slip (#798) answers with a PDF: the engine is stubbed so the
+    # sweep runs where WeasyPrint's native stack is absent (Windows CI) and
+    # stays about who is answered, not about rendering
+    from app.services import pdf_service
+
+    monkeypatch.setattr(pdf_service, "render_pdf", lambda html, **kw: html.encode())
     offered = set().union(*_pages(_probe(), "bookkeeper").values())
     unknown = sorted(
         offered - set(KEPT) - set(TAKEN) - set(SETTINGS_TAKEN_FROM_A_SIGN_IN)

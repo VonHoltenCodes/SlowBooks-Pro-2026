@@ -239,7 +239,11 @@ Saved Reports on the Report Center, below the starred reports, as a collapsible 
 ## Driving nonprofit mode from the API
 
 Everything above is an API call, so a bring-your-own-AI agent with a scoped
-token can do the month-end and year-end work unattended, in this order:
+token can do the month-end and year-end work unattended. Claude and other
+agents that speak the Model Context Protocol reach the API through
+[SlowBooks Switchboard](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md)
+(`sbplive`, [download](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases)),
+whose `find_operations` and `call_operation` tools reach these paths under the token's role. The order:
 
 1. `GET /openapi.json` — every nonprofit path is described.
 2. `PUT /api/settings {"company_type": "nonprofit"}` then

@@ -53,7 +53,8 @@ TRANSIT_TAX_RATE = Decimal("0.001")  # 0.1% of gross, employee
 # 60% employee / 40% employer. Employers averaging fewer than 25 employees
 # owe no employer share: the pay run passes the company's active-employee
 # count as employee_count; a caller that passes none is charged it (the
-# large-employer case).
+# large-employer case). The company's setting (employer_share_applies,
+# #825) outranks the count when it is set.
 PAID_LEAVE_EMPLOYEE_RATE = Decimal("0.006")
 PAID_LEAVE_EMPLOYER_RATE = Decimal("0.004")
 PAID_LEAVE_EMPLOYER_MIN_EMPLOYEES = 25
@@ -247,10 +248,13 @@ class OregonEngine(StateEngine):
         pl_wages = max(Decimal("0"), min(gross, t["paid_leave_wage_cap"] - ytd))
         paid_leave_employee = _q(pl_wages * PAID_LEAVE_EMPLOYEE_RATE)
         count = _extra.get("employee_count")
+        # the company's setting, as OED determined it (#825), outranks the
+        # run's headcount; None follows the headcount
+        applies = _extra.get("employer_share_applies")
+        if applies is None:
+            applies = count is None or count >= PAID_LEAVE_EMPLOYER_MIN_EMPLOYEES
         paid_leave_employer = (
-            _q(pl_wages * PAID_LEAVE_EMPLOYER_RATE)
-            if count is None or count >= PAID_LEAVE_EMPLOYER_MIN_EMPLOYEES
-            else Decimal("0.00")
+            _q(pl_wages * PAID_LEAVE_EMPLOYER_RATE) if applies else Decimal("0.00")
         )
 
         # Statewide transit tax — flat 0.1% of gross, employee.

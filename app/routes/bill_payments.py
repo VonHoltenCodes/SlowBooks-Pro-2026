@@ -360,11 +360,15 @@ def create_bill_payment(
         payment, [a for _b, _d, a in discounts if a], _actor(db)
     )
 
-    # A payment of one bill carries that bill's memo, for the check's memo
-    # line (#602); a memo typed on the payment wins, and a payment of
-    # several bills leaves the memo for the person to type.
-    if not (data.notes or "").strip() and len(applied_bills) == 1:
-        payment.notes = (applied_bills[0][0].notes or "").strip() or None
+    # The check's memo line (#602) as Settings, Check Printing, Check memo
+    # chooses (#800): the bills' references, one bill's memo, or nothing.
+    # A memo typed on the payment wins, and stays editable before printing.
+    if not (data.notes or "").strip() and applied_bills:
+        from app.services import check_memo
+
+        payment.notes = check_memo.memo_for_bills(
+            check_memo.choice(db), [b for b, _home in applied_bills], vendor.name
+        )
 
     # Journal: DR AP, CR Bank — always; the accounts were resolved above
     if True:
