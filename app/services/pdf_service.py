@@ -265,6 +265,12 @@ from app.services.estimate_bid import (  # noqa: E402
 )
 
 _jinja_env.globals["estimate_totals"] = _estimate_totals
+
+# The line an exempt estimate, invoice or sales receipt prints under its
+# totals (#864): "Sales tax exempt", with the certificate when one is named.
+from app.services.tax_exemption import exemption_line as _exemption_line  # noqa: E402
+
+_jinja_env.globals["tax_exempt_line"] = _exemption_line
 _jinja_env.globals["spread_markup_prices"] = _spread_markup_prices
 # Which layout a construction estimate prints in (#774), as the form picks it.
 _jinja_env.globals["presentation_style"] = _presentation_style

@@ -94,7 +94,7 @@ def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
     return subtotal, tax_amount, total
 
 
-def taxed_copy_lines(lines, customer):
+def taxed_copy_lines(lines, customer, exempt=False):
     """Lines a NEW document is built from (an estimate converting, an invoice
     being duplicated, a recurring template running), with each line's tax
     flag as the customer stands TODAY: a customer marked non-taxable pays no
@@ -104,10 +104,11 @@ def taxed_copy_lines(lines, customer):
 
     Copying the source's tax instead charged a reseller tax on a new invoice
     converted from an estimate saved before the exemption applied (2.16.2
-    gate, skytech — booked to Sales Tax Payable)."""
+    gate, skytech — booked to Sales Tax Payable). ``exempt`` is the new
+    document's "Tax exempt" switch (#864), which unticks every line too."""
     from types import SimpleNamespace
 
-    exempt = customer is not None and customer.is_taxable is False
+    exempt = exempt or (customer is not None and customer.is_taxable is False)
     out = []
     for ln in lines:
         flag = False if exempt else (getattr(ln, "is_taxable", None) is not False)

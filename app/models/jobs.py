@@ -100,6 +100,14 @@ class Job(Base):
     co_markup_pct = Column(Numeric(7, 4), nullable=True)
     contract_date = Column(Date, nullable=True)
     sales_tax_treatment = Column(String(20), nullable=True)  # SALES_TAX_TREATMENTS
+    # Sales tax charged on the job's sales, or the job exempt (#864): a
+    # public owner's job for a customer who is otherwise taxable. A new
+    # job starts as its customer is. Exempt, a new estimate, invoice, sales
+    # receipt, pay application or change order for the job starts with
+    # every line untaxed, and so does a new schedule-of-values line; what
+    # is already made keeps its flags when this changes. Not the same as
+    # sales_tax_treatment, which says who pays the tax on a taxed job.
+    is_taxable = Column(Boolean, nullable=False, default=True, server_default=true())
     contract_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )

@@ -105,6 +105,7 @@ def sales_tax_report(
     rows.sort(key=lambda r: (r[1].date, r[0] != "invoice", str(r[2])))
 
     items = []
+    exempt = _ExemptSales(db)
     for kind, doc, number, subtotal, taxable, tax in rows:
         items.append(
             {
@@ -118,6 +119,7 @@ def sales_tax_report(
                 "taxable": float(taxable),
                 "tax_rate": float(doc.tax_rate or 0) if taxable else None,
                 "tax_amount": float(tax),
+                "exempt_reason": exempt.add(doc, subtotal - taxable),
             }
         )
 
@@ -137,6 +139,7 @@ def sales_tax_report(
         "tax_on_sales": float(tax_on_sales),
         "tax_credited": float(tax_credited),
         "total_tax": float(total_tax),
+        "exempt_sales": exempt.rows(),
         "ledger": _sales_tax_ledger(db, start_date, end_date, total_tax),
         "use_tax": _use_tax_section(db, start_date, end_date),
         "basis": "accrual",
@@ -242,6 +245,7 @@ def _sales_tax_cash(db: Session, start_date, end_date):
             prior += applied
     rows.sort(key=lambda r: (r[0].date, r[0].id, str(r[1].invoice_number)))
 
+    exempt = _ExemptSales(db)
     items = [
         {
             "type": "invoice",
@@ -254,6 +258,7 @@ def _sales_tax_cash(db: Session, start_date, end_date):
             "taxable": float(taxable),
             "tax_rate": float(inv.tax_rate or 0) if taxable else None,
             "tax_amount": float(tax),
+            "exempt_reason": exempt.add(inv, subtotal - taxable),
         }
         for pay, inv, subtotal, taxable, tax in rows
     ]
@@ -270,11 +275,48 @@ def _sales_tax_cash(db: Session, start_date, end_date):
         "tax_on_sales": float(total_tax),
         "tax_credited": 0.0,
         "total_tax": float(total_tax),
+        "exempt_sales": exempt.rows(),
         "ledger": _sales_tax_ledger(db, start_date, end_date, total_tax, "cash"),
         "use_tax": _use_tax_section(db, start_date, end_date, "cash"),
         "basis": "cash",
         "basis_note": cash_basis.receivable_note(db, end_date, "cash"),
     }
+
+
+class _ExemptSales:
+    """The report's Exempt sales section (#864): each sale's untaxed amount
+    (its sales less its taxable amount, so the section adds up to the
+    Non-taxable sales line) under the reason it is untaxed: the kind of the
+    certificate its customer names when the sale is exempt as a whole, no
+    certificate on file when none is named, or lines left untaxed one by
+    one on a taxed sale (services/tax_exemption.exempt_reason)."""
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.amounts: dict[str, Decimal] = {}
+
+    def add(self, doc, untaxed) -> Optional[str]:
+        from app.services.tax_exemption import exempt_reason
+
+        untaxed = _q(untaxed)
+        if untaxed == 0:
+            return None
+        reason = exempt_reason(self.db, doc)
+        self.amounts[reason] = self.amounts.get(reason, Decimal(0)) + untaxed
+        return reason
+
+    def rows(self) -> list[dict]:
+        from app.services.tax_exemption import EXEMPT_REASON_LABELS, EXEMPT_REASONS
+
+        return [
+            {
+                "reason": reason,
+                "label": EXEMPT_REASON_LABELS[reason],
+                "amount": float(self.amounts[reason]),
+            }
+            for reason in EXEMPT_REASONS
+            if self.amounts.get(reason, Decimal(0)) != 0
+        ]
 
 
 def _settlements_of(db: Session, invoice_ids) -> dict:
@@ -563,6 +605,10 @@ def _sales_tax_sections(data: dict, t) -> list[dict]:
         }
     )
     ledger = data.get("ledger")
+    exempt_rows = [
+        {"cells": [e["label"], _money(e["amount"])]}
+        for e in data.get("exempt_sales") or []
+    ]
     notes = [data.get("basis_note")] if data.get("basis_note") else []
     if ledger:
         name = " ".join(
@@ -618,6 +664,23 @@ def _sales_tax_sections(data: dict, t) -> list[dict]:
             "note": " ".join(notes) or None,
         }
     ]
+    if exempt_rows:
+        # by reason, as the state returns ask for them (#864)
+        exempt_rows.append(
+            {
+                "cells": ["Total exempt sales", _money(data["total_non_taxable"])],
+                "style": "grand-total",
+            }
+        )
+        sections.append(
+            {
+                "title": "Exempt Sales",
+                "period": _sales_tax_period(data),
+                "columns": ["Reason", "Sales"],
+                "text_columns": 1,
+                "rows": exempt_rows,
+            }
+        )
     use = data.get("use_tax")
     if use:
         use_rows = [

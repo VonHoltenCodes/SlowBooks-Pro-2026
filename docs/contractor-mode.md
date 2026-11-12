@@ -470,6 +470,20 @@ not-to-exceed). The type decides how the fee and the cap read:
   in Florida and many states (`sales_tax_treatment`: `charge_owner` or
   `contractor_pays`). See *Sales tax and use tax on a job* below.
 
+**A tax-exempt job** (#864). Separate from who pays the tax, the job form says
+whether sales tax is charged on the job at all: **Sales tax: Charged** or
+**Exempt** (`is_taxable` on the job; a new job starts as its customer's Taxable
+flag). A public owner's job for a general contractor who is otherwise taxable
+is the usual case. On an exempt job a new estimate, invoice or sales receipt
+starts with its **Sales tax exempt** switch on and every line untaxed, a new
+pay application starts with *Charge tax* off, and a new schedule-of-values
+line, a contingency line and a change order's line start untaxed (a Tax box
+ticked by hand still counts). The job's header shows *Sales tax exempt*.
+Changing the job later changes new documents and new lines only: what is
+already made keeps its own tax. The exempt document prints "Sales tax exempt —
+certificate <number> (<state>)" under its totals when the customer names a
+certificate on file (see *Sales Tax* in features.md).
+
 **Sales tax and use tax on a job.** On a *charge the owner* job the pay
 applications tax the taxable SOV lines (see *Progress billing*). On a
 *contractor pays* job the contractor is the consumer of the materials it

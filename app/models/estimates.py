@@ -19,6 +19,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     event,
+    false,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -90,6 +91,10 @@ class Estimate(Base):
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     # Job-costing dimension (QB "Customer:Job"); NULL = no job
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    # The document's "Tax exempt" switch (#864): on, no line is taxed and the
+    # PDF says so under the totals. A new one starts as its job is, else its
+    # customer (services/tax_exemption.default_tax_exempt).
+    tax_exempt = Column(Boolean, nullable=False, server_default=false())
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
@@ -105,6 +110,15 @@ class Estimate(Base):
     )
     converted_invoice = relationship("Invoice", foreign_keys=[converted_invoice_id])
     job = relationship("Job", foreign_keys=[job_id])
+
+
+@event.listens_for(Estimate, "before_insert")
+def _default_tax_exempt(_mapper, connection, target):
+    """A new estimate made without saying (an import, a copy) starts exempt
+    as its job or customer is (#864); see tax_exemption.fill_tax_exempt."""
+    from app.services.tax_exemption import fill_tax_exempt
+
+    fill_tax_exempt(connection, target)
 
 
 WON_STATUSES = (EstimateStatus.ACCEPTED, EstimateStatus.CONVERTED)

@@ -683,7 +683,13 @@ def duplicate_invoice(
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     today = date.today()
-    copied = taxed_copy_lines(original.lines, original.customer)
+    # the copy keeps the original's Tax exempt switch (#864)
+    from app.services.tax_exemption import settle_tax_exempt
+
+    exempt = settle_tax_exempt(
+        db, bool(original.tax_exempt), original.customer, original.job_id
+    )
+    copied = taxed_copy_lines(original.lines, original.customer, exempt)
     subtotal, tax_amount, total = compute_line_totals(copied, original.tax_rate)
     noun = document_label(original, words).lower()
     confirm_zero_total(
@@ -732,6 +738,7 @@ def duplicate_invoice(
         fair_value_description=original.fair_value_description,
         notes=original.notes,
         class_id=original.class_id,
+        tax_exempt=exempt,
         # The copy carries the customer's jobs only; another customer's job
         # stored on the original (books from before the rule) is left off,
         # and the response says which (NEW-36).

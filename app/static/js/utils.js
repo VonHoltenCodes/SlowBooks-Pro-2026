@@ -1892,17 +1892,40 @@ const CheckNumberWarn = {
 // from each sales form's recalc(), so it holds after a customer change, an
 // item pick or a new line. A box's own state is kept and restored when the
 // form switches back to a taxable customer.
+//
+// The estimate, invoice and sales receipt forms also carry the document's
+// own "Sales tax exempt" switch (#864), passed as `form`: on, every line's
+// box is held off the same way and a new line starts untaxed; a
+// non-taxable customer holds the switch on. A new document's switch starts
+// as its job is (the job picker's data-taxable) and follows a change of job.
 const TaxExempt = {
-    enforce(customers, customerId, tbody) {
+    enforce(customers, customerId, tbody, form) {
         const c = (customers || []).find(x => x.id == customerId);
-        const exempt = !!c && c.is_taxable === false;
+        const custExempt = !!c && c.is_taxable === false;
+        const sw = form ? form.querySelector('[name="tax_exempt"]') : null;
+        if (sw) {
+            if (custExempt) {
+                if (!sw.disabled) sw.dataset.was = sw.checked ? '1' : '0';
+                sw.checked = true;
+                sw.disabled = true;
+                sw.title = `${c.name} is non-taxable, so this is always sales tax exempt`;
+            } else if (sw.disabled && sw.dataset.was !== undefined) {
+                sw.disabled = false;
+                sw.checked = sw.dataset.was === '1';
+                delete sw.dataset.was;
+                sw.title = TaxExempt.SWITCH_TITLE;
+            }
+        }
+        const exempt = custExempt || (!!sw && sw.checked);
         if (!tbody) return exempt;
         tbody.querySelectorAll('.line-taxable').forEach(box => {
             if (exempt) {
                 if (!box.disabled) box.dataset.was = box.checked ? '1' : '0';
                 box.checked = false;
                 box.disabled = true;
-                box.title = `${c.name} is non-taxable (reseller or exempt): no sales tax on any line`;
+                box.title = custExempt
+                    ? `${c.name} is non-taxable (reseller or exempt): no sales tax on any line`
+                    : 'Marked sales tax exempt: no sales tax on any line';
             } else if (box.disabled) {
                 box.disabled = false;
                 box.checked = box.dataset.was !== '0';
@@ -1910,6 +1933,46 @@ const TaxExempt = {
             }
         });
         return exempt;
+    },
+
+    SWITCH_TITLE: 'No sales tax on any line; the PDF says the sale is exempt',
+
+    // The header switch, named tax_exempt; `onchange` is the form's recalc.
+    switchHtml(on, onchange) {
+        return `<div class="form-group"><label>Sales tax</label>
+            <label style="font-weight:normal;"><input type="checkbox" name="tax_exempt" title="${TaxExempt.SWITCH_TITLE}" ${on ? 'checked' : ''} onchange="${onchange}"> Sales tax exempt</label></div>`;
+    },
+
+    // Whether the job picked in `select` is exempt (its option's data-taxable).
+    jobExempt(select) {
+        const opt = select && select.options ? select.options[select.selectedIndex] : null;
+        return !!opt && opt.value !== '' && opt.dataset && opt.dataset.taxable === '0';
+    },
+
+    // A change of job sets the switch to the job's, then `recalc` runs.
+    watchJob(form, recalc) {
+        const select = form ? form.querySelector('select[name="job_id"]') : null;
+        if (!select) return;
+        select.addEventListener('change', () => TaxExempt.followJob(form, recalc));
+    },
+
+    followJob(form, recalc) {
+        const sw = form ? form.querySelector('[name="tax_exempt"]') : null;
+        const select = form ? form.querySelector('select[name="job_id"]') : null;
+        if (!sw || !select) return;
+        if (sw.disabled) {
+            // held on by a non-taxable customer: what it goes back to
+            sw.dataset.was = TaxExempt.jobExempt(select) ? '1' : '0';
+        } else {
+            sw.checked = TaxExempt.jobExempt(select);
+        }
+        if (recalc) recalc();
+    },
+
+    // The switch's value for the save body.
+    value(form) {
+        const sw = form ? form.querySelector('[name="tax_exempt"]') : null;
+        return sw ? !!sw.checked : undefined;
     },
 };
 window.TaxExempt = TaxExempt;
@@ -2077,7 +2140,7 @@ async function jobFormGroupHtml(selectedId, customerSelectId) {
     try { jobs = await API.get('/jobs'); } catch (e) { return ''; }
     if (!jobs.length) return '';
     const opts = jobs.map(j =>
-        `<option value="${j.id}" data-customer="${j.customer_id}" ${selectedId === j.id ? 'selected' : ''}>${escapeHtml(j.full_name || j.name)}</option>`
+        `<option value="${j.id}" data-customer="${j.customer_id}" data-taxable="${j.is_taxable === false ? '0' : '1'}" ${selectedId === j.id ? 'selected' : ''}>${escapeHtml(j.full_name || j.name)}</option>`
     ).join('');
     const bind = customerSelectId ? `data-customer-select="${customerSelectId}"` : '';
     return `<div class="form-group"><label>${T('Job')}</label>

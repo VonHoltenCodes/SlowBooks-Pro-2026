@@ -215,6 +215,7 @@ const JobsPage = {
                     <h2 style="margin:2px 0 0 0;">${escapeHtml(job.name)}
                         <span class="badge" style="font-size:11px; vertical-align:middle;">${escapeHtml(JobsPage.STATUS_LABELS[job.status] || job.status)}</span>
                         ${job.is_active ? '' : '<span style="font-size:11px;color:var(--text-danger);">inactive</span>'}
+                        ${job.is_taxable === false ? '<span class="badge" style="font-size:11px; vertical-align:middle;" title="New documents for this job start with every line untaxed">Sales tax exempt</span>' : ''}
                     </h2>
                 </div>
                 <div>
@@ -876,7 +877,9 @@ const JobsPage = {
         // through) starts the new row on it, so its revenue stays on one
         // account; otherwise blank, 4050 Contract Revenue (#731).
         const revenue = (JobsPage._contract || {}).new_line_revenue_account_id || null;
-        body.insertAdjacentHTML('beforeend', JobsPage.sovRowHtml({ revenue_account_id: revenue }, body.children.length, packages, codes));
+        // an exempt job's new line starts untaxed (#864)
+        const exempt = !!JobsPage._job && JobsPage._job.is_taxable === false;
+        body.insertAdjacentHTML('beforeend', JobsPage.sovRowHtml({ revenue_account_id: revenue, is_taxable: exempt ? false : undefined }, body.children.length, packages, codes));
         JobsPage.retotalSov();
     },
 
@@ -1913,6 +1916,9 @@ const JobsPage = {
             contract_amount: '', notes: '', is_active: true };
         if (id) { try { job = await API.get(`/jobs/${id}`); } catch (err) { toast(err.message, 'error'); return; } }
         const customers = await JobsPage._pickerCustomers(job);
+        JobsPage._formCustomers = customers;
+        // a new job is charged sales tax as its customer is (#864)
+        if (!id) job.is_taxable = JobsPage.customerTaxable(customers, job.customer_id);
         const custOpts = customers.map(c => `<option value="${c.id}" ${String(job.customer_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
         const statusOpts = Object.entries(JobsPage.STATUS_LABELS)
             .map(([k, v]) => `<option value="${k}" ${job.status === k ? 'selected' : ''}>${v}</option>`).join('');
@@ -1920,7 +1926,7 @@ const JobsPage = {
             <form id="job-form" onsubmit="JobsPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+                        <select name="customer_id" required ${id ? '' : 'onchange="JobsPage.customerPicked(this)"'}><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>${T('Job')} name *</label>
                         <input name="name" required maxlength="200" value="${escapeHtml(job.name)}" placeholder="Kitchen remodel"></div>
                     <div class="form-group"><label>${T('Job')} #</label>
@@ -1931,6 +1937,7 @@ const JobsPage = {
                         <input name="job_type" maxlength="100" value="${escapeHtml(job.job_type || '')}" placeholder="Remodel, New build, Service…"></div>
                     <div class="form-group"><label>Contract amount</label>
                         <input name="contract_amount" type="number" step="0.01" min="0" value="${job.contract_amount ?? ''}"></div>
+                    ${JobsPage.salesTaxGroupHtml(job, id)}
                     <div class="form-group"><label>Start date</label>
                         <input name="start_date" type="date" value="${job.start_date || ''}"></div>
                     <div class="form-group"><label>Projected end</label>
@@ -1953,6 +1960,36 @@ const JobsPage = {
                 </div>
             </form>`;
         openModal(id ? `Edit ${T('Job')}` : `New ${T('Job')}`, html);
+    },
+
+    // "Sales tax: charged / exempt" (#864). Exempt, the job's new documents
+    // and new schedule-of-values lines start untaxed; a change reaches new
+    // ones only. Not the Contract tab's "who pays the tax" setting.
+    salesTaxGroupHtml(job, id) {
+        const exempt = job.is_taxable === false;
+        return `<div class="form-group"><label>Sales tax</label>
+            <select name="is_taxable" data-touched="${id ? '1' : ''}" onchange="this.dataset.touched='1'" title="Exempt: new estimates, invoices, sales receipts, pay applications and change orders for this job start with every line untaxed. What is already made keeps its tax.">
+                <option value="true" ${exempt ? '' : 'selected'}>Charged</option>
+                <option value="false" ${exempt ? 'selected' : ''}>Exempt</option>
+            </select></div>`;
+    },
+
+    customerTaxable(customers, customerId) {
+        const c = (customers || []).find(x => String(x.id) === String(customerId));
+        return !(c && c.is_taxable === false);
+    },
+
+    // A new job's Sales tax follows its customer until it is set by hand.
+    customerPicked(select) {
+        const form = select.form || select.closest('form');
+        const tax = form ? form.querySelector('[name="is_taxable"]') : null;
+        if (!tax || tax.dataset.touched) return;
+        tax.value = JobsPage.customerTaxable(JobsPage._formCustomers, select.value) ? 'true' : 'false';
+    },
+
+    formTaxable(form) {
+        const tax = form ? form.querySelector('[name="is_taxable"]') : null;
+        return tax ? tax.value !== 'false' : undefined;
     },
 
     // Active customers only — the picker listed inactive ones too — plus the
@@ -1987,6 +2024,7 @@ const JobsPage = {
             site_address: val('site_address'),
             description: val('description'),
             notes: val('notes'),
+            is_taxable: JobsPage.formTaxable(form),
         };
         if (form.is_active) data.is_active = form.is_active.value === 'true';
         try {

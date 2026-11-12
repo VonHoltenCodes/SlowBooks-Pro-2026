@@ -143,6 +143,8 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     # defaulted to 0%, so returned taxable goods were credited without
     # their tax unless the user remembered (2.17.3 exploratory W-L14, F14).
     tax_rate = data.tax_rate
+    # a credit on an exempt invoice gives back no tax: it charged none (#864)
+    exempt = False
     if data.original_invoice_id is not None:
         original = db.get(Invoice, data.original_invoice_id)
         if original is None:
@@ -152,12 +154,13 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         refuse_unless_pays_for(db, data.customer_id, original, "credit memo")
         if tax_rate is None:
             tax_rate = original.tax_rate
+        exempt = bool(original.tax_exempt)
     if tax_rate is None:
         tax_rate = 0
 
     # Tax follows the lines the way an invoice's does: an item's own flag,
-    # and nothing at all for a non-taxable customer.
-    resolve_line_taxable(db, data.lines, customer)
+    # and nothing at all for a non-taxable customer or an exempt invoice.
+    resolve_line_taxable(db, data.lines, customer, exempt)
     subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
     # lines that fit can still come past the column once tax is added
     refuse_total_past_column(subtotal, tax_amount, total)

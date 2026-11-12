@@ -1131,8 +1131,9 @@ def sales_tax_csv(data: dict, company: str) -> str:
     """The Sales Tax report (#806): Date | Type | Number | Customer | Sales |
     Taxable | Rate | Tax, one row per invoice or credit memo as the screen
     lists them (a credit memo's figures negative), then the screen's totals,
-    the check against Sales Tax Payable, and the Use tax section when the
-    report has one. Rate is the percent (8.25 for 8.25%)."""
+    the check against Sales Tax Payable, the Exempt sales by reason (#864)
+    and the Use tax section when the report has one. Rate is the percent
+    (8.25 for 8.25%)."""
     out = io.StringIO()
     w = _SafeWriter(out)
     period = f"{data['start_date']} to {data['end_date']}"
@@ -1192,6 +1193,25 @@ def sales_tax_csv(data: dict, company: str) -> str:
         total("Difference from this report", ledger["difference"])
         total("Paid this period", ledger["payments"])
         total(f"Owed at {data['end_date']}", ledger["balance"])
+    exempt = data.get("exempt_sales") or []
+    if exempt:
+        # the untaxed sales by reason, as the state returns ask (#864), in
+        # the Customer and Sales columns as the Non-taxable sales line is
+        w.writerow(["", "", "", "Exempt sales by reason", "", "", "", ""])
+        for e in exempt:
+            w.writerow(["", "", "", e["label"], _money(e["amount"]), "", "", ""])
+        w.writerow(
+            [
+                "",
+                "",
+                "",
+                "Total exempt sales",
+                _money(data["total_non_taxable"]),
+                "",
+                "",
+                "",
+            ]
+        )
     use = data.get("use_tax")
     if use:
         w.writerow([])

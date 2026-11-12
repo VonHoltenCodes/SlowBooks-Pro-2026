@@ -437,7 +437,14 @@ def generate_due_invoices(
         # A/R debit once SQL rounds.
         tax_rate = rec.tax_rate or Decimal("0")
         # the customer's CURRENT tax treatment, not the template's saved flags
-        copied = taxed_copy_lines(rec.lines, rec.customer)
+        # and the job's (#864): a run for an exempt job taxes no line
+        from app.services.tax_exemption import default_tax_exempt
+
+        copied = taxed_copy_lines(
+            rec.lines,
+            rec.customer,
+            default_tax_exempt(db, rec.customer, rec.job_id),
+        )
         subtotal, tax_amount, total = compute_line_totals(copied, tax_rate)
         if total <= 0:
             skipped.append(

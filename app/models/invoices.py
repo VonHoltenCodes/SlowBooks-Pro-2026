@@ -141,6 +141,10 @@ class Invoice(Base):
     is_sales_receipt = Column(
         Boolean, nullable=False, default=False, server_default=false(), index=True
     )
+    # The document's "Tax exempt" switch (#864), an invoice's and a sales
+    # receipt's alike: on, no line is taxed and the PDF says so under the
+    # totals. A new one starts as its job is, else its customer.
+    tax_exempt = Column(Boolean, nullable=False, server_default=false())
 
     # Multi-currency: document currency + rate it was booked at (GL is home)
     currency = Column(String(3), nullable=True)
@@ -184,6 +188,9 @@ def _freeze_bill_to(_mapper, connection, target):
     every other path that makes an invoice (the IIF and QuickBooks report
     importers, which write no street) freezes the same thing without each
     saying so."""
+    from app.services.tax_exemption import fill_tax_exempt
+
+    fill_tax_exempt(connection, target)
     if target.customer_id is None:
         return
     if target.bill_to_name is not None and target.ship_to_country is not None:

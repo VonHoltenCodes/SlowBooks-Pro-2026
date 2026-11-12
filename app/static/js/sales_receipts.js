@@ -182,7 +182,7 @@ const SalesReceiptsPage = {
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
                             <option value="">${blankDeposit}</option>${bankOpts}</select></div>
-                    ${classGroup}${jobGroup}
+                    ${classGroup}${jobGroup}${TaxExempt.switchHtml(false, 'SalesReceiptsPage.recalc()')}
                     ${currencyFormGroupsHtml(null, null)}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((sr.tax_rate || 0) * 100).toFixed(4)}"
@@ -223,6 +223,8 @@ const SalesReceiptsPage = {
         typeof LineOrder !== 'undefined' && LineOrder.attach('#sr-lines', { add: () => SalesReceiptsPage.addLine(), changed: () => SalesReceiptsPage.recalc() });
         // the totals carry the receipt's currency; follow a change of it
         $('#sales-receipt-form [name="currency"]')?.addEventListener('change', () => SalesReceiptsPage.recalc());
+        // the Tax exempt switch follows a change of job (#864)
+        TaxExempt.watchJob($('#sales-receipt-form'), () => SalesReceiptsPage.recalc());
         SalesReceiptsPage.recalc();
         ScanHelper.wire(SalesReceiptsPage._applyScan, SalesReceiptsPage._applyScanField,
             SalesReceiptsPage._scanFieldTarget);
@@ -388,7 +390,7 @@ const SalesReceiptsPage = {
     },
 
     recalc() {
-        TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'));
+        TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'), $('#sales-receipt-form'));
         const cur = $('#sales-receipt-form [name="currency"]')?.value;
         const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value, cur);
         SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total'], cur);
@@ -424,6 +426,7 @@ const SalesReceiptsPage = {
             deposit_to_account_id: form.deposit_to_account_id.value ? parseInt(form.deposit_to_account_id.value) : null,
             class_id: classIdFromForm(form),
             job_id: jobIdFromForm(form),
+            tax_exempt: TaxExempt.value(form),
             ...currencyPayloadFromForm(form),
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
             notes: form.notes.value || null,

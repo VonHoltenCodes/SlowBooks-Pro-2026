@@ -211,6 +211,13 @@ class EstimateCreate(StrictModel):
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    tax_exempt: Optional[bool] = Field(
+        None,
+        description="The document's Tax exempt switch (#864): true untaxes "
+        "every line. Left out, a new one starts as its job is, else its "
+        "customer, and an edit keeps what it had. A non-taxable customer's "
+        "document is always exempt.",
+    )
     # Compounding markups as percent values (5.5 = 5.5%), #551.
     gc_pct: Decimal = Decimal("0")
     insurance_pct: Decimal = Decimal("0")
@@ -247,6 +254,7 @@ class EstimateUpdate(StrictModel):
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    tax_exempt: Optional[bool] = None
     gc_pct: Optional[Decimal] = None
     insurance_pct: Optional[Decimal] = None
     fee_pct: Optional[Decimal] = None
@@ -369,6 +377,7 @@ class EstimateResponse(BaseModel):
     job_id: Optional[int] = None
     job_name: Optional[str] = None
     job_site_address: Optional[str] = None
+    tax_exempt: bool = False
     converted_invoice_id: Optional[int]
     lines: list[EstimateLineResponse] = []
     customer_name: Optional[str] = None

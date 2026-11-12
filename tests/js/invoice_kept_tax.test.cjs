@@ -41,7 +41,7 @@ function fixture(invoice) {
         formatCurrency: value => `$${Number(value || 0).toFixed(2)}`,
         todayISO: () => '2026-09-26', classFormGroupHtml: async () => '', jobFormGroupHtml: async () => '',
         currencyFormGroupsHtml: () => '', openModal: (title, html) => dialogs.push({ title, html }),
-        TaxExempt: { enforce() {} },
+        TaxExempt: { enforce() {}, switchHtml: () => '', watchJob() {}, value: () => undefined },
         document: { getElementById: id => form.cells[id] || null },
         $, $$: selector => selector === '#inv-lines tr' ? form.rows : [],
     };

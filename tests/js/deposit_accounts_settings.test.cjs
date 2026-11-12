@@ -50,6 +50,8 @@ function load(file, name, { accounts, settings = {}, routes = {} }) {
         classFormGroupHtml: async () => '',
         jobFormGroupHtml: async () => '',
         currencyFormGroupsHtml: () => '',
+        // the document's Tax exempt switch (#864) is not under test here
+        TaxExempt: { enforce() {}, switchHtml: () => '', watchJob() {}, value: () => undefined },
         PaymentClass: { load: async () => {}, groupHtml: () => '' },
         ScanHelper: { scanRowHtml: () => '', wire() {} },
         DepositAccounts: depositAccounts(App),

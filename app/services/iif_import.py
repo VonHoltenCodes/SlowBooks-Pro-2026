@@ -836,6 +836,9 @@ def _customer_fields(row: dict) -> dict:
         terms=row.get("TERMS", "").strip() or "Net 30",
         tax_id=row.get("TAXID", "").strip() or None,
         credit_limit=_parse_decimal(row.get("LIMIT", "")) or None,
+        # a customer QuickBooks marks non-taxable stays so (#864); a row
+        # that says nothing is taxable, as before
+        is_taxable=row.get("TAXABLE", "").strip().upper() != "N",
         is_active=True,
     )
 

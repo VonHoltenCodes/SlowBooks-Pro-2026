@@ -50,6 +50,14 @@ class JobCreate(StrictModel):
     end_date: Optional[dt_date] = None
     contract_amount: Optional[Money] = None
     notes: Optional[str] = None
+    # "Sales tax: charged" (true) or "exempt" (false), #864; left out, the
+    # customer's Taxable flag.
+    is_taxable: Optional[bool] = Field(
+        None,
+        description="Sales tax charged on the job's sales (true) or the job "
+        "exempt (false); left out, as the customer is. Exempt, new documents "
+        "and new schedule-of-values lines for the job start untaxed.",
+    )
 
     _name = field_validator("name")(_clean_name)
     _status = field_validator("status")(_check_status)
@@ -69,6 +77,8 @@ class JobUpdate(StrictModel):
     contract_amount: Optional[Money] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    # Changing it changes the job's new documents only (#864).
+    is_taxable: Optional[bool] = None
 
     @field_validator("name")
     @classmethod
@@ -95,6 +105,7 @@ class JobResponse(BaseModel):
     contract_amount: Optional[Decimal] = None
     notes: Optional[str] = None
     is_active: bool
+    is_taxable: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

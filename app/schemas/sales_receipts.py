@@ -27,6 +27,13 @@ class SalesReceiptCreate(StrictModel):
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    tax_exempt: Optional[bool] = Field(
+        None,
+        description="The document's Tax exempt switch (#864): true untaxes "
+        "every line. Left out, a new one starts as its job is, else its "
+        "customer, and an edit keeps what it had. A non-taxable customer's "
+        "document is always exempt.",
+    )
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     # Nonprofit donation receipt: what the donor got back, if anything
