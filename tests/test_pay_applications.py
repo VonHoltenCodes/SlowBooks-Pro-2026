@@ -825,9 +825,14 @@ def test_negative_retainage_this_period_balances(
     assert _gl(db_session, "1150") == Decimal("2000.00")
 
 
-def test_many_applications_stay_linear(client, seed_accounts, seed_customer):
-    import time
-
+def test_the_sixteenth_application_approves_and_lists(
+    client, seed_accounts, seed_customer
+):
+    """Fifteen approved applications on one job, then a sixteenth is made,
+    edited and approved, and the job's list holds all sixteen. This used to
+    time the sixteenth against a wall-clock second, which failed on a loaded
+    CI runner (1.09 s on Windows) while proving nothing the next test's
+    statement count does not; the count is the linearity check (#731)."""
     job = _job(client, seed_customer.id)
     _contract(
         client,
@@ -849,8 +854,6 @@ def test_many_applications_stay_linear(client, seed_accounts, seed_customer):
             lines=[{"sov_line_id": sov[0]["id"], "this_period": 1000, "stored": 0}],
         )
         assert _approve(client, a["id"]).status_code == 200
-    t0 = time.perf_counter()
-    assert client.get(f"/api/pay-applications?job_id={job['id']}").status_code == 200
     a = _new_app(client, job["id"])
     _edit(
         client,
@@ -858,7 +861,11 @@ def test_many_applications_stay_linear(client, seed_accounts, seed_customer):
         lines=[{"sov_line_id": sov[0]["id"], "this_period": 1000, "stored": 0}],
     )
     assert _approve(client, a["id"]).status_code == 200
-    assert time.perf_counter() - t0 < 1.0
+    r = client.get(f"/api/pay-applications?job_id={job['id']}")
+    assert r.status_code == 200, r.text
+    listed = r.json()
+    assert len(listed) == 16
+    assert all(app["status"] == "approved" for app in listed)
 
 
 def test_a_later_pay_application_runs_no_more_queries_than_the_second(
