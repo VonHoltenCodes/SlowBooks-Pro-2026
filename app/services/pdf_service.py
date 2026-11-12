@@ -257,12 +257,17 @@ _jinja_env.globals["terms"] = _Terms()
 # The construction estimate PDF (#551) groups and totals the bid through the
 # same pure function the route and tests use.
 from app.services.estimating import estimate_totals as _estimate_totals  # noqa: E402
+from app.services.estimating import (  # noqa: E402
+    presentation_style as _presentation_style,
+)
 from app.services.estimate_bid import (  # noqa: E402
     spread_markup_prices as _spread_markup_prices,
 )
 
 _jinja_env.globals["estimate_totals"] = _estimate_totals
 _jinja_env.globals["spread_markup_prices"] = _spread_markup_prices
+# Which layout a construction estimate prints in (#774), as the form picks it.
+_jinja_env.globals["presentation_style"] = _presentation_style
 
 
 def paper_size_of(company_settings: dict) -> str:

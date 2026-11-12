@@ -25,6 +25,10 @@
     table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
     table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; }
     table.line-items tr:nth-child(even) { background: #f7f9fb; }
+    {%- if terms.is_construction and presentation_style(est, company.estimate_style) == 'line_markup' %}
+    /* a markup-per-line row prints whole on one page, its description wrapping (#774) */
+    table.line-items.priced-lines tr { break-inside: avoid; page-break-inside: avoid; }
+    {%- endif %}
     .totals { float: right; width: 240px; }
     .totals table { width: 100%; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
@@ -96,7 +100,33 @@
         {% endif %}
     </div>
 
-    {% if terms.is_construction %}
+    {% if terms.is_construction %}{% if presentation_style(est, company.estimate_style) == 'line_markup' %}
+    {# Markup per line (#774): the owner sees what each line costs them —
+       description, quantity with its unit, amount — and the totals. No rate,
+       no cost code, no cost and no markup. The commercial bid below prints as
+       it always has. #}
+    <table class="line-items priced-lines">
+        <thead><tr><th>Description</th><th class="r" style="width:80px;">Qty</th><th class="r" style="width:90px;">Amount</th></tr></thead>
+        <tbody>
+        {% for line in est.lines %}
+            <tr>
+                <td>{{ line.description or '' }}</td>
+                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+                <td class="r">{{ line.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals keep">
+        <table>
+            <tr><td class="label">Subtotal</td><td class="r">{{ est.subtotal | currency }}</td></tr>
+            {% if est.tax_amount and est.tax_amount != 0 %}
+            <tr><td class="label">Tax ({{ est.tax_rate | tax_percent }}%)</td><td class="r">{{ est.tax_amount | currency }}</td></tr>
+            {% endif %}
+            <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
+        </table>
+    </div>{% else %}
     {# Construction bid (#551): lines AT COST grouped by package with the
        section code in the description column, then allowances, alternates
        (marked-up price, accepted ones marked) and unit prices in their own
@@ -208,7 +238,7 @@
             {% endif %}
             <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
         </table>
-    </div>
+    </div>{% endif %}
 
     {% if est.terms %}
     <div class="terms-block"><strong>Terms, inclusions and exclusions</strong>

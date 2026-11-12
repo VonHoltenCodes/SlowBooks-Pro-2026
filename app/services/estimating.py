@@ -12,15 +12,66 @@
 # subtotal — on the PDF, in the app, and (later, #552) as their own
 # schedule-of-values lines. The bid total is subtotal + the markups, pre-tax;
 # tax covers the taxable lines and their share of the markups.
+#
+# A line may instead carry its own markup (#774, markup per line): its rate
+# is its unit cost plus that markup, and the estimate uses none of the bid
+# tools above. presentation_style() says which layout an estimate gets.
 # ============================================================================
 
 from decimal import Decimal
 
-from app.services.accounting import _q, refuse_total_past_column
+from app.services.accounting import _q, quantize_to, refuse_total_past_column
+
+# A line's rate is stored to four places (estimate_lines.rate).
+RATE_Q = Decimal("0.0001")
+
+# The two ways a construction estimate is laid out (#774): each line priced at
+# its cost plus its own markup, or the commercial bid (lines at cost, packages,
+# kinds, the four markups under the subtotal).
+LINE_MARKUP = "line_markup"
+COMMERCIAL_BID = "commercial_bid"
+ESTIMATE_STYLES = (LINE_MARKUP, COMMERCIAL_BID)
 
 # A package with no id groups here; a real package named "Unassigned" keeps
 # its own id, so grouping is by id, never by this label.
 UNASSIGNED = -1
+
+
+def priced_rate(unit_cost, markup_pct) -> Decimal:
+    """A construction base or alternate line's rate from its unit cost (#774):
+    unit cost × (1 + markup / 100) to the rate column's four places when the
+    line carries a markup, else the unit cost itself (at cost, as a commercial
+    bid's line is)."""
+    cost = Decimal(str(unit_cost))
+    if markup_pct is None:
+        return cost
+    return quantize_to(cost * (1 + Decimal(str(markup_pct)) / Decimal("100")), RATE_Q)
+
+
+def uses_bid_tools(estimate) -> bool:
+    """True when the estimate uses a commercial bid's tools: any of the four
+    markups, a trade package on a line, or a line that is not a base line."""
+    if any(
+        Decimal(str(getattr(estimate, name, 0) or 0)) != 0
+        for name in ("gc_pct", "insurance_pct", "fee_pct", "bond_pct")
+    ):
+        return True
+    return any(
+        ln.trade_package_id is not None or (ln.line_kind or "base") != "base"
+        for ln in estimate.lines
+    )
+
+
+def presentation_style(estimate, company_style) -> str:
+    """The layout an estimate gets on the form and the owner's PDF (#774): the
+    commercial bid when it uses bid tools (nothing on it is hidden), else
+    markup per line when a line carries its own markup, else the company's
+    estimate_style setting."""
+    if uses_bid_tools(estimate):
+        return COMMERCIAL_BID
+    if any(getattr(ln, "markup_pct", None) is not None for ln in estimate.lines):
+        return LINE_MARKUP
+    return LINE_MARKUP if company_style == LINE_MARKUP else COMMERCIAL_BID
 
 
 def is_included_line(line) -> bool:
@@ -290,11 +341,13 @@ def markup_parts(estimate) -> list[dict]:
 def estimate_totals(estimate) -> dict:
     """Every bid figure for an estimate, from its own lines and markups.
 
-    The lines stay at cost; the markups are their own figures under the
-    subtotal:
+    A commercial bid's lines stay at cost; the markups are their own figures
+    under the subtotal:
 
     - markup_base — Σ price of base + accepted-alternate lines that HAVE a
-      unit cost (priced at cost, so this is the cost the markups build on);
+      unit cost (at cost on a commercial bid, so this is the cost the markups
+      build on; a line that carries its own markup (#774) is in it at its
+      marked-up price, and the four markups build on that);
       allowances count only when the estimate's markup_allowances flag is on
       (off by default).
     - the four markups compound in order on markup_base; markup_total is their
@@ -307,6 +360,9 @@ def estimate_totals(estimate) -> dict:
     - bid_total — subtotal + markup_total (the PRE-TAX contract sum #552 uses).
     - bid_tax / bid_total_with_tax mirror the estimate's stored tax and total
       (total − tax == bid_total).
+    - cost_total — Σ cost of the included lines, an allowance at its amount;
+      profit — bid_total − budget_cost; margin_pct — profit ÷ bid_total × 100
+      to two places (0 on a $0 bid); uses_bid_tools — see uses_bid_tools().
 
     by_package carries price and cost per package (allowances contribute price
     only, never a unit cost); alternates and unit_prices list the lines held
@@ -408,12 +464,11 @@ def estimate_totals(estimate) -> dict:
     # What accepting locks as cost: every package's cost (allowances at their
     # amount) plus the three markups that are also real job costs. The fee is
     # the only markup that stays margin.
-    budget_cost = (
-        sum((b["cost"] for b in by_package.values()), Decimal("0"))
-        + gc
-        + insurance
-        + bond
-    )
+    cost_total = sum((b["cost"] for b in by_package.values()), Decimal("0"))
+    budget_cost = cost_total + gc + insurance + bond
+    # What the contractor keeps: the bid less what accepting budgets as cost.
+    profit = bid_total - budget_cost
+    margin_pct = _q(profit / bid_total * 100) if bid_total else Decimal("0")
 
     return {
         "markup_allowances": markup_allowances,
@@ -436,6 +491,11 @@ def estimate_totals(estimate) -> dict:
         # total (total − tax == bid_total).
         "bid_total": bid_total,
         "budget_cost": budget_cost,
+        # Σ cost of the included lines, an allowance at its amount (#774).
+        "cost_total": cost_total,
+        "profit": profit,
+        "margin_pct": margin_pct,
+        "uses_bid_tools": uses_bid_tools(estimate),
         "bid_tax": _q(getattr(estimate, "tax_amount", 0) or 0),
         "bid_total_with_tax": _q(getattr(estimate, "total", 0) or 0),
         "by_package": packages,

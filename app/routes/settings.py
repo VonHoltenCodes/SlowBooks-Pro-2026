@@ -97,6 +97,8 @@ ENUM_SETTINGS = {
     "warn_edit_transaction": frozenset({"true", "false"}),
     "inventory_refuse_oversell": frozenset({"true", "false"}),
     "auto_enter_on_open": frozenset({"true", "false"}),
+    # A construction estimate's layout (#774).
+    "estimate_style": frozenset({"line_markup", "commercial_bid"}),
 }
 
 

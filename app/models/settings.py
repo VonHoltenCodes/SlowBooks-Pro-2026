@@ -82,6 +82,14 @@ DEFAULT_SETTINGS = {
     # text a new construction estimate starts with (editable on each one).
     "company_license": "",
     "estimate_terms": "",
+    # How a construction estimate is priced (#774): "line_markup", each line
+    # its cost plus its own markup, or "commercial_bid", lines at cost with
+    # packages, allowances, alternates and four markups under the subtotal.
+    # Commercial bid is the default, so a construction company keeps the bid
+    # sheet it has unless it picks markup per line. The default markup percent
+    # (0 to 1000, blank is 0) prefills a new line in the markup per line form.
+    "estimate_style": "commercial_bid",
+    "estimate_default_markup_pct": "",
     "operator_name": "",
     "operator_email": "",
     # Desktop: "true" signs the company out whenever the app is quit, so the

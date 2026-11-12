@@ -94,3 +94,27 @@ test("a reader's bid panel shows the server's figures, not a recompute without c
     assert.equal(t.unitPrices[0].idx, 1);
     assert.equal(t.unitPrices[0].unit, 'CY');
 });
+
+// #774 with #824: the markup-per-line form has Cost and Markup % columns
+// for the owner, none for a reader; a commercial-bid line's own markup
+// shows under its cost instead of riding the row hidden.
+test("a reader's markup-per-line form has no Cost or Markup % column", () => {
+    const MARKED = { ...LINE, unit_cost: 16, rate: 20, markup_pct: '25' };
+    for (const [role, shows] of [['admin', true], ['readonly', false], ['accountant', false]]) {
+        const ctx = estimatesContext(true, role);
+        ctx.EstimatesPage._style = 'line_markup';
+        const head = ctx.EstimatesPage.markupHeadHtml();
+        const row = ctx.EstimatesPage.lineRowHtml(0, MARKED, []);
+        assert.equal(/>Cost<\/th>/.test(head) && /Markup %/.test(head), shows, role);
+        assert.equal(/line-unit-cost|line-markup/.test(row), shows, role);
+        assert.match(row, /class="line-rate money"/);
+    }
+});
+
+test('a commercial-bid line shows its own markup, a business line keeps it hidden', () => {
+    const MARKED = { ...LINE, unit_cost: 16, rate: 20, markup_pct: '25' };
+    const shown = estimatesContext(true, 'admin').EstimatesPage.lineRowHtml(0, MARKED, []);
+    assert.match(shown, /<input class="line-markup" type="number"[^>]*value="25"/);
+    const kept = estimatesContext(false, 'admin').EstimatesPage.lineRowHtml(0, MARKED, []);
+    assert.match(kept, /<input type="hidden" class="line-markup" value="25">/);
+});

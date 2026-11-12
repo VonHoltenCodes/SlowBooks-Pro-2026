@@ -197,12 +197,19 @@ _PERCENT_SETTINGS = {
     "default_tax_rate": "Default tax rate",
     "late_fee_rate": "Late fee rate",
     "use_tax_rate": "Use tax rate",
+    "estimate_default_markup_pct": "Default markup",
 }
+# A percent setting whose top is not 100: a markup on cost may be more.
+_PERCENT_MAX = {"estimate_default_markup_pct": Decimal("1000")}
 # A document keeps its tax rate to four places of a percent (New York
 # City's 8.875%, 7.0625%), so the default that fills it in can have no more.
-_FOUR_PLACE_PERCENTS = {"default_tax_rate", "use_tax_rate"}
+_FOUR_PLACE_PERCENTS = {
+    "default_tax_rate",
+    "use_tax_rate",
+    "estimate_default_markup_pct",
+}
 # Percents whose empty value means "follow another setting", kept empty.
-_BLANK_IS_DEFAULT = {"use_tax_rate"}
+_BLANK_IS_DEFAULT = {"use_tax_rate", "estimate_default_markup_pct"}
 # key -> (label, smallest allowed, largest allowed or None)
 _WHOLE_NUMBER_SETTINGS = {
     "invoice_next_number": ("Next invoice number", 1, None),
@@ -500,9 +507,10 @@ def clean_setting_value(key: str, value) -> str:
             number = Decimal(text)
         except InvalidOperation:
             number = None
-        if number is None or not number.is_finite() or not 0 <= number <= 100:
+        top = _PERCENT_MAX.get(key, Decimal("100"))
+        if number is None or not number.is_finite() or not 0 <= number <= top:
             raise SettingValueError(
-                f"{label} must be a number from 0 to 100. It is a percent: "
+                f"{label} must be a number from 0 to {top}. It is a percent: "
                 "8.25 means 8.25%."
             )
         if key in _FOUR_PLACE_PERCENTS and number != number.quantize(Decimal("0.0001")):

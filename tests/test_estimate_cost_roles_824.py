@@ -45,6 +45,8 @@ def _estimate(client, customer_id, mode):
                 "unit_cost": 4321.09,
                 "trade_package_id": concrete,
             },
+            # a line's own markup (#774) is cost side too
+            {"description": "Fence", "quantity": 10, "unit_cost": 16, "markup_pct": 25},
             {
                 "description": "Finishes allowance",
                 "quantity": 1,
@@ -224,7 +226,16 @@ def test_the_print_preview_prints_no_cost_figure(client, seed_customer):
 
 
 def test_the_cost_side_is_one_named_set():
-    assert ESTIMATE_COST_FIELDS == {"unit_cost", "cost", "markup_base", "budget_cost"}
+    assert ESTIMATE_COST_FIELDS == {
+        "unit_cost",
+        "cost",
+        "markup_base",
+        "budget_cost",
+        "markup_pct",
+        "cost_total",
+        "profit",
+        "margin_pct",
+    }
     shaped = without_cost_side(
         {
             "id": 1,

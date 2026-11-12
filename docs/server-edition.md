@@ -23,8 +23,9 @@ download, free either way.
   addresses blanked; an accountant's sign-in sees no employee records at
   all. Time entries and time off remain daily books. **An estimate's cost
   side is the contractor's own** (#824): a read-only or accountant sign-in
-  reads estimates without each line's unit cost, the packages' cost, the
-  cost of work and the budget cost; a bookkeeper reads them.
+  reads estimates without each line's unit cost and markup, the packages'
+  cost, the cost of work, the budget cost and the estimate's cost, profit
+  and margin; a bookkeeper reads them.
 - Every change in the audit log says **who** made it.
 - The company stays **one file** — backup is copy, undo is restore.
 
@@ -212,9 +213,10 @@ What a token can do:
   with that role. HR and payroll stay closed to all three unless the token
   is let run payroll (below). An accountant or read-only token reads an
   estimate (`GET /api/estimates`, `GET /api/estimates/<id>`) without its cost
-  side: the fields `unit_cost`, `cost` (under `totals.by_package`),
-  `markup_base` and `budget_cost` are left out of the answer; every other
-  field is there. A bookkeeper token gets them (#824).
+  side: the fields `unit_cost`, `markup_pct`, `cost` (under
+  `totals.by_package`), `markup_base`, `budget_cost`, `cost_total`, `profit`
+  and `margin_pct` are left out of the answer; every other field is there.
+  A bookkeeper token gets them (#824).
 - With **Can make backups** ticked: make a backup (`POST /api/backups`), list
   this company's backups (`GET /api/backups`) and download one
   (`GET /api/backups/download/<file>`), on top of its role. A backup is the

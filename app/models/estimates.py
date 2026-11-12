@@ -123,6 +123,10 @@ class EstimateLine(Base):
     # Per-line cost type; NULL falls back to the cost code's default.
     cost_type = Column(String(20), nullable=True)
     unit_cost = Column(Numeric(12, 4), nullable=True)  # cost side; rate is revenue
+    # A construction line's own markup on its unit cost, a percent (25 means
+    # 25%): rate = unit cost × (1 + markup_pct / 100) (#774). NULL is a line
+    # with no markup of its own, priced at cost as a commercial bid's is.
+    markup_pct = Column(Numeric(9, 4), nullable=True)
     # Construction bid shape (#551). The bid package this line belongs to
     # (NULL groups under "Unassigned"); the line kind — a plain base line, an
     # allowance, an add/deduct alternate, or a unit price (a rate with no
