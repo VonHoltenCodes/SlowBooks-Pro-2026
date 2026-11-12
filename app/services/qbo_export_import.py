@@ -120,6 +120,15 @@ _KINDS = (
     ("supplier", "vendors"),
     # the Employee Contact List: names and contact details, no pay (#711)
     ("employee", "employees"),
+    # The Customer Contact List under the company's own word for its
+    # customers (Settings → Advanced → Customer label): Clients.xlsx,
+    # Donors.xlsx, Members.xlsx. Last, so every other report's name wins.
+    ("client", "customers"),
+    ("donor", "customers"),
+    ("guest", "customers"),
+    ("member", "customers"),
+    ("patient", "customers"),
+    ("tenant", "customers"),
 )
 
 # The section a leaf sits under decides its type. "LIABILITIES AND EQUITY"
@@ -2275,6 +2284,31 @@ def _prepare(bundle: dict) -> tuple[dict, list[str]]:
             "Online, export again, and dry-run with that Trial Balance."
         )
     return bundle, notes
+
+
+def _listed(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+def dry_run_notes(bundle: dict, names: list[str]) -> list[str]:
+    """What the dry run says of the upload's file names: when no file is
+    the customer list, one sentence naming the files that came and the
+    names a customer list is read under. The import goes ahead without it
+    (open invoices still come in under the A/R Aging Detail's names)."""
+    if "customers" in bundle:
+        return []
+    shown = [n for n in names if n][:12]
+    more = len([n for n in names if n]) - len(shown)
+    files = _listed(shown + ([f"{more} more"] if more > 0 else [])) or "none"
+    labels = [lab.capitalize() for lab in CUSTOMER_LABELS]
+    return [
+        f"No customer list was found, so no customers are read from one: the "
+        f"files are {files}, and a customer list is read from a file whose name "
+        f"has {', '.join(labels[:-1])} or {labels[-1]} in it (Customers.xlsx "
+        f"or Members.xlsx, say)."
+    ]
 
 
 def _counts(db: Session, bundle: dict) -> dict:
