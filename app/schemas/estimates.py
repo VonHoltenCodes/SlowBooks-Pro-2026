@@ -363,6 +363,7 @@ class EstimateResponse(BaseModel):
     show_markup_rows: bool = True
     terms: Optional[str] = None
     accepted_at: Optional[datetime] = None
+    decided_at: Optional[datetime] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None

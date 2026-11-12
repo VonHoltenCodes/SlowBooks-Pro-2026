@@ -51,6 +51,7 @@ const ReportsPage = {
         'field-ticket-log':     { label: 'Field Ticket Log',   open: (p) => ReportsPage.fieldTicketLog(p), asOf: true, construction: true },
         'retainage':            { label: 'Retainage',          open: (p) => ReportsPage.retainage(p), asOf: true, construction: true },
         'compliance':           { label: 'Sub Compliance',     open: (p) => ReportsPage.subCompliance(p), asOf: true, construction: true },
+        'estimate-closing-rate': { label: 'Estimate Closing Rate', open: (p) => ReportsPage.estimateClosingRate(p), keep: ['customer_id', 'job_type'] },
         'budget-vs-actual':     { label: 'Budget vs Actual',   open: (p) => { if (/^\d{4}$/.test(p.year || '')) BudgetsPage._year = parseInt(p.year, 10); return BudgetsPage.showVariance(p); } },
         'financial-statements': { label: 'Financial Statements Pack', open: (p) => ReportsPage.financialStatementsPdf(p) },
         'fixed-asset-reconciliation': { label: 'Fixed Asset Reconciliation', open: () => ReportsPage.fixedAssetReconciliation() },
@@ -406,6 +407,7 @@ const ReportsPage = {
             card('income-by-customer', T('Income by Customer'), Terms.isNonprofit() ? 'Contribution totals per donor' : 'Sales totals per customer'),
             card('past-customers', Terms.text('Past customers'), Terms.text('Past customers: a mailing list by service address and last job date')),
             card('sales-by-item', 'Sales by Item', 'What sold, by item: quantity, amount, margin'),
+            card('estimate-closing-rate', 'Estimate Closing Rate', Terms.text('Estimates won, lost and still open, by count and dollars, per customer and job type, with the days to a decision')),
             card('purchases-by-item', 'Purchases by Item', 'What was bought, by item: quantity, amount, average cost'),
             card('customer-statement', T('Customer Statement'), Terms.text('Invoice/payment history PDF')),
             card('trial-balance', 'Trial Balance', 'Debits and credits by account'),
@@ -4708,3 +4710,65 @@ ReportsPage.functionalExpenses = async function (prefill) {
     window.addEventListener('focus', back);
     document.addEventListener('visibilitychange', () => (document.hidden ? left() : back()));
 })();
+
+// Estimate Closing Rate (#795): estimates dated in the period, won (accepted
+// or converted), lost and open, by count and dollars, per customer and per
+// job type. The closing rate is won ÷ (won + lost); open bids count neither way.
+ReportsPage.estimateClosingRate = async function (prefill) {
+    let customers = [], jobs = [];
+    // every customer, inactive ones too: a past bid's customer may be gone
+    try { customers = (await API.get('/customers?tree=1')).map(c => ({ ...c, name: customerLabel(c) })); } catch (e) { customers = []; }
+    try { jobs = await API.get('/jobs?include_inactive=true'); } catch (e) { jobs = []; }
+    const params = {};
+    if (prefill && prefill.customer_id) params.customer_id = prefill.customer_id;
+    if (prefill && prefill.job_type) params.job_type = prefill.job_type;
+    const types = [...new Set(jobs.map(j => (j.job_type || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const opt = (v, label, cur) => `<option value="${escapeHtml(String(v))}" ${String(cur || '') === String(v) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    const toolbar = `<div class="form-group">
+            <label for="ecr-customer">${T('Customer')}</label>
+            <select id="ecr-customer" onchange="ReportsPage.setParam('customer_id', this.value)">
+                ${opt('', 'All', params.customer_id)}${customers.map(c => opt(c.id, c.name, params.customer_id)).join('')}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="ecr-job-type">${T('Job')} type</label>
+            <select id="ecr-job-type" data-no-search onchange="ReportsPage.setParam('job_type', this.value)">
+                ${opt('', 'All', params.job_type)}${types.map(t => opt(t, t, params.job_type)).join('')}${opt('No job type', Terms.text('No job type'), params.job_type)}
+            </select>
+        </div>`;
+    await ReportsPage.openPeriodModal('Estimate Closing Rate', ReportsPage.defaultPeriod(), async (_period, range, p) => {
+        const qs = new URLSearchParams({ start_date: range.start, end_date: range.end });
+        if (p.customer_id) qs.set('customer_id', p.customer_id);
+        if (p.job_type) qs.set('job_type', p.job_type);
+        const data = await API.get(`/reports/estimate-closing-rate?${qs}`);
+        const m = ReportsPage._money;
+        const pct = (v) => (v === null || v === undefined ? '—' : `${Number(v).toFixed(1)}%`);
+        const days = (v) => (v === null || v === undefined ? '—' : Number(v).toFixed(1));
+        const cells = (r) => `<td class="amount">${r.sent_count}</td><td class="amount">${m(r.sent_amount)}</td>
+            <td class="amount">${r.won_count}</td><td class="amount">${m(r.won_amount)}</td>
+            <td class="amount">${r.lost_count}</td><td class="amount">${m(r.lost_amount)}</td>
+            <td class="amount">${r.open_count}${r.expired_count ? ` <span style="color:var(--gray-500);">(${r.expired_count} expired)</span>` : ''}</td><td class="amount">${m(r.open_amount)}</td>
+            <td class="amount">${pct(r.closing_rate)}</td><td class="amount">${pct(r.closing_rate_amount)}</td><td class="amount">${days(r.avg_days)}</td>`;
+        const head = (first) => `<thead><tr><th scope="col">${first}</th><th scope="col" class="amount">Sent</th><th scope="col" class="amount">Sent $</th>
+            <th scope="col" class="amount">Won</th><th scope="col" class="amount">Won $</th><th scope="col" class="amount">Lost</th><th scope="col" class="amount">Lost $</th>
+            <th scope="col" class="amount">Open</th><th scope="col" class="amount">Open $</th><th scope="col" class="amount">Closing rate</th>
+            <th scope="col" class="amount">Closing rate $</th><th scope="col" class="amount">Avg days to decision</th></tr></thead>`;
+        const t = data.totals;
+        const foot = `<tfoot><tr style="font-weight:700; background:var(--gray-50);"><td>Total</td>${cells(t)}</tr></tfoot>`;
+        const grid = (title, first, rows) => `<h4 style="margin:14px 0 4px 0;">${title}</h4>
+            <div class="table-container"><table>${head(first)}
+                <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.job_type === '' ? Terms.text(r.name) : r.name)}</td>${cells(r)}</tr>`).join('') || '<tr><td colspan="12" style="color:var(--gray-400);">No estimates dated in this period</td></tr>'}</tbody>
+                ${foot}</table></div>`;
+        const undated = t.undated ? ` ${t.undated} decided estimate${t.undated === 1 ? ' has' : 's have'} no decision date (decided before this report existed) and ${t.undated === 1 ? 'is' : 'are'} left out of the average.` : '';
+        return `${ReportsPage._exportButtons('estimate-closing-rate', qs.toString())}
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Estimates dated ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, by status today. Won is accepted or converted; the closing rate is won ÷ (won + lost), so open bids count neither way. Dollars are the estimate totals. Days run from the first time the estimate was emailed (else its date) to the decision.${undated}</div>
+            <div style="display:flex; gap:24px; margin-bottom:6px; font-size:13px;">
+                <div><strong>${pct(t.closing_rate)}</strong> closing rate (${t.won_count} of ${t.won_count + t.lost_count} decided)</div>
+                <div><strong>${pct(t.closing_rate_amount)}</strong> by dollars</div>
+                <div><strong>${days(t.avg_days)}</strong> avg days to decision</div>
+            </div>
+            ${grid(`By ${T('Customer').toLowerCase()}`, T('Customer'), data.by_customer)}
+            ${grid(`By ${T('Job').toLowerCase()} type`, `${T('Job')} type`, data.by_job_type)}`;
+    }, "Dates", false, { view: 'estimate-closing-rate', prefill, params, toolbar, wide: true, spotlight: false });
+};
+

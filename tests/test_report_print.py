@@ -61,6 +61,7 @@ TITLES = {
     "/api/reports/sales-tax/print": "Sales Tax Report",
     "/api/reports/ar-aging/print": "Accounts Receivable Aging",
     "/api/reports/ap-aging/print": "Accounts Payable Aging",
+    "/api/reports/estimate-closing-rate/print": "Estimate Closing Rate: by customer",
     RECON: "Reconciliation Summary",
 }
 

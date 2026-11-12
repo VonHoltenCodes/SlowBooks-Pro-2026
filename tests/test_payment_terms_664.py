@@ -683,7 +683,7 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["a4c8e2f6b1d3"]  # estimate line markup (#774)
+    assert script.get_heads() == ["a4c8e2f6b0d3"]  # estimate decided_at (#795)
     assert script.get_revision("e5c1a7d3f9b2").down_revision == "95209e8d293c"
 
     command.upgrade(cfg, "95209e8d293c")
