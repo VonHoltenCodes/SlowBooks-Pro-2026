@@ -189,9 +189,12 @@ def test_a_voided_release_shows_nothing_due(client, seed_accounts, seed_customer
 
 
 def test_the_view_takes_release_only_from_the_server():
-    """One test of release-only, the server's: the view reads the flag GET
-    /invoices/{id} returns rather than re-deriving it."""
+    """One test of what a line-less pay application invoice bills, the
+    server's: the view prints the rows GET /invoices/{id} returns rather than
+    re-deriving them (#751; since #815 the rows, which a release-only invoice
+    is one case of)."""
     from pathlib import Path
 
     js = Path("app/static/js/invoices.js").read_text(encoding="utf-8")
-    assert "const releaseOnly = !!inv.release_only;" in js
+    assert "const retainageLines = inv.retainage_lines || [];" in js
+    assert "Retainage release$" not in js  # the old client-side row

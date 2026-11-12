@@ -166,38 +166,46 @@
                 <td class="r">{{ line.amount | currency(cur) }}</td>
             </tr>
         {% endfor %}
-        {# A pay application that only releases retainage posts no lines (#751): name the release so the page says what the money is for. #}
-        {% if release_only %}
+        {# A pay application's invoice with no lines (#751, #815): the release,
+           the retainage a lower percent gives back, or holds, named as its
+           lines, so the table says what the money is for. #}
+        {% for row in retainage_lines or [] %}
             <tr>
-                <td>Retainage release{% if pay_application_number %}, {{ pay_application_number }}{% endif %}</td>
+                <td>{{ row.description }}</td>
                 <td class="r">1</td>
-                <td class="r">{{ inv.retainage_released | currency(cur) }}</td>
-                <td class="r">{{ inv.retainage_released | currency(cur) }}</td>
+                <td class="r">{{ row.amount | currency(cur) }}</td>
+                <td class="r">{{ row.amount | currency(cur) }}</td>
             </tr>
-        {% endif %}
+        {% endfor %}
         </tbody>
     </table>
 
+    {% set lineless = (retainage_lines or []) | length > 0 %}
     <div class="totals">
         <table>
-            {# A release-only invoice's $0.00 subtotal and total would lead the block; the release rows below carry it (#751). #}
-            {% if not release_only %}
+            {# A line-less invoice's $0.00 subtotal and total would lead the block; its retainage lines carry it (#751). #}
+            {% if not (lineless and not inv.total and not inv.tax_amount) %}
             <tr><td class="label">Subtotal</td><td class="r">{{ inv.subtotal | currency(cur) }}</td></tr>
             {% if inv.tax_amount and inv.tax_amount != 0 %}
             <tr><td class="label">Tax ({{ inv.tax_rate | tax_percent }}%)</td><td class="r">{{ inv.tax_amount | currency(cur) }}</td></tr>
             {% endif %}
             <tr><td class="label grand">{% if kind == 'DonationReceipt' %}Contribution{% elif kind == 'Pledge' %}Pledge Amount{% else %}Total{% endif %}</td><td class="r grand">{{ inv.total | currency(cur) }}</td></tr>
             {% endif %}
-            {# Construction progress billing (#555): retainage held / released and the current payment due. #}
-            {% if inv.retainage_held and inv.retainage_held != 0 %}
+            {# Construction progress billing (#555): retainage held / released and the current payment due.
+               A line-less invoice already shows them as its lines (#751, #815). A lower percent
+               holds less than was held: that period's hold is negative and reads as a reduction. #}
+            {% if not lineless %}
+            {% if inv.retainage_held and inv.retainage_held > 0 %}
             <tr><td class="label">Retainage withheld this period</td><td class="r">-{{ inv.retainage_held | currency(cur) }}</td></tr>
+            {% elif inv.retainage_held and inv.retainage_held < 0 %}
+            <tr><td class="label">Retainage reduction this period</td><td class="r">{{ (-inv.retainage_held) | currency(cur) }}</td></tr>
             {% endif %}
-            {# A release-only invoice already shows the release as its line (#751). #}
-            {% if inv.retainage_released and inv.retainage_released != 0 and not release_only %}
+            {% if inv.retainage_released and inv.retainage_released != 0 %}
             <tr><td class="label">Retainage released</td><td class="r">{{ inv.retainage_released | currency(cur) }}</td></tr>
             {% endif %}
-            {# A voided release has nothing due; its line stays, its due row doesn't (#751). #}
-            {% if ((inv.retainage_held and inv.retainage_held != 0) or (inv.retainage_released and inv.retainage_released != 0)) and not (release_only and inv.status == 'void') %}
+            {% endif %}
+            {# A voided line-less invoice has nothing due; its lines stay, its due row doesn't (#751). #}
+            {% if ((inv.retainage_held and inv.retainage_held != 0) or (inv.retainage_released and inv.retainage_released != 0)) and not (lineless and inv.status == 'void') %}
             <tr><td class="label grand">Current payment due</td><td class="r grand">{{ (inv.total - inv.retainage_held + inv.retainage_released) | currency(cur) }}</td></tr>
             {% endif %}
             {% if inv.is_sales_receipt %}

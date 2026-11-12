@@ -18,6 +18,7 @@ from app.services.accounting import (
 from app.services.numbering import next_invoice_number
 from app.services.pay_applications import (
     invoice_is_release_only,
+    invoice_retainage_lines,
     pay_application_number,
 )
 from app.services.payment_terms import (
@@ -136,6 +137,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
         resp.customer_name = invoice_customer_name(inv)
     resp.pay_application_number = pay_application_number(db, inv)
     resp.release_only = invoice_is_release_only(inv)
+    resp.retainage_lines = invoice_retainage_lines(inv, resp.pay_application_number)
     fill_last_emailed(db, [resp])
     return resp
 
