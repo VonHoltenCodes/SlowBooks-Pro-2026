@@ -1132,6 +1132,7 @@ const App = {
         'BillsPage.deleteAttachment', 'BillsPage.showPayForm', 'BillsPage.saveLienWaiver', 'VendorCreditsPage.void', 'VendorCreditsPage.showApply',
         'VendorCreditsPage.doApply', 'PurchaseOrdersPage.convertToBill', 'PurchaseOrdersPage.doConvert',
         'ExpensesPage.void', 'ExpensesPage.uploadAttachment', 'ExpensesPage.deleteAttachment', 'CCChargesPage.voidCharge',
+        'CCChargesPage.uploadAttachment', 'CCChargesPage.deleteAttachment',
         'JournalPage.void', 'JournalPage.uploadAttachment', 'JournalPage.deleteAttachment',
         'JobCostsPage.voidEntry', 'JobCostsPage.showAllocate', 'JobsPage.postTime', 'JobsPage.remove',
         'JobsPage.saveBudget', 'JobsPage.seedBudget', 'JobsPage.saveContract', 'JobsPage.saveSov', 'JobsPage.buildSov',

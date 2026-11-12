@@ -4,6 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 from app.schemas.common import StrictModel, clean_line_cost_type
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class ExpenseLineIn(StrictModel):
@@ -46,6 +47,8 @@ class ExpenseCreate(StrictModel):
     cost_type: Optional[str] = None
     function: Optional[str] = None  # nonprofit: program | management | fundraising
     is_billable: bool = False
+    # Files attached on the form before this first save (#796)
+    pending_attachments: PendingAttachmentIds = []
 
     _cost_type = field_validator("cost_type")(clean_line_cost_type)
 

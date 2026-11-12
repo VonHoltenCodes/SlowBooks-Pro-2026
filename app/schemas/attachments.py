@@ -1,7 +1,12 @@
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+# The ids of files attached to a new document before its first save (#796),
+# as POST /api/attachments/pending answered them. A create call that names
+# them attaches them to the record it makes.
+PendingAttachmentIds = list[Annotated[str, Field(max_length=64)]]
 
 
 class AttachmentResponse(BaseModel):
@@ -30,3 +35,14 @@ class AttachmentResponse(BaseModel):
         if self.missing:
             self.file_size = None
         return self
+
+
+class PendingAttachmentResponse(BaseModel):
+    """A file held for a document not yet saved (#796): `id` is what the
+    create call names in `pending_attachments`."""
+
+    id: str
+    filename: str
+    mime_type: Optional[str]
+    file_size: int
+    expires_at: datetime
