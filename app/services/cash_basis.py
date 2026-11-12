@@ -255,6 +255,156 @@ def prorate(lines: list[dict], applied: Decimal, total: Decimal) -> list[dict]:
     return [s for s in shares if s["amount"] != 0]
 
 
+# The columns a recognition line is netted by.
+DIMENSIONS = (
+    "account_id",
+    "class_id",
+    "job_id",
+    "cost_code_id",
+    "cost_type",
+    "function",
+)
+
+
+def _dims(line: dict) -> tuple:
+    return tuple(line.get(k) for k in DIMENSIONS)
+
+
+def running_share(full, prior, applied, total) -> Decimal:
+    """One settlement's share of `full` (a figure of a document: its tax,
+    its sales) when `prior` of `total` was settled before it and it settles
+    `applied` more: the rounded running total less what the earlier
+    settlements took (#804). The shares of a document settled in full add
+    up to `full` exactly, and a part settled never takes more than its
+    rounded share of the running total."""
+    total = Decimal(str(total))
+    if total == 0:
+        return Decimal("0")
+    full = Decimal(str(full))
+    prior = Decimal(str(prior))
+    done = prior + Decimal(str(applied))
+    return _q(full * done / total) - _q(full * prior / total)
+
+
+def settle(
+    lines: list[dict], total: Decimal, prior: list[dict], applied: Decimal
+) -> list[dict]:
+    """One settlement's share of a document's recognition lines (#804): the
+    lines prorated to the running total (what earlier settlements
+    recognized, `prior`, plus `applied`) less what those earlier
+    settlements recognized, line by line. The shares add up to `applied`
+    exactly, and once the running total reaches the document's total every
+    line has been recognized to the cent: the settlement that settles the
+    document carries the rounding left by the others."""
+    done = sum((p["amount"] for p in prior), Decimal("0"))
+    netted: dict[tuple, dict] = {}
+    for line in prorate(lines, done + _q(applied), total):
+        netted[_dims(line)] = dict(line)
+    for p in prior:
+        key = _dims(p)
+        if key in netted:
+            netted[key]["amount"] -= p["amount"]
+        else:
+            netted[key] = {**p, "amount": -p["amount"]}
+    return [s for s in netted.values() if s["amount"] != 0]
+
+
+def _settlement_entries(db: Session, document, invoice: bool):
+    """A select of the entry ids that settle part of a document and stand:
+    its non-void payments' and its standing early-payment discounts'."""
+    from sqlalchemy import union
+
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
+
+    if invoice:
+        paid = (
+            select(Payment.transaction_id)
+            .join(PaymentAllocation, PaymentAllocation.payment_id == Payment.id)
+            .where(
+                PaymentAllocation.invoice_id == document.id,
+                Payment.is_voided.isnot(True),
+                Payment.transaction_id.isnot(None),
+            )
+        )
+        discounted = select(CreditMemo.transaction_id).where(
+            CreditMemo.original_invoice_id == document.id,
+            CreditMemo.discount_payment_id.isnot(None),
+            CreditMemo.status != CreditMemoStatus.VOID,
+            CreditMemo.transaction_id.isnot(None),
+        )
+    else:
+        paid = (
+            select(BillPayment.transaction_id)
+            .join(
+                BillPaymentAllocation,
+                BillPaymentAllocation.bill_payment_id == BillPayment.id,
+            )
+            .where(
+                BillPaymentAllocation.bill_id == document.id,
+                BillPayment.is_voided.isnot(True),
+                BillPayment.transaction_id.isnot(None),
+            )
+        )
+        discounted = select(VendorCredit.transaction_id).where(
+            VendorCredit.original_bill_id == document.id,
+            VendorCredit.discount_bill_payment_id.isnot(None),
+            VendorCredit.status != VendorCreditStatus.VOID,
+            VendorCredit.transaction_id.isnot(None),
+        )
+    return union(paid, discounted)
+
+
+def _recognized_before(
+    db: Session, document, *, invoice: bool, control_id: int, entry=None
+) -> list[dict]:
+    """What the standing settlements of a document have recognized of it so
+    far, netted by account and dimensions, `amount` credit-positive. With
+    `entry` (a rewrite), only the settlements entered before it, by date
+    then entry, count; without (a posting now), all of them do. A voided
+    payment's lines stay in its entry beside their reversal, so the entries
+    are the standing settlements', not every line that names the document."""
+    from sqlalchemy import and_, or_
+
+    # the session does not autoflush: a discount entered a moment ago in
+    # this request (its entry id set on its credit) is an earlier settlement
+    db.flush()
+    link = (
+        TransactionLine.recognizes_invoice_id
+        if invoice
+        else TransactionLine.recognizes_bill_id
+    )
+    q = (
+        db.query(TransactionLine)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(
+            link == document.id,
+            TransactionLine.basis == BASIS_CASH,
+            TransactionLine.account_id != control_id,
+            TransactionLine.transaction_id.in_(
+                _settlement_entries(db, document, invoice)
+            ),
+        )
+    )
+    if entry is not None:
+        q = q.filter(
+            or_(
+                Transaction.date < entry.date,
+                and_(Transaction.date == entry.date, Transaction.id < entry.id),
+            )
+        )
+    netted: dict[tuple, dict] = {}
+    for ln in q.order_by(TransactionLine.id).execution_options(**reading(READ_ALL)):
+        line = {k: getattr(ln, k) for k in DIMENSIONS}
+        amount = Decimal(str(ln.credit or 0)) - Decimal(str(ln.debit or 0))
+        key = _dims(line)
+        if key in netted:
+            netted[key]["amount"] += amount
+        else:
+            netted[key] = {**line, "amount": amount}
+    return [e for e in netted.values() if e["amount"] != 0]
+
+
 def _cash_line(line: dict, memo: str) -> dict:
     """A recognition line as create_journal_entry takes it: a positive
     amount is a credit, a negative one a debit."""
@@ -292,17 +442,27 @@ def _recognition(
     control_id: int,
     applied_home: Decimal,
     memo: str,
+    entry=None,
 ) -> list[dict]:
     """The cash lines recognizing `applied_home` of one invoice or bill: its
-    recognition pool (`recognition_pool`) prorated, each line on the same
-    side as on the document and tied to it. A document with nothing to
-    recognize (an import that posted no lines) is recognized to the
-    unapplied account instead. `applied_home` is signed credit-positive:
-    an invoice's is positive, a bill's negative."""
+    recognition pool (`recognition_pool`) settled by the running-total rule
+    (`settle`, #804) after what its earlier settlements recognized, each
+    line on the same side as on the document and tied to it. `entry` is
+    the settlement's own entry when its lines are rewritten (only the
+    settlements before it count as earlier); a posting now leaves it out
+    and comes after all of them. A document with nothing to recognize (an
+    import that posted no lines) is recognized to the unapplied account
+    instead. `applied_home` is signed credit-positive: an invoice's is
+    positive, a bill's negative."""
     lines, total = recognition_pool(
         db, document, invoice=invoice, control_id=control_id
     )
-    shares = prorate(lines, applied_home, total) if total else []
+    shares = []
+    if total and lines:
+        prior = _recognized_before(
+            db, document, invoice=invoice, control_id=control_id, entry=entry
+        )
+        shares = settle(lines, total, prior, applied_home)
     if not shares:
         if applied_home == 0:
             return []
@@ -310,6 +470,19 @@ def _recognition(
         shares = [{"account_id": fallback(db), "amount": applied_home}]
     link_key = INVOICE_LINK if invoice else BILL_LINK
     return [_cash_line({**s, link_key: document.id}, memo) for s in shares]
+
+
+def _by_document(applied: list[tuple]) -> list[tuple]:
+    """(document, applied_home) pairs with one pair per document, in the
+    order first seen: a document's share is settled once per entry, after
+    what was settled before it."""
+    out: dict[int, list] = {}
+    for document, amount in applied:
+        if document.id in out:
+            out[document.id][1] += _q(amount)
+        else:
+            out[document.id] = [document, _q(amount)]
+    return [tuple(pair) for pair in out.values()]
 
 
 def customer_payment_cash_lines(
@@ -320,7 +493,7 @@ def customer_payment_cash_lines(
     cost lines prorated; the unapplied remainder to Unapplied Cash Payment
     Income; and one Dr A/R for the whole, so the cash lines balance."""
     out: list[dict] = []
-    for invoice, applied_home in applied:
+    for invoice, applied_home in _by_document(applied):
         if _ledger_posted(db, invoice):
             continue
         out.extend(
@@ -351,7 +524,7 @@ def bill_payment_cash_lines(
     Expense, and one Cr A/P for the whole. A retainage-release bill
     recognizes the held expense of the bills it releases."""
     out: list[dict] = []
-    for bill, applied_home in applied:
+    for bill, applied_home in _by_document(applied):
         # a bill's lines are debits: recognize -applied of credit
         out.extend(
             _recognition(
@@ -573,6 +746,7 @@ def discount_cash_lines(
     discount_account_id: int,
     memo: str,
     invoice: bool = True,
+    entry=None,
 ) -> list[dict]:
     """The cash lines of an early-payment discount's entry (#664). The
     discount settles part of the document with no cash, so on the cash basis
@@ -604,6 +778,7 @@ def discount_cash_lines(
         control_id=control_id,
         applied_home=amount_home if invoice else -amount_home,
         memo=memo,
+        entry=entry,
     )
     net = sum((ln["credit"] - ln["debit"] for ln in lines), Decimal("0"))
     if net == 0:
@@ -716,6 +891,93 @@ def _lines_to_rewrite(
     return None
 
 
+def _standing_discounts(db: Session, document, invoice: bool) -> list:
+    """The early-payment discounts standing on a document (credit memos on
+    an invoice, vendor credits on a bill), with their entries."""
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
+
+    if invoice:
+        standing = (
+            db.query(CreditMemo)
+            .filter(
+                CreditMemo.original_invoice_id == document.id,
+                CreditMemo.discount_payment_id.isnot(None),
+                CreditMemo.status != CreditMemoStatus.VOID,
+            )
+            .all()
+        )
+    else:
+        standing = (
+            db.query(VendorCredit)
+            .filter(
+                VendorCredit.original_bill_id == document.id,
+                VendorCredit.discount_bill_payment_id.isnot(None),
+                VendorCredit.status != VendorCreditStatus.VOID,
+            )
+            .all()
+        )
+    out = []
+    for credit in standing:
+        txn = (
+            db.get(Transaction, credit.transaction_id)
+            if credit.transaction_id
+            else None
+        )
+        if txn is not None:
+            out.append((credit, txn))
+    return out
+
+
+def _rewrite_discount(
+    db: Session, document, credit, txn, *, invoice: bool, control_id: int
+) -> bool:
+    """Rewrite one early-payment discount's cash lines from the document as
+    it now stands, after the settlements entered before it (#665, #804)."""
+    from app.services.audit import audited_bulk_delete
+
+    # the discount account: the accrual line that is not the control's
+    account_id = next(
+        (
+            ln.account_id
+            for ln in db.query(TransactionLine)
+            .filter(
+                TransactionLine.transaction_id == txn.id,
+                TransactionLine.basis == BASIS_ACCRUAL,
+                TransactionLine.account_id != control_id,
+            )
+            .execution_options(**reading(READ_ALL))
+        ),
+        None,
+    )
+    if account_id is None:
+        return False
+    old = _cash_lines_of(db, txn.id)
+    if old:
+        audited_bulk_delete(
+            db,
+            db.query(TransactionLine)
+            .filter(TransactionLine.id.in_([ln.id for ln in old]))
+            .execution_options(**reading(READ_ALL)),
+        )
+    _insert_cash_lines(
+        db,
+        txn,
+        discount_cash_lines(
+            db,
+            control_id,
+            document,
+            Decimal(str(credit.total)),
+            account_id,
+            txn.description or "Early-payment discount",
+            invoice=invoice,
+            entry=txn,
+        ),
+    )
+    db.flush()
+    return True
+
+
 def _recompute(
     db: Session,
     document,
@@ -727,12 +989,17 @@ def _recompute(
     adopted: bool,
     rewritten_ids: set | None = None,
 ) -> int:
-    """Rewrite, in each non-void payment of `document`, the cash lines that
-    recognize it from the document's lines as they now stand, prorated by
-    the same applied amount and kept on the payment's date. A payment on or
-    before the closing date keeps what it has; so does one whose older cash
-    lines cannot be told from another document's. Returns the payments
-    rewritten, and adds their ids to `rewritten_ids` when it is given."""
+    """Rewrite, in each non-void payment and each standing early-payment
+    discount of `document`, the cash lines that recognize it from the
+    document's lines as they now stand, for the same applied amount and on
+    the settlement's own date. They are rewritten in the order they were
+    entered (date, then entry), each settled by the running-total rule
+    after those before it (#804), so the last one carries the rounding and
+    the document reads the same on both bases once it is settled. A
+    settlement on or before the closing date keeps what it has; so does a
+    payment whose older cash lines cannot be told from another document's.
+    Returns the payments and discounts rewritten, and adds the payments'
+    ids to `rewritten_ids` when it is given."""
     from app.services.audit import audited_bulk_delete
     from app.services.closing_date import get_closing_date
     from app.services.currency import to_home
@@ -741,20 +1008,44 @@ def _recompute(
     closing = get_closing_date(db)
     rate = document.exchange_rate or Decimal("1")
     link_key = INVOICE_LINK if invoice else BILL_LINK
-    rewritten = 0
+
+    # every settlement once, in the order it was entered
+    by_payment: dict[int, list] = {}
     for payment, alloc in allocations(document):
         if payment is None or payment.is_voided or payment.transaction_id is None:
             continue
+        by_payment.setdefault(payment.id, [payment, []])[1].append(alloc)
+    jobs = []
+    for payment, allocs in by_payment.values():
         txn = db.get(Transaction, payment.transaction_id)
-        if txn is None:
-            continue
+        if txn is not None:
+            jobs.append((txn, payment, allocs))
+    for credit, txn in _standing_discounts(db, document, invoice):
+        jobs.append((txn, credit, None))
+    jobs.sort(key=lambda job: (job[0].date, job[0].id))
+
+    rewritten = 0
+    for txn, settlement, allocs in jobs:
         if closing is not None and txn.date <= closing:
-            log.info(
-                "Cash-basis lines of payment %s kept as they are: it is on or "
-                "before the closing date",
-                payment.id,
-            )
+            if allocs is not None:
+                log.info(
+                    "Cash-basis lines of payment %s kept as they are: it is on "
+                    "or before the closing date",
+                    settlement.id,
+                )
             continue
+        if allocs is None:
+            if _rewrite_discount(
+                db,
+                document,
+                settlement,
+                txn,
+                invoice=invoice,
+                control_id=control_id,
+            ):
+                rewritten += 1
+            continue
+        payment = settlement
         theirs = _cash_lines_of(db, txn.id)
         mine = [
             ln
@@ -766,7 +1057,10 @@ def _recompute(
             old = mine
         else:
             old = _lines_to_rewrite(
-                mine, theirs, fully_applied(payment, alloc), control_id
+                mine,
+                theirs,
+                len(allocs) == 1 and fully_applied(payment, allocs[0]),
+                control_id,
             )
             if old is None:
                 log.warning(
@@ -775,13 +1069,17 @@ def _recompute(
                     payment.id,
                 )
                 continue
+        applied_home = sum(
+            (_q(to_home(alloc.amount, rate)) for alloc in allocs), Decimal("0")
+        )
         new = _recognition(
             db,
             document,
             invoice=invoice,
             control_id=control_id,
-            applied_home=(1 if invoice else -1) * _q(to_home(alloc.amount, rate)),
+            applied_home=(1 if invoice else -1) * applied_home,
             memo=txn.description or "Payment",
+            entry=txn,
         )
         if old:
             audited_bulk_delete(
@@ -817,6 +1115,7 @@ def _recompute(
         rewritten += 1
         if rewritten_ids is not None:
             rewritten_ids.add(payment.id)
+        db.flush()
     db.flush()
     return rewritten
 
@@ -848,7 +1147,7 @@ def recompute_invoice_cash_lines(
         )
         return n == 1 and Decimal(str(payment.amount)) == Decimal(str(alloc.amount))
 
-    rewritten = _recompute(
+    return _recompute(
         db,
         invoice,
         invoice=True,
@@ -858,7 +1157,6 @@ def recompute_invoice_cash_lines(
         adopted=adopted,
         rewritten_ids=rewritten_ids,
     )
-    return rewritten + recompute_discount_cash_lines(db, invoice, invoice=True)
 
 
 def recompute_bill_cash_lines(db: Session, bill: Bill) -> int:
@@ -899,7 +1197,7 @@ def _recompute_bill_payments(
         )
         return n == 1 and Decimal(str(payment.amount)) == Decimal(str(alloc.amount))
 
-    rewritten = _recompute(
+    return _recompute(
         db,
         bill,
         invoice=False,
@@ -909,94 +1207,28 @@ def _recompute_bill_payments(
         adopted=False,
         rewritten_ids=rewritten_ids,
     )
-    return rewritten + recompute_discount_cash_lines(db, bill, invoice=False)
 
 
 def recompute_discount_cash_lines(db: Session, document, invoice: bool = True) -> int:
     """After an invoice's or bill's journal is reposted (#665): rewrite the
     cash lines of each early-payment discount standing on it from its lines
     as they now stand, as its payments' are, so the cash basis and the cash
-    Sales Tax report (which prorates the discount from the document as it
+    Sales Tax report (which settles the discount from the document as it
     is) agree to the cent. A discount on or before the closing date keeps
-    what it has. Returns the discounts rewritten."""
-    from app.models.credit_memos import CreditMemo, CreditMemoStatus
-    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
+    what it has. Returns the discounts rewritten. The recompute of a
+    document's payments rewrites its discounts with them, in order; this
+    is the discounts alone."""
     from app.services.accounting import get_ap_account_id, get_ar_account_id
-    from app.services.audit import audited_bulk_delete
-    from app.services.closing_date import get_closing_date
 
-    if invoice:
-        control_id = get_ar_account_id(db)
-        standing = (
-            db.query(CreditMemo)
-            .filter(
-                CreditMemo.original_invoice_id == document.id,
-                CreditMemo.discount_payment_id.isnot(None),
-                CreditMemo.status != CreditMemoStatus.VOID,
-            )
-            .all()
-        )
-    else:
-        control_id = get_ap_account_id(db)
-        standing = (
-            db.query(VendorCredit)
-            .filter(
-                VendorCredit.original_bill_id == document.id,
-                VendorCredit.discount_bill_payment_id.isnot(None),
-                VendorCredit.status != VendorCreditStatus.VOID,
-            )
-            .all()
-        )
-    closing = get_closing_date(db)
-    rewritten = 0
-    for credit in standing:
-        txn = (
-            db.get(Transaction, credit.transaction_id)
-            if credit.transaction_id
-            else None
-        )
-        if txn is None or (closing is not None and txn.date <= closing):
-            continue
-        # the discount account: the accrual line that is not the control's
-        account_id = next(
-            (
-                ln.account_id
-                for ln in db.query(TransactionLine)
-                .filter(
-                    TransactionLine.transaction_id == txn.id,
-                    TransactionLine.basis == BASIS_ACCRUAL,
-                    TransactionLine.account_id != control_id,
-                )
-                .execution_options(**reading(READ_ALL))
-            ),
-            None,
-        )
-        if account_id is None:
-            continue
-        old = _cash_lines_of(db, txn.id)
-        if old:
-            audited_bulk_delete(
-                db,
-                db.query(TransactionLine)
-                .filter(TransactionLine.id.in_([ln.id for ln in old]))
-                .execution_options(**reading(READ_ALL)),
-            )
-        _insert_cash_lines(
-            db,
-            txn,
-            discount_cash_lines(
-                db,
-                control_id,
-                document,
-                Decimal(str(credit.total)),
-                account_id,
-                txn.description or "Early-payment discount",
-                invoice=invoice,
-            ),
-        )
-        rewritten += 1
-    db.flush()
-    return rewritten
+    return _recompute(
+        db,
+        document,
+        invoice=invoice,
+        control_id=get_ar_account_id(db) if invoice else get_ap_account_id(db),
+        allocations=lambda _document: [],
+        fully_applied=lambda _payment, _alloc: False,
+        adopted=False,
+    )
 
 
 # ---------------------------------------------------------------------------

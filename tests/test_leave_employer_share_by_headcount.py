@@ -62,10 +62,13 @@ def test_paid_leave_oregon_employer_share_only_from_twenty_five_employees():
 def test_a_pay_run_dated_in_another_year_says_which_tables_it_used():
     from app.services.payroll_service import TABLES_YEAR, tables_year_note
 
-    assert tables_year_note(TABLES_YEAR) is None
+    assert tables_year_note(TABLES_YEAR, ["TX"]) is None
     assert tables_year_note(None) is None
-    note = tables_year_note(2025)
-    assert note and "dated 2025" in note and str(TABLES_YEAR) in note
+    # 2025 keeps its own federal and Washington tables (#818); Texas has
+    # only 2026's here, and the run says so
+    assert tables_year_note(2025, ["WA"]) is None
+    note = tables_year_note(2025, ["TX", "WA"])
+    assert note and "dated 2025" in note and "2026's tables for Texas" in note
 
 
 def test_the_prior_year_note_is_on_the_run_wherever_it_is_read(

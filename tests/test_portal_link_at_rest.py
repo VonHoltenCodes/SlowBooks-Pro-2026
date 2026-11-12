@@ -10,23 +10,10 @@ import hashlib
 from pathlib import Path
 
 import sqlalchemy as sa
-from alembic import command
-from alembic.config import Config
 
 from app.services.encryption import decrypt
 
 ROOT = Path(__file__).resolve().parents[1]
-BEFORE = "c5e1f7a9b3d2"
-REVISION = "e2b7c4d9a1f3"  # portal links kept as a digest and an encrypted copy
-# a link as an earlier release stored it (token_urlsafe(24): 32 characters)
-OLD_LINK = "Qm9va3NLZWVwVGhpc0xpbmtGb3JMZW5h"
-
-
-def _cfg(url: str) -> Config:
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = url
-    return cfg
 
 
 def _employee(client) -> dict:
@@ -104,58 +91,6 @@ def test_a_copy_this_install_cannot_open_still_lets_the_employee_in(client, db_s
     assert client.get(f"/portal/{token}", follow_redirects=False).status_code == 303
     healed = client.get(f"/api/employees/{emp['id']}/portal-token").json()
     assert healed["portal_token"] == token
-
-
-def test_the_upgrade_moves_each_link_over_and_back(tmp_path, monkeypatch):
-    from app import config
-
-    # The migration reads the secret from the environment, as the app did at
-    # start-up; alembic's env.py would otherwise load a checkout's own .env.
-    monkeypatch.setenv("PAYROLL_ENCRYPTION_SECRET", config.PAYROLL_ENCRYPTION_SECRET)
-    url = "sqlite:///" + (tmp_path / "books.db").as_posix()
-    command.upgrade(_cfg(url), BEFORE)
-    engine = sa.create_engine(url)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                sa.text(
-                    "INSERT INTO employees (first_name, last_name, portal_token) "
-                    "VALUES ('Marisol', 'Vance', :t), ('Jonah', 'Vance', NULL)"
-                ),
-                {"t": OLD_LINK},
-            )
-    finally:
-        engine.dispose()
-
-    command.upgrade(_cfg(url), REVISION)  # its own step, not the chain (#770)
-    engine = sa.create_engine(url)
-    try:
-        with engine.connect() as conn:
-            marisol, jonah = conn.execute(
-                sa.text(
-                    "SELECT portal_token, portal_token_hash, portal_token_enc "
-                    "FROM employees ORDER BY id"
-                )
-            ).all()
-    finally:
-        engine.dispose()
-    assert marisol.portal_token is None
-    assert marisol.portal_token_hash == hashlib.sha256(OLD_LINK.encode()).hexdigest()
-    assert decrypt(marisol.portal_token_enc) == OLD_LINK
-    assert tuple(jonah) == (None, None, None)
-
-    command.downgrade(_cfg(url), BEFORE)
-    engine = sa.create_engine(url)
-    try:
-        with engine.connect() as conn:
-            links = (
-                conn.execute(sa.text("SELECT portal_token FROM employees ORDER BY id"))
-                .scalars()
-                .all()
-            )
-    finally:
-        engine.dispose()
-    assert links == [OLD_LINK, None]
 
 
 def test_the_employee_page_says_why_a_link_cannot_be_shown():

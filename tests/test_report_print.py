@@ -58,6 +58,7 @@ TITLES = {
     "/api/reports/job-cost-by-vendor/print": "Job Cost by Vendor",
     "/api/reports/job-profitability/print": "Job Profitability",
     "/api/reports/job-budget-vs-actual/print": "Job Budget vs Actual",
+    "/api/reports/sales-tax/print": "Sales Tax Report",
     "/api/reports/ar-aging/print": "Accounts Receivable Aging",
     "/api/reports/ap-aging/print": "Accounts Payable Aging",
     RECON: "Reconciliation Summary",

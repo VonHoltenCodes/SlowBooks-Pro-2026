@@ -481,6 +481,8 @@ def wait_for_health(
         # step never reached the picker or launcher.log.
         if progress_path is not None:
             state = startup_progress.read(progress_path)
+            if startup_progress.reason(state):
+                return False  # the server refused the file and said why (#769)
             if state is not None and state != seen:
                 seen = state
                 changed_at = started
@@ -582,6 +584,17 @@ def launch_company(
         except company_file.CompanyFileLocked as exc:
             raise RuntimeError(str(exc)) from exc
 
+    # A file from before 2.29.0 is not migrated by this build (#769): read
+    # as it lies, refused with one sentence before anything opens it
+    # writable or remembers it as the last company, and recorded where the
+    # wait for the server reads its reasons.
+    from app.services import migration_floor, startup_progress
+
+    too_old = migration_floor.file_problem(db_path, key)
+    if too_old:
+        startup_progress.refuse(too_old, startup_progress_path())
+        raise migration_floor.BelowMigrationFloor(too_old)
+
     # A second launch while the app is already open would lose the fight
     # for the port and fail confusingly -- say what's actually wrong.
     if _server_already_running(port):
@@ -598,8 +611,6 @@ def launch_company(
 
     migrate(db_url, output=output, key=key)
 
-    from app.services import startup_progress
-
     progress_path = startup_progress_path()
     startup_progress.clear(progress_path)  # a note from an earlier run
     if on_progress is not None:
@@ -615,7 +626,12 @@ def launch_company(
         on_progress=on_progress,
     ):
         stop_server(proc)
-        last = startup_progress.describe(startup_progress.read(progress_path))
+        state = startup_progress.read(progress_path)
+        refused = startup_progress.reason(state)
+        if refused:
+            # the server said why it will not open the file (#769)
+            raise RuntimeError(refused)
+        last = startup_progress.describe(state)
         raise RuntimeError(
             f"Server did not become healthy on port {port}. "
             + (
@@ -652,6 +668,7 @@ PICKER_HTML = """<!DOCTYPE html>
   .company:hover { border-color: #2f6fed; box-shadow: 0 1px 4px rgba(47,111,237,.15); }
   .company .name { font-weight: 600; color: #1a2b3c; }
   .company .file { font-size: 11px; color: #99a; }
+  .company .note { font-size: 12px; color: #a0522d; margin-top: 4px; line-height: 1.4; }
   .open { color: #2f6fed; font-size: 12px; font-weight: 600; }
   .newco { margin-top: 20px; background: #fff; border: 1px dashed #b9c2cc;
            border-radius: 8px; padding: 16px; }
@@ -798,7 +815,8 @@ async function refresh() {
     const sample = c.sample ? ' <span class="open">sample</span>' : '';
     return '<div class="company" data-file="' + esc(c.file) + '">' +
       '<div><div class="name">' + esc(c.name) + sample + last + '</div>' +
-      '<div class="file">' + esc(c.file) + '</div></div>' +
+      '<div class="file">' + esc(c.file) + '</div>' +
+      (c.note ? '<div class="note">' + esc(c.note) + '</div>' : '') + '</div>' +
       '<div class="open">Open &rsaquo;</div></div>';
   }).join('');
   list.querySelectorAll('.company').forEach(function (el) {
@@ -2737,6 +2755,13 @@ def _migrate_other_companies(started: str, output=None) -> list[str]:
                 )
                 skipped.append(filename)
                 continue
+        from app.services import migration_floor
+
+        too_old = migration_floor.file_problem(db_path, key)
+        if too_old:  # #769: from before 2.29.0, left as it is
+            print(f"WARNING: {filename} is not served. {too_old}")
+            skipped.append(filename)
+            continue
         try:
             migrate("sqlite:///" + db_path.as_posix(), output=output, key=key)
         except Exception as exc:  # one company must not stop the others

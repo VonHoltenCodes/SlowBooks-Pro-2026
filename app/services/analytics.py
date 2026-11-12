@@ -110,7 +110,14 @@ class AnalyticsEngine:
         One grouped query over the window, aggregated by calendar month in
         Python. Result is dense — months with no income still appear with
         0.0.
+
+        The WIP schedule's as-of entry, its next-day reversal and the voids
+        of both are left out, as on the dashboard's Monthly Revenue card
+        (#805): the trend is what was billed; the P&L carries the WIP
+        adjustments.
         """
+        from app.services.jobs_service import not_wip_entry
+
         today = date.today()
         end_cursor = _next_month_start(today)
         start_cursor = _month_start(today)
@@ -128,6 +135,7 @@ class AnalyticsEngine:
             .join(Account, TransactionLine.account_id == Account.id)
             .filter(Account.account_type == AccountType.INCOME)
             .filter(Transaction.date >= start_cursor, Transaction.date < end_cursor)
+            .filter(not_wip_entry())
             .group_by(Transaction.date)
             .all()
         )

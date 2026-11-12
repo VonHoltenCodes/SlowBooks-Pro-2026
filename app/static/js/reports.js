@@ -2042,7 +2042,7 @@ const ReportsPage = {
                         ${Math.abs(ledger.purchase_tax_to_date || 0) >= 0.005 ? `<div style="margin-top:6px;">
                             Sales tax paid to suppliers on bills entered before SlowBooks Pro 2.18 was posted to ${escapeHtml(ledger.account_name)}, lowering that balance by <strong>${formatCurrency(ledger.purchase_tax)}</strong> this period; since 2.18 that tax is part of what the purchase cost. To correct it, post one journal entry: debit the expense or cost-of-goods account those purchases used, and credit ${accountLabel(ledger, ledger.account_name, ' ')} <strong>${formatCurrency(ledger.purchase_tax_to_date)}</strong> (the total to ${formatDate(data.end_date)}).</div>` : ''}
                     </div>` : '';
-            return `
+            return `${ReportsPage._exportButtons('sales-tax', `start_date=${range.start}&end_date=${range.end}${ReportsPage._basisQs(params)}`)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}</p>${ReportsPage._basisNote(data)}
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')} / Credit Memo</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Taxable</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
@@ -2653,7 +2653,7 @@ const ReportsPage = {
                     <thead><tr>${numbers ? '<th scope="col">Number</th>' : ''}<th scope="col">Account</th><th scope="col">Type</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th><th scope="col" class="amount">Net</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>`;
-        }, "Dates", false, { view: 'trial-balance', prefill, ...tbOpts });
+        }, "Dates", false, { reportType: 'trial_balance', view: 'trial-balance', prefill, ...tbOpts });
     },
 
     // The accountant's adjusting entries for a period (#341): each with its

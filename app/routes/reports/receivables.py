@@ -24,7 +24,7 @@ from app.services.settings_service import get_all_settings as get_settings
 from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
 from app.routes._roles import is_admin
-from app.services.email_errors import where_to_see_why
+from app.services.email_errors import sentence_for_last_send, where_to_see_why
 from app.routes._helpers import refuse_unknown_filters
 
 logger = logging.getLogger(__name__)
@@ -726,6 +726,7 @@ def batch_email_statements(db: Session = Depends(get_db)):
             continue
 
         ok = False
+        ran = False
         try:
             pdf_bytes = generate_statement_pdf(
                 customer,
@@ -734,6 +735,7 @@ def batch_email_statements(db: Session = Depends(get_db)):
                 as_of_date,
             )
 
+            ran = True
             ok = send_email(
                 db=db,
                 to_email=customer.email,
@@ -754,9 +756,14 @@ def batch_email_statements(db: Session = Depends(get_db)):
             sent += 1
         else:
             failed += 1
+            # the reply's sentence when the send ran and the server said
+            # why (#811); the raw text stays in the email log
+            why = sentence_for_last_send(db, "statement", cid) if ran else ""
             errors.append(
-                f"{customer.name}: the statement could not be sent (the email "
-                "log has the reason)"
+                f"{customer.name}: the statement could not be sent. {why}".rstrip()
+                if why
+                else f"{customer.name}: the statement could not be sent (the "
+                "email log has the reason)"
             )
 
     return {"sent": sent, "failed": failed, "errors": errors}
@@ -850,8 +857,10 @@ def collection_letters(
                 ):
                     emailed += 1
                 else:
+                    why = sentence_for_last_send(db, "collection", cid)
                     errors.append(
                         f"{customer.name}: the letter could not be emailed. "
+                        + (why + " " if why else "")
                         + where_to_see_why(is_admin(request))
                     )
         except Exception:

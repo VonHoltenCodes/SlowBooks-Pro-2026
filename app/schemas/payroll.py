@@ -206,6 +206,9 @@ class PayStubResponse(BaseModel):
     state_other_employer: float = 0
     employer_benefits: float = 0
     benefits: list[PayStubBenefitResponse] = []
+    # how the stub was figured, when it needs saying: "work state missing",
+    # the L&I hours of a salaried stub with none entered (#818, #826)
+    notes: list[str] = []
     model_config = {"from_attributes": True}
 
 

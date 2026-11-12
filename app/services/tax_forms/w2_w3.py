@@ -6,7 +6,7 @@
 # follow the standard W-2 layout.
 # ============================================================================
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import joinedload, selectinload
@@ -46,7 +46,8 @@ def _stub_state(stub: PayStub, employee: Employee | None) -> str:
     """The state a stub's wages are reported in: where it was worked (the
     stub's own work state, else the employee's), as the paycheck taxed it."""
     emp = employee or stub.employee
-    return (stub.work_state or (emp.work_state if emp else None) or "WA").upper()
+    # a blank one is no state (#818): it was read as Washington
+    return (stub.work_state or (emp.work_state if emp else None) or "").upper()
 
 
 def _state_lines(stubs: list, opening, employee: Employee | None, legacy: bool):
@@ -71,7 +72,12 @@ def _state_lines(stubs: list, opening, employee: Employee | None, legacy: bool):
             )
         else:
             wages = stub_taxable_wages(s)["state"]
-        add(_stub_state(s, employee), wages, Decimal(str(s.state_tax or 0)))
+        state = _stub_state(s, employee)
+        if not state:
+            # no work state: the W-2 leaves the state boxes empty for it,
+            # and the forms page says so (missing_work_state)
+            continue
+        add(state, wages, Decimal(str(s.state_tax or 0)))
     if opening is not None:
         from app.services.payroll_opening import amount
 
@@ -85,15 +91,16 @@ def _state_lines(stubs: list, opening, employee: Employee | None, legacy: bool):
         else:
             # its federal wages, as a stub's would be
             emp = employee or opening.employee
-            home = ((emp.work_state if emp else None) or "WA").upper()
-            add(
-                home,
-                max(
+            home = ((emp.work_state if emp else None) or "").upper()
+            if home:
+                add(
+                    home,
+                    max(
+                        Decimal("0"),
+                        amount(opening, "gross") - amount(opening, "pretax_deductions"),
+                    ),
                     Decimal("0"),
-                    amount(opening, "gross") - amount(opening, "pretax_deductions"),
-                ),
-                Decimal("0"),
-            )
+                )
     return [
         {
             "state": st,
@@ -271,6 +278,66 @@ def w2_state_lines(db, year: int, employee_id: int) -> list[dict]:
             }
         ]
     return lines
+
+
+def missing_work_state(
+    db, year: int, quarter: int | None = None, employee_id: int | None = None
+) -> list[str]:
+    """One sentence per employee whose processed paychecks in the year (or
+    the quarter) were figured with no work state, or whose opening balance
+    has no state rows and no work state to stand in (#818): those wages
+    are on no state's SUI report and the W-2 leaves the state boxes empty,
+    so nothing is filed under a state nobody chose."""
+    from app.services.payroll_opening import openings_for_year
+
+    if quarter:
+        start_month = (quarter - 1) * 3 + 1
+        start = date(year, start_month, 1)
+        end = (
+            date(year, 12, 31)
+            if quarter == 4
+            else date(year, start_month + 3, 1) - timedelta(days=1)
+        )
+    else:
+        start, end = date(year, 1, 1), date(year, 12, 31)
+    stubs = (
+        db.query(PayStub)
+        .join(PayRun, PayStub.pay_run_id == PayRun.id)
+        .options(joinedload(PayStub.employee))
+        .filter(PayRun.status == PayRunStatus.PROCESSED)
+        .filter(PayRun.pay_date >= start)
+        .filter(PayRun.pay_date <= end)
+    )
+    if employee_id is not None:
+        stubs = stubs.filter(PayStub.employee_id == employee_id)
+    counts: dict[int, list] = {}
+    for s in stubs.all():
+        if not _stub_state(s, None).strip():
+            entry = counts.setdefault(s.employee_id, [s.employee, 0, False])
+            entry[1] += 1
+    if not quarter:
+        for emp_id, o in openings_for_year(db, year).items():
+            if employee_id is not None and emp_id != employee_id:
+                continue
+            emp = o.employee
+            if not o.states and not ((emp.work_state if emp else None) or "").strip():
+                counts.setdefault(emp_id, [emp, 0, False])[2] = True
+    out = []
+    for emp_id, (emp, n, opening) in sorted(
+        counts.items(), key=lambda kv: (kv[1][0].full_name if kv[1][0] else "", kv[0])
+    ):
+        name = emp.full_name if emp else f"Employee {emp_id}"
+        what = []
+        if n:
+            what.append(f"{n} paycheck{'s' if n != 1 else ''}")
+        if opening:
+            what.append("the opening balance")
+        out.append(
+            f"{name}: work state missing on {' and '.join(what)} in {year}. "
+            "Those wages are on no state's SUI report and the W-2 leaves the "
+            "state boxes empty. Set the work state on the employee."
+        )
+    return out
 
 
 STATES_PER_FORM = 2

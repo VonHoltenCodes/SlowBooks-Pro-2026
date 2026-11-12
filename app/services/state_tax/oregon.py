@@ -107,22 +107,83 @@ _RATES = {
 }
 
 
+# --- 2025 (a run dated 2025, #818) ----------------------------------------
+# Oregon DOR, "Oregon Withholding Tax Formulas, Effective January 1, 2025",
+# 150-206-436 (Rev. 12-10-24), pages 5-6: standard deductions $2,835 /
+# $5,670, federal tax subtraction limit $8,500 (phase-out steps of $1,700),
+# $256 personal exemption credit, the rate formulas (add-ons below are the
+# formula constants less the $256 the under-$50,000 formulas carry).
+# https://www.oregon.gov/dor/forms/FormsPubs/withholding-tax-formulas_206-436_2025.pdf
+# Paid Leave Oregon 2025: 1% (60% / 40%) up to the 2025 Social Security
+# base, $176,100; UI taxable wage base 2025 $54,300 (OED); transit 0.1%.
+OR_YEARS = {
+    2025: {
+        "std_deduction": {"single": Decimal("2835"), "married": Decimal("5670")},
+        "fed_phase_out": {
+            "single": [
+                (Decimal("145000"), Decimal("0")),
+                (Decimal("140000"), Decimal("1700")),
+                (Decimal("135000"), Decimal("3400")),
+                (Decimal("130000"), Decimal("5100")),
+                (Decimal("125000"), Decimal("6800")),
+            ],
+            "married": [
+                (Decimal("290000"), Decimal("0")),
+                (Decimal("280000"), Decimal("1700")),
+                (Decimal("270000"), Decimal("3400")),
+                (Decimal("260000"), Decimal("5100")),
+                (Decimal("250000"), Decimal("6800")),
+            ],
+        },
+        "fed_cap": Decimal("8500"),
+        "exemption_credit": Decimal("256"),
+        "rates": {
+            "single": [
+                (Decimal("0"), Decimal("0.0475"), Decimal("0")),
+                (Decimal("4400"), Decimal("0.0675"), Decimal("209")),
+                (Decimal("11100"), Decimal("0.0875"), Decimal("661")),
+                (Decimal("125000"), Decimal("0.099"), Decimal("10627")),
+            ],
+            "married": [
+                (Decimal("0"), Decimal("0.0475"), Decimal("0")),
+                (Decimal("8800"), Decimal("0.0675"), Decimal("418")),
+                (Decimal("22200"), Decimal("0.0875"), Decimal("1323")),
+                (Decimal("250000"), Decimal("0.099"), Decimal("21256")),
+            ],
+        },
+        "paid_leave_wage_cap": Decimal("176100"),
+        "suta_wage_base": Decimal("54300"),
+    },
+    2026: {
+        "std_deduction": STD_DEDUCTION,
+        "fed_phase_out": _FED_PHASE_OUT,
+        "fed_cap": FEDERAL_TAX_SUBTRACTION_CAP,
+        "exemption_credit": EXEMPTION_CREDIT,
+        "rates": _RATES,
+        "paid_leave_wage_cap": PAID_LEAVE_WAGE_CAP,
+        "suta_wage_base": Decimal("56700"),
+    },
+}
+
+
 def _federal_subtraction(
-    federal_annual: Decimal, wages: Decimal, table: str
+    federal_annual: Decimal, wages: Decimal, table: str, t: dict | None = None
 ) -> Decimal:
-    cap = FEDERAL_TAX_SUBTRACTION_CAP
-    for floor, limit in _FED_PHASE_OUT[table]:
+    t = t or OR_YEARS[2026]
+    cap = t["fed_cap"]
+    for floor, limit in t["fed_phase_out"][table]:
         if wages >= floor:
             cap = limit
             break
     return min(max(Decimal("0"), federal_annual), cap)
 
 
-def _rate_table_tax(base: Decimal, table: str) -> Decimal:
+def _rate_table_tax(base: Decimal, table: str, t: dict | None = None) -> Decimal:
     if base <= 0:
         return Decimal("0")
-    row = _RATES[table][0]
-    for candidate in _RATES[table]:
+    rates = (t or OR_YEARS[2026])["rates"][table]
+    row = rates[0]
+    for candidate in rates:
         if base >= candidate[0]:
             row = candidate
     lower, rate, add = row
@@ -133,6 +194,11 @@ class OregonEngine(StateEngine):
     state_code: str = "OR"
     # OED 2025-11-18: 2026 taxable wage base $56,700 (Tax Schedule 3).
     suta_wage_base: Decimal = Decimal("56700")
+
+    def __init__(self, year: int = 2026) -> None:
+        self.year = year
+        self.t = OR_YEARS[year]
+        self.suta_wage_base = self.t["suta_wage_base"]
 
     def calculate(
         self,
@@ -161,23 +227,24 @@ class OregonEngine(StateEngine):
 
         # Income tax — annualize, build BASE, apply the formula, divide back.
         wages = taxable * pay_periods
+        t = self.t
         federal_annual = _federal_subtraction(
-            federal_period * pay_periods, wages, phase_out
+            federal_period * pay_periods, wages, phase_out, t
         )
-        base = wages - federal_annual - STD_DEDUCTION[table]
-        annual_tax = _rate_table_tax(base, table)
+        base = wages - federal_annual - t["std_deduction"][table]
+        annual_tax = _rate_table_tax(base, table, t)
         if wages < LOW_WAGE_LIMIT:
-            annual_tax += EXEMPTION_CREDIT
+            annual_tax += t["exemption_credit"]
         if wages > _ALLOWANCE_WAGE_LIMIT[phase_out]:
             allowances = 0
-        annual_tax -= EXEMPTION_CREDIT * allowances
+        annual_tax -= t["exemption_credit"] * allowances
         if annual_tax < 0:
             annual_tax = Decimal("0")
         income_tax = _q(max(Decimal("0"), _q(annual_tax / pay_periods) + extra))
 
         # Paid Leave Oregon — on gross wages up to the Social Security base.
         ytd = Decimal(str(ytd_gross))
-        pl_wages = max(Decimal("0"), min(gross, PAID_LEAVE_WAGE_CAP - ytd))
+        pl_wages = max(Decimal("0"), min(gross, t["paid_leave_wage_cap"] - ytd))
         paid_leave_employee = _q(pl_wages * PAID_LEAVE_EMPLOYEE_RATE)
         count = _extra.get("employee_count")
         paid_leave_employer = (

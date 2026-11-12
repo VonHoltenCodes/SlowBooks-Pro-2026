@@ -25,7 +25,13 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
+from app.services.migration_floor import MIGRATION_FLOOR
+
 ROOT = Path(__file__).resolve().parents[1]
+
+# The files these tests damage start at the migration floor (#769): a file
+# below it is refused before any migration or repair runs on it.
+OLD = MIGRATION_FLOOR
 
 
 def _cfg(db):
@@ -43,7 +49,7 @@ def _head():
     return ScriptDirectory.from_config(_cfg("/tmp/x.db")).get_current_head()
 
 
-def _half_upgraded(tmp_path, name="halfup.db", at="e7f8a9b0c1d2"):
+def _half_upgraded(tmp_path, name="halfup.db", at=OLD):
     """A file at an older revision that a server has started against — the
     exact damage, produced the way it actually happens."""
     from alembic import command
@@ -100,14 +106,14 @@ def test_repair_refuses_to_drop_a_table_with_rows(tmp_path):
     # Pick the table the upgrade hits first and give it a row that satisfies
     # its NOT NULL columns, so the refusal is about data rather than about a
     # constraint.
-    victim = "vendor_credits"
+    victim = "trade_packages"  # the first table the floor's upgrade creates
     assert victim in added
     engine = create_engine(f"sqlite:///{db}")
     with engine.begin() as conn:
         conn.execute(
             text(
-                'INSERT INTO "vendor_credits" '
-                "(credit_number, vendor_id, date) VALUES ('VC-X', 1, '2026-01-01')"
+                'INSERT INTO "trade_packages" '
+                "(name, is_active, sort_order) VALUES ('Framing', 1, 0)"
             )
         )
     engine.dispose()
@@ -141,7 +147,7 @@ def test_repair_also_upgrades_an_ordinary_old_file(tmp_path):
     from app.services.schema_repair import repair
 
     db = tmp_path / "old.db"
-    command.upgrade(_cfg(db), "e7f8a9b0c1d2")
+    command.upgrade(_cfg(db), OLD)
     result = repair(f"sqlite:///{db}")
     assert result.ok and result.now_at == _head() and result.dropped == []
 
@@ -193,7 +199,7 @@ def test_the_startup_refusal_still_says_upgrade_for_an_ordinary_old_file(
     import app.main as main
 
     db = tmp_path / "ordinary.db"
-    command.upgrade(_cfg(db), "e7f8a9b0c1d2")
+    command.upgrade(_cfg(db), OLD)
     monkeypatch.setattr(main, "engine", create_engine(f"sqlite:///{db}"))
     with pytest.raises(RuntimeError) as e:
         main._refuse_a_database_behind_head()
@@ -298,7 +304,7 @@ def test_the_repair_is_linear_in_blocking_tables(tmp_path):
 
     pending = sorted(
         tables_pending_revisions_would_create(
-            "sqlite:///" + str(tmp_path / "probe.db"), "e7f8a9b0c1d2"
+            "sqlite:///" + str(tmp_path / "probe.db"), OLD
         )
     )
     assert len(pending) >= 2, "need a multi-table revision to measure this"
@@ -307,11 +313,11 @@ def test_the_repair_is_linear_in_blocking_tables(tmp_path):
 
     # 1, 2 and 3 blockers tell one pass (n drops) from the old retry loop
     # (2**n - 1: 1, 3, 7), and the full count checks the whole revision. Each
-    # n runs the chain to e7f8a9b0c1d2 again, so every n up to the full count
+    # n runs the chain to OLD again, so every n up to the full count
     # grew with each new table until the Windows job's time limit cut it off.
     for n in sorted({1, 2, min(3, len(pending)), len(pending)}):
         db = tmp_path / f"linear{n}.db"
-        command.upgrade(_cfg(db), "e7f8a9b0c1d2")
+        command.upgrade(_cfg(db), OLD)
         engine = create_engine(f"sqlite:///{db}")
         for name in pending[:n]:
             Base.metadata.tables[name].create(bind=engine)

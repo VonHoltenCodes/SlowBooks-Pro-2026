@@ -2233,13 +2233,21 @@ const App = {
 
     // Quick Entry mode — batch invoice entry for paper invoice backlog
     async renderQuickEntry() {
-        const [customers, items] = await Promise.all([
+        const [customers, items, settings] = await Promise.all([
             API.get('/customers?active_only=true&tree=1'),
             API.get('/items?active_only=true'),
+            API.get('/settings'),
             PaymentTerms.load(),
         ]);
         App._qeCustomers = customers;
         App._qeItems = items;
+        App._qeLineCount = 1;
+        // Sales tax as on the New Invoice form (#802): the company's rate to
+        // start with, which the operator can change for the batch; each line
+        // taxed by its Tax box (the item's flag, else the company's "new
+        // lines are taxable"); nothing for a non-taxable customer.
+        const taxPct = +(parseFloat(settings.default_tax_rate || '0') || 0).toFixed(4);
+        App._qeTaxPct = taxPct;
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
         // "+ New Customer", as on the New Invoice form (#484): the customer
         // is added in place and picked, and nothing else typed is lost. A
@@ -2279,23 +2287,20 @@ const App = {
                         </select></div>
                     <div class="form-group"><label>PO #</label>
                         <input name="po_number" id="qe-po"></div>
+                    <div class="form-group"><label for="qe-tax-rate">Tax Rate (%)</label>
+                        <input name="tax_rate" id="qe-tax-rate" type="number" step="0.0001" min="0" value="${taxPct}" oninput="App.qeRecalc()"></div>
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
-                    <tbody id="qe-lines">
-                        <tr data-qeline="0">
-                            <td><select class="line-item" onchange="App.qeItemSelected(0)">${ItemQuickAdd.options(items)}</select></td>
-                            <td><input class="line-desc" value=""></td>
-                            <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
-                            <td><input class="line-rate money" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>
-                            <td class="col-amount line-amount">$0.00</td>
-                        </tr>
-                    </tbody>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Sales Tax</th></tr></thead>
+                    <tbody id="qe-lines">${App._qeLineHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="App.qeAddLine()">+ Add Line</button>
                 <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center;">
-                    <div id="qe-total" style="font-size:16px; font-weight:700; color:var(--qb-navy);">Total: $0.00</div>
+                    <div>
+                        <div id="qe-tax-summary" style="font-size:11px; color:var(--text-muted);">Subtotal: <span id="qe-subtotal">$0.00</span> · Tax: <span id="qe-tax">$0.00</span></div>
+                        <div id="qe-total" style="font-size:16px; font-weight:700; color:var(--qb-navy);">Total: $0.00</div>
+                    </div>
                     <div class="form-actions" style="margin:0;">
                         <button type="submit" class="btn btn-primary" data-write>Save & Next (Ctrl+Enter)</button>
                     </div>
@@ -2312,6 +2317,8 @@ const App = {
         const open = value === '__new__';
         box.style.display = open ? 'block' : 'none';
         if (open) { const n = $('#qe-new-cust-name'); if (n && !n.value) n.focus(); }
+        // a non-taxable customer's lines carry no tax (TaxExempt)
+        App.qeRecalc();
     },
 
     // What the keyboard is on for the customer: the type-ahead box when the
@@ -2367,6 +2374,7 @@ const App = {
         }
         ['name', 'email', 'phone'].forEach(k => { $(`#qe-new-cust-${k}`).value = ''; });
         box.style.display = 'none';
+        App.qeRecalc();
         toast(`${T('Customer')} "${cust.name}" added`);
         App._qeFocusCustomer();
         return cust;
@@ -2377,97 +2385,130 @@ const App = {
         if (box) box.style.display = 'none';
         const sel = $('#qe-customer');
         if (sel) { sel.value = ''; if (sel._cbx) sel._cbx.sync(); }
+        App.qeRecalc();
         App._qeFocusCustomer();
     },
 
     _qeLineCount: 1,
-    qeAddLine() {
-        const idx = App._qeLineCount++;
-        $('#qe-lines').insertAdjacentHTML('beforeend', `
+    // One Quick Entry line. Its Tax box starts as a new invoice line's does
+    // (TaxDefault) and follows the item picked; the last cell shows the tax
+    // the line will be charged (#802).
+    _qeLineHtml(idx) {
+        const taxed = TaxDefault.checked(null);
+        const pct = $('#qe-tax-rate')?.value ?? App._qeTaxPct;
+        const taxText = taxed ? `${formatCurrency(0)} at ${SalesLines.taxPercent((parseFloat(pct) || 0) / 100)}%` : 'None';
+        return `
             <tr data-qeline="${idx}">
                 <td><select class="line-item" onchange="App.qeItemSelected(${idx})">${ItemQuickAdd.options(App._qeItems)}</select></td>
                 <td><input class="line-desc" value=""></td>
                 <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
                 <td><input class="line-rate money" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>
                 <td class="col-amount line-amount">$0.00</td>
-            </tr>`);
+                <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" aria-label="Sales tax applies to this line" ${taxed} onchange="App.qeRecalc()"></td>
+                <td class="col-amount line-tax">${taxText}</td>
+            </tr>`;
+    },
+
+    qeAddLine() {
+        const idx = App._qeLineCount++;
+        $('#qe-lines').insertAdjacentHTML('beforeend', App._qeLineHtml(idx));
+        App.qeRecalc();
     },
 
     qeItemSelected(idx) {
         const row = $(`[data-qeline="${idx}"]`);
         if (ItemQuickAdd.selected(row.querySelector('.line-item'), App._qeItems, () => App.qeItemSelected(idx))) return;
-        const itemId = row.querySelector('.line-item').value;
-        const item = App._qeItems.find(i => i.id == itemId);
-        if (item) {
-            row.querySelector('.line-desc').value = item.description || item.name;
-            row.querySelector('.line-rate').value = item.rate;
-            App.qeRecalc();
-        }
+        // description, price and the item's tax flag, as on the invoice form
+        if (SalesLines.fillFromItem(row, App._qeItems)) App.qeRecalc();
     },
 
+    // The tax a line will be charged, as its Sales Tax cell reads it:
+    // "$0.83 at 8.25%", or "None" for a line its Tax box leaves out (and
+    // every line of a non-taxable customer, whose boxes TaxExempt holds off).
+    qeLineTax(row, taxPct) {
+        const box = row.querySelector('.line-taxable');
+        if (box && !box.checked) return { tax: 0, text: 'None' };
+        const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
+        const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+        const tax = SalesLines.tax(SalesLines.cents(qty * rate), taxPct);
+        const pct = SalesLines.taxPercent((parseFloat(taxPct) || 0) / 100);
+        return { tax, text: `${formatCurrency(tax)} at ${pct}%` };
+    },
+
+    // Every line's amount and tax, and the Subtotal / Tax / Total under the
+    // lines: the figures the server will post (SalesLines.totals, tax on the
+    // rounded taxable lines). Returns {subtotal, tax, total}.
     qeRecalc() {
-        let total = 0;
+        const tbody = $('#qe-lines');
+        TaxExempt.enforce(App._qeCustomers, $('#qe-customer')?.value, tbody);
+        const taxPct = $('#qe-tax-rate')?.value;
+        const t = SalesLines.totals(tbody, taxPct);
         $$('#qe-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amt = qty * rate;
-            total += amt;
-            const cell = row.querySelector('.line-amount');
-            if (cell) cell.textContent = formatCurrency(amt);
+            const cell = row.querySelector('.line-tax');
+            if (cell) cell.textContent = App.qeLineTax(row, taxPct).text;
         });
-        const el = $('#qe-total');
-        if (el) el.textContent = `Total: ${formatCurrency(total)}`;
+        const put = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+        put('#qe-subtotal', formatCurrency(t.subtotal));
+        put('#qe-tax', formatCurrency(t.tax));
+        put('#qe-total', `Total: ${formatCurrency(t.total)}`);
+        return t;
     },
 
-    async saveQuickEntry(e) {
-        e.preventDefault();
-        const form = e.target;
+    // The invoice Quick Entry posts, as the New Invoice form sends one: the
+    // rate typed (a percent) as a fraction, and each line's Tax box. Null
+    // when no line has a price or a description.
+    qeInvoiceData(form) {
         const lines = [];
         $$('#qe-lines tr').forEach((row, i) => {
             const item_id = ItemQuickAdd.itemId(row.querySelector('.line-item'));
             const qty = parseFloat(row.querySelector('.line-qty')?.value) || 1;
             const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
             if (rate > 0 || row.querySelector('.line-desc')?.value) {
+                const box = row.querySelector('.line-taxable');
                 lines.push({
                     item_id,
                     description: row.querySelector('.line-desc')?.value || '',
                     quantity: qty, rate: rate, line_order: i,
+                    is_taxable: box ? box.checked : null,
                 });
             }
         });
-        if (lines.length === 0) { toast('Add at least one line item', 'error'); return; }
+        if (lines.length === 0) return null;
+        return {
+            customer_id: parseInt(form.customer_id.value),
+            date: form.date.value,
+            terms: form.terms.value,
+            po_number: form.po_number.value || null,
+            tax_rate: (parseFloat(form.tax_rate?.value) || 0) / 100,
+            notes: null,
+            lines,
+        };
+    },
+
+    async saveQuickEntry(e) {
+        e.preventDefault();
+        const form = e.target;
+        if (!App.qeInvoiceData(form)) { toast('Add at least one line item', 'error'); return; }
         // "+ New Customer" still open with a name typed: Save & Next adds the
         // customer first, then the invoice
         if (form.customer_id.value === '__new__') {
             if (!(await App.qeSaveNewCustomer())) return;
         }
-        const data = {
-            customer_id: parseInt(form.customer_id.value),
-            date: form.date.value,
-            terms: form.terms.value,
-            po_number: form.po_number.value || null,
-            tax_rate: 0,
-            notes: null,
-            lines,
-        };
+        // read after the customer is settled: a non-taxable one's lines go
+        // with their Tax boxes off
+        App.qeRecalc();
+        const data = App.qeInvoiceData(form);
         try {
             const inv = await API.post('/invoices', data);
             const log = $('#qe-log');
             log.insertAdjacentHTML('afterbegin',
                 `<div style="padding:4px 0; font-size:11px; border-bottom:1px solid var(--gray-200);">
-                    <strong>#${escapeHtml(inv.invoice_number)}</strong> created — ${escapeHtml(inv.customer_name || '')} — ${formatCurrency(inv.total)}
+                    <strong>#${escapeHtml(inv.invoice_number)}</strong> created — ${escapeHtml(inv.customer_name || '')} — ${formatCurrency(inv.total)}${Number(inv.tax_amount) ? ` (${formatCurrency(inv.tax_amount)} tax)` : ''}
                 </div>`);
             toast(`${T('Invoice')} #${inv.invoice_number} created`);
-            // Reset form for next entry
+            // Reset form for next entry; the tax rate stays as typed
             form.po_number.value = '';
-            $('#qe-lines').innerHTML = `
-                <tr data-qeline="0">
-                    <td><select class="line-item" onchange="App.qeItemSelected(0)">${ItemQuickAdd.options(App._qeItems)}</select></td>
-                    <td><input class="line-desc" value=""></td>
-                    <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
-                    <td><input class="line-rate money" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>
-                    <td class="col-amount line-amount">$0.00</td>
-                </tr>`;
+            $('#qe-lines').innerHTML = App._qeLineHtml(0);
             App._qeLineCount = 1;
             App.qeRecalc();
             form.customer_id.focus();

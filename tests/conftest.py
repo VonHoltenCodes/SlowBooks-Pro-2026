@@ -163,10 +163,17 @@ def _cached_upgrade(config, revision, sql=False, tag=None, **kw):
     # before its own, a different one per file, and from an empty file each
     # of those was a walk of up to a hundred steps; from the kept file of
     # the nearest earlier revision it is the few steps between.
+    # Never from a kept file below the migration floor (#769): the
+    # migrations refuse to walk up from one. A walk to a target below the
+    # floor comes from nothing, the way a fresh file is built.
+    from app.services.migration_floor import is_below_floor
+
     nearest = None
     for ancestor in script.walk_revisions(base="base", head=targets[0].revision):
         if ancestor.revision == targets[0].revision:
             continue
+        if is_below_floor(ancestor.revision):
+            break
         kept_ancestor = _MIGRATION_CACHE.get((key[0], ancestor.revision))
         if kept_ancestor is not None and kept_ancestor.exists():
             nearest = kept_ancestor
