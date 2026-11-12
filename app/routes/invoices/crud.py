@@ -112,7 +112,8 @@ def list_invoices(
         .all()
     )
     results = []
-    terms_reader = DocumentTerms(db, "invoice")
+    # the discounts taken, one query for the page (not one a row)
+    terms_reader = DocumentTerms(db, "invoice").prefetch(invoices)
     for inv in invoices:
         resp = InvoiceResponse.model_validate(inv)
         terms_reader.fill(resp, inv)
