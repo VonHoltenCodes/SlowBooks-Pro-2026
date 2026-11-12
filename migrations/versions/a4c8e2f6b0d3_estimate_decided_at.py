@@ -59,9 +59,13 @@ def upgrade() -> None:
             when = datetime.strptime(found[-1], "%Y-%m-%d")
         except ValueError:
             continue
+        # the note's date is the machine's local date (mark-lost writes
+        # date.today()) and the report reads decided_at back on the local
+        # calendar: noon there, stored as UTC, is that date in every zone
+        # (midnight UTC was the day before west of Greenwich)
         bind.execute(
             sa.text("UPDATE estimates SET decided_at = :at WHERE id = :id"),
-            {"at": when.replace(tzinfo=timezone.utc), "id": est_id},
+            {"at": when.replace(hour=12).astimezone(timezone.utc), "id": est_id},
         )
 
 

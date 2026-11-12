@@ -61,6 +61,8 @@ _ALLOWED_TYPES = {
     "fund_balances",
     "functional_expenses",
     "pledges",
+    # the customer, job-type and before-sales-tax choices ride along (#795)
+    "estimate_closing_rate",
 }
 
 
