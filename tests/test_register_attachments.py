@@ -71,7 +71,8 @@ def test_the_register_entry_dialog_has_the_attachments_panel():
         in js
     )
     assert 'id="entry-attach-file" aria-label="File to attach"' in js
-    assert "${entry ? BankingPage._attachmentsHtml(entry.id) : ''}" in js
+    # the Activity panel (#894) follows the attachments panel on the same line
+    assert "${entry ? BankingPage._attachmentsHtml(entry.id) + " in js
     assert "BankingPage.loadAttachments(entry.id);" in js
     app_js = (ROOT / "app/static/js/app.js").read_text(encoding="utf-8")
     assert "'BankingPage.uploadAttachment', 'BankingPage.deleteAttachment'" in app_js
