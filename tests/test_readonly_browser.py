@@ -629,6 +629,11 @@ def test_no_document_or_dialog_offers_a_read_only_sign_in_a_write(
     assert _unseen(admin, FOUND_IN_DIALOGS) == {}
     assert _offered_writes(ro) == {}
     assert _lost_reads(admin, ro) == {}
+    # Copy Payment Link is the administrator's and a bookkeeper's (#822):
+    # the server refuses the link to a read-only sign-in, read or made
+    for opener in ("InvoicesPage.view({sent})", "InvoicesPage.view({partial})"):
+        assert "Copy Payment Link" in {c["text"] for c in admin[opener]}, opener
+        assert "Copy Payment Link" not in {c["text"] for c in ro[opener]}, opener
     # the statement picker only opens a document: it stays usable
     picker = {c["text"] for c in ro["ReportsPage.customerStatementPicker()"]}
     assert "Generate PDF" in picker
