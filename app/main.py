@@ -151,6 +151,7 @@ from app.config import (
     FORCE_HTTPS,
     HSTS_MAX_AGE,
     SESSION_IDLE_TIMEOUT_SECONDS,
+    server_edition_switch,
 )
 from app.database import SessionLocal, Base, engine
 from app.database import _served_company
@@ -275,7 +276,17 @@ def _run_startup_security_checks():
                     "Example: postgresql://user:pass@host:5432/db?sslmode=require"
                 )
 
-        if not FORCE_HTTPS:
+        if not FORCE_HTTPS and server_edition_switch():
+            # A Server Edition host (#812): the window's own build serving
+            # an office network over plain HTTP, which docs/server-edition.md
+            # says to keep on a trusted network. Only the HTTPS refusal is
+            # waived; the key checks above and the database TLS check stay.
+            logging.getLogger("app.main").warning(
+                "SLOWBOOKS_SERVER_EDITION=1: serving plain HTTP to the local "
+                "network. Keep this server on a trusted network; to reach it "
+                "from outside, use a VPN (docs/server-edition.md)."
+            )
+        elif not FORCE_HTTPS:
             raise RuntimeError(
                 "FATAL: FORCE_HTTPS=false in production. Plain-HTTP traffic leaks "
                 "session cookies, portal tokens, and bank PII over the wire. Set "
