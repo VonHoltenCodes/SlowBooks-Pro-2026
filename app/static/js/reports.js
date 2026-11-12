@@ -33,6 +33,7 @@ const ReportsPage = {
         'sales-by-item':        { label: 'Sales by Item',      open: (p) => ReportsPage.salesByItem(p) },
         'purchases-by-item':    { label: 'Purchases by Item',  open: (p) => ReportsPage.purchasesByItem(p) },
         'trial-balance':        { label: 'Trial Balance',      open: (p) => ReportsPage.trialBalance(p) },
+        'books-check':          { label: 'Books Check',        open: (p) => ReportsPage.booksCheck(p), asOf: true },
         'adjusting-entries':    { label: 'Adjusting Journal Entries', open: (p) => ReportsPage.adjustingEntries(p) },
         'closing-date-exceptions': { label: 'Closing Date Exceptions', open: (p) => ReportsPage.closingDateExceptions(p) },
         'accountants-package':  { label: "Accountant's Package", open: (p) => ReportsPage.accountantsPackage(p) },
@@ -437,6 +438,7 @@ const ReportsPage = {
             card('purchases-by-item', 'Purchases by Item', 'What was bought, by item: quantity, amount, average cost'),
             card('customer-statement', T('Customer Statement'), Terms.text('Invoice/payment history PDF')),
             card('trial-balance', 'Trial Balance', 'Debits and credits by account'),
+            card('books-check', 'Books Check', Terms.text('Every subledger beside its control account: the agings, deposits, inventory, payroll and sales tax tied to the ledger, with the documents behind a difference')),
             card('adjusting-entries', 'Adjusting Journal Entries', 'The accountant\'s adjustments for a period, with who posted each'),
             card('closing-date-exceptions', 'Closing Date Exceptions', 'Every change made into a closed period with the password, before and after'),
             card('accountants-package', "Accountant's Package", 'One zip: statements, ledger, agings, reconciliations, adjustments, exceptions and the audit log'),
@@ -4861,3 +4863,72 @@ ReportsPage.estimateClosingRate = async function (prefill) {
     }, "Dates", false, { reportType: 'estimate_closing_rate', view: 'estimate-closing-rate', prefill, params, toolbar, wide: true, spotlight: false });
 };
 
+
+// Books Check (#893): a row per subledger and its control account as of a
+// date, PASS in green or the difference in the warning colour, the sentence
+// under it, and each document behind a difference a link to its page (Back
+// returns here, as from the agings' names).
+ReportsPage._BOOKS_CHECK_PAGES = {
+    invoice: '/invoices', bill: '/bills', payment: '/payments', bill_payment: '/bill-payments',
+    credit_memo: '/credit-memos', vendor_credit: '/vendor-credits', deposit: '/deposits',
+    journal: '/journal', pay_run: '/payroll', expense: '/expenses', cc_charge: '/cc-charges',
+    job_cost: '/job-costs', customer: '/customers', vendor: '/vendors', job: '/jobs',
+};
+ReportsPage._booksCheckKind = function (kind) {
+    const words = {
+        invoice: T('Invoice'), customer: T('Customer'), job: T('Job'), credit_memo: 'Credit memo',
+        bill: 'Bill', bill_payment: 'Bill payment', payment: 'Payment', vendor_credit: 'Vendor credit',
+        deposit: 'Deposit', journal: 'Journal entry', pay_run: 'Pay run', expense: 'Expense',
+        cc_charge: 'Card charge', job_cost: `${T('Job')} cost`, vendor: 'Vendor', item: 'Item',
+    };
+    return words[kind] || String(kind || '').replace(/_/g, ' ');
+};
+// The address a named document opens at; an item opens the Item List, a
+// job-less row ("No job") opens nothing.
+ReportsPage.booksCheckHref = function (doc) {
+    if (doc.type === 'item') return '#/items';
+    const page = ReportsPage._BOOKS_CHECK_PAGES[doc.type];
+    return page && doc.id !== null && doc.id !== undefined ? `#${page}/${doc.id}` : null;
+};
+ReportsPage.openBooksCheckDocument = function (href, from) {
+    ReportsPage._leaveFrom(from);
+    App.navigate(href);
+};
+ReportsPage.booksCheckBody = function (data) {
+    const money = (v) => (v === null || v === undefined ? '—' : formatCurrency(v));
+    const result = (r) => r.status === 'pass'
+        ? '<strong style="color:var(--text-success);">PASS</strong>'
+        : r.status === 'difference'
+            ? `<strong style="color:var(--text-warning);">Difference ${escapeHtml(formatCurrency(r.difference))}</strong>`
+            : '<span style="color:var(--gray-500);">Not checked</span>';
+    const docRow = (r, d, i) => {
+        const href = ReportsPage.booksCheckHref(d);
+        const name = `${ReportsPage._booksCheckKind(d.type)}${d.number ? ` ${d.number}` : ''}`;
+        const link = href
+            ? ReportsPage._rowLink(`ReportsPage.openBooksCheckDocument(${JSON.stringify(href)}, this)`, name, `books:${r.key}:${d.type}:${d.id}:${i}`)
+            : escapeHtml(name);
+        return `<li>${link}${d.amount !== null && d.amount !== undefined ? ` <span class="amount">${escapeHtml(formatCurrency(d.amount))}</span>` : ''} — <span style="color:var(--gray-500);">${escapeHtml(d.why)}</span></li>`;
+    };
+    const rows = data.rows.map(r => `<tr class="books-check-row books-check-${escapeHtml(r.status)}" data-check="${escapeHtml(r.key)}">
+            <td><strong>${escapeHtml(r.name)}</strong>
+                <div style="font-size:12px; color:var(--gray-500); margin-top:2px;">${escapeHtml(r.sentence)}</div>
+                ${r.documents.length ? `<ul class="books-check-documents" style="font-size:12px; margin:4px 0 0 0; padding-left:18px;">${r.documents.map((d, i) => docRow(r, d, i)).join('')}${r.more_documents ? `<li>… and ${r.more_documents} more</li>` : ''}</ul>` : ''}</td>
+            <td class="amount">${r.subledger_label ? money(r.subledger) : ''}</td>
+            <td class="amount">${r.control_label ? money(r.control) : ''}</td>
+            <td class="amount">${result(r)}</td>
+        </tr>`).join('');
+    const ok = !data.differences;
+    return `${ReportsPage._exportButtons('books-check', `as_of=${data.as_of}`)}
+        <p style="margin-bottom:6px; color:var(--gray-500);">As of ${formatDate(data.as_of)} · accrual basis</p>
+        <p class="books-check-summary" style="margin-bottom:12px; font-weight:600; color:${ok ? 'var(--text-success)' : 'var(--text-warning)'};">${escapeHtml(data.summary)}</p>
+        <div class="table-container"><table>
+            <thead><tr><th scope="col">Check</th><th scope="col" class="amount">Subledger</th><th scope="col" class="amount">Control account</th><th scope="col" class="amount">Result</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>`;
+};
+ReportsPage.booksCheck = async function (prefill) {
+    await ReportsPage.openPeriodModal('Books Check', ReportsPage.defaultPeriod(), async (_period, params) => {
+        const data = await API.get(`/reports/books-check?as_of=${params.as_of_date}`);
+        return ReportsPage.booksCheckBody(data);
+    }, 'As Of', true, { view: 'books-check', prefill });
+};

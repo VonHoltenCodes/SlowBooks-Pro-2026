@@ -286,6 +286,17 @@ const DashboardPage = {
                 <ul style="font-size:12px;margin:6px 0 0 0;padding-left:16px">${d.items.map(r => `<li>${escapeHtml(r.filename || r.intake_id)} <span style="color:var(--gray-500)">(${r.expires_in_hours} h left)</span></li>`).join('')}</ul>
                 <div style="font-size:11px;margin-top:4px"><a href="#/expenses">Enter Expenses →</a></div>`;
         },
+        // Books Check (#893): the one sentence, PASS in green or the count of
+        // differences in the warning colour, and the report as the link
+        books_check(d) {
+            const ok = !d.differences;
+            const color = ok ? 'var(--text-success)' : 'var(--text-warning)';
+            const hover = ok ? 'Every subledger agrees with its control account' : d.failing.join('\n');
+            return `<a class="dash-tile" href="${DashboardPage._tileLink('books-check')}" onclick="ReportsPage._leaveFrom(this)" title="${escapeHtml(hover)}"
+                style="display:block;color:inherit;text-decoration:none">
+                <div style="font-size:13px;font-weight:600;color:${color}">${ok ? '✓ ' : ''}${escapeHtml(d.summary)}</div>
+                <div style="font-size:11px;color:var(--gray-500)">${d.checked} checks run</div></a>`;
+        },
         // The contractor's tiles: the figure, a note, and the report behind
         // it as a link. The jobs that make the figure up show on hover.
         retainage_receivable(d) {
