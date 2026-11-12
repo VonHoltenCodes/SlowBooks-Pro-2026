@@ -876,6 +876,36 @@ const SettingsPage = {
                     </div>
                 </div>
 
+                <!-- SlowBooks Switchboard (#829): words and links only. The
+                     program is its own public repository; nothing of it runs
+                     inside SlowBooks Pro, and this block has no setting. -->
+                <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
+                    <h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
+                        Model Context Protocol work this company's books. It is a free program of its own,
+                        <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
+                        with a <strong>bookkeeper API token</strong> you make under Users and security, API Tokens
+                        (read-only for an agent that only reports). It does only what that token's role allows,
+                        and every change it makes is in the audit log as <code>token:&lt;label&gt;</code>.
+                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        The token stays on this computer, and Switchboard sends nothing anywhere but this
+                        SlowBooks Pro. For Claude on the web it has a self-hosted door, <code>sbplive serve-http</code>,
+                        behind your own Cloudflare Tunnel; nothing of the books can be reached from outside this
+                        computer unless you set that door up. What Claude reads from the books goes to Claude,
+                        as with any agent.
+                    </div>
+                    <div style="font-size:11px;">
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md" target="_blank" rel="noopener">The guide</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md" target="_blank" rel="noopener">Claude on the web: the self-hosted door</a>
+                    </div>
+                </div>
+
                 <div class="settings-section" data-group="connections" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
                     <h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -1257,7 +1287,10 @@ const SettingsPage = {
                         benefits, deductions, and employees added and edited, never
                         deleted, with no portal logins, bank accounts or documents)
                         or <em>import</em> (the migration imports). A revoked token
-                        stays revoked: make a new one instead.
+                        stays revoked: make a new one instead. A bookkeeper token is
+                        what <code>sbplive setup</code> asks for, to let Claude work
+                        the books through SlowBooks Switchboard (Connections, Claude
+                        and agents); make a read-only one for an agent that only reports.
                     </p>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
