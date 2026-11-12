@@ -1486,32 +1486,49 @@ def test_sales_by_item_opens_on_the_fiscal_year_and_names_an_item_as_it_is(
 
 # ── #395: a pinned card is first, and stays so after a reload ──────────────
 
-PIN = '#page-content .card-pin[data-pin="ap-aging"]'
-FIRST_CARD = "() => document.querySelector('#page-content a.card-link').dataset.rowKey"
+PIN = '#page-content .card-pin[data-pin="trial-balance"]'
+STARRED = """() => [...document.querySelectorAll('#starred-reports a.card-link')].map(a => a.dataset.rowKey)"""
+ALL_OPEN = "() => !document.getElementById('all-reports').hidden"
 
 
-def test_a_pinned_card_leads_the_report_center_and_a_reload_keeps_it(
+def test_a_starred_card_joins_the_starred_reports_and_a_reload_keeps_it(
     browser, company, books
 ):
-    """The star on A/P Aging pins it: pressed, the card first on the grid;
-    the pins are a preference (report_center_pins), so a fresh document
-    at #/reports still leads with it; the star again unpins it."""
+    """#395, #794: the page opens on the starting stars with All reports
+    folded; the star on Trial Balance (under All reports) moves it to the
+    end of the starred ones, focus on its star; the stars are a preference
+    (report_center_pins), so a fresh document keeps it; unstarring puts it
+    back under All reports."""
+    four = [
+        "report:profit-loss",
+        "report:balance-sheet",
+        "report:ar-aging",
+        "report:ap-aging",
+    ]
     page = _open_at(browser, company, "#/reports")[0]
     try:
-        assert page.evaluate(FIRST_CARD) != "report:ap-aging"
+        assert page.evaluate(STARRED) == four
+        assert not page.evaluate(ALL_OPEN)
+        page.click("#all-reports-toggle")
         assert page.get_attribute(PIN, "aria-pressed") == "false"
         page.click(PIN)
-        page.wait_for_function(f"() => ({FIRST_CARD})() === 'report:ap-aging'")
+        page.wait_for_function(f"() => ({STARRED})().includes('report:trial-balance')")
+        assert page.evaluate(STARRED) == four + ["report:trial-balance"]
         assert page.get_attribute(PIN, "aria-pressed") == "true"
-        assert page.evaluate("() => document.activeElement.dataset.pin") == "ap-aging"
+        assert (
+            page.evaluate("() => document.activeElement.dataset.pin") == "trial-balance"
+        )
     finally:
         page.close()
     page = _open_at(browser, company, "#/reports")[0]
     try:
-        assert page.evaluate(FIRST_CARD) == "report:ap-aging"
+        assert page.evaluate(STARRED) == four + ["report:trial-balance"]
         page.click(PIN)
-        page.wait_for_function(f"() => ({FIRST_CARD})() !== 'report:ap-aging'")
-        assert page.get_attribute(PIN, "aria-pressed") == "false"
+        page.wait_for_function(f"() => !({STARRED})().includes('report:trial-balance')")
+        assert (
+            page.locator('#all-reports a[data-row-key="report:trial-balance"]').count()
+            == 1
+        )
     finally:
         page.close()
 

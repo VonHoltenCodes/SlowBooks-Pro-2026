@@ -149,11 +149,6 @@ def test_each_card_has_a_pin_outside_its_link():
     assert 'aria-pressed="${pinned}"' in pin
     assert 'aria-label="Pin ${escapeHtml(title)}"' in pin
     assert """onclick="ReportsPage.togglePin('${view}')\"""" in pin
-    # pinned first, in the order pinned; the rest in their fixed order
-    grid = JS[JS.index("    _cardGrid() {") :]
-    grid = grid[: grid.index("\n    },")]
-    assert "ReportsPage._pins.map(v => cards.find(c => c.view === v))" in grid
-    assert "[...pinned, ...cards.filter(c => !pinned.includes(c))]" in grid
     assert (
         "API.put('/preferences/report_center_pins', { value: { pinned: ReportsPage._pins } })"
         in JS
@@ -249,3 +244,61 @@ def test_the_report_center_routes_the_gated_reports_by_mode():
         assert "construction: true" in line, name
     line = next(ln for ln in js.splitlines() if "'job-cost-by-vendor':" in ln)
     assert "construction: true" not in line
+
+
+@needs_node
+def test_a_fresh_company_opens_on_its_starting_stars(tmp_path):
+    """#794: never set is the starting stars (P&L, Balance Sheet, the two
+    agings, Job Profitability in construction mode, a nonprofit's own two
+    statements); an empty list is none starred, All reports open; the
+    starred cards lead and All reports holds every other card."""
+    probe = tmp_path / "stars.cjs"
+    probe.write_text(
+        """
+const fs=require('fs'),vm=require('vm');
+const src=fs.readFileSync(process.argv[2],'utf8');
+async function run(mode, pref){
+  const ctx={console,URLSearchParams,JSON,Object,
+    T:s=>s, Terms:{text:s=>s,isNonprofit:()=>mode==='np',isConstruction:()=>mode==='con'},
+    escapeHtml:s=>String(s==null?'':s), document:{}, window:{}, location:{hash:'#/'},
+    history:{state:null}, localStorage:{getItem:()=>null},
+    API:{get:async(u)=>u.startsWith('/preferences')?{value:pref}:[]}};
+  vm.createContext(ctx);
+  vm.runInContext(src+'\\nthis.ReportsPage=ReportsPage;',ctx);
+  const R=ctx.ReportsPage, html=await R.render();
+  const keys=(h)=>[...h.matchAll(/data-row-key="report:([^"]+)"/g)].map(m=>m[1]);
+  return {pins:R._pins, starred:keys(R._starredGrid()), all:keys(R._allGrid()),
+    cards:R._cards().map(c=>c.view), open:!/id="all-reports" hidden/.test(html)};
+}
+(async()=>{
+  console.log(JSON.stringify({biz:await run('biz',null), con:await run('con',null),
+    np:await run('np',null), none:await run('biz',{pinned:[]}),
+    mine:await run('biz',{pinned:['trial-balance']})}));
+})();
+""",
+        encoding="utf-8",
+    )
+    out = subprocess.run(
+        ["node", str(probe), str(ROOT / "app/static/js/reports.js")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    res = json.loads(out.stdout)
+    four = ["profit-loss", "balance-sheet", "ar-aging", "ap-aging"]
+    assert res["biz"]["pins"] == four
+    assert res["con"]["pins"] == four + ["job-profitability"]
+    assert res["np"]["pins"] == [
+        "statement-of-activities",
+        "statement-of-financial-position",
+        "ar-aging",
+        "ap-aging",
+    ]
+    for got in res.values():
+        # starred first, the rest under All reports, nothing lost
+        assert got["starred"] == got["pins"]
+        assert sorted(got["starred"] + got["all"]) == sorted(got["cards"])
+    assert not res["biz"]["open"]
+    assert res["none"]["pins"] == [] and res["none"]["open"]
+    assert res["mine"]["starred"] == ["trial-balance"] and not res["mine"]["open"]

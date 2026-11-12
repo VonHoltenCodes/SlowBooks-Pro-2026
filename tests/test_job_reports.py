@@ -659,9 +659,8 @@ function run(isCon){
   const views=ctx.ReportsPage._cards().map(c=>c.view);
   // pins reorder: pin a card and confirm it precedes an unpinned one
   ctx.ReportsPage._pins=['job-cost-by-vendor'];
-  const grid=ctx.ReportsPage._cardGrid();
-  const pinned=grid.indexOf('report-card-job-cost-by-vendor');
-  const unpinned=grid.indexOf('report-card-wip-schedule');
+  const pinned=ctx.ReportsPage._starredGrid().indexOf('report-card-job-cost-by-vendor');
+  const unpinned=ctx.ReportsPage._allGrid().indexOf('report-card-wip-schedule');
   return {views, pinned, unpinned};
 }
 console.log(JSON.stringify({con:run(true), biz:run(false)}));
@@ -696,7 +695,7 @@ console.log(JSON.stringify({con:run(true), biz:run(false)}));
         ]
         + five
     )
-    # a pinned card precedes an unpinned one in the rendered grid
+    # a starred card is in the starred grid, an unstarred one under All reports
     assert res["con"]["pinned"] >= 0 and res["con"]["unpinned"] >= 0
     assert res["con"]["pinned"] < res["con"]["unpinned"]
 

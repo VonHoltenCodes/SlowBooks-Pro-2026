@@ -1883,7 +1883,8 @@ waiver.
 
 ## The reports
 
-In construction mode the Report Center's first thirteen cards are the three job
+In construction mode the Report Center's first thirteen cards (Job Profitability
+starred from the start, #794, the rest leading **All reports**) are the three job
 reports that always existed — **Job Profitability**, **Job Budget vs Actual**
 and **P&L by Job** — then the ten construction reports: **WIP Schedule**,
 **Cost to Complete**, **Change Order Log**, **Buyout Report**, **Job Cost by
