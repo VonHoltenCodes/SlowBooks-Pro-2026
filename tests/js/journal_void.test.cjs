@@ -56,7 +56,7 @@ for (const kind of ['manual_void', 'qbo_ledger_void', 'bill_payment', 'deposit']
 function listPage(entries) {
     const context = {
         $: () => null,
-        API: { get: async url => (url === '/journal' ? entries : entries[0]) },
+        API: { get: async url => (url === '/journal' ? { entries, total: entries.length, skip: 0, limit: 100, default_range: true } : entries[0]) },
         escapeHtml: value => String(value ?? '').replace(/[&<>"']/g, character => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
         })[character]),

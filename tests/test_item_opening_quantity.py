@@ -224,7 +224,9 @@ def test_opening_entry_is_listed_but_not_voidable(client, db_session, seed_accou
     """Point 2: the Journal page shows the entry (for the record) but marks
     it non-voidable, so the UI hides Void."""
     _create(client, seed_accounts)
-    entries = client.get("/api/journal").json()
+    entries = client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+        "entries"
+    ]
     opening = [e for e in entries if e["source_type"] == "item_opening"]
     assert len(opening) == 1
     assert opening[0]["voidable"] is False

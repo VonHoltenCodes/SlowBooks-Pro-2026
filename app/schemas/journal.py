@@ -125,3 +125,19 @@ class JournalEntryResponse(BaseModel):
     # journal entry) the entry replaced, and the one that replaced it.
     replaces_id: Optional[int] = None
     replaced_by_id: Optional[int] = None
+
+
+class JournalListResponse(BaseModel):
+    """One page of the Journal Entries list (#817): the entries on it, how
+    many the filter holds in all, where the page starts and how long it is,
+    and the date range the list was read over (the current fiscal year when
+    the request names neither end)."""
+
+    entries: list[JournalEntryResponse] = []
+    total: int = 0
+    skip: int = 0
+    limit: int = 100
+    start_date: Optional[dt_date] = None
+    end_date: Optional[dt_date] = None
+    # true when the range is the fiscal-year default, not one asked for
+    default_range: bool = False

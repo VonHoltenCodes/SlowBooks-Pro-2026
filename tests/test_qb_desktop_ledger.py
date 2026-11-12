@@ -308,7 +308,11 @@ def test_the_entries_list_on_journal_entries_with_their_word(
     _chart(db_session)
     _upload(client, FIXTURE.read_bytes())
     listed = [
-        e for e in client.get("/api/journal").json() if e["source_type"] == SOURCE_TYPE
+        e
+        for e in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+        if e["source_type"] == SOURCE_TYPE
     ]
     assert len(listed) == 8
     utils = (Path(__file__).resolve().parents[1] / "app/static/js/utils.js").read_text(

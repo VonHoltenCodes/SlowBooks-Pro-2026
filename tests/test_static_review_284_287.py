@@ -168,7 +168,12 @@ def test_the_journal_api_takes_cents_only(client, seed_accounts):
     )
     assert r.status_code == 422, r.text
     assert "at most two decimal places" in r.text
-    assert client.get("/api/journal").json() == []
+    assert (
+        client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+        == []
+    )
 
 
 def test_the_posting_service_balances_at_the_stored_precision(

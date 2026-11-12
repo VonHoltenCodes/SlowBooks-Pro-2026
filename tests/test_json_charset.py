@@ -84,7 +84,10 @@ def test_the_sign_in_gates_refusal_names_it_too(unauthed_client):
 def test_the_qbo_importers_separators_read_back_as_written(client, seed_accounts):
     resp = client.post("/api/migration/qbo_export/import", files=_bundle())
     assert resp.json()["ok"] is True, resp.json()["errors"]
-    r = client.get("/api/journal", params={"source_type": qbo.SOURCE_TYPE})
+    r = client.get(
+        "/api/journal",
+        params={"source_type": qbo.SOURCE_TYPE, "start_date": "1900-01-01"},
+    )
     assert r.status_code == 200, r.text
     # the bytes are UTF-8 ...
     assert "—".encode() in r.content and "·".encode() in r.content

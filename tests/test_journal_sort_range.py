@@ -46,9 +46,13 @@ def _entries(db):
 
 
 def _listed(client, **params):
+    # no range named reads the current fiscal year (#817): these entries are
+    # dated in 2026, so name a range that holds them whatever today is
+    if "start_date" not in params and "end_date" not in params:
+        params["start_date"] = "1900-01-01"
     r = client.get("/api/journal", params=params)
     assert r.status_code == 200, r.text
-    return [e["id"] for e in r.json()]
+    return [e["id"] for e in r.json()["entries"]]
 
 
 def test_by_entry_date_newest_first_as_before(client, db_session, seed_accounts):

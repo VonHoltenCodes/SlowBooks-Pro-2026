@@ -12,6 +12,12 @@ const JournalPage = {
     _from: '',
     _to: '',
 
+    // The list pages (#817): a hundred entries at a time, newest first,
+    // the Show, Sort and range kept from page to page. With no From or To
+    // the server reads the current fiscal year; either box widens it.
+    _skip: 0,
+    _page: null,
+
     sortChoice() {
         let v = '';
         try { v = localStorage.getItem(JournalPage._SORT_KEY) || ''; } catch (e) { /* the default */ }
@@ -25,13 +31,49 @@ const JournalPage = {
         if (JournalPage._to) parts.push('end_date=' + encodeURIComponent(JournalPage._to));
         const sort = JournalPage.sortChoice();
         if (sort !== 'date') parts.push('sort=' + encodeURIComponent(sort));
+        if (JournalPage._skip > 0) parts.push('skip=' + JournalPage._skip);
         const base = JournalPage._show === 'adjusting' ? '/journal?adjusting=true' : '/journal';
         if (!parts.length) return base;
         return base + (base.includes('?') ? '&' : '?') + parts.join('&');
     },
 
+    // the page of entries the server answered, kept for Previous / Next
+    async _load() {
+        let page = await API.get(JournalPage.listPath());
+        // a page past the end (entries voided or the filter narrowed in
+        // another window): back to the first
+        if (JournalPage._skip > 0 && !(page.entries || []).length) {
+            JournalPage._skip = 0;
+            page = await API.get(JournalPage.listPath());
+        }
+        JournalPage._page = page;
+        return page;
+    },
+
+    // "Entries 101–200 of 3,001", or "3 entries" when one page holds them
+    // all; "in this date range" once From or To is set, "this fiscal year"
+    // for the list the page opens on
+    countText(page) {
+        const total = Number(page.total) || 0;
+        const shown = (page.entries || []).length;
+        const where = page.default_range ? ' this fiscal year' : ' in this date range';
+        const n = value => Number(value).toLocaleString('en-US');
+        if (total > shown || (page.skip || 0) > 0) {
+            const first = shown ? page.skip + 1 : 0;
+            return `Entries ${n(first)}\u2013${n(page.skip + shown)} of ${n(total)}${where}`;
+        }
+        return `${n(total)} ${total === 1 ? 'entry' : 'entries'}${where}`;
+    },
+
+    // what the list the page opens on holds, and how to see the rest
+    rangeNote(page) {
+        if (!page.default_range || !page.start_date) return '';
+        return `This fiscal year, ${formatDate(page.start_date)} to ${formatDate(page.end_date)}. Set From or To to see entries from other dates.`;
+    },
+
     async render() {
-        const entries = await API.get(JournalPage.listPath());
+        const page = await JournalPage._load();
+        const entries = page.entries;
         const sort = JournalPage.sortChoice();
         const ranged = !!(JournalPage._from || JournalPage._to);
         // The accountant's sign-in keeps this page's own controls (#340):
@@ -65,17 +107,49 @@ const JournalPage = {
                     <input type="date" id="journal-to" data-readonly-ok value="${escapeHtml(JournalPage._to)}" onblur="JournalPage.setRange()" onkeydown="JournalPage.rangeKey(event)">
                 </div>
             </div>
-            <p id="journal-count" role="status" style="color:var(--gray-500); margin:0 0 8px;">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}${ranged ? ' in this date range' : ''}</p>`;
+            <p id="journal-count" role="status" style="color:var(--gray-500); margin:0 0 4px;">${escapeHtml(JournalPage.countText(page))}</p>
+            <p id="journal-range-note" style="color:var(--gray-500); margin:0 0 8px; font-size:11px;">${escapeHtml(JournalPage.rangeNote(page))}</p>`;
 
-        html += `<div id="journal-list">${JournalPage.listHtml(entries, ranged)}</div>`;
+        html += `<div id="journal-list">${JournalPage.listHtml(entries, ranged)}${JournalPage.pagerHtml(page)}</div>`;
         return html;
+    },
+
+    // Previous / Next under the rows, when the filter holds more than a page
+    pagerHtml(page) {
+        const total = Number(page.total) || 0;
+        const skip = page.skip || 0;
+        const shown = (page.entries || []).length;
+        if (skip === 0 && shown >= total) return '';
+        const prev = skip > 0;
+        const next = skip + shown < total;
+        return `<div id="journal-pager" style="display:flex; gap:8px; margin-top:8px;">
+            <button type="button" id="journal-prev" class="btn btn-sm btn-secondary" data-readonly-ok ${prev ? '' : 'disabled'} onclick="JournalPage.turn(-1)">Previous ${page.limit}</button>
+            <button type="button" id="journal-next" class="btn btn-sm btn-secondary" data-readonly-ok ${next ? '' : 'disabled'} onclick="JournalPage.turn(1)">Next ${page.limit}</button>
+        </div>`;
+    },
+
+    // a page back or on; the filters and sort stay as they are
+    async turn(step) {
+        const page = JournalPage._page || { skip: 0, limit: 100, total: 0 };
+        const limit = page.limit || 100;
+        const skip = Math.max(0, (page.skip || 0) + step * limit);
+        if (skip >= (page.total || 0) && step > 0) return;
+        JournalPage._skip = skip;
+        await JournalPage._redrawList();
+        const id = step > 0 ? 'journal-next' : 'journal-prev';
+        const button = document.getElementById(id);
+        if (button && !button.disabled) button.focus();
+        else {
+            const count = document.getElementById('journal-count');
+            if (count) { count.setAttribute('tabindex', '-1'); count.focus(); }
+        }
     },
 
     // the rows under the controls; drawn alone when the range changes (W-99)
     listHtml(entries, ranged) {
         let out = '';
         if (entries.length === 0) {
-            out += `<div class="empty-state"><p>${ranged ? 'No journal entries in this date range' : JournalPage._show === 'adjusting' ? 'No adjusting entries' : 'No journal entries yet'}</p></div>`;
+            out += `<div class="empty-state"><p>${ranged ? 'No journal entries in this date range' : JournalPage._show === 'adjusting' ? 'No adjusting entries this fiscal year' : 'No journal entries this fiscal year'}</p></div>`;
         } else {
             out += `<div class="table-container"><table>
                 <thead><tr><th scope="col">ID</th><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th><th scope="col">Posted by</th>
@@ -104,11 +178,13 @@ const JournalPage = {
 
     setShow(value) {
         JournalPage._show = value === 'adjusting' ? 'adjusting' : 'all';
+        JournalPage._skip = 0;
         App.navigate('#/journal');
     },
 
     async setSort(value) {
         try { localStorage.setItem(JournalPage._SORT_KEY, value === 'entered' ? 'entered' : 'date'); } catch (e) { /* this view only */ }
+        JournalPage._skip = 0;
         await JournalPage._redraw('journal-sort');
     },
 
@@ -128,21 +204,25 @@ const JournalPage = {
         if (next.from === JournalPage._from && next.to === JournalPage._to) return;
         JournalPage._from = next.from;
         JournalPage._to = next.to;
+        JournalPage._skip = 0;
         await JournalPage._redrawList();
     },
 
     // the list and its count again, the controls left as they are
     async _redrawList() {
-        const entries = await API.get(JournalPage.listPath());
+        const page = await JournalPage._load();
+        const entries = page.entries;
         const count = document.getElementById('journal-count');
         const ranged = !!(JournalPage._from || JournalPage._to);
-        if (count) count.textContent = `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}${ranged ? ' in this date range' : ''}`;
+        if (count) count.textContent = JournalPage.countText(page);
+        const note = document.getElementById('journal-range-note');
+        if (note) note.textContent = JournalPage.rangeNote(page);
         const host = document.getElementById('journal-list');
         // Tab out of a date box can land on a row's button just before the
         // blur redraws the rows under it (2.31.5 round 2, W-104): then the
         // keyboard goes to the count line, which says what the range did.
         const inRows = !!(host && document.activeElement && host.contains(document.activeElement));
-        if (host) host.innerHTML = JournalPage.listHtml(entries, ranged);
+        if (host) host.innerHTML = JournalPage.listHtml(entries, ranged) + JournalPage.pagerHtml(page);
         if (inRows && count) { count.setAttribute('tabindex', '-1'); count.focus(); }
     },
 

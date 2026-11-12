@@ -97,7 +97,9 @@ def test_the_register_and_its_reports_read_the_type(client, db_session, seed_acc
     ] * 2
     listed = {
         e["reference"]: e["source_kind"]
-        for e in client.get("/api/journal").json()
+        for e in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
         if e["source_type"] == SOURCE_TYPE and e["reference"]
     }
     assert listed == KINDS

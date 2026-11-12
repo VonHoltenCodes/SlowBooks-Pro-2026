@@ -137,7 +137,13 @@ def test_journal_lines_inherit_header_job_and_class_unless_set(
     assert by_debit[60.0].job_id == job_b["id"]  # its own
     assert all(ln.class_id == cls["id"] for ln in txn.lines)
     # and the API echoes the line dimensions back
-    entry = next(e for e in client.get("/api/journal").json() if e["id"] == txn.id)
+    entry = next(
+        e
+        for e in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+        if e["id"] == txn.id
+    )
     assert {ln["job_id"] for ln in entry["lines"]} == {job_a["id"], job_b["id"]}
 
 

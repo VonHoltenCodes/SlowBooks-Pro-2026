@@ -59,7 +59,13 @@ def test_a_line_job_survives_create_and_read(client, db_session, seed_accounts):
     # a line naming no job takes the header's
     assert rest["job_id"] == kitchen and rest["job_name"] == "Acme Diner: Kitchen"
     assert e["job_id"] == kitchen
-    listed = next(x for x in client.get("/api/journal").json() if x["id"] == e["id"])
+    listed = next(
+        x
+        for x in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+        if x["id"] == e["id"]
+    )
     assert {ln["job_id"] for ln in listed["lines"]} == {bath, kitchen}
     assert "Acme Diner: Bath" in {ln["job_name"] for ln in listed["lines"]}
 
@@ -108,7 +114,12 @@ def test_the_list_marks_hand_entered_standing_entries_editable(
         {"source_type": "iif_import"}
     )
     db_session.commit()
-    listed = {x["id"]: x for x in client.get("/api/journal").json()}
+    listed = {
+        x["id"]: x
+        for x in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+    }
     assert listed[standing["id"]]["editable"] is True
     assert listed[voided["id"]]["editable"] is False
     assert listed[imported["id"]]["editable"] is False
@@ -139,7 +150,12 @@ def test_the_list_offers_the_accountant_no_edit(client, db_session, seed_account
         "/api/auth/login", json={"username": "cpa", "password": "cpa-password-123"}
     )
     assert r.status_code == 200, r.text
-    listed = {x["id"]: x for x in client.get("/api/journal").json()}
+    listed = {
+        x["id"]: x
+        for x in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+    }
     assert listed[standing["id"]]["editable"] is False
 
 

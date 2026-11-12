@@ -275,7 +275,9 @@ def test_general_journal_blocks_come_back_once_and_as_adjusting_on_request(
 
     body = upload(adjusting=True)
     assert body["journal_entries"] == 1 and body["ledger_entries"] == 1, body
-    entries = client.get("/api/journal").json()
+    entries = client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+        "entries"
+    ]
     assert len(entries) == 1
     e = entries[0]
     assert e["reference"] == "AJE-7" and e["is_adjusting"] is True
@@ -287,7 +289,14 @@ def test_general_journal_blocks_come_back_once_and_as_adjusting_on_request(
     }
     again = upload(adjusting=False)
     assert again["journal_entries"] == 0 and again["duplicates_skipped"] == 1
-    assert len(client.get("/api/journal").json()) == 1
+    assert (
+        len(
+            client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+                "entries"
+            ]
+        )
+        == 1
+    )
     # an unbalanced block is refused with its figures
     bad = GJ_IIF.replace("-120.00", "-100.00")
     body = _ok(
@@ -347,12 +356,19 @@ def test_the_adjusting_entries_import_takes_general_journal_rows_only(
     assert (
         "Check row" in body["errors"][0] and "Nothing was posted" in body["errors"][0]
     )
-    assert client.get("/api/journal").json() == []
+    assert (
+        client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+        == []
+    )
 
     body = upload(GJ_ONLY, adjusting_only=True)
     assert body["errors"] == [], body["errors"]
     assert body["journals"] == 1 and body["adjusting"] is True
-    entries = client.get("/api/journal?adjusting=true").json()
+    entries = client.get("/api/journal?adjusting=true&start_date=1900-01-01").json()[
+        "entries"
+    ]
     assert len(entries) == 1
     assert entries[0]["is_adjusting"] is True and entries[0]["posted_by"] == "admin"
     assert entries[0]["total_debit"] == 120.0

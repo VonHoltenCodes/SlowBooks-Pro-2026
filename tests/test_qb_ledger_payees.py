@@ -178,7 +178,9 @@ def test_a_journal_entry_with_no_name_reads_as_its_memo(
     _upload(client, FIXTURE.read_bytes())
     listed = {
         e["reference"]: e
-        for e in client.get("/api/journal").json()
+        for e in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
         if e["source_type"] == SOURCE_TYPE
     }
     assert listed["7"]["description"] == "Card sales, week 2"
