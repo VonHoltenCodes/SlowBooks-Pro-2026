@@ -448,8 +448,12 @@ amount, the checks subtotal is the sum of the check lines, and the total is
 the deposit's amount. Checks past the slip's lines continue on another page
 at the same lines, with the date and account, for the back of the slip or a
 second slip; the subtotal (of every check) and the total print on the first
-page. A void deposit prints its date, its account and VOID in the total's
-box, and no figures.
+page. The deposit's other lines (money never invoiced, #792) print with its
+payments, after them, the same way (#883): a cash line adds to the cash, and
+any other line goes on a check line, with its check number when it has one; a
+deposit of other lines alone prints the same way, and the slip's figures
+always add up to the deposit's total. A void deposit prints its date, its
+account and VOID in the total's box, and no figures.
 
 A **left/right** and an **up/down nudge** (−0.5 to +0.5 inch, 0.01 steps; a
 positive nudge moves right and down) shift every figure together, for a
