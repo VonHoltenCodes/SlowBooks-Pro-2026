@@ -30,7 +30,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from app.schemas.common import StrictModel
 
 router = APIRouter(prefix="/api/print-tokens", tags=["print"])
 page_router = APIRouter(tags=["print"])
@@ -78,7 +78,7 @@ _FORWARDED_HEADERS = {
 }
 
 
-class PrintTokenRequest(BaseModel):
+class PrintTokenRequest(StrictModel):
     path: str
     query: str = ""
 
