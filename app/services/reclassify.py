@@ -100,6 +100,7 @@ SOURCE_LABELS = {
     "sales_tax_payment": "Sales tax payment",
     "late_fee": "Late fee",
     "adjustment": "Inventory adjustment",
+    "inventory_adjustment": "Inventory adjustment",
 }
 
 

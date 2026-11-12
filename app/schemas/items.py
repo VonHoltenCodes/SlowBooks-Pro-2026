@@ -122,6 +122,58 @@ class InventoryAdjustmentRequest(StrictModel):
     memo: Optional[str] = None
 
 
+class InventoryAdjustmentLineIn(StrictModel):
+    """One line of an adjustment of several items (#801): the item and
+    either the change (`quantity_delta`, signed) or the count it is set to
+    (`new_quantity`), the unit cost where it applies (the average when left
+    out) and a memo."""
+
+    item_id: int
+    quantity_delta: Optional[Decimal] = None
+    new_quantity: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = None
+    memo: Optional[str] = None
+
+
+class InventoryAdjustmentCreate(StrictModel):
+    """POST /api/inventory/adjustments (#801): `lines`, one per item, and a
+    memo for the adjustment. One line may be sent the way a one-item
+    adjustment is, at the top level: `item_id` with `quantity_delta` (or
+    `new_quantity`), `unit_cost` and `memo`."""
+
+    memo: Optional[str] = None
+    lines: Optional[list[InventoryAdjustmentLineIn]] = None
+    item_id: Optional[int] = None
+    quantity_delta: Optional[Decimal] = None
+    new_quantity: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = None
+
+
+class InventoryAdjustmentLineOut(BaseModel):
+    line: int
+    movement_id: int
+    item_id: int
+    item_name: str
+    quantity_delta: Decimal
+    unit_cost: Decimal
+    # quantity x unit cost, signed as the change is
+    amount: Decimal
+    balance_qty: Decimal
+    balance_avg_cost: Decimal
+    memo: Optional[str] = None
+
+
+class InventoryAdjustmentResponse(BaseModel):
+    id: int
+    date: dt_date
+    memo: Optional[str] = None
+    transaction_id: Optional[int] = None
+    line_count: int
+    # the lines' amounts added, signed: up is more stock on the books
+    net_amount: Decimal
+    lines: list[InventoryAdjustmentLineOut] = []
+
+
 class LowStockResponse(BaseModel):
     id: int
     name: str
