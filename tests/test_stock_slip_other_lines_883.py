@@ -253,3 +253,70 @@ def test_the_test_slip_is_unchanged(client, as_html):
     assert _one(page, "cash") == "75.00"
     assert _one(page, "checks_subtotal") == "1,484.56"
     assert _one(page, "total") == "1,559.56"
+
+
+# ── W-147: the method's case does not move a line ───────────────────────
+
+
+def _cased_deposit(client, accounts, cid, cash, check):
+    """Two checks and some cash among the payments, and a cash and a
+    numbered check other line, every method spelled as given."""
+    _receive(client, cid, "300.00", check="4420", method=check)
+    _receive(client, cid, "100.00", check="4421", method=check)
+    _receive(client, cid, "25.00", method=cash)
+    return _deposit(
+        client,
+        accounts,
+        other_lines=[
+            _other(accounts, "4900", "10.00", method=cash, memo="Bake sale"),
+            _other(accounts, "6300", "45.50", "88123", method=check),
+        ],
+    )
+
+
+def _summary(html):
+    """The plain slip's summary rows: {label: amount}."""
+    rows = re.findall(
+        r'<td class="label[^"]*">([^<]+)</td><td class="r[^"]*">([^<]+)</td>', html
+    )
+    return {label.strip(): amount.strip() for label, amount in rows}
+
+
+@pytest.mark.parametrize(
+    "cash,check", [("Cash", "Check"), ("cash", "check"), ("CASH", "check ")]
+)
+def test_a_lowercase_cash_or_check_lands_where_the_capitalised_one_does_on_stock(
+    client, seed_accounts, acme, preprinted, as_html, cash, check
+):
+    pages, detail = _slip(
+        client, _cased_deposit(client, seed_accounts, acme, cash, check)
+    )
+    lines, cash_total, total = _adds_up(pages, detail)
+    assert lines == [("4420", "300.00"), ("4421", "100.00"), ("88123", "45.50")]
+    assert cash_total == D("35.00") and total == D("480.50")
+    assert _one(pages[0], "cash") == "35.00"
+    assert _one(pages[0], "checks_subtotal") == "445.50"
+
+
+@pytest.mark.parametrize(
+    "cash,check", [("Cash", "Check"), ("cash", "check"), ("CASH", "check ")]
+)
+def test_a_lowercase_cash_or_check_lands_where_the_capitalised_one_does_on_the_plain_slip(
+    client, seed_accounts, acme, as_html, cash, check
+):
+    dep = _cased_deposit(client, seed_accounts, acme, cash, check)
+    rows = _summary(client.get(f"/api/deposits/{dep}/pdf").text)
+    assert rows["3 checks"] == "$445.50"
+    assert rows["Cash"] == "$35.00"
+    assert rows["Total deposit"] == "$480.50"
+
+
+def test_the_slip_kind_reads_the_method_without_case():
+    kind = pdf_service._slip_kind
+    assert kind({"method": "cash"}, False) == "cash"
+    assert kind({"method": " Cash "}, True) == "cash"
+    assert kind({"method": "check"}, False) == "check"
+    assert kind({"method": "ach"}, False) == "other"
+    assert kind({"method": None}, True) == "other"
+    # an other line with a check number is a check, whatever its method
+    assert kind({"method": "cash", "check_number": "7007"}, True) == "check"
