@@ -396,6 +396,38 @@ def _slip_date(value) -> str:
 _SLIP_AMOUNT_WIDTH_IN = 2.5
 
 
+def _slip_kind(line: dict, other: bool) -> str:
+    """Where a deposit line goes on a slip: "cash", "check", or "other"
+    (ACH, card, ...). The method is compared without case (W-147): the
+    forms send "Cash" and "Check" but Batch Payments and the API store
+    "cash" and "check". An other line with a check number is a check line
+    with that number (#883), whatever its method says."""
+    if other and str(line.get("check_number") or "").strip():
+        return "check"
+    method = str(line.get("method") or "").strip().lower()
+    if method in ("cash", "check"):
+        return method
+    return "other"
+
+
+def deposit_slip_split(payments, others) -> dict:
+    """The plain slip's summary rows: the deposit's check lines and its cash
+    lines, payments first and then the other lines, by _slip_kind."""
+    split = {"checks": [], "cash": []}
+    for line, other in [(p, False) for p in payments or []] + [
+        (o, True) for o in others or []
+    ]:
+        kind = _slip_kind(line, other)
+        if kind == "check":
+            split["checks"].append(line)
+        elif kind == "cash":
+            split["cash"].append(line)
+    return split
+
+
+_jinja_env.globals["deposit_slip_split"] = deposit_slip_split
+
+
 def deposit_slip_pages(deposit: dict, company_settings: dict) -> list:
     """The figures of a deposit on pre-printed slip stock (#798), as pages
     of [{"field", "text", "left", "top", "size", "amount"}] in inches from
@@ -447,14 +479,9 @@ def deposit_slip_pages(deposit: dict, company_settings: dict) -> list:
     others = deposit.get("other_lines") or []
     slip = [(p, False) for p in payments] + [(o, True) for o in others]
 
-    def is_cash(line, other):
-        # an other line with a check number is a check line with that number
-        if other and (line.get("check_number") or "").strip():
-            return False
-        return line.get("method") == "Cash"
-
-    cash = [p for p, other in slip if is_cash(p, other)]
-    checks = [p for p, other in slip if not is_cash(p, other)]
+    # every line that is not cash goes on a check line (_slip_kind)
+    cash = [p for p, other in slip if _slip_kind(p, other) == "cash"]
+    checks = [p for p, other in slip if _slip_kind(p, other) != "cash"]
     cash_total = sum((Decimal(str(p.get("amount") or 0)) for p in cash), Decimal(0))
     checks_total = sum((Decimal(str(p.get("amount") or 0)) for p in checks), Decimal(0))
     per_page = int(layout["check_lines"]["count"])

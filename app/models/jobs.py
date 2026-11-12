@@ -174,16 +174,6 @@ class SovLine(Base):
         Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
     )
     is_taxable = Column(Boolean, nullable=False, default=True, server_default=true())
-    # The exemption certificate an exempt job stands on (#864): it lives and
-    # dies with the job, so every exempt job takes its own. Number, state
-    # (or jurisdiction) and kind are required while the job is exempt; the
-    # expiry is optional. Switching the job back to charged clears them. A
-    # document made exempt keeps its own copy (exempt_certificate_* on
-    # estimates and invoices), so a later edit here never changes it.
-    exempt_certificate_number = Column(String(50), nullable=True)
-    exempt_certificate_state = Column(String(20), nullable=True)
-    exempt_certificate_kind = Column(String(20), nullable=True)
-    exempt_certificate_expires = Column(Date, nullable=True)
     source_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )
