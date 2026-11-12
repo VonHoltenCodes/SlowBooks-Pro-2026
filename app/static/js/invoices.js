@@ -416,7 +416,7 @@ const InvoicesPage = {
             return `<tr>
                 <td>${escapeHtml(label)}</td>
                 <td class="amount">${money(c.available)}</td>
-                <td><input class="credit-take money" data-kind="${escapeHtml(c.kind)}" data-id="${c.id}" data-max="${c.available}"
+                <td><input class="credit-take money" data-kind="${escapeHtml(c.kind)}" data-id="${c.id}" data-max="${c.available}" data-label="${escapeHtml(label)}"
                     type="number" step="0.01" min="0" max="${c.available}" value="${take > 0 ? (take / 100).toFixed(2) : ''}"
                     aria-label="Apply from ${escapeHtml(label)}" oninput="InvoicesPage._applyCreditStatus()" style="width:100px;"></td>
             </tr>`;
@@ -458,21 +458,48 @@ const InvoicesPage = {
                 : `Applying ${money(used)}; ${money(state.due - used)} still due.`;
     },
 
+    // One request per credit. Every row is checked before anything is sent
+    // (#803, as the Apply Credit dialogs since #747): a credit over what it
+    // has, or the rows together over what the invoice owes, is refused whole
+    // with the row named. A refusal part-way stops there, says what was
+    // applied before it, and opens the dialog again on what remains, so a
+    // second Apply never sends a credit the server already took.
     async saveApplyCredit(e, invoiceId) {
         e.preventDefault();
+        const state = InvoicesPage._applying || {};
+        const money = (v) => SalesLines.money(v, state.currency);
         const picks = [];
-        $$('.credit-take').forEach(input => {
+        let total = 0;
+        for (const input of $$('.credit-take')) {
             const c = PaymentsPage._cents(input.value);
-            if (c > 0) picks.push({ kind: input.dataset.kind, id: parseInt(input.dataset.id), amount: c / 100 });
-        });
-        if (!picks.length) { toast('Enter an amount to apply', 'error'); return; }
-        try {
-            for (const p of picks) {
-                await PaymentsPage.applyCredit(p.kind, p.id, [{ invoice_id: invoiceId, amount: p.amount }]);
+            if (c <= 0) continue;
+            const label = input.dataset.label || `Credit ${input.dataset.id}`;
+            if (input.dataset.max !== undefined && c > PaymentsPage._cents(input.dataset.max)) {
+                toast(`${label}: ${money(c / 100)} is more than the ${money(input.dataset.max)} it has left. Nothing was applied.`, 'error');
+                return;
             }
-            toast('Credit applied');
-            App.refresh();
-        } catch (err) { toast(err.message, 'error'); }
+            total += c;
+            picks.push({ kind: input.dataset.kind, id: parseInt(input.dataset.id), amount: c / 100, label });
+        }
+        if (!picks.length) { toast('Enter an amount to apply', 'error'); return; }
+        if (typeof state.due === 'number' && total > state.due) {
+            toast(`${money(total / 100)} is more than the ${money(state.due / 100)} the ${T('invoice')} owes. Nothing was applied.`, 'error');
+            return;
+        }
+        const applied = [];
+        for (const p of picks) {
+            try {
+                await PaymentsPage.applyCredit(p.kind, p.id, [{ invoice_id: invoiceId, amount: p.amount }]);
+            } catch (err) {
+                const before = applied.map(a => `${money(a.amount)} from ${a.label}`);
+                toast(PaymentsPage._stoppedAt(p.label, err, before), 'error');
+                if (applied.length) await InvoicesPage.showApplyCredit(invoiceId);
+                return;
+            }
+            applied.push(p);
+        }
+        toast('Credit applied');
+        App.refresh();
     },
 
     logoOptionHtml(settings) {
