@@ -181,10 +181,19 @@ def test_a_year_with_no_base_is_saved_and_says_so(client):
     assert r.status_code == 200, r.text
     [warning] = r.json()["warnings"]
     assert f"not for {year}" in warning
-    # and a pay run that year runs, measured against the nearest base, and
-    # says so too
-    run = _run(client, emp["id"], f"{year}-04-10", process=False)
-    assert any(f"not for {year}" in w for w in run["warnings"])
+    # a pay run that year is refused: SlowBooks keeps no tables for it
+    # (#818; it used to run against the nearest year's)
+    r = client.post(
+        "/api/payroll",
+        json={
+            "period_start": f"{year}-03-28",
+            "period_end": f"{year}-04-10",
+            "pay_date": f"{year}-04-10",
+            "stubs": [{"employee_id": emp["id"], "gross_override": 1000}],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert f"not for {year}" in r.json()["detail"]
 
 
 def test_a_2025_paycheck_and_w2_use_2025s_base(client, db_session):

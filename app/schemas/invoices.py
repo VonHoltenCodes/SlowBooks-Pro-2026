@@ -1,4 +1,4 @@
-from datetime import date as dt_date, datetime
+from datetime import date as dt_date, datetime, timezone
 from decimal import Decimal
 from typing import Annotated, Optional
 
@@ -296,8 +296,30 @@ class InvoiceResponse(BaseModel):
     # shown in place of the offer, which is then cleared.
     discount_taken: Optional[DiscountTaken] = None
     terms_note: Optional[str] = None
+    # The terms-list entry the invoice is tied to (#664), the one its due
+    # date and discount are read from; null when it is tied to none (free
+    # text, an import, or one saved before the list), #810.
+    payment_term_id: Optional[int] = Field(
+        None,
+        description=(
+            "The payment term (GET /api/payment-terms/{id}) the invoice is "
+            "tied to, which its due date and discount follow; null when it "
+            "is tied to none."
+        ),
+    )
     customer_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("last_emailed_at")
+    def _last_emailed_at(self, value):
+        # The log's stamps are naive UTC. Written with "+00:00", the way
+        # /api/email-log writes the same send's sent_at (#811), so a browser
+        # does not read it as local time.
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()

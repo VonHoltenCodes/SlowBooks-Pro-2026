@@ -1,4 +1,5 @@
-"""The upgrade copies each company's files in from the shared folder (2.18.0).
+"""The copy step brings each company's files in from the shared folder
+(2.18.0), proved on books at the migration floor (#769).
 
 Before 2.18.0 every company on a desktop install kept its uploads in one
 shared folder, and the rows only held paths into it: company_logo_path
@@ -15,6 +16,14 @@ per company, each file that company's rows point at into its own database:
 - the shared files are left where they are: another company may still
   need its copy;
 - running the copy again copies nothing twice.
+
+Books from before 2.18.0 are below the migration floor, so this build never
+walks the migration up from them; 2.31.14 does. What the step does is proved
+here without that walk: books at the floor are seeded with the rows a
+release before 2.18.0 left (paths into the shared folder, no stored file),
+and the migration's own copy step, ``copy_shared_folder_files``, and its own
+``downgrade`` are run on them directly. Then the app is shown the books the
+step brought in.
 
 Runs on SQLite always, and on PostgreSQL when SLOWBOOKS_TEST_POSTGRES_URL
 names a server the test may create a scratch database on (for example
@@ -40,13 +49,16 @@ from starlette.requests import HTTPConnection
 import app.database as db_module
 from app.database import get_db
 from app.main import app
+from app.services.migration_floor import MIGRATION_FLOOR
 
 # The seeded admin row is never signed in to with a password; a named
 # constant keeps it apart from the username for the secret scanner.
 _NO_PASSWORD = "x"
 
 ROOT = Path(__file__).resolve().parents[1]
-BEFORE = "d3d40d716684"
+# the books are at the floor; the rows seeded on them are the release
+# before 2.18.0's, which the copy step of REVISION brings in
+BEFORE = MIGRATION_FLOOR
 REVISION = "c5e1f7a9b3d2"
 
 RECEIPT = b"Acme Signs receipt for invoice 1"
@@ -132,7 +144,7 @@ _TEMPLATE = {}
 
 @pytest.fixture(scope="module", autouse=True)
 def _books_at_the_release_before(tmp_path_factory):
-    """Empty books at the release before, migrated once for the module (from
+    """Empty books at the migration floor, migrated once for the module (from
     nothing, SQLite takes seconds); each SQLite test copies the file."""
     path = tmp_path_factory.mktemp("before") / "before.db"
     command.upgrade(_cfg("sqlite:///" + path.as_posix()), BEFORE)
@@ -142,7 +154,8 @@ def _books_at_the_release_before(tmp_path_factory):
 
 
 def _old_books(url: str, logo="/static/uploads/company_logo.png") -> None:
-    """A company's books as the release before this one left them."""
+    """A company's books with the rows a release before 2.18.0 left: paths
+    into the shared folder and no stored file, on books at the floor."""
     if url.startswith("sqlite:///") and "sqlite" in _TEMPLATE:
         shutil.copyfile(_TEMPLATE["sqlite"], url[len("sqlite:///") :])
     else:
@@ -298,21 +311,43 @@ def _assert_copied_in(url: str, shared: Path) -> None:
     assert (uploads / "company_logo.png").read_bytes() == LOGO
 
 
-def _copy_again(url: str) -> dict:
-    """Run the migration's copy step once more, as a second run would."""
-    module = ScriptDirectory.from_config(_cfg(url)).get_revision(REVISION).module
+def _migration():
+    script = ScriptDirectory.from_config(_cfg("sqlite:///unused.db"))
+    return script.get_revision(REVISION).module
+
+
+def _copy_in(url: str) -> dict:
+    """Run the migration's copy step on the books, as its upgrade does."""
     engine = sa.create_engine(url)
     try:
         with engine.begin() as conn:
             stored_files = sa.Table("stored_files", sa.MetaData(), autoload_with=conn)
-            return module.copy_shared_folder_files(conn, stored_files)
+            return _migration().copy_shared_folder_files(conn, stored_files)
+    finally:
+        engine.dispose()
+
+
+_copy_again = _copy_in  # a second run, as a second upgrade would be
+
+
+def _run_the_downgrade(url: str) -> None:
+    """The migration's own downgrade, run on its own (not the chain below
+    the floor)."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    engine = sa.create_engine(url)
+    try:
+        with engine.begin() as conn:
+            with Operations.context(MigrationContext.configure(conn)):
+                _migration().downgrade()
     finally:
         engine.dispose()
 
 
 def _upgrade_scenario(url: str, shared: Path) -> None:
     _old_books(url)
-    command.upgrade(_cfg(url), REVISION)
+    assert _copy_in(url) == {"copied": 5, "missing": 2}
     _assert_copied_in(url, shared)
 
     # idempotent: a second run of the step, or of the upgrade, copies nothing
@@ -323,7 +358,7 @@ def _upgrade_scenario(url: str, shared: Path) -> None:
     _assert_copied_in(url, shared)
 
     # the downgrade points the rows at the shared folder again
-    command.downgrade(_cfg(url), BEFORE)
+    _run_the_downgrade(url)
     engine = sa.create_engine(url)
     try:
         with engine.connect() as conn:
@@ -343,7 +378,7 @@ def _upgrade_scenario(url: str, shared: Path) -> None:
         engine.dispose()
 
 
-def test_the_upgrade_copies_each_file_in_flags_it_and_is_idempotent(
+def test_the_copy_step_copies_each_file_in_flags_it_and_is_idempotent(
     tmp_path, shared_folder
 ):
     _upgrade_scenario("sqlite:///" + (tmp_path / "old.db").as_posix(), shared_folder)
@@ -379,7 +414,7 @@ def postgres_url():
         admin.dispose()
 
 
-def test_the_upgrade_on_postgresql(postgres_url, shared_folder):
+def test_the_copy_step_on_postgresql(postgres_url, shared_folder):
     _upgrade_scenario(postgres_url, shared_folder)
 
 
@@ -393,8 +428,8 @@ def test_every_company_copies_its_own_and_the_shared_file_stays(
     copy = "sqlite:///" + (tmp_path / "acme-copy.db").as_posix()
     _old_books(acme)
     _old_books(copy)
-    command.upgrade(_cfg(acme), REVISION)
-    command.upgrade(_cfg(copy), REVISION)
+    _copy_in(acme)
+    _copy_in(copy)
     _assert_copied_in(acme, shared_folder)
     _assert_copied_in(copy, shared_folder)
 
@@ -409,7 +444,7 @@ def test_a_desktop_company_file_finds_its_data_folder_without_being_told(
     (shared_folder / "companies").mkdir()
     url = "sqlite:///" + (shared_folder / "companies" / "acme.db").as_posix()
     _old_books(url)
-    command.upgrade(_cfg(url), REVISION)
+    _copy_in(url)
     _assert_copied_in(url, shared_folder)
 
 
@@ -417,7 +452,7 @@ def test_a_logo_that_is_not_there_is_recorded_as_missing(tmp_path, shared_folder
     (shared_folder / "uploads" / "company_logo.png").unlink()
     url = "sqlite:///" + (tmp_path / "old.db").as_posix()
     _old_books(url)
-    command.upgrade(_cfg(url), REVISION)
+    _copy_in(url)
     logo = _logo_row(url)
     assert logo["row"]["missing"] in (True, 1)
     assert logo["row"]["data"] is None
@@ -429,7 +464,7 @@ def test_a_logo_setting_that_names_no_shared_file_is_left_alone(
 ):
     url = "sqlite:///" + (tmp_path / "old.db").as_posix()
     _old_books(url, logo=value)
-    command.upgrade(_cfg(url), REVISION)
+    _copy_in(url)
     assert _logo_row(url) == {"value": value, "row": None}
 
 
@@ -440,9 +475,10 @@ def test_a_logo_setting_that_names_no_shared_file_is_left_alone(
 
 @pytest.fixture
 def upgraded(tmp_path, shared_folder, client, monkeypatch):
-    """Older books, upgraded, opened in the app."""
+    """Older books, their files copied in, upgraded, opened in the app."""
     url = "sqlite:///" + (tmp_path / "old.db").as_posix()
     _old_books(url)
+    _copy_in(url)
     command.upgrade(_cfg(url), "head")
     engine = sa.create_engine(url, connect_args={"check_same_thread": False})
     Session = sessionmaker(bind=engine, autoflush=False)
@@ -507,6 +543,7 @@ def test_the_app_keeps_and_serves_files_on_postgresql(
     from app.services import ocr_service, pdf_service
 
     _old_books(postgres_url)
+    _copy_in(postgres_url)
     command.upgrade(_cfg(postgres_url), "head")
     engine = sa.create_engine(postgres_url)
     Session = sessionmaker(bind=engine, autoflush=False)

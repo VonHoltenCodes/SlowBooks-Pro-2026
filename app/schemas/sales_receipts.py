@@ -2,7 +2,7 @@ from datetime import date as dt_date
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.common import StrictModel, TaxRate
 
@@ -45,6 +45,16 @@ class SalesReceiptCreate(StrictModel):
 class SalesReceiptResponse(BaseModel):
     invoice: InvoiceResponse
     payment: PaymentResponse
+    # The receipt's customer by name, as GET /api/sales-receipts answers it
+    # on each row ("Parent: Sub" for a sub-customer, the walk-in customer
+    # for a counter sale): a client reading the top level found null (#810).
+    customer_name: Optional[str] = Field(
+        None,
+        description=(
+            "The receipt's customer by name, as GET /api/sales-receipts "
+            "answers it; the same as invoice.customer_name."
+        ),
+    )
     # The invoice step's warnings (#642): a sentence for each stock item
     # the sale took past what was on hand. Empty when nothing was short.
     warnings: list[str] = []

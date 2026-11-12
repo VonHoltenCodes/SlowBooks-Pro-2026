@@ -5,12 +5,14 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import AfterValidator
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.contacts import Vendor
 from app.models.payroll import Employee
+from app.schemas.common import check_quarter
 from app.services.tax_forms import form_941, form_940, w2_w3, state_sui, tax_liability
 from app.services import form_1099
 from app.services.payroll_documents import employer_block
@@ -21,6 +23,9 @@ router = APIRouter(prefix="/api/tax-forms", tags=["tax-forms"])
 # A tax year the forms can be dated in: 99999 reached date() and answered a
 # 500 (#755 review; a payroll token can reach these routes now).
 TaxYear = Annotated[int, Query(ge=1900, le=9999)]
+# A quarter, 1 to 4: refused as the year is, a 422 with a sentence naming
+# the four (#810; it was a 400, "quarter must be 1-4").
+TaxQuarter = Annotated[int, Query(), AfterValidator(check_quarter)]
 
 
 def _employee_or_404(db: Session, employee_id: int) -> None:
@@ -47,23 +52,14 @@ def _pdf(content: bytes, *name) -> Response:
     )
 
 
-def _check_quarter(quarter: int):
-    if quarter not in (1, 2, 3, 4):
-        raise HTTPException(status_code=400, detail="quarter must be 1-4")
-
-
 # --- Form 941 — quarterly federal -----------------------------------------
 @router.get("/941")
-def get_941(year: TaxYear, quarter: int = Query(...), db: Session = Depends(get_db)):
-    _check_quarter(quarter)
+def get_941(year: TaxYear, quarter: TaxQuarter, db: Session = Depends(get_db)):
     return form_941.compute_941(db, year, quarter)
 
 
 @router.get("/941/pdf")
-def get_941_pdf(
-    year: TaxYear, quarter: int = Query(...), db: Session = Depends(get_db)
-):
-    _check_quarter(quarter)
+def get_941_pdf(year: TaxYear, quarter: TaxQuarter, db: Session = Depends(get_db)):
     pdf = form_941.generate_941_pdf(db, year, quarter, _company(db))
     return _pdf(pdf, "941", year, f"Q{quarter}")
 
@@ -104,25 +100,34 @@ def get_w2_pdf(employee_id: int, year: TaxYear, db: Session = Depends(get_db)):
     return _pdf(pdf, "W-2", year, emp.full_name if emp else None)
 
 
+# --- Paychecks with no work state (#818) -----------------------------------
+@router.get("/work-state-missing")
+def get_work_state_missing(year: TaxYear, db: Session = Depends(get_db)):
+    """The employees paid in the year with no work state: their wages are
+    on no state's SUI report and the W-2 leaves the state boxes empty. The
+    Tax Forms page shows these sentences."""
+    return {"year": year, "warnings": w2_w3.missing_work_state(db, year)}
+
+
 # --- State unemployment ----------------------------------------------------
 @router.get("/sui")
 def get_sui(
     year: TaxYear,
-    quarter: int = Query(...),
+    quarter: TaxQuarter,
     state: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    _check_quarter(quarter)
     return state_sui.compute_sui(db, year, quarter, state)
 
 
 # --- Quarterly tax liability schedule --------------------------------------
 @router.get("/liability")
 def get_tax_liability(
-    year: TaxYear, quarter: int = Query(...), db: Session = Depends(get_db)
+    year: TaxYear, quarter: TaxQuarter, db: Session = Depends(get_db)
 ):
-    """What payroll tax is owed for the quarter, and when it is due."""
-    _check_quarter(quarter)
+    """What payroll tax is owed for the quarter, and when it is due. The
+    year is 1900 to 9999 and the quarter 1 to 4; any other is a 422 naming
+    the bounds (#810)."""
     return tax_liability.compute_tax_liability(db, year, quarter)
 
 

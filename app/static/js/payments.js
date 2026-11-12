@@ -646,8 +646,11 @@ const PaymentsPage = {
 
     // Apply one credit — the unapplied part of a payment, or a credit memo —
     // to the customer's open invoices, filled oldest first up to what the
-    // credit has left.
-    async showApplyCredit(kind, creditId, customerId, backToForm = false) {
+    // credit has left. Opened again after a refusal part-way (#803),
+    // `resume` = { keep: {invoice id: amount typed}, skip: [invoice ids
+    // applied] }: the rows applied are left out and the rest keep what was
+    // typed, so nothing is refilled onto an invoice the credit just paid.
+    async showApplyCredit(kind, creditId, customerId, backToForm = false, resume = null) {
         let credits, invoices;
         try {
             [credits, invoices] = await Promise.all([
@@ -659,11 +662,14 @@ const PaymentsPage = {
         } catch (err) { toast(err.message, 'error'); return; }
         const credit = credits.credits.find(c => c.kind === kind && c.id === creditId);
         if (!credit) { toast('That credit has already been applied', 'error'); return; }
+        const skip = new Set(((resume && resume.skip) || []).map(String));
         const open = PaymentsPage._openInvoices(invoices)
-            .filter(i => (i.currency || credits.home_currency) === credit.currency);
+            .filter(i => (i.currency || credits.home_currency) === credit.currency)
+            .filter(i => !skip.has(String(i.id)));
         let left = PaymentsPage._cents(credit.available);
         const rows = open.map(i => {
-            const take = Math.max(0, Math.min(left, PaymentsPage._cents(i.balance_due)));
+            let take = Math.max(0, Math.min(left, PaymentsPage._cents(i.balance_due)));
+            if (resume) take = PaymentsPage._cents((resume.keep || {})[i.id]);
             left -= take;
             return `<tr>
                 <td>#${escapeHtml(i.invoice_number)}</td>
@@ -687,6 +693,7 @@ const PaymentsPage = {
                     ${open.length ? '<button type="submit" class="btn btn-primary">Apply Credit</button>' : ''}
                 </div>
             </form>`);
+        PaymentsPage._applyAvailable = PaymentsPage._cents(credit.available);
         PaymentsPage._creditStatus(PaymentsPage._cents(credit.available));
     },
 
@@ -708,31 +715,88 @@ const PaymentsPage = {
             : `Applying ${formatCurrency(used / 100)}; ${formatCurrency((availableCents - used) / 100)} stays as a credit.`;
     },
 
-    // Apply one credit to invoices: an unapplied payment in one request, a
-    // credit memo one invoice at a time (its own endpoint). The invoice
-    // view's Apply Credit sends through here too.
+    // Apply one credit to invoices: an unapplied payment in one request,
+    // which the server applies whole or not at all, a credit memo one
+    // invoice at a time (its own endpoint). The invoice view's Apply Credit
+    // sends through here too. A credit memo row refused part-way throws with
+    // err.row (the refused allocation's index) and err.applied (the
+    // allocations applied before it), so the caller can say what was
+    // applied and never send those again (#803).
     async applyCredit(kind, creditId, allocations) {
         if (kind === 'payment') {
             await API.post(`/payments/${creditId}/apply`, { allocations });
             return;
         }
-        for (const a of allocations) await API.post(`/credit-memos/${creditId}/apply`, a);
+        const applied = [];
+        for (const [i, a] of allocations.entries()) {
+            try {
+                await API.post(`/credit-memos/${creditId}/apply`, a);
+            } catch (err) {
+                err.row = i;
+                err.applied = applied.slice();
+                throw err;
+            }
+            applied.push(a);
+        }
     },
 
+    // A refusal part-way, in one sentence: the refused row, the server's
+    // reason with its full stop, and what was applied before it (#803).
+    // `applied` is a list of phrases ("$5.00 to invoice #1001").
+    _stoppedAt(label, err, applied) {
+        let why = String((err && err.message) || 'The server refused it').trim();
+        if (!/[.!?]$/.test(why)) why += '.';
+        const before = applied.length
+            ? ` ${applied.join(', ')} ${applied.length === 1 ? 'was' : 'were'} applied before it; the dialog shows what remains now.`
+            : ' Nothing was applied.';
+        return `${label}: ${why}${before}`;
+    },
+
+    // Every row is checked before anything is sent (#803, as the credit
+    // memo's own dialog since #747): a row over its invoice's balance, or
+    // the rows together over what the credit has, is refused whole with the
+    // row named. A credit memo row the server refuses part-way says what
+    // was applied before it and opens the dialog again on what remains.
     async saveApplyCredit(e, kind, creditId, customerId, backToForm) {
         e.preventDefault();
-        const allocations = [];
-        $$('.credit-alloc').forEach(input => {
+        const allocations = [], numbers = [];
+        let total = 0;
+        for (const input of $$('.credit-alloc')) {
             const cents = PaymentsPage._cents(input.value);
-            if (cents > 0) allocations.push({ invoice_id: parseInt(input.dataset.invoice), amount: cents / 100 });
-        });
+            if (cents <= 0) continue;
+            const number = input.dataset.number || input.dataset.invoice;
+            if (input.dataset.max !== undefined && cents > PaymentsPage._cents(input.dataset.max)) {
+                toast(Terms.text(`Invoice #${number}: ${formatCurrency(cents / 100)} is more than its ${formatCurrency(input.dataset.max)} balance. Nothing was applied.`), 'error');
+                return;
+            }
+            total += cents;
+            allocations.push({ invoice_id: parseInt(input.dataset.invoice), amount: cents / 100 });
+            numbers.push(number);
+        }
         if (!allocations.length) { toast('Enter an amount to apply', 'error'); return; }
+        const available = PaymentsPage._applyAvailable;
+        if (typeof available === 'number' && total > available) {
+            toast(`${formatCurrency(total / 100)} is more than the ${formatCurrency(available / 100)} the credit has. Nothing was applied.`, 'error');
+            return;
+        }
         try {
             await PaymentsPage.applyCredit(kind, creditId, allocations);
-            toast('Credit applied');
-            if (backToForm) { PaymentsPage.showForm(null, customerId); return; }
-            App.refresh();
-        } catch (err) { toast(err.message, 'error'); }
+        } catch (err) {
+            if (err.row === undefined) { toast(err.message, 'error'); return; }
+            const before = err.applied.map((a, i) => Terms.text(`${formatCurrency(a.amount)} to invoice #${numbers[i]}`));
+            toast(PaymentsPage._stoppedAt(Terms.text(`Invoice #${numbers[err.row]}`), err, before), 'error');
+            if (err.applied.length) {
+                // the refused row and those after it keep what was typed
+                const keep = {};
+                for (const a of allocations.slice(err.row)) keep[a.invoice_id] = a.amount;
+                await PaymentsPage.showApplyCredit(kind, creditId, customerId, backToForm,
+                    { keep, skip: err.applied.map(a => a.invoice_id) });
+            }
+            return;
+        }
+        toast('Credit applied');
+        if (backToForm) { PaymentsPage.showForm(null, customerId); return; }
+        App.refresh();
     },
 
     async save(e) {
@@ -749,17 +813,27 @@ const PaymentsPage = {
             return;
         }
         const allocations = [];
-        let unpaid = null;
+        let unpaid = null, over = null;
         $$('#payment-invoices .alloc-amount').forEach(input => {
             const cents = PaymentsPage._cents(input.value);
             const discount = PaymentsPage._discountCents(input.dataset.invoice);
             if (discount > 0 && cents === 0) unpaid = unpaid || input;
+            // every row is checked before anything is sent (#803): the
+            // server applies them together or not at all
+            if (!over && input.dataset.max !== undefined && cents + discount > PaymentsPage._cents(input.dataset.max)) {
+                over = { input, cents: cents + discount };
+            }
             if (cents > 0 || discount > 0) {
                 const row = { invoice_id: parseInt(input.dataset.invoice), amount: cents / 100 };
                 if (discount > 0) row.discount = discount / 100;
                 allocations.push(row);
             }
         });
+        if (over) {
+            const inv = (PaymentsPage._invoices || []).find(i => String(i.id) === String(over.input.dataset.invoice));
+            toast(Terms.text(`Invoice #${inv ? inv.invoice_number : over.input.dataset.invoice}: ${PaymentsPage._fmt(over.cents / 100)} is more than its ${PaymentsPage._fmt(over.input.dataset.max)} balance. Nothing was recorded.`), 'error');
+            return;
+        }
         // a discount comes with a payment on its invoice (#664)
         if (unpaid) {
             const inv = (PaymentsPage._invoices || []).find(i => String(i.id) === String(unpaid.dataset.invoice));

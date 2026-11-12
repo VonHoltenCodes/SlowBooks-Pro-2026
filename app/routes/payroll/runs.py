@@ -26,11 +26,17 @@ from app.schemas.payroll import PayRunCreate, PayRunResponse
 from app.schemas.deductions import GrossUpRequest, GrossUpResponse
 from app.services.payroll_accounts import PayrollAccountProblem, posting_accounts
 from app.services.payroll_service import (
+    META_TABLES_YEAR,
+    TABLES_YEAR,
     _q,
     calculate_withholdings,
+    has_tables,
+    legacy_tables_note,
     tables_year_note,
+    tables_year_refusal,
     wage_base_note,
 )
+from app.services.state_tax.wa import salaried_lni_hours
 from app.services.accounting import create_journal_entry
 from app.services.garnishment import (
     GarnishmentSpec,
@@ -43,14 +49,56 @@ from app.services.state_tax.reciprocity import withholding_state
 from app.services import benefits_engine
 
 
+def _stub_detail(stub) -> dict:
+    try:
+        data = json.loads(stub.detail_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def stub_notes(stub) -> list[str]:
+    """The sentences a stub carries about how it was figured ("work state
+    missing", the salaried L&I hours): its detail's ``note:`` entries."""
+    return [str(v) for k, v in _stub_detail(stub).items() if str(k).startswith("note:")]
+
+
+def _stub_states(stub) -> set[str]:
+    """The work state and the withholding state a stub was figured in."""
+    work = (stub.work_state or "").strip().upper()
+    if not work:
+        return set()
+    emp = stub.employee
+    wh = withholding_state(work, emp.residence_state if emp else None) or work
+    return {work, wh.strip().upper()}
+
+
+def _tables_notes(run: PayRun) -> list[str]:
+    """What a run says about the year of the tables it was figured with: a
+    state with no tables of the pay date's year (#818), or a run figured
+    before per-year tables, which used 2026's whatever its date."""
+    if not run.pay_date:
+        return []
+    year = run.pay_date.year
+    if run.stubs and not any(META_TABLES_YEAR in _stub_detail(s) for s in run.stubs):
+        note = legacy_tables_note(year)
+        return [note] if note else []
+    states: set[str] = set()
+    for stub in run.stubs:
+        states |= _stub_states(stub)
+    note = tables_year_note(year, states)
+    return [note] if note else []
+
+
 def _with_employee_names(run: PayRun) -> PayRunResponse:
     resp = PayRunResponse.model_validate(run)
-    # a run dated outside the tables' year says so wherever it is read, not
-    # only in the answer to its creation (2.31.3 gate, note A)
-    note = tables_year_note(run.pay_date.year) if run.pay_date else None
-    if note:
-        resp.warnings = [note]
+    # a run's tables note is on it wherever it is read, not only in the
+    # answer to its creation (2.31.3 gate, note A)
+    notes = _tables_notes(run)
+    if notes:
+        resp.warnings = notes
     for stub_resp, stub in zip(resp.stubs, run.stubs):
+        stub_resp.notes = stub_notes(stub)
         if stub.employee:
             stub_resp.employee_name = stub.employee.full_name
             stub_resp.direct_deposit = pays_by_direct_deposit(stub.employee)
@@ -188,6 +236,20 @@ def _unapproved_time(db: Session, employee_id: int, start: date, end: date):
     return len(waiting), _q(hours)
 
 
+def _entered_hours(stub_input) -> tuple[Decimal, Decimal, Decimal]:
+    """(regular, overtime, double-time) hours typed on a stub: regular is
+    regular_hours when given, else hours less the overtime and double time."""
+    ot = Decimal(str(stub_input.overtime_hours or 0))
+    dt = Decimal(str(stub_input.doubletime_hours or 0))
+    if stub_input.regular_hours is not None:
+        reg = Decimal(str(stub_input.regular_hours))
+    else:
+        reg = Decimal(str(stub_input.hours or 0)) - ot - dt
+    if reg < 0:
+        reg = Decimal("0")
+    return reg, ot, dt
+
+
 def _entries(count: int) -> str:
     return f"{count} time entry" if count == 1 else f"{count} time entries"
 
@@ -224,6 +286,13 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             ),
         )
 
+    # every table is the pay date's year's (#818): a year SlowBooks keeps
+    # none for is refused before anything is written
+    if not has_tables(data.pay_date.year):
+        raise HTTPException(
+            status_code=422, detail=tables_year_refusal(data.pay_date.year)
+        )
+
     run = PayRun(
         period_start=data.period_start,
         period_end=data.period_end,
@@ -241,10 +310,11 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     employee_count = len(active)
     state_counts: dict[str, int] = {}
     for e in active:
-        # the employee's work state, read as the stub reads it: a blank one
-        # is Washington for the stub's taxes, so it is for the count too
-        code = (e.work_state or "WA").upper()
-        state_counts[code] = state_counts.get(code, 0) + 1
+        # the employee's work state, read as the stub reads it; a blank one
+        # counts toward no state (it was counted as Washington, #818)
+        code = (e.work_state or "").strip().upper()
+        if code:
+            state_counts[code] = state_counts.get(code, 0) + 1
     total_gross = total_taxes = total_net = total_employer = Decimal("0")
     total_employer_benefits = Decimal("0")
     period = f"{data.period_start} to {data.period_end}"
@@ -254,6 +324,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     # unapproved beside approved time is paid later; the run says so.
     refused: list[str] = []
     warnings: list[str] = []
+    states_used: set[str] = set()
 
     for stub_input in data.stubs:
         emp = db.query(Employee).filter(Employee.id == stub_input.employee_id).first()
@@ -273,6 +344,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             # Bug 3 fix: divide by the employee's actual pay frequency, not a
             # hardcoded 26.
             gross = rate / periods_per_year(emp.pay_frequency)
+            # hours entered on a salaried stub do not change its pay; they
+            # are the hours worked, which Washington L&I is figured on (#826)
+            reg, ot, dt = _entered_hours(stub_input)
         else:
             if stub_input.use_time_entries:
                 entries = (
@@ -296,14 +370,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
                     db, emp.id, data.period_start, data.period_end
                 )
             else:
-                ot = Decimal(str(stub_input.overtime_hours or 0))
-                dt = Decimal(str(stub_input.doubletime_hours or 0))
-                if stub_input.regular_hours is not None:
-                    reg = Decimal(str(stub_input.regular_hours))
-                else:
-                    reg = Decimal(str(stub_input.hours or 0)) - ot - dt
-                if reg < 0:
-                    reg = Decimal("0")
+                reg, ot, dt = _entered_hours(stub_input)
             gross = reg * rate + ot * rate * Decimal("1.5") + dt * rate * Decimal("2")
 
         gross = _q(gross)
@@ -360,8 +427,38 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
 
         # Multi-state: per-stub work location, with reciprocity deciding which
         # state's income tax is actually withheld.
-        work_state = (stub_input.work_state or emp.work_state or "WA").upper()
-        wh_state = withholding_state(work_state, emp.residence_state)
+        work_state = (stub_input.work_state or emp.work_state or "").strip().upper()
+        stub_notes_: dict[str, str] = {}
+        if work_state:
+            wh_state = withholding_state(work_state, emp.residence_state)
+        else:
+            # a blank work state is no state: nothing is counted or charged
+            # for it, and the run and the stub say so (#818)
+            wh_state = None
+            missing = (
+                f"{name}: work state missing. No state income tax, leave "
+                "premiums, L&I or state unemployment were figured. Set the "
+                "work state on the employee and run the stub again."
+            )
+            warnings.append(missing)
+            stub_notes_["note:work_state"] = "No state taxes: work state missing."
+
+        # Washington L&I is per hour; a salaried stub with no hours entered
+        # reports the state's basis for salaried workers, 160 hours a month
+        # prorated to the period (#826). Hours entered win.
+        lni_hours = total_hours
+        if (
+            work_state == "WA"
+            and emp.pay_type.value == "salary"
+            and stub_input.gross_override is None
+            and not stub_input.supplemental
+            and total_hours == 0
+        ):
+            lni_hours = salaried_lni_hours(periods_per_year(emp.pay_frequency))
+            stub_notes_["note:lni"] = (
+                f"L&I on 160 hours (salaried, no hours entered): "
+                f"{lni_hours} hours this period."
+            )
 
         regular_wages = Decimal("0")
         if stub_input.supplemental and stub_input.supplemental_method == "aggregate":
@@ -414,7 +511,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             local_tax_rate=emp.local_tax_rate,
             employee_count=employee_count,
             state_employee_count=state_counts.get(work_state, 0),
-            hours=total_hours,
+            hours=lni_hours,
             pretax_deductions=ben.pretax_federal + adhoc_pretax,
             pretax_state=ben.pretax_state + adhoc_pretax,
             pretax_fica=ben.pretax_fica,
@@ -502,6 +599,10 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             detail["other_pretax_deductions"] = str(adhoc_pretax)
         if adhoc_posttax:
             detail["other_posttax_deductions"] = str(adhoc_posttax)
+        detail.update(stub_notes_)
+        # the year whose tables figured the stub (#818)
+        detail[META_TABLES_YEAR] = str(year)
+        states_used.update({work_state, (wh_state or "").strip().upper()} - {""})
 
         stub = PayStub(
             pay_run_id=run.id,
@@ -520,7 +621,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             posttax_deductions=posttax,
             garnishments=garnish_total,
             reimbursements=reimbursements,
-            work_state=work_state,
+            work_state=work_state or None,
             net_pay=net,
             employer_ss_tax=result["employer_ss"],
             employer_medicare_tax=result["employer_medicare"],
@@ -554,7 +655,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     note = wage_base_note(year)
     if note:
         warnings.append(note)
-    note = tables_year_note(year)
+    note = tables_year_note(year, states_used)
     if note:
         warnings.append(note)
 
@@ -1367,17 +1468,23 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="target_net must be positive")
 
     year = date.today().year
+    # figured with the newest tables when today's year has none yet
+    figure_year = year if has_tables(year) else TABLES_YEAR
     ytd = employee_ytd(db, emp.id, year)
     ytd_suppl = (
         _ytd_supplemental(db, emp.id, year) if data.supplemental else Decimal("0")
     )
-    work_state = (emp.work_state or "WA").upper()
-    wh_state = withholding_state(work_state, emp.residence_state)
+    work_state = (emp.work_state or "").strip().upper()
+    wh_state = (
+        withholding_state(work_state, emp.residence_state) if work_state else None
+    )
     bases = wage_base_ytd(db, emp.id, year, work_state)
     active = db.query(Employee).filter(Employee.is_active.is_(True)).all()
     employee_count = len(active)
     state_employee_count = sum(
-        1 for e in active if (e.work_state or "WA").upper() == work_state
+        1
+        for e in active
+        if work_state and (e.work_state or "").strip().upper() == work_state
     )
 
     def net_of(g: Decimal) -> Decimal:
@@ -1403,7 +1510,7 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
             supplemental=bool(data.supplemental),
             ytd_supplemental=ytd_suppl,
             ytd_bases=bases,
-            year=year,
+            year=figure_year,
         )["net"]
 
     target = Decimal(str(data.target_net))

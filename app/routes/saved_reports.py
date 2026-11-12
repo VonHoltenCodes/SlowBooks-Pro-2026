@@ -37,6 +37,9 @@ _ALLOWED_TYPES = {
     "profit_loss_by_job",
     "profit_loss_detail",  # every line under each P&L account (#477)
     "balance_sheet",
+    # the dates (or as_of_date), the basis, the adjusting-entries and
+    # zero-balance choices, as the view's address carries them (#806)
+    "trial_balance",
     "ar_aging",
     "ap_aging",
     "sales_tax",

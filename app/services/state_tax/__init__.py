@@ -7,7 +7,11 @@
 # a territory) falls back to a zero-rate GenericStateEngine so it contributes
 # no state income tax rather than a wrong guess.
 #
-# Engines are stateless, so the registry holds module-level singletons.
+# Engines are stateless, so the registry holds module-level singletons, one
+# set per year SlowBooks keeps tables for (#818): get_engine(code, year)
+# returns the engine with that year's figures. Washington, California and
+# Oregon keep 2025's and 2026's; every other state keeps 2026's only, and a
+# run dated 2025 there uses them and says so (state_tables_year).
 # ============================================================================
 
 from app.services.state_tax.base import StateEngine, StateTaxResult
@@ -29,11 +33,14 @@ __all__ = [
     "OregonEngine",
     "TableEngine",
     "get_engine",
+    "state_name",
+    "state_tables_year",
     "list_states",
     "is_supported",
 ]
 
-# Registry of dedicated engines, keyed by uppercase 2-letter state code.
+# Registry of dedicated engines, keyed by uppercase 2-letter state code: the
+# newest year's figures.
 _REGISTRY: dict[str, StateEngine] = {
     "WA": WAEngine(),
     "CA": CAEngine(),
@@ -43,18 +50,57 @@ _REGISTRY: dict[str, StateEngine] = {
 for _code, _spec in STATES.items():
     _REGISTRY.setdefault(_code, TableEngine(_spec))
 
+# The newest year the state tables are for, and the engines of each earlier
+# year a state keeps its own figures for.
+NEWEST_YEAR = 2026
+_BY_YEAR: dict[int, dict[str, StateEngine]] = {
+    2025: {"WA": WAEngine(2025), "CA": CAEngine(2025), "OR": OregonEngine(2025)},
+    NEWEST_YEAR: _REGISTRY,
+}
+
 # Shared fallback for any state without a dedicated engine (flat_rate 0).
 _GENERIC = GenericStateEngine()
 
 
-def get_engine(state_code: str | None) -> StateEngine:
-    """Return the payroll engine for a 2-letter state code (case-insensitive).
+def state_tables_year(state_code: str | None, year: int | None) -> int | None:
+    """The year whose figures a run dated in `year` is figured with for the
+    state: `year` itself when SlowBooks keeps the state's tables for it,
+    else the nearest year it keeps them for. None for a blank or unknown
+    code (no figures to be dated)."""
+    code = (state_code or "").strip().upper()
+    if code not in _REGISTRY:
+        return None
+    if year is None:
+        return NEWEST_YEAR
+    kept = sorted(y for y, reg in _BY_YEAR.items() if code in reg)
+    if year in kept:
+        return year
+    return min(kept, key=lambda y: (abs(y - year), -y))
+
+
+def state_name(state_code: str) -> str:
+    """A state's name ("Texas"), or the code itself when unknown."""
+    code = (state_code or "").strip().upper()
+    if code in STATES:
+        return STATES[code].name
+    if code in DEDICATED:
+        return DEDICATED[code][0]
+    return code
+
+
+def get_engine(state_code: str | None, year: int | None = None) -> StateEngine:
+    """Return the payroll engine for a 2-letter state code (case-insensitive)
+    with `year`'s figures (the nearest year kept for the state; the newest
+    when None).
 
     Unknown or missing codes return a zero-rate GenericStateEngine.
     """
     if not state_code:
         return _GENERIC
-    return _REGISTRY.get(state_code.strip().upper(), _GENERIC)
+    code = state_code.strip().upper()
+    if code not in _REGISTRY:
+        return _GENERIC
+    return _BY_YEAR[state_tables_year(code, year)][code]
 
 
 def is_supported(state_code: str | None) -> bool:

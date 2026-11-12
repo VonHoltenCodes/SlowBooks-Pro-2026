@@ -160,7 +160,9 @@ def test_form_941_quarterly_aggregation(client: any, db_session: Session):
 def test_form_941_invalid_quarter(client: any):
     """Form 941 endpoint rejects invalid quarter (must be 1-4)."""
     r = client.post("/api/payroll/forms/941/2026/5")
-    assert r.status_code == 400
+    # refused as a year past 9999 is (#810): a 422 naming the four
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["message"] == "Quarter must be 1, 2, 3 or 4."
 
 
 # --- Tier 3: Tax form PDF variants ------------------------------------------
@@ -238,7 +240,9 @@ def test_form_941_pdf_endpoint_returns_pdf(client: any, db_session: Session):
 
 def test_form_941_pdf_rejects_invalid_quarter(client: any):
     r = client.post("/api/payroll/forms/941/2026/5/pdf")
-    assert r.status_code == 400
+    # refused as a year past 9999 is (#810): a 422 naming the four
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["message"] == "Quarter must be 1, 2, 3 or 4."
 
 
 # --- Tier 3: Document audit hashing for tax forms ---------------------------

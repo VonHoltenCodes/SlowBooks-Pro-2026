@@ -9,7 +9,7 @@ import logging
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
@@ -103,7 +103,11 @@ def acknowledgment_pdf(kind: str, gift_id: int, db: Session = Depends(get_db)):
 
 @router.post("/gifts/{kind}/{gift_id}/acknowledgment/email")
 def acknowledgment_email(
-    kind: str, gift_id: int, data: AcknowledgmentEmail, db: Session = Depends(get_db)
+    kind: str,
+    gift_id: int,
+    data: AcknowledgmentEmail,
+    request: Request,
+    db: Session = Depends(get_db),
 ):
     gift, customer, subject, body, pdf = _letter(db, kind, gift_id)
     recipient = (data.recipient or customer.email or "").strip()
@@ -122,8 +126,16 @@ def acknowledgment_email(
         entity_id=gift_id,
     )
     if not sent:
+        # what the server said, in a sentence, the way the invoice's Email
+        # button answers (#811); the raw text stays in the email log
+        from app.routes._roles import is_admin
+        from app.services.email_errors import send_failed_detail
+
         raise HTTPException(
-            status_code=502, detail="Email could not be sent (check SMTP settings)"
+            status_code=502,
+            detail=send_failed_detail(
+                db, f"acknowledgment_{kind}", gift_id, is_admin(request)
+            ),
         )
     return {"sent": True, "recipient": recipient}
 
@@ -307,7 +319,15 @@ def giving_statements_batch_email(
                 sent += 1
             else:
                 failed += 1
-                errors.append(f"{customer.name}: email could not be sent")
+                # the reply's sentence when the server said why (#811)
+                from app.services.email_errors import sentence_for_last_send
+
+                why = sentence_for_last_send(db, "giving_statement", customer.id)
+                errors.append(
+                    f"{customer.name}: the giving statement could not be sent. {why}"
+                    if why
+                    else f"{customer.name}: email could not be sent"
+                )
         except Exception:
             logger.exception("giving statement failed for customer %s", customer.id)
             failed += 1

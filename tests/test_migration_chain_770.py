@@ -4,8 +4,13 @@ Every migration test walks only its own step: up from the revision before
 its migration and back down to it. The chain as a whole, every later
 migration walking back over every earlier one and forward again, is proven
 here once per run: up from an empty file to head (the suite serves that
-from its cache), down to the oldest revision that walks back, up again,
-and the schema is the one a fresh head has.
+from its cache), down to the migration floor, up again, and the schema is
+the one a fresh head has.
+
+The walk starts at the floor (#769): 2.29.0's head, the oldest revision
+this build migrates a company file from. The migrations before it stay in
+the repo and still build a fresh file, which is the walk up from empty;
+the suite no longer walks back over them.
 """
 
 from pathlib import Path
@@ -16,13 +21,9 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
-ROOT = Path(__file__).resolve().parents[1]
+from app.services.migration_floor import MIGRATION_FLOOR
 
-# b8c9d0e1f2a3 (tier-3 HR onboarding) cannot walk back on SQLite: its
-# downgrade drops attachments.employee_id, a column a foreign key names, and
-# SQLite's DROP COLUMN refuses that. Nothing older walks back either; the
-# revision after it is the oldest this test reaches.
-OLDEST_REVERSIBLE = "c9d0e1f2a3b4"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _cfg(db: Path) -> Config:
@@ -62,7 +63,7 @@ def _current(db: Path) -> str:
         engine.dispose()
 
 
-def test_the_chain_walks_back_to_its_oldest_reversible_revision_and_up_again(
+def test_the_chain_walks_back_to_the_migration_floor_and_up_again(
     tmp_path,
 ):
     db = tmp_path / "chain.db"
@@ -70,12 +71,12 @@ def test_the_chain_walks_back_to_its_oldest_reversible_revision_and_up_again(
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     older = [r.revision for r in script.walk_revisions(base="base", head="head")]
-    assert OLDEST_REVERSIBLE in older
+    assert MIGRATION_FLOOR in older
     command.upgrade(cfg, "head")
     fresh = _schema(db)
     assert len(fresh) > 100
-    command.downgrade(cfg, OLDEST_REVERSIBLE)
-    assert _current(db) == OLDEST_REVERSIBLE
+    command.downgrade(cfg, MIGRATION_FLOOR)
+    assert _current(db) == MIGRATION_FLOOR
     command.upgrade(cfg, "head")
     assert _current(db) == script.get_current_head()
     assert _schema(db) == fresh

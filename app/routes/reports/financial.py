@@ -1456,6 +1456,32 @@ def first_date(db: Session = Depends(get_db)):
     return {"first_date": first.isoformat() if first else None}
 
 
+# The Trial Balance's end date under the Balance Sheet's name (#806): a
+# client that sends as_of_date, as it would to the Balance Sheet, gets the
+# trial balance as of that day rather than as of today.
+_TB_AS_OF = Query(
+    default=None,
+    description=(
+        "The same as end_date (the Balance Sheet's name for it); when both "
+        "are sent they must be the same day"
+    ),
+)
+
+
+def _tb_end_date(end_date, as_of_date):
+    end_date = end_date if isinstance(end_date, date) else None
+    as_of_date = as_of_date if isinstance(as_of_date, date) else None
+    if end_date and as_of_date and end_date != as_of_date:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The end date and the as-of date are different days. "
+                "Send one of them, or the same day in both."
+            ),
+        )
+    return end_date or as_of_date
+
+
 @router.get("/trial-balance")
 def trial_balance(
     start_date: date = Query(default=None),
@@ -1464,6 +1490,7 @@ def trial_balance(
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,
     hide_zero: bool = _HIDE_ZERO,
+    as_of_date: date = _TB_AS_OF,
 ):
     """Trial Balance as QuickBooks reads it: asset, liability and equity
     accounts at their balance as of the end date (one debit or credit
@@ -1474,10 +1501,12 @@ def trial_balance(
     `hide_zero` (#625) leaves out a row with nothing in either column (a
     balance-sheet account that stands at zero); a P&L account whose debits
     and credits offset keeps both figures, so each column still adds up to
-    its total."""
+    its total. `as_of_date` (#806) is the end date under the Balance Sheet's
+    name: either may be sent; when both are, they must be the same day."""
     basis = cash_basis.resolve_basis(db, basis if isinstance(basis, str) else None)
     exclude_adjusting = _flag(exclude_adjusting)
     hide_zero = _flag(hide_zero)
+    end_date = _tb_end_date(end_date, as_of_date)
     if not end_date:
         end_date = date.today()
     if not start_date:
@@ -2842,6 +2871,7 @@ def trial_balance_pdf(
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,
     hide_zero: bool = _HIDE_ZERO,
+    as_of_date: date = _TB_AS_OF,
 ):
     data = trial_balance(
         start_date,
@@ -2850,6 +2880,7 @@ def trial_balance_pdf(
         exclude_adjusting=exclude_adjusting,
         basis=basis,
         hide_zero=hide_zero,
+        as_of_date=as_of_date,
     )
     return _pdf_response(
         [_tb_section(data)],
@@ -2867,6 +2898,7 @@ def trial_balance_csv_route(
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,
     hide_zero: bool = _HIDE_ZERO,
+    as_of_date: date = _TB_AS_OF,
 ):
     from app.services.ledger_exports import trial_balance_csv
 
@@ -2877,6 +2909,7 @@ def trial_balance_csv_route(
         exclude_adjusting=exclude_adjusting,
         basis=basis,
         hide_zero=hide_zero,
+        as_of_date=as_of_date,
     )
     return _csv_download(
         trial_balance_csv(data, _company_name(db)),

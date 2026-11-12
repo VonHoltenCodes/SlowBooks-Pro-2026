@@ -215,45 +215,6 @@ def test_the_documents_print_the_quantity_as_entered():
         ), name
 
 
-QUANTITY_REVISION = "e8f9a0b1c2d3"  # line quantities to four decimal places
-
-
-def test_the_migration_widens_and_the_downgrade_rounds(tmp_path):
-    import sqlite3
-
-    from alembic import command
-    from alembic.config import Config
-
-    db = tmp_path / "fresh.db"
-    url = "sqlite:///" + db.as_posix()
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = url
-    command.upgrade(cfg, "d6f7a8b9c0e1")
-    con = sqlite3.connect(db)
-    con.execute("insert into customers (name) values ('Q')")
-    con.execute(
-        "insert into invoices (invoice_number, customer_id, date, subtotal, tax_rate,"
-        " tax_amount, total, amount_paid, balance_due, is_sales_receipt, is_pledge)"
-        " values ('8125', 1, '2026-09-14', 170, 0, 0, 170, 0, 170, 0, 0)"
-    )
-    con.execute(
-        "insert into invoice_lines (invoice_id, quantity, rate, amount, is_taxable,"
-        " line_order) values (1, 2.125, 80, 170, 1, 0)"
-    )
-    con.commit()
-    con.close()
-    command.upgrade(cfg, QUANTITY_REVISION)  # its own step, not the chain (#770)
-    con = sqlite3.connect(db)
-    assert con.execute("select quantity from invoice_lines").fetchone()[0] == 2.125
-    con.close()
-    command.downgrade(cfg, "d6f7a8b9c0e1")
-    con = sqlite3.connect(db)
-    q = con.execute("select quantity from invoice_lines").fetchone()[0]
-    con.close()
-    assert round(float(q), 2) in (2.12, 2.13)
-
-
 def test_a_rounded_quantity_keeps_the_line_consistent(
     client, db_session, seed_accounts, seed_customer
 ):

@@ -106,8 +106,9 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
     a file that is not there (404), another company's backup unless
     confirmed again (409 "other_company" — every company's backups share
     one folder, and this used to copy any of them over the open company),
-    and a copy made by a newer version this one cannot open (409
-    "newer_version"). Otherwise a safety backup of the books as they are is
+    a copy made by a newer version this one cannot open (409
+    "newer_version"), and books from before 2.29.0, which this version does
+    not migrate (409 "before_floor", #769). Otherwise a safety backup of the books as they are is
     taken first, and named in the answer, so a restore can be undone."""
     filepath = backup_service.backup_path(data.filename)
     if filepath is None:
@@ -136,6 +137,12 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
     if newer:
         raise HTTPException(
             status_code=409, detail={"code": "newer_version", "message": newer}
+        )
+    # #769: books from before 2.29.0 are not migrated by this build
+    too_old = backup_service.backup_floor_problem(filepath.name, data.recovery_key)
+    if too_old:
+        raise HTTPException(
+            status_code=409, detail={"code": "before_floor", "message": too_old}
         )
     locked = backup_service.backup_key_problem(filepath.name, data.recovery_key)
     if locked:

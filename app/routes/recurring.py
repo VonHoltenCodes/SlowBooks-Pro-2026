@@ -13,7 +13,12 @@ from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
 from app.models.invoices import Invoice
 from app.models.recurring import RecurringInvoice, RecurringInvoiceLine
 from app.models.contacts import Customer
-from app.schemas.recurring import RecurringCreate, RecurringUpdate, RecurringResponse
+from app.schemas.recurring import (
+    GenerateRequest,
+    RecurringCreate,
+    RecurringResponse,
+    RecurringUpdate,
+)
 from app.services.accounting import compute_line_totals
 from app.services.jobs_service import (
     refuse_other_customers_jobs,
@@ -267,22 +272,46 @@ def delete_recurring(rec_id: int, db: Session = Depends(get_db)):
     return {"message": "Recurring invoice deleted"}
 
 
+def _query_or_body(name: str, in_query, data):
+    """A generate parameter from the query or the body (#810). Sent both
+    ways, they must agree: two different dates are a 422, since either one
+    could be the installment the caller meant."""
+    in_body = getattr(data, name, None) if data is not None else None
+    if in_query is not None and in_body is not None and in_query != in_body:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"The {name} date was sent twice, as {in_query.isoformat()} in "
+                f"the query and {in_body.isoformat()} in the body. Send it "
+                "once, or the same date both ways."
+            ),
+        )
+    return in_body if in_body is not None else in_query
+
+
 @router.post("/{rec_id}/generate")
 def generate_one(
     rec_id: int,
     dated: date = Query(default=None),
     occurrence: date = Query(default=None),
+    data: GenerateRequest | None = None,
     db: Session = Depends(get_db),
 ):
     """Enter this one schedule's installment now (#605, the Memorized
     transactions page's Enter now), due or not: `occurrence`, the
     installment the page showed (the next due date when not sent), dated
     its scheduled date or `dated`; the schedule moves on from the scheduled
-    date. The installment is claimed before anything posts, so one that is
-    no longer the next (generated meanwhile by another window, Generate or
-    Enter All Due, or the schedule edited) is a 409, "That installment was
-    just generated", and nothing is created (2.31.1 gate W-71); one after
-    the next due date is a 409 saying it is not the next one."""
+    date. Each is read from the query or from a JSON body
+    (`{"occurrence": ..., "dated": ...}`, as Enter now on a memorized
+    schedule takes it); one sent both ways with two different dates is a
+    422 naming both, and nothing is created (#810). The installment is
+    claimed before anything posts, so one that is no longer the next
+    (generated meanwhile by another window, Generate or Enter All Due, or
+    the schedule edited) is a 409, "That installment was just generated",
+    and nothing is created (2.31.1 gate W-71); one after the next due date
+    is a 409 saying it is not the next one."""
+    occurrence = _query_or_body("occurrence", occurrence, data)
+    dated = _query_or_body("dated", dated, data)
     rec = db.query(RecurringInvoice).filter(RecurringInvoice.id == rec_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Recurring invoice not found")

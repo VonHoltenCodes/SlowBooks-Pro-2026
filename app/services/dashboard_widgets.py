@@ -199,8 +199,20 @@ def _month_bounds(year: int, month: int) -> tuple[date, date]:
     return date(year, month, 1), date(year, month, monthrange(year, month)[1])
 
 
+# The card's caption in construction mode, where a WIP schedule can be posted.
+MONTHLY_REVENUE_WIP_NOTE = "Billed revenue by month; WIP adjustments are on the P&L"
+
+
 def monthly_revenue(db: Session) -> dict:
-    """Last 12 months of income from the ledger (not just invoices)."""
+    """Last 12 months of income from the ledger (not just invoices).
+
+    The WIP schedule's as-of entry, its next-day reversal and the voids of
+    both are left out (#805). The pair is right on a P&L by period, but on a
+    quick look at revenue by month it read as a rise one month and a fall
+    the next that nobody billed. A book with no WIP entry is unchanged."""
+    from app.services.jobs_service import not_wip_entry
+    from app.services.terminology import terms_from_db
+
     today = date.today()
     out = []
     for i in range(11, -1, -1):
@@ -219,10 +231,20 @@ def monthly_revenue(db: Session) -> dict:
             .join(Account, Account.id == TransactionLine.account_id)
             .filter(Transaction.date >= start, Transaction.date <= end)
             .filter(Account.account_type == AccountType.INCOME)
+            .filter(not_wip_entry())
             .scalar()
         )
-        out.append({"month": start.strftime("%b"), "year": year, "amount": _f(total)})
-    return {"months": out}
+        out.append(
+            {
+                "month": start.strftime("%b"),
+                "year": year,
+                "amount": float(_q(_money(total))),
+            }
+        )
+    data = {"months": out}
+    if terms_from_db(db).is_construction:
+        data["note"] = MONTHLY_REVENUE_WIP_NOTE
+    return data
 
 
 def recent_invoices(db: Session) -> dict:
@@ -697,7 +719,7 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "monthly_revenue": (
         "Monthly Revenue",
         "half",
-        "Income from the ledger, last 12 months",
+        "Billed revenue by month, last 12 months",
         monthly_revenue,
     ),
     "recent_invoices": (

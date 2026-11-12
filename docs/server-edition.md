@@ -117,6 +117,16 @@ starts it again at the end instead of offering to open the desktop window
 and the window it opened then held port 3001). Running the install script
 again does the same and re-registers the task against the installed exe.
 
+**A company file from before 2.29.0.** From 2.32.0 on, the server
+upgrades a company file only from 2.29.0 or later. A file nobody has opened
+since an earlier release is not served, and is left as it is; the console
+and the company picker say: "This company file is from before SlowBooks Pro
+2.29.0. Open it once with 2.31.14, then upgrade:
+https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/tag/v2.31.14".
+Run the 2.31.14 installer, open the file once, then run the current
+installer again. The install guide has the steps:
+[Upgrading a company file from before 2.29.0](../INSTALL.md#upgrading-a-company-file-from-before-2290).
+
 **Stopping and starting**, from an elevated prompt:
 
 ```powershell
