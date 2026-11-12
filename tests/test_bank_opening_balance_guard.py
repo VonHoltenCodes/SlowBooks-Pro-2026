@@ -151,9 +151,10 @@ def test_import_file_offers_the_feed_on_its_own_account():
     to make one, and the form opened on 1000 Checking, the list's first, so
     every account a QuickBooks import made had to be picked again."""
     ofx = re.search(r"async showOFXImport\(accountId\).*?\n    },\n", JS, re.S).group(0)
-    assert "BankingPage.showAccountForm(accountId)" in ofx
+    # and goes back to the register's import after Create (#813)
+    assert "BankingPage.showAccountForm(accountId, null, true)" in ofx
     form = re.search(
-        r"async showAccountForm\(accountId = null, feedRow = null\).*?\n    },\n",
+        r"async showAccountForm\(accountId = null, feedRow = null, importAfter = false\).*?\n    },\n",
         JS,
         re.S,
     ).group(0)

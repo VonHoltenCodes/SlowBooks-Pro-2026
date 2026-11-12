@@ -20,10 +20,14 @@ const BudgetsPage = {
 
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+        // A sub-account by its path, "Payroll Expenses: Taxes", as the
+        // reports name it: a QuickBooks import names it by its leaf (#813).
+        const path = App._accountTree(accounts).path;
         let rows = '';
         for (const acct of budgetAccounts) {
+            const words = accountLabel(acct, path(acct), ' ');
             rows += `<tr data-acct="${acct.id}">
-                <td class="budget-acct" title="${accountLabel(acct, null, ' ')}">${accountLabel(acct, null, ' ')}</td>`;
+                <td class="budget-acct" title="${words}">${words}</td>`;
             for (let m = 1; m <= 12; m++) {
                 const val = budgetMap[acct.id]?.[m] || '';
                 rows += `<td><input type="number" step="0.01" class="budget-cell" data-write data-acct="${acct.id}" data-month="${m}"
@@ -117,7 +121,7 @@ const BudgetsPage = {
             // the same frozen account column and month row as the budget grid
             let html = BudgetsPage._variancePrintButton() + '<div class="table-container table-container--frozen budget-variance"><div class="budget-variance__sheet">';
             for (const acct of data.accounts) {
-                html += `<h3 class="budget-variance__acct">${accountLabel(acct, acct.account_name, ' — ')}</h3>`;
+                html += `<h3 class="budget-variance__acct">${accountLabel(acct, acct.account_path || acct.account_name, ' — ')}</h3>`;
                 html += `<table class="table--frozen budget-variance__table"><thead><tr><th scope="col"></th>`;
                 html += months.map(m => `<th scope="col" class="amount">${m}</th>`).join('');
                 html += '<th scope="col" class="amount" style="font-weight:700;">Total</th></tr></thead><tbody>';

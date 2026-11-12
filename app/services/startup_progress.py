@@ -102,14 +102,37 @@ def reason(state: dict | None) -> str:
     return str(state["error"])
 
 
-def clear(path: Path | None = None) -> None:
-    """Remove the file: the jobs are done, or a new server is starting."""
+# On Windows a file another process has open (the launcher reading the
+# note) cannot be deleted: the delete is tried again this many times, this
+# far apart, before the note is emptied in place instead (#813).
+CLEAR_TRIES = 5
+CLEAR_PAUSE = 0.1
+
+
+def clear(path: Path | None = None, sleep=time.sleep) -> None:
+    """Remove the file: the jobs are done, or a new server is starting.
+    Never raises. A delete refused while a reader holds the file (Windows)
+    is retried; if it is still refused, the file is written empty of any
+    label or refusal, so no reader shows a job that is over (2.31.6 gate,
+    #813: the OSError was swallowed and the note was left behind)."""
     path = path or progress_path()
     _last.update(label=None, at=0.0)
     if path is None:
         return
+    for attempt in range(CLEAR_TRIES):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if attempt + 1 < CLEAR_TRIES:
+                sleep(CLEAR_PAUSE)
     try:
-        path.unlink()
+        path.write_text(
+            json.dumps({"label": None, "pid": os.getpid(), "updated": time.time()}),
+            encoding="utf-8",
+        )
     except OSError:
         pass
 

@@ -76,7 +76,10 @@
             "style",
             "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.85);" +
                 "display:flex;align-items:flex-start;justify-content:center;" +
-                "padding:48px 16px;overflow-y:auto;" +
+                // the margins shrink with Text size (--ui-scale, style.css)
+                // so the form, which grows, still fits the window at 150%
+                // with Forgot your password? open (#813)
+                "padding:calc(48px / var(--ui-scale, 1)) 16px;overflow-y:auto;" +
                 "font-family:system-ui,-apple-system,Segoe UI,sans-serif;"
         );
         root.innerHTML = innerHTML;
@@ -316,7 +319,7 @@
         const name = existingCompany.name;
         return (
             '<form id="auth-form" ' +
-            'style="background:#fff;color:#111;padding:32px 28px;border-radius:8px;' +
+            'style="background:#fff;color:#111;padding:calc(32px / var(--ui-scale, 1)) 28px;border-radius:8px;' +
             'min-width:340px;max-width:400px;width:100%;' +
             'box-shadow:0 20px 60px rgba(0,0,0,0.4);">' +
             '<h2 id="auth-title" style="margin:0 0 6px;font-size:20px;">' +
@@ -426,21 +429,9 @@
         }
         if (!link || !panel) return;
         const ask = "Ask an administrator to reset it under Settings, Users.";
-        link.addEventListener("click", async function () {
-            const showing = panel.hidden;
-            panel.hidden = !showing;
-            link.setAttribute("aria-expanded", showing ? "true" : "false");
-            if (!showing) return;
+        const fill = function (offer) {
             let message = (forgot && forgot.message) || ask;
-            let offer = false;
-            if (forgotOffersReset()) {
-                // only the app's own window has the bridge; a browser at
-                // the same address is told where to go instead
-                panel.innerHTML = "";
-                offer = !!(await windowCanReset());
-                if (panel.hidden) return;
-                if (!offer) message = forgot.elsewhere || ask;
-            }
+            if (forgotOffersReset() && !offer) message = forgot.elsewhere || ask;
             panel.innerHTML = '<span id="auth-forgot-text">' + escapeText(message) + "</span>" +
                 (offer ? "<br>" + resetButtonHTML("auth-reset-here") : "");
             const here = panel.querySelector("#auth-reset-here");
@@ -448,6 +439,25 @@
                 here.addEventListener("click", function () { renderReset(onSuccess); });
                 here.focus();
             }
+        };
+        link.addEventListener("click", function () {
+            const showing = panel.hidden;
+            panel.hidden = !showing;
+            link.setAttribute("aria-expanded", showing ? "true" : "false");
+            if (!showing) return;
+            if (!forgotOffersReset()) { fill(false); return; }
+            // only the app's own window has the bridge; a browser at the
+            // same address is told where to go instead. That sentence shows
+            // at once rather than after the wait for a bridge a browser
+            // never gets (up to five seconds, #813); the reset is offered
+            // in its place should the bridge arrive (the Mac app's comes
+            // after the page).
+            const api = bridgeNow("reset_admin_password");
+            fill(!!api);
+            if (api || bridgeWaited) return;
+            windowCanReset().then(function (late) {
+                if (late && !panel.hidden && panel.isConnected) fill(true);
+            });
         });
     }
 
@@ -489,7 +499,7 @@
         }
         return (
             '<form id="auth-form" ' +
-            'style="background:#fff;color:#111;padding:32px 28px;border-radius:8px;' +
+            'style="background:#fff;color:#111;padding:calc(32px / var(--ui-scale, 1)) 28px;border-radius:8px;' +
             'min-width:340px;max-width:400px;width:100%;' +
             'box-shadow:0 20px 60px rgba(0,0,0,0.4);">' +
             '<h2 id="auth-title" style="margin:0 0 6px;font-size:20px;">Set a new administrator password</h2>' +

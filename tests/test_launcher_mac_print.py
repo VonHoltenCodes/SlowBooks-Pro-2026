@@ -181,4 +181,10 @@ def test_the_budgets_sheets_ask_for_landscape_and_a_portrait_report_does_not(
 
 def test_the_launcher_installs_it_before_the_window_starts():
     src = open(dl.__file__, encoding="utf-8").read()
-    assert src.index("install_mac_print_panel()\n        webview.start(") > 0
+    # the Mac Window menu (#813) is installed beside it, still before start
+    assert (
+        src.index(
+            "install_mac_print_panel()\n        install_mac_window_menu()\n        webview.start("
+        )
+        > 0
+    )

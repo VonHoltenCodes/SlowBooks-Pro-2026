@@ -303,7 +303,10 @@ def test_money_fields_are_bounded_to_numeric_15_2(client, seed_customer):
     assert client.put(f"/api/jobs/{job['id']}/sov", json=bad).status_code == 422
 
 
-def test_put_sov_quantizes_three_decimal_values(client, seed_customer):
+def test_put_sov_refuses_three_decimal_values(client, seed_customer):
+    """They were rounded to 33.34 / 66.67, and the schedule came to 100.01
+    with a -0.01 balance; a third decimal is refused since #813
+    (tests/test_sov_whole_cents_813.py)."""
     job = _job(client, seed_customer.id)
     client.put(f"/api/jobs/{job['id']}/contract", json={"contract_amount": 100})
     r = client.put(
@@ -315,11 +318,8 @@ def test_put_sov_quantizes_three_decimal_values(client, seed_customer):
             ]
         },
     )
-    assert r.status_code == 200
-    sov = client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
-    assert [float(x["scheduled_value"]) for x in sov] == [33.34, 66.67]
-    # the balance sees what was stored, so the total's 0.01 over shows honestly
-    assert r.json()["sov_total"] == 100.01 and r.json()["sov_balance"] == -0.01
+    assert r.status_code == 422, r.text
+    assert client.get(f"/api/jobs/{job['id']}/contract").json()["sov"] == []
 
 
 # ── Summary math ────────────────────────────────────────────────────────

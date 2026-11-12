@@ -74,6 +74,7 @@
 
     --success:        #4caf7a;
     --warning:        #e0a840;
+    --star-on:        #e0a840;
     --danger:         #e46969;   /* = --qb-red */
 }
 
@@ -248,6 +249,14 @@
 [data-theme="dark"] .form-group :is(input:not([type="checkbox"], [type="radio"], [type="file"]), select, textarea),
 [data-theme="dark"] :where(#page-content, #modal) :where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"], [type="hidden"], [type="submit"], [type="button"], [type="reset"], [type="image"]), select, textarea) {
     color-scheme: dark;
+}
+/* A placeholder (smtp.gmail.com, books@example.com) read almost as bright
+   as typed text on the dark field (#813): the browser's own placeholder grey
+   follows the field's light text. The light text token is dimmer and still
+   clears AA on the field, at rest and in focus. */
+[data-theme="dark"] ::placeholder {
+    color: var(--text-light);
+    opacity: 1;
 }
 /* a checkbox or a radio keeps the keyboard's ring and its halo over the
    sunken shadow above (style.css) */

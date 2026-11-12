@@ -76,7 +76,7 @@ const buttons = (html) => (html.match(/<button[^>]*>[^<]*<\/button>/g) || []).ma
     const last = cells[cells.length - 1] || '';
     const txn = Number(id[1] || id[2] || 0);
     const key = txn || `row${Object.keys(out.register).length}`;
-    out.register[key] = buttons(last).map((b) => b.includes('Void') ? 'Void' : b);
+    out.register[key] = buttons(last).map((b) => />Void<\/button>$/.test(b) ? 'Void' : b);
   }
   // rows with neither button carry no id in their last cell: key them by order
   const order = [61, 62, 63, 64, 65];

@@ -21,18 +21,22 @@ from fastapi.responses import HTMLResponse
 # didFinishNavigation and then fires "pywebviewready"), so printing at
 # onload opened no dialog there, ever (NEW-208, 2.31.7 gate). There the
 # page prints once, at pywebviewready or a moment after load, whichever
-# comes first. A Print button on the sheet (bottom right, clear of the
-# header; not printed) starts it again. A document window opened at the
-# sheet's one-time address (/print/<token>, #823) is the shell too, though its
-# protocol is http: and window.pywebview is not there yet at load.
+# comes first. A Print button on the sheet starts it again: in a strip of
+# its own above the sheet, in the page's flow, not printed. Fixed in a
+# corner (W-124) it sat over whatever the corner held at the top of a long
+# sheet, Budgets' November and December (2.31.7 gate, #813); in the flow it
+# covers nothing, and the print dialog it repeats has opened at load. A
+# document window opened at the sheet's one-time address (/print/<token>,
+# #823) is the shell too, though its protocol is http: and window.pywebview
+# is not there yet at load.
 PRINT_SCRIPT = (
-    "<style>.sb-print-again{position:fixed;bottom:10px;right:10px;z-index:9;"
-    "font:13px sans-serif;padding:4px 14px;cursor:pointer}"
-    # room under the sheet on screen, so the button never sits on the last
-    # figures once the window is scrolled to the end (W-124)
-    "@media screen{body{padding-bottom:64px}}"
-    "@media print{.sb-print-again{display:none}}</style>"
+    "<style>.sb-print-bar{display:flex;justify-content:flex-end;"
+    "padding:6px 10px;margin:0 0 6px}"
+    ".sb-print-again{font:13px sans-serif;padding:4px 14px;cursor:pointer}"
+    "@media print{.sb-print-bar{display:none}}</style>"
+    '<div class="sb-print-bar" id="sb-print-bar">'
     '<button type="button" class="sb-print-again" id="sb-print-again">Print</button>'
+    "</div>"
     "<script>(function(){var done=false;"
     "function go(){if(done)return;done=true;window.print();}"
     "var shell=!/^https?:$/.test(location.protocol)||!!window.pywebview"
@@ -40,6 +44,8 @@ PRINT_SCRIPT = (
     "if(shell){window.addEventListener('pywebviewready',go);"
     "window.addEventListener('load',function(){setTimeout(go,1500);});}"
     "else{window.addEventListener('load',go);}"
+    "var bar=document.getElementById('sb-print-bar');"
+    "if(bar&&document.body)document.body.insertBefore(bar,document.body.firstChild);"
     "var b=document.getElementById('sb-print-again');"
     "if(b)b.addEventListener('click',function(){window.print();});"
     "})();</script>"

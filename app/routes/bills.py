@@ -4,7 +4,6 @@
 # ============================================================================
 
 from app.routes._print import print_html
-import re
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -167,10 +166,10 @@ def bill_print_preview(bill_id: int, db: Session = Depends(get_db)):
 def _default_bill_number(db: Session, vendor: Vendor, date) -> str:
     """'20260902-GK' for Gin Kee on 2026-09-02; '-2', '-3' … when that
     vendor already has a bill under the same generated number."""
-    initials = "".join(
-        w[0] for w in re.findall(r"[A-Za-z0-9]+", vendor.name or "")
-    ).upper()[:4]
-    base = f"{date:%Y%m%d}-{initials or 'BILL'}"
+    # the same base the check memo reads as "no reference" (#800)
+    from app.services.check_memo import generated_bill_number_base
+
+    base = generated_bill_number_base(vendor.name, date)
     taken = {
         row[0]
         for row in db.query(Bill.bill_number)

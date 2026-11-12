@@ -902,6 +902,40 @@ async function createCompany() {
   setStatus('Created. Opening…');
   await openCompany(result.file);
 }
+// Text size (#813): the size the company's pages keep, as CSS zoom, and
+// Ctrl + / Ctrl − / Ctrl 0 (Cmd on a Mac) and Ctrl + wheel step it here
+// as they do there (text_size.js, desktop_shim.js).
+var SIZES = [100, 115, 125, 150], textSize = 100;
+function applyTextSize(size) {
+  textSize = SIZES.indexOf(size) >= 0 ? size : 100;
+  document.documentElement.style.zoom = textSize === 100 ? '' : String(textSize / 100);
+}
+function stepTextSize(direction) {
+  var i = direction === 0 ? 0 : Math.max(0, Math.min(SIZES.length - 1, SIZES.indexOf(textSize) + direction));
+  applyTextSize(SIZES[i]);
+  try { window.pywebview.api.set_text_size(textSize); } catch (e) {}
+}
+document.addEventListener('keydown', function (e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  var d = (e.key === '=' || e.key === '+' || e.code === 'NumpadAdd') ? 1
+    : (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') ? -1 : e.key === '0' ? 0 : null;
+  if (d === null) return;
+  e.preventDefault();
+  stepTextSize(d);
+}, true);
+var wheelAt = 0;
+window.addEventListener('wheel', function (e) {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  if (Date.now() - wheelAt < 250 || !e.deltaY) return;
+  wheelAt = Date.now();
+  stepTextSize(e.deltaY < 0 ? 1 : -1);
+}, { passive: false, capture: true });
+window.addEventListener('pywebviewready', function () {
+  try {
+    window.pywebview.api.text_size().then(function (r) { applyTextSize(r && r.size); }, function () {});
+  } catch (e) {}
+});
 window.addEventListener('pywebviewready', refresh);
 </script>
 </body>
@@ -1609,6 +1643,19 @@ class PickerApi:
     def _set_startup_status(self, text: str) -> None:
         self._startup_status = text
 
+    def text_size(self) -> dict:
+        """The Text size setting for the company picker (#813). The picker
+        is the launcher's own page, with no origin, so it cannot read the
+        size the company's pages keep in their storage; the pages hand it
+        to the window (set_text_size) and the picker reads it here."""
+        return {"size": load_text_size()}
+
+    def set_text_size(self, size) -> dict:
+        """Keep the Text size for the picker: text_size.js sends it from
+        the company's pages, and the picker's own Ctrl + / Ctrl − send it
+        too. Anything but one of the four sizes is refused."""
+        return {"success": save_text_size(size)}
+
     def startup_status(self) -> dict:
         """What the server is doing while a company opens (#693): the
         picker shows it under the list while open_company is waiting."""
@@ -2210,6 +2257,55 @@ def _announce_serve_lan(port: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Text size for the company picker (#813)
+# ---------------------------------------------------------------------------
+# The company's pages keep Text size in their own storage (text_size.js);
+# the picker, loaded as HTML with no origin, can't read it, so the pages
+# hand it to the window and it is kept beside the window's geometry.
+
+TEXT_SIZE_FILE = "text-size.json"
+TEXT_SIZES = (100, 115, 125, 150)
+
+
+def text_size_path() -> Path:
+    return get_data_dir() / TEXT_SIZE_FILE
+
+
+def load_text_size(path: Path | None = None) -> int:
+    """The kept size, or 100 when there is none or it is not one of the
+    four."""
+    path = path or text_size_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 100
+    size = raw.get("size") if isinstance(raw, dict) else None
+    if isinstance(size, bool) or size not in TEXT_SIZES:
+        return 100
+    return int(size)
+
+
+def save_text_size(size, path: Path | None = None) -> bool:
+    """Keep one of the four sizes. Never raises: the picker at 100% is no
+    reason for an error."""
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        return False
+    if size not in TEXT_SIZES:
+        return False
+    path = path or text_size_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps({"size": size}), encoding="utf-8")
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Window geometry (#681): the company window opens where it was closed
 # ---------------------------------------------------------------------------
 
@@ -2722,6 +2818,7 @@ def run_window(port: int, log_fh=None) -> int:
         # Blocks until the window is closed. private_mode/storage_path:
         # see the comment above where storage_dir is created.
         install_mac_print_panel()
+        install_mac_window_menu()
         webview.start(gui=gui, private_mode=False, storage_path=str(storage_dir))
         # Clean exit: save again in case the closing event never fired.
         save_window_geometry(geometry_tracker.geometry(), geometry_path)
@@ -3291,6 +3388,70 @@ def _repair_schema(argv) -> int:
         print(f"dropped (empty) : {', '.join(result.dropped)}")
     print(f"result          : {'OK' if result.ok else 'FAILED'} - {result.message}")
     return 0 if result.ok else 1
+
+
+# The Mac app's Window menu (#813): pywebview's menu bar has the app menu,
+# View and Edit, and no Window menu, so there was no Minimize and no ⌘M.
+# What a Mac app's Window menu offers, as (title, AppKit action, key);
+# None is a separator.
+MAC_WINDOW_MENU = (
+    ("Minimize", "performMiniaturize:", "m"),
+    ("Zoom", "performZoom:", ""),
+    None,
+    ("Bring All to Front", "arrangeInFront:", ""),
+)
+
+
+def _add_mac_window_menu(AppKit, main_menu, app) -> None:
+    """Append the Window menu to a main menu that has none, and make it the
+    app's windows menu (AppKit lists the open windows under it)."""
+    for i in range(main_menu.numberOfItems()):
+        if main_menu.itemAtIndex_(i).title() == "Window":
+            return
+    menu = AppKit.NSMenu.alloc().initWithTitle_("Window")
+    for entry in MAC_WINDOW_MENU:
+        if entry is None:
+            menu.addItem_(AppKit.NSMenuItem.separatorItem())
+        else:
+            menu.addItemWithTitle_action_keyEquivalent_(*entry)
+    holder = AppKit.NSMenuItem.alloc().init()
+    holder.setTitle_("Window")
+    holder.setSubmenu_(menu)
+    main_menu.addItem_(holder)
+    app.setWindowsMenu_(menu)
+
+
+def install_mac_window_menu() -> bool:
+    """On a Mac, add a Window menu (Minimize ⌘M, Zoom, Bring All to Front)
+    to the menu bar pywebview builds. pywebview rebuilds the bar when the
+    window opens and when a window with its own menu takes the focus, so
+    the menu is added each time it is built. pywebview 6.2's own menu items
+    carry no key equivalent, so ⌘M is set here. Anything unexpected leaves
+    pywebview's bar as it was. Returns whether it was installed."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import AppKit
+        from webview.platforms.cocoa import BrowserView
+    except Exception:
+        return False
+    original = getattr(BrowserView, "_recreate_menus", None)
+    if original is None:
+        return False
+    if getattr(original, "_slowbooks", False):
+        return True
+
+    def recreate(self, user_menu):
+        main_menu = original(self, user_menu)
+        try:
+            _add_mac_window_menu(AppKit, main_menu, BrowserView.app)
+        except Exception:
+            pass  # the bar pywebview built still works
+        return main_menu
+
+    recreate._slowbooks = True
+    BrowserView._recreate_menus = recreate
+    return True
 
 
 def install_mac_print_panel() -> bool:

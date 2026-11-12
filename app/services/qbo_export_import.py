@@ -987,10 +987,17 @@ def parse_contacts(csv_text: str, label: str) -> list[dict]:
     """Rows of the Customer, Vendor or Employee Contact List: {name,
     email, phone, address} with the list's own column names."""
     rows = _rows(csv_text)
+    # The Customer list is headed by the word the company calls its
+    # customers (Customer, Client, Donor, Guest, Member, Patient or Tenant:
+    # a "Member Contact List" with a "Member" column for a nonprofit that
+    # calls them members); any of them is the name column.
+    labels = CUSTOMER_LABELS if label.lower() == "customer" else (label.lower(),)
     header_at = None
     for i, row in enumerate(rows):
         cells = [c.strip().lower() for c in row]
-        if label.lower() in cells and any("phone" in c or "email" in c for c in cells):
+        if any(lab in cells for lab in labels) and any(
+            "phone" in c or "email" in c for c in cells
+        ):
             header_at = i
             break
     if header_at is None:
@@ -1003,7 +1010,7 @@ def parse_contacts(csv_text: str, label: str) -> list[dict]:
                 return header.index(n)
         return None
 
-    i_name = col(label.lower())
+    i_name = col(*labels)
     i_phone, i_email = col("phone numbers", "phone"), col("email")
     i_addr = col("billing address", "address")
     i_full = col("full name")
@@ -1195,6 +1202,27 @@ def _import_employees(db: Session, bundle: dict) -> int:
 CARRY_ITEM = "QuickBooks Online open balance"
 
 
+# What QuickBooks Online lets a company call its customers (Settings →
+# Advanced → Other preferences → Customer label); the lists and reports
+# head their columns with the word chosen.
+CUSTOMER_LABELS = (
+    "customer",
+    "client",
+    "donor",
+    "guest",
+    "member",
+    "patient",
+    "tenant",
+)
+
+# The customer column of the A/R Aging Detail report under each label
+# QuickBooks Online offers for customers ("<label> full name", or the bare
+# label on an older export), with or without the plural.
+CUSTOMER_LABEL_COLUMN = re.compile(
+    r"(customer|client|donor|guest|member|patient|tenant)s?( full name)?"
+)
+
+
 def parse_ar_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
     """The A/R Aging Detail report's rows as {kind, type, date, num,
     customer, due_date, amount, open}: kind "invoice" for an invoice with
@@ -1240,12 +1268,24 @@ def parse_ar_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
 
     i_date, i_type = col("date"), col("transaction type", "type")
     i_num, i_due = col("num", "no.", "number"), col("due date")
+    # QuickBooks Online calls customers what the company chose (Settings →
+    # Advanced → Other preferences → Customer label): Customers, Clients,
+    # Donors, Guests, Members, Patients or Tenants, and the report heads
+    # the column with that word ("Member full name" for a nonprofit that
+    # calls them members). Any of them is the customer column.
     i_cust = col("customer full name", "customer", "name")
+    if i_cust is None:
+        for n, name in enumerate(header):
+            if CUSTOMER_LABEL_COLUMN.fullmatch(name):
+                i_cust = n
+                break
     i_amount, i_open = col("amount"), col("open balance")
     if None in (i_type, i_cust):
         errors.append(
             "The A/R Aging Detail report lacks its Transaction type or Customer "
-            "column: export it with the report's own columns"
+            "column (Customer, Client, Donor, Guest, Member, Patient or Tenant "
+            "full name, as QuickBooks labels them): export it with the report's "
+            "own columns"
         )
         return items, errors, notes
     stated_total = None
@@ -2311,6 +2351,27 @@ def _payable_note(prepared: dict) -> list[str]:
     ]
 
 
+_NOT_ON_STATEMENTS = re.compile(
+    r"^Account ('.*'|\".*\") is in the books but not on the Balance Sheet "
+)
+_UNKNOWN_IN_GL = re.compile(r"^GL references account ('.*'|\".*\") not present ")
+
+
+def _named_once(errors: list[str]) -> list[str]:
+    """An account already refused as "in the books but not on the Balance
+    Sheet or the Profit and Loss" is not named again as one the chart lacks:
+    without the General Ledger the deleted card came back twice, the second
+    time in the import's own words (#813)."""
+    named = {m.group(1) for e in errors if (m := _NOT_ON_STATEMENTS.match(e))}
+    if not named:
+        return errors
+    return [
+        e
+        for e in errors
+        if not ((m := _UNKNOWN_IN_GL.match(e)) and m.group(1) in named)
+    ]
+
+
 def dry_run(db: Session, bundle: dict) -> dict:
     bundle = _fold_list(bundle)
     plan = _carry_plan(db, bundle)
@@ -2328,6 +2389,7 @@ def dry_run(db: Session, bundle: dict) -> dict:
         verdict["errors"] = [
             e for e in verdict["errors"] if not is_unknown_account_error(e)
         ]
+    verdict["errors"] = _named_once(verdict["errors"])
     verdict["warnings"] = (
         notes + list(_COA_NOTES) + _payable_note(prepared) + verdict["warnings"]
     )

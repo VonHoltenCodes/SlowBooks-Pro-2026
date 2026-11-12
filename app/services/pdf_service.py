@@ -669,6 +669,26 @@ def blank_stock(company_settings: dict) -> dict:
     }
 
 
+def check_amount_figures(value, no_dollar_sign=False) -> str:
+    """The amount in figures on the check face: "$1,234.56", or "1,234.56"
+    when Settings -> Check Printing leaves the dollar sign off (#799), for
+    stock that prints its own "$" beside the amount box. Only the face's
+    amount box reads it; the amount in words, the stubs and the vouchers
+    print as they always have."""
+    text = _format_currency(value)
+    return text.replace("$", "", 1) if no_dollar_sign else text
+
+
+_jinja_env.filters["check_amount"] = check_amount_figures
+
+
+def check_amount_no_dollar_sign(company_settings: dict) -> bool:
+    """Whether the amount box prints without its dollar sign (#799). Read
+    apart from check_print_options() so its shape holds; off unless the
+    setting is "true"."""
+    return company_settings.get("check_amount_no_dollar_sign") == "true"
+
+
 # Where each field of the check layout (#749) sits on the face: the element
 # an offset moves, and whether its size and weight go on a span around the
 # value (the value's own line keeps its height, so nothing laid out after it
@@ -784,6 +804,7 @@ def render_checks_html(checks: list, company_settings: dict, options=None) -> st
         position=check_position(company_settings),
         field_css=field_css,
         field_wrap=field_wrap,
+        no_dollar_sign=check_amount_no_dollar_sign(company_settings),
         **opts,
         **extra,
     )

@@ -147,7 +147,7 @@ def test_each_card_has_a_pin_outside_its_link():
     pin = card[link_end:]
     assert '<button type="button" class="card-pin" data-write' in pin
     assert 'aria-pressed="${pinned}"' in pin
-    assert 'aria-label="Pin ${escapeHtml(title)}"' in pin
+    assert "aria-label=\"${pinned ? 'Unstar' : 'Star'} ${escapeHtml(title)}\"" in pin
     assert """onclick="ReportsPage.togglePin('${view}')\"""" in pin
     assert (
         "API.put('/preferences/report_center_pins', { value: { pinned: ReportsPage._pins } })"

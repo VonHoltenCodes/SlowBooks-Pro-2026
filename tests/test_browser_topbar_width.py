@@ -36,7 +36,7 @@ ALL_FIVE = [
     "Create Invoice",
     "Receive Payment",
     "Quick Entry",
-    "Bill Entry",
+    "Bill Quick Entry",
 ]
 
 
@@ -55,9 +55,9 @@ ALL_FIVE = [
         1280,
         1366,
         1400,
-        1403,
-        1409,
-        1410,
+        1419,
+        1425,
+        1426,
         1600,
     ],
 )
@@ -71,8 +71,8 @@ def test_the_company_name_keeps_its_room_beside_contact_support(browser, width):
     assert got["right"] <= width, got
     assert got["overflow"] <= 0, got
     assert got["clock"] == (
-        "none" if width < 1410 else "block"
-    ), got  # W-105: tight below 1400
+        "none" if width < 1426 else "block"
+    ), got  # W-105: tight below 1400; 1426 since the bar says Bill Quick Entry
     assert got["signOut"] <= width, got
     # The quick-entry buttons stay wherever they fit (2.31.1 gate W-87:
     # Windows' own default window is a 1264px page, and hiding all five
@@ -104,7 +104,7 @@ def test_the_bar_names_its_shortcuts_and_quick_entry_is_on_the_sidebar(browser):
     keys = {name: key for name, key, _title in got}
     assert keys["Home"] == "Alt+H" and keys["Create Invoice"] == "Alt+N", got
     assert keys["Receive Payment"] == "Alt+P" and keys["Quick Entry"] == "Alt+Q", got
-    assert keys["New Customer"] is None and keys["Bill Entry"] is None, got
+    assert keys["New Customer"] is None and keys["Bill Quick Entry"] is None, got
     titles = {name: title for name, _key, title in got}
     assert titles["Quick Entry"] in ("Quick Entry (Alt+Q)", "Quick Entry (⌥Q)"), got
     assert link

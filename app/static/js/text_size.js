@@ -83,12 +83,29 @@
         if (size === 100) root.removeAttribute('data-text-size');
         else root.setAttribute('data-text-size', String(size));
         set(KEY, size === 100 ? null : String(size));
+        tellWindow(size);
         // the Settings control, should it be on the page when a key changed it
         if (typeof document.querySelectorAll === 'function') {
             var controls = document.querySelectorAll('select[data-text-size-control]');
             for (var i = 0; i < controls.length; i++) controls[i].value = String(size);
         }
         return size;
+    }
+
+    // The desktop app's company picker is the launcher's own page, with
+    // no origin and none of this storage: the size is handed to the window
+    // (desktop_launcher.py, set_text_size), which keeps it for the picker
+    // (#813). In a browser there is no window bridge and nothing to tell.
+    function tellWindow(size) {
+        try {
+            var api = window.pywebview && window.pywebview.api;
+            if (api && typeof api.set_text_size === 'function') api.set_text_size(size);
+        } catch (e) {
+            // the picker stays at the size it had
+        }
+    }
+    if (typeof window.addEventListener === 'function') {
+        window.addEventListener('pywebviewready', function () { tellWindow(current); });
     }
 
     // One size up (1) or down (-1), stopping at either end.

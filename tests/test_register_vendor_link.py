@@ -171,7 +171,7 @@ def test_an_unlinked_payee_and_a_transfer_do_not_count(client, seed_accounts):
         amount="-900.00",
         category_account_id=seed_accounts["1010"].id,
     )  # a transfer
-    assert _nec(client, v["id"])["total_paid"] == 0.00
+    assert _nec(client, v["id"]) is None  # paid nothing: off the list (#813)
     assert _summary(client, v["id"])["total_paid"] == 0
 
 
@@ -197,7 +197,7 @@ def test_a_card_charge_to_a_1099_vendor_does_not_count(client, seed_accounts):
         amount="-700.00",
     )
     assert seed_accounts["2100"].bank_kind == "credit_card"
-    assert _nec(client, v["id"])["total_paid"] == 0.00
+    assert _nec(client, v["id"]) is None  # paid nothing: off the list (#813)
     _post(client, seed_accounts, payee="Sub Co", amount="-300.00")  # a check
     assert _nec(client, v["id"])["total_paid"] == 300.00
 
@@ -211,7 +211,7 @@ def test_an_entry_to_accounts_payable_alone_counts_zero(client, seed_accounts):
         amount="-900.00",
         category_account_id=seed_accounts["2000"].id,
     )
-    assert _nec(client, v["id"])["total_paid"] == 0.00
+    assert _nec(client, v["id"]) is None  # paid nothing: off the list (#813)
 
 
 def test_a_split_counts_only_its_expense_and_cogs_lines(

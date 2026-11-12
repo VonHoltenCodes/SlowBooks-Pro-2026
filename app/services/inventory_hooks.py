@@ -576,11 +576,14 @@ _OVERSELL_WAY_OUT = {
 def oversell_refusal(shorts: list[dict[str, Any]], action: str = "sale") -> str:
     """The sentence a refused sale (or a bill's refused void or edit, W-67,
     or a refused vendor credit, W-74) answers with when Settings says to
-    refuse: each item, its count and how many short, and what to do."""
+    refuse: each item, its count and how many short, and what to do.
+    "Short" is this sale's part (#813): with the count already below zero,
+    the shortfall from before is not this sale's, and the count it takes
+    the item to says the whole of it."""
     parts = [
         f"{s['item'].name}: {plain_quantity(s['on_hand'])} on hand; this {action} "
         f"takes it to {plain_quantity(s['after'])}, "
-        f"{plain_quantity(-s['after'])} short."
+        f"{plain_quantity(min(s['on_hand'] - s['after'], -s['after']))} short."
         for s in shorts
     ]
     return " ".join(parts) + " " + _OVERSELL_WAY_OUT[action]

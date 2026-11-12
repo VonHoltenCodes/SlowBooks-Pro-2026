@@ -182,9 +182,10 @@ const BillsPage = {
             </div>`);
     },
 
-    // The check's memo line, editable before the check prints (#602): a
-    // payment of one bill starts with that bill's memo, a payment of
-    // several starts blank. Only a payment that prints a check shows it.
+    // The check's memo line, editable before the check prints (#602): it
+    // starts as Settings, Check Printing, Check memo chooses (#800), the
+    // bills' invoice numbers, one bill's memo or nothing. Only a payment
+    // that prints a check shows it.
     _checkMemoHtml(p) {
         const byCheck = !p.method || p.method === 'check' || !!p.check_number;
         if (p.is_voided || !byCheck) return '';

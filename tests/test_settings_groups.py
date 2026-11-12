@@ -40,6 +40,8 @@ EXPECTED = {
     "payroll": [
         "settings-h-direct-deposit",
         "settings-h-payroll-accounts",
+        # the paid-leave employer share as the agency determined it (#825)
+        "settings-h-leave-employer-share",
         "settings-h-check-printing",
     ],
     "lists": [
@@ -100,7 +102,7 @@ def test_the_groups_are_the_nine_in_order_with_their_names():
 def test_every_section_carries_a_known_group():
     known = {key for key, _ in _groups()}
     tags = _section_tags()
-    assert len(tags) == 34  # every section of the page, the conditional ones too
+    assert len(tags) == 35  # every section of the page, the conditional ones too
     missing = [t for t in tags if 'data-group="' not in t]
     assert missing == [], "a section with no data-group: " + "; ".join(missing)
     unknown = [

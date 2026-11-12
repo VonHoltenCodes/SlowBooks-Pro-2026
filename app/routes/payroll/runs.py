@@ -37,6 +37,7 @@ from app.services.payroll_service import (
     wage_base_note,
 )
 from app.services.state_tax.wa import salaried_lni_hours
+from app.services.state_tax import employer_share
 from app.services.accounting import create_journal_entry
 from app.services.garnishment import (
     GarnishmentSpec,
@@ -90,6 +91,22 @@ def _tables_notes(run: PayRun) -> list[str]:
     return [note] if note else []
 
 
+# The stub detail key of the sentence saying whether the work state's
+# paid-leave employer share applied as the agency determined (#825).
+EMPLOYER_SHARE_NOTE = "note:employer_share"
+
+
+def _run_notes(run: PayRun) -> list[str]:
+    """The run's own sentences, once each: which paid-leave employer share
+    applied by the company's setting, and why (#825)."""
+    notes: list[str] = []
+    for stub in run.stubs:
+        note = _stub_detail(stub).get(EMPLOYER_SHARE_NOTE)
+        if note and str(note) not in notes:
+            notes.append(str(note))
+    return notes
+
+
 def _with_employee_names(run: PayRun) -> PayRunResponse:
     resp = PayRunResponse.model_validate(run)
     # a run's tables note is on it wherever it is read, not only in the
@@ -97,6 +114,7 @@ def _with_employee_names(run: PayRun) -> PayRunResponse:
     notes = _tables_notes(run)
     if notes:
         resp.warnings = notes
+    resp.notes = _run_notes(run)
     for stub_resp, stub in zip(resp.stubs, run.stubs):
         stub_resp.notes = stub_notes(stub)
         if stub.employee:
@@ -315,6 +333,12 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         code = (e.work_state or "").strip().upper()
         if code:
             state_counts[code] = state_counts.get(code, 0) + 1
+    # the employer share as the agency determined it, per state (#825):
+    # yes, no, or the headcount above (the default)
+    share_settings = {
+        code: employer_share.setting_value(db, code) for code in employer_share.PROGRAMS
+    }
+    share_warnings: dict[str, str] = {}
     total_gross = total_taxes = total_net = total_employer = Decimal("0")
     total_employer_benefits = Decimal("0")
     period = f"{data.period_start} to {data.period_end}"
@@ -460,6 +484,18 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
                 f"{lni_hours} hours this period."
             )
 
+        # the work state's leave-program employer share: the company's
+        # setting when it says yes or no, the headcount otherwise (#825)
+        share = employer_share.decide(
+            work_state,
+            share_settings.get(work_state, employer_share.FOLLOW_HEADCOUNT),
+            employee_count if work_state == "OR" else state_counts.get(work_state, 0),
+        )
+        if share.note:
+            stub_notes_[EMPLOYER_SHARE_NOTE] = share.note
+        if share.warning:
+            share_warnings.setdefault(work_state, share.warning)
+
         regular_wages = Decimal("0")
         if stub_input.supplemental and stub_input.supplemental_method == "aggregate":
             regular_wages = _last_regular_gross(db, emp.id, data.pay_date)
@@ -511,6 +547,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             local_tax_rate=emp.local_tax_rate,
             employee_count=employee_count,
             state_employee_count=state_counts.get(work_state, 0),
+            employer_share_applies=share.applies,
             hours=lni_hours,
             pretax_deductions=ben.pretax_federal + adhoc_pretax,
             pretax_state=ben.pretax_state + adhoc_pretax,
@@ -652,6 +689,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     if refused:
         # Nothing is written: the session is never committed.
         raise HTTPException(status_code=422, detail=" ".join(refused))
+    warnings.extend(share_warnings.values())
     note = wage_base_note(year)
     if note:
         warnings.append(note)
@@ -1486,12 +1524,20 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
         for e in active
         if work_state and (e.work_state or "").strip().upper() == work_state
     )
+    # the employer share as the agency determined it (#825); it never moves
+    # the net, but the figures stay the pay run's
+    share = employer_share.decide(
+        work_state,
+        employer_share.setting_value(db, work_state),
+        employee_count if work_state == "OR" else state_employee_count,
+    )
 
     def net_of(g: Decimal) -> Decimal:
         return calculate_withholdings(
             g,
             employee_count=employee_count,
             state_employee_count=state_employee_count,
+            employer_share_applies=share.applies,
             pay_frequency=emp.pay_frequency.value if emp.pay_frequency else "biweekly",
             filing_status=emp.filing_status.value if emp.filing_status else "single",
             multiple_jobs=bool(emp.multiple_jobs),

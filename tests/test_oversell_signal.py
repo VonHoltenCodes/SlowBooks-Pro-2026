@@ -261,8 +261,9 @@ def test_a_sales_receipt_carries_the_warning_and_the_refusal(
     before = db_session.query(Invoice).count()
     r = client.post("/api/sales-receipts", json=body)
     assert r.status_code == 422, r.text
+    # "short" is this sale's three, not the five below zero (#813)
     assert (
-        "Widget: -2 on hand; this sale takes it to -5, 5 short." in r.json()["detail"]
+        "Widget: -2 on hand; this sale takes it to -5, 3 short." in r.json()["detail"]
     )
     assert db_session.query(Invoice).count() == before
     assert _on_hand(db_session, item.id) == Decimal("-2")

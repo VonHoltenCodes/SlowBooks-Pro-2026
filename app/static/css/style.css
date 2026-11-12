@@ -255,6 +255,11 @@
     /* -- Functional -- */
     --success:        #339966;
     --warning:        #cc9933;
+    /* a starred report's star: the warning gold reads 2.6:1 on a white
+       card and the Reports page's cards sit on the panel grey (#eef1f5),
+       so the pressed star takes a dark gold that reads 6.3:1 on white and
+       5.5:1 on the grey */
+    --star-on:        #7a5c00;
     --danger:         #cc3333;
 
     /* -- Gray scale (used by JS components and dark theme overrides) -- */
@@ -565,7 +570,7 @@ body {
    at 900 the bar ran 1265px wide and Sign Out sat out of view; then W-87,
    hiding all five below 1280 caught Windows' own default window, a 1264px
    page). Below 1366 the bar's spacing tightens, so all five fit a 1264px
-   window; below 1250 Quick Entry and Bill Entry step aside (both on the
+   window; below 1250 Quick Entry and Bill Quick Entry step aside (both on the
    sidebar), and below 1110 New Customer, Create Invoice and Receive Payment
    too (on the sidebar's pages; Alt+N and Alt+P). */
 @media (max-width: 1249px) {
@@ -1299,7 +1304,7 @@ a.card-link:focus-visible { box-shadow: 0 0 0 8px var(--focus-halo); }
     color: var(--text-muted); font-size: 15px; cursor: pointer;
 }
 .card-pin:hover { border-color: var(--panel-border); }
-.card-pin[aria-pressed="true"] { color: var(--warning); }
+.card-pin[aria-pressed="true"] { color: var(--star-on); }
 
 /* ========================================================================
  * FORMS — Modal forms styled like QB2003 data entry windows
@@ -1964,6 +1969,9 @@ a:hover { text-decoration: underline; }
 .opening-states thead th {
     white-space: normal;
     padding: 4px 5px;
+    /* a long one-word heading (WITHHOLDING) breaks in its own cell
+       rather than running into the next (#813) */
+    overflow-wrap: anywhere;
 }
 .opening-states tbody td { padding: 3px 4px; }
 .opening-states input {
@@ -1971,6 +1979,17 @@ a:hover { text-decoration: underline; }
     min-width: 0;
     box-sizing: border-box;
     padding: 4px 3px;
+}
+/* The narrow cells have no room for a stepper: 1234567.89 lost its last
+   digit under it (2.29.0 gate, #813). The arrow keys still step. */
+.opening-states input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+.opening-states input[type="number"]::-webkit-inner-spin-button,
+.opening-states input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 /* ========================================================================

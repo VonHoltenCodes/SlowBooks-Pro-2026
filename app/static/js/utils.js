@@ -1777,12 +1777,19 @@ const TxnWarn = {
     // A date carried from the last entry posted (#566: the register keeps
     // it) was asked about when it was first typed; `opts.carried`, or the
     // date box's data-carried, names it, and it is not asked about again
-    // unless the date is changed.
+    // unless the date is changed. An edit asks about its date only when the
+    // date was changed: the date it was saved with, the date box's own
+    // value as the form drew it (or `opts.saved`), was asked about when it
+    // was saved (2.29.1 gate, #813).
     async ok(form, opts = {}) {
-        const date = opts.date !== undefined ? opts.date : (form && form.date ? form.date.value : '');
+        const box = form && form.date;
+        const date = opts.date !== undefined ? opts.date : (box ? box.value : '');
         const carried = opts.carried !== undefined ? opts.carried
-            : (form && form.date && form.date.dataset ? form.date.dataset.carried : undefined);
-        const message = date && date === carried ? null : TxnWarn.dateMessage(date);
+            : (box && box.dataset ? box.dataset.carried : undefined);
+        const saved = opts.saved !== undefined ? opts.saved
+            : (opts.editing && box && typeof box.defaultValue === 'string' ? box.defaultValue : undefined);
+        const unchanged = date && (date === carried || (!!saved && date === saved));
+        const message = unchanged ? null : TxnWarn.dateMessage(date);
         if (message && !confirm(message)) return false;
         if (opts.editing && TxnWarn._on('warn_edit_transaction') && !confirm(TxnWarn.EDIT_MESSAGE)) return false;
         return true;

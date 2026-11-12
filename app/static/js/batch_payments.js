@@ -43,7 +43,7 @@ const BatchPaymentsPage = {
                     <div class="form-group"><label>Payment Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Deposit To</label>
-                        <select name="deposit_to_account_id"><option value="">${blankDeposit}</option>${acctOpts}</select></div>
+                        <select name="deposit_to_account_id"><option value=""${blankDeposit === '--' ? '' : ' data-choice'}>${blankDeposit}</option>${acctOpts}</select></div>
                     <div class="form-group"><label>Method</label>
                         <select name="method">
                             <option value="check">Check</option><option value="cash">Cash</option>
