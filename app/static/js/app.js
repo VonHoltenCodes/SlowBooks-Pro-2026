@@ -3110,6 +3110,13 @@ const App = {
      * it reloads the page after login so this runs again authenticated.
      * The whole thing is best-effort; failures leave the footer as-is.
      */
+    // "Version 2.32.0+0123456789ab" from /api/system, or the bare version
+    // when the build does not know its commit; null with no version.
+    buildLabel(info) {
+        if (!info || !info.version) return null;
+        return `Version ${info.build_version || info.version}`;
+    },
+
     async initSystemInfo() {
         try {
             let res = await fetch('/api/system', { credentials: 'same-origin' });
@@ -3129,6 +3136,17 @@ const App = {
                     if (el) el.textContent = label;
                 });
             }
+            // About names the build (#816): <version>+<sha>, the same string
+            // the smoke test and Contact support's diagnostics carry, so two
+            // builds of one release can be told apart.
+            const build = App.buildLabel(info);
+            const aboutVersion = $('#splash-version');
+            if (aboutVersion && build) {
+                aboutVersion.textContent = build;
+                aboutVersion.hidden = false;
+            }
+            const footer = $('#app-version-footer');
+            if (footer && build) footer.title = build;
             if (info.server_mode) {
                 // Serving the LAN: the deployment announces itself.
                 document.querySelectorAll('.sidebar-edition, .splash-subtitle')

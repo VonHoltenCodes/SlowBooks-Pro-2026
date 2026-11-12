@@ -23,9 +23,9 @@ function load(api) {
 }
 
 const DIAG = {
-    version: '2.29.1', commit: 'abc1234', platform: 'macOS', deployment: 'native',
+    version: '2.29.1', commit: 'abc1234def56', platform: 'macOS', deployment: 'native',
     is_native: true, reply_to: 'me@co.com',
-    environment: 'Version: v2.29.1 (abc1234)\nPlatform: macOS\nPython: 3.13.0\nDeployment: native',
+    environment: 'Version: v2.29.1+abc1234def56\nPlatform: macOS\nPython: 3.13.0\nDeployment: native',
     log_tail: '2026-10-25 09:15:01 INFO ready', log_available: true, browser: 'TestUA/1.0',
 };
 

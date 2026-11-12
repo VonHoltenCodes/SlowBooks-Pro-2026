@@ -13,12 +13,12 @@ from tests.test_theme_contrast import browser_fixture  # noqa: E402,F401  (the f
 
 DIAG = {
     "version": "2.29.1",
-    "commit": "abc1234",
+    "commit": "abc1234def56",
     "platform": "macOS",
     "deployment": "native",
     "is_native": True,
     "reply_to": "books@example.com",
-    "environment": "Version: v2.29.1 (abc1234)\nPlatform: macOS\nPython: 3.13.0\nDeployment: native",
+    "environment": "Version: v2.29.1+abc1234def56\nPlatform: macOS\nPython: 3.13.0\nDeployment: native",
     "log_tail": "2026-10-25 09:15:01 INFO ready",
     "log_available": True,
     "log_note": "",

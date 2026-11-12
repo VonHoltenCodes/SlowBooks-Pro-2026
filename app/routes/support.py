@@ -72,6 +72,7 @@ def diagnostics(db: Session = Depends(get_db)):
     return {
         "version": __version__,
         "commit": commit,
+        "build_version": f"{__version__}+{commit}" if commit else __version__,
         "platform": platform_name,
         "python": python,
         "deployment": deployment,
