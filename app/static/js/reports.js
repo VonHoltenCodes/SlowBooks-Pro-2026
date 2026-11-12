@@ -4716,7 +4716,8 @@ ReportsPage.functionalExpenses = async function (prefill) {
 // job type. The closing rate is won ÷ (won + lost); open bids count neither way.
 ReportsPage.estimateClosingRate = async function (prefill) {
     let customers = [], jobs = [];
-    try { customers = (await API.get('/customers?active_only=true&tree=1')).map(c => ({ ...c, name: customerLabel(c) })); } catch (e) { customers = []; }
+    // every customer, inactive ones too: a past bid's customer may be gone
+    try { customers = (await API.get('/customers?tree=1')).map(c => ({ ...c, name: customerLabel(c) })); } catch (e) { customers = []; }
     try { jobs = await API.get('/jobs?include_inactive=true'); } catch (e) { jobs = []; }
     const params = {};
     if (prefill && prefill.customer_id) params.customer_id = prefill.customer_id;
@@ -4732,7 +4733,7 @@ ReportsPage.estimateClosingRate = async function (prefill) {
         <div class="form-group">
             <label for="ecr-job-type">${T('Job')} type</label>
             <select id="ecr-job-type" data-no-search onchange="ReportsPage.setParam('job_type', this.value)">
-                ${opt('', 'All', params.job_type)}${types.map(t => opt(t, t, params.job_type)).join('')}${opt('No job type', 'No job type', params.job_type)}
+                ${opt('', 'All', params.job_type)}${types.map(t => opt(t, t, params.job_type)).join('')}${opt('No job type', Terms.text('No job type'), params.job_type)}
             </select>
         </div>`;
     await ReportsPage.openPeriodModal('Estimate Closing Rate', ReportsPage.defaultPeriod(), async (_period, range, p) => {
@@ -4756,7 +4757,7 @@ ReportsPage.estimateClosingRate = async function (prefill) {
         const foot = `<tfoot><tr style="font-weight:700; background:var(--gray-50);"><td>Total</td>${cells(t)}</tr></tfoot>`;
         const grid = (title, first, rows) => `<h4 style="margin:14px 0 4px 0;">${title}</h4>
             <div class="table-container"><table>${head(first)}
-                <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td>${cells(r)}</tr>`).join('') || '<tr><td colspan="12" style="color:var(--gray-400);">No estimates dated in this period</td></tr>'}</tbody>
+                <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.job_type === '' ? Terms.text(r.name) : r.name)}</td>${cells(r)}</tr>`).join('') || '<tr><td colspan="12" style="color:var(--gray-400);">No estimates dated in this period</td></tr>'}</tbody>
                 ${foot}</table></div>`;
         const undated = t.undated ? ` ${t.undated} decided estimate${t.undated === 1 ? ' has' : 's have'} no decision date (decided before this report existed) and ${t.undated === 1 ? 'is' : 'are'} left out of the average.` : '';
         return `${ReportsPage._exportButtons('estimate-closing-rate', qs.toString())}

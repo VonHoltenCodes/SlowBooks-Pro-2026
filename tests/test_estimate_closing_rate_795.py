@@ -128,6 +128,44 @@ def test_the_routes_answer_json_and_csv(client, seed_customer):
     assert "Closing rate" in csv.text and "Test Customer" in csv.text
     bad = client.get(f"/api/reports/estimate-closing-rate?{qs}&jobtype=x")
     assert bad.status_code == 422
+    huge = client.get("/api/reports/estimate-closing-rate?customer_id=" + "9" * 24)
+    assert huge.status_code == 422  # not a database overflow
+    back = client.get(
+        "/api/reports/estimate-closing-rate?start_date=2026-12-31&end_date=2026-01-01"
+    )
+    assert back.status_code == 400
+    assert back.json()["detail"] == "The start date is after the end date."
+
+    # the exports carry the expired column and speak the company's words
+    client.put("/api/settings", json={"company_type": "nonprofit"})
+    csv = client.get(f"/api/reports/estimate-closing-rate/csv?{qs}").text
+    assert "By donor" in csv and "No grant type" in csv
+    assert "Expired (open)" in csv
+
+
+def test_days_count_on_the_local_calendar(db_session, seed_customer):
+    import os
+    import time
+
+    # an evening decision in New York is already the next day in UTC; on
+    # Windows (no tzset) it runs on the machine's own zone
+    old_tz = os.environ.get("TZ")
+    if hasattr(time, "tzset"):
+        os.environ["TZ"] = "America/New_York"
+        time.tzset()
+    try:
+        e = _est(db_session, 7, seed_customer, "100", EstimateStatus.ACCEPTED)
+        local_evening = datetime(D.year, D.month, D.day, 20).astimezone()
+        e.decided_at = local_evening.astimezone(timezone.utc)
+        db_session.commit()
+        assert estimate_closing_report(db_session, D, D)["totals"]["avg_days"] == 0.0
+    finally:
+        if hasattr(time, "tzset"):
+            if old_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old_tz
+            time.tzset()
 
 
 def test_the_migration_fills_decided_at_from_what_the_estimate_shows(tmp_path):
@@ -148,7 +186,8 @@ def test_the_migration_fills_decided_at_from_what_the_estimate_shows(tmp_path):
         conn.execute("INSERT INTO customers (id, name, is_active) VALUES (1, 'C', 1)")
         for n, status, accepted, notes in (
             (1, "ACCEPTED", "2026-02-03 10:00:00", None),
-            (2, "REJECTED", None, "call back\nLost 2026-02-09: price"),
+            # lost, reopened, lost again: the last loss is the decision
+            (2, "REJECTED", None, "Lost 2026-01-20: old\nLost 2026-02-09: price"),
             (3, "REJECTED", None, "no date here"),
         ):
             conn.execute(

@@ -13,10 +13,11 @@
 # left out of the average and counted in `undated`. Nothing is posted.
 # ============================================================================
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
+from fastapi import HTTPException
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -38,6 +39,7 @@ COLUMNS = [
     {"key": "lost_amount", "label": "Lost $", "kind": "money"},
     {"key": "open_count", "label": "Open", "kind": "int"},
     {"key": "open_amount", "label": "Open $", "kind": "money"},
+    {"key": "expired_count", "label": "Expired (open)", "kind": "int"},
     {"key": "closing_rate", "label": "Closing rate", "kind": "pct"},
     {"key": "closing_rate_amount", "label": "Closing rate $", "kind": "pct"},
     {"key": "avg_days", "label": "Avg days to decision", "kind": "num"},
@@ -82,6 +84,14 @@ def _figures(b: dict) -> dict:
     }
 
 
+def _local_date(dt: datetime) -> date:
+    """A stored timestamp's date on this machine's clock, the clock an
+    estimate's own date is kept on. SQLite hands back the UTC value naive."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone().date()
+
+
 def _first_sent(db: Session, ids: list[int]) -> dict[int, date]:
     """Each estimate's first successful email from SlowBooks, as a date."""
     if not ids:
@@ -96,7 +106,7 @@ def _first_sent(db: Session, ids: list[int]) -> dict[int, date]:
         .group_by(EmailLog.entity_id)
         .all()
     )
-    return {eid: at.date() for eid, at in rows if at is not None}
+    return {eid: _local_date(at) for eid, at in rows if at is not None}
 
 
 def estimate_closing_report(
@@ -112,6 +122,10 @@ def estimate_closing_report(
     today = date.today()
     start_date = start_date or fiscal_year_start(db, today)
     end_date = end_date or today
+    if start_date > end_date:
+        raise HTTPException(
+            status_code=400, detail="The start date is after the end date."
+        )
     q = (
         db.query(Estimate)
         .options(joinedload(Estimate.customer), joinedload(Estimate.job))
@@ -143,7 +157,7 @@ def estimate_closing_report(
         days = None
         if outcome != "open" and e.decided_at is not None:
             sent = sent_on.get(e.id, e.date)
-            days = max((e.decided_at.date() - sent).days, 0)
+            days = max((_local_date(e.decided_at) - sent).days, 0)
         expired = (
             outcome == "open"
             and e.expiration_date is not None

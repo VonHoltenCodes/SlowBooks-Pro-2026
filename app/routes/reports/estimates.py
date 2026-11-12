@@ -21,8 +21,13 @@ from app.routes.reports.financial import _company_name, _csv_download, _pdf_resp
 from app.services.csv_export import _SafeWriter
 from app.services.estimate_closing_report import estimate_closing_report
 from app.services.ledger_exports import _preamble
+from app.services.terminology import terms_from_db
 
-_CUST_Q = Annotated[Optional[int], Query(description="Only this customer's estimates")]
+# bounded so an id past a 64-bit integer is a 422, not a database overflow
+_CUST_Q = Annotated[
+    Optional[int],
+    Query(description="Only this customer's estimates", le=9223372036854775807),
+]
 _TYPE_Q = Annotated[
     Optional[str],
     Query(description='Only this job type; "" for estimates with no job type'),
@@ -47,16 +52,31 @@ def estimate_closing_rate(
 
 
 def _period_words(data: dict) -> str:
-    return f"{data['start_date']} — {data['end_date']}"
+    """The period, and when some decisions have no date, that the average
+    leaves them out (the screen says the same)."""
+    words = f"{data['start_date']} — {data['end_date']}"
+    undated = data["totals"]["undated"]
+    if undated:
+        words += f" ({undated} decided with no decision date, left out of the average)"
+    return words
 
 
-def _grids(data: dict) -> list[tuple[str, list[dict]]]:
-    """The two grids, each with the grand total as its last row."""
+def _grids(data: dict, t) -> list[tuple[str, list[dict]]]:
+    """The two grids in the company's words, each with the grand total as its
+    last row."""
     total = {"name": "Total", **data["totals"]}
-    return [
-        ("By customer", data["by_customer"] + [total]),
-        ("By job type", data["by_job_type"] + [total]),
+    types = [
+        {**r, "name": t.text(r["name"])} if r["job_type"] == "" else r
+        for r in data["by_job_type"]
     ]
+    return [
+        (t.text("By customer"), data["by_customer"] + [total]),
+        (t.text("By job type"), types + [total]),
+    ]
+
+
+def _labels(data: dict, t) -> list[str]:
+    return [t.text(c["label"]) for c in data["columns"]]
 
 
 @router.get(
@@ -71,13 +91,14 @@ def estimate_closing_rate_pdf(
 ):
     data = estimate_closing_report(db, start_date, end_date, customer_id, job_type)
     cols = data["columns"]
+    t = terms_from_db(db)
     sections = []
-    for title, rows in _grids(data):
+    for title, rows in _grids(data, t):
         sections.append(
             {
-                "title": f"{_TITLE}: {title.lower()}",
+                "title": f"{_TITLE}: {title[0].lower()}{title[1:]}",
                 "period": _period_words(data),
-                "columns": [c["label"] for c in cols],
+                "columns": _labels(data, t),
                 "text_columns": 1,
                 "rows": [
                     {
@@ -109,12 +130,13 @@ def estimate_closing_rate_csv(
 ):
     data = estimate_closing_report(db, start_date, end_date, customer_id, job_type)
     cols = data["columns"]
+    t = terms_from_db(db)
     out = io.StringIO()
     w = _SafeWriter(out)
     _preamble(w, _company_name(db), _TITLE, _period_words(data))
-    for title, rows in _grids(data):
+    for title, rows in _grids(data, t):
         w.writerow([title])
-        w.writerow([c["label"] for c in cols])
+        w.writerow(_labels(data, t))
         for r in rows:
             w.writerow([_csv_cell(r[c["key"]], c["kind"]) for c in cols])
         w.writerow([])

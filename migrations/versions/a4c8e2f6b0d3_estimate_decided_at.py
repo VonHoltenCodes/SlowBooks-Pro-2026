@@ -3,7 +3,7 @@
 The Estimate Closing Rate report averages the days from sent to decision,
 and nothing dated a decision but acceptance. An estimate decided before
 this keeps what it can show: its accepted_at when it was won, the date in
-its "Lost YYYY-MM-DD: reason" note line when it was marked lost. The rest
+its last "Lost YYYY-MM-DD: reason" note line when it was marked lost. The rest
 stay NULL and the report leaves them out of the average.
 
 Revision ID: a4c8e2f6b0d3
@@ -50,11 +50,13 @@ def upgrade() -> None:
         )
     ).fetchall()
     for est_id, notes in lost:
-        m = _LOST.search(notes)
-        if not m:
+        # lost, reopened and lost again leaves a line per loss: the last one
+        # is the decision the status stands on
+        found = _LOST.findall(notes)
+        if not found:
             continue
         try:
-            when = datetime.strptime(m.group(1), "%Y-%m-%d")
+            when = datetime.strptime(found[-1], "%Y-%m-%d")
         except ValueError:
             continue
         bind.execute(
