@@ -85,7 +85,7 @@ def compute_sui(db, year: int, quarter: int, state: str | None = None) -> dict:
                 else Decimal("0")
             )
         if st not in bases:
-            bases[st] = Decimal(str(get_engine(st).suta_wage_base or 0))
+            bases[st] = Decimal(str(get_engine(st, year).suta_wage_base or 0))
         wages = stub_taxable_wages(s)["fica"]
         taxable_of[s.id] = _capped_wages(wages, filled[key], bases[st])
         filled[key] += wages

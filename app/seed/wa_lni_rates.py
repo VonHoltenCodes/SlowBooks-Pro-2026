@@ -10,6 +10,10 @@
 # employer's rate notice applies its own experience factor).
 # https://lni.wa.gov/insurance/_docs/2026RatesByClassCodeFund.pdf
 # Class titles from WAC 296-17A (app.leg.wa.gov). Verified 2026-10-31.
+#
+# A run dated 2025 uses L&I's "2025 Hourly Rates by Risk Classification Code
+# and Fund" (WA_LNI_RATES_2025, the same two columns), #818.
+# https://lni.wa.gov/insurance/_docs/2025RatesByClassCodeFund.pdf
 # ============================================================================
 
 from decimal import Decimal
@@ -54,14 +58,30 @@ WA_LNI_RATES = {
     },  # Exempt limited liability company members, N.O.C.
 }
 
+WA_LNI_RATES_2025 = {
+    "4904": {"total": Decimal("0.2051"), "employee": Decimal("0.09315")},
+    "5206": {"total": Decimal("1.0400"), "employee": Decimal("0.22015")},
+    "6303": {"total": Decimal("0.2839"), "employee": Decimal("0.10540")},
+    "0101": {"total": Decimal("2.0977"), "employee": Decimal("0.36130")},
+    "0510": {"total": Decimal("4.7435"), "employee": Decimal("0.80875")},
+    "0507": {"total": Decimal("5.8440"), "employee": Decimal("1.05730")},
+    "3905": {"total": Decimal("0.4851"), "employee": Decimal("0.15460")},
+    "3909": {"total": Decimal("0.7559"), "employee": Decimal("0.20615")},
+    "7100": {"total": Decimal("0.2141"), "employee": Decimal("0.09320")},
+}
+
+WA_LNI_RATES_BY_YEAR = {2025: WA_LNI_RATES_2025, 2026: WA_LNI_RATES}
+
 # Fallback when an employee has no class code or an unknown one. This is a
 # placeholder, not an L&I figure: the right rate is the one on the
 # employer's rate notice for the employee's class.
 WA_LNI_DEFAULT = {"total": Decimal("0.2000"), "employee": Decimal("0.0800")}
 
 
-def get_lni_rate(class_code: str | None) -> dict:
-    """Return {'total', 'employee'} hourly L&I rates for a risk class code."""
-    if class_code and class_code in WA_LNI_RATES:
-        return WA_LNI_RATES[class_code]
+def get_lni_rate(class_code: str | None, year: int | None = None) -> dict:
+    """Return {'total', 'employee'} hourly L&I rates for a risk class code,
+    from `year`'s table (2026's when None or a year with no table)."""
+    rates = WA_LNI_RATES_BY_YEAR.get(year, WA_LNI_RATES)
+    if class_code and class_code in rates:
+        return rates[class_code]
     return WA_LNI_DEFAULT
