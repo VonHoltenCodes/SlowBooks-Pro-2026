@@ -12,8 +12,13 @@ voided payment as waiting and hid a live one.
 
 Now:
 
-- an ITEM is a debit on 1200 from a transaction that is not void and is
-  not itself a void's reversal;
+- an ITEM is a debit on 1200 from customer money — a customer payment
+  (a sales receipt posts as one) or a journal entry — from a transaction
+  that is not void and is not itself a void's reversal. A bill, expense
+  or card-charge line saved on 1200 before 2.31.14 (#785) debits it the
+  same way and is never offered for deposit: depositing it raised the bank
+  by money nobody paid (#821). It stays on the Balance Sheet until the
+  bookkeeper moves it to the account it belongs on;
 - a deposit made from the list stamps each item's line with its journal
   entry (``TransactionLine.deposit_transaction_id``); voiding the deposit
   clears the stamp, and the payments are waiting again;
@@ -83,6 +88,17 @@ def dead_transaction_ids(db: Session, txns: Iterable[Transaction]) -> set[int]:
     return dead
 
 
+def customer_money_sources() -> frozenset[str]:
+    """The source types whose debit on Undeposited Funds is money waiting
+    for the bank (#821): a customer payment (a sales receipt, a batch of
+    payments and the importers' payments post as one) and a journal entry
+    of any kind the Journal Entries page lists. Anything else on 1200 — a
+    purchase line saved before #785 — is not offered for deposit."""
+    from app.routes.journal import _journal_sources
+
+    return frozenset({"payment", "qbo_ledger", *_journal_sources()})
+
+
 def _uf_rows(db: Session, uf_id: int) -> list[tuple[TransactionLine, Transaction]]:
     return (
         db.query(TransactionLine, Transaction)
@@ -130,10 +146,12 @@ def _waiting_and_pool(
         for ln, _ in rows
         if ln.deposit_transaction_id and ln.deposit_transaction_id not in dead
     }
+    money = customer_money_sources()
     items = [
         (ln, t)
         for ln, t in rows
         if ln.debit > 0
+        and (t.source_type or "") in money
         and t.id not in dead
         and not (ln.deposit_transaction_id and ln.deposit_transaction_id not in dead)
     ]
