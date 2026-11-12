@@ -134,11 +134,18 @@ def get_tax_liability(
 # --- 1099-NEC / 1096 -------------------------------------------------------
 @router.get("/1099")
 def get_1099(year: TaxYear, db: Session = Depends(get_db)):
+    """The year's 1099-NEC vendors and the 1096. A 1099 vendor paid nothing
+    in the year has no form to file and is left off the list and the Tax
+    Forms picker; `unpaid` counts them, so the picker can say why it is
+    empty (2.31.3 gate, #813)."""
+    every = form_1099.compute_1099_data(db, year)
+    paid = [v for v in every if v["total_paid"] > 0]
     return {
         "year": year,
         "threshold": float(form_1099.nec_threshold(year)),
         "transmittal": form_1099.compute_1096(db, year),
-        "vendors": form_1099.compute_1099_data(db, year),
+        "vendors": paid,
+        "unpaid": len(every) - len(paid),
     }
 
 
