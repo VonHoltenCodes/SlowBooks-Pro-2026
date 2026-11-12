@@ -297,7 +297,10 @@ jobs:
           # VOID-mark tests (#807, test_pdf_807.py) and five with the aging
           # PDFs (#808, test_aging_pdfs_808.py); conftest now counts a render
           # the app answered 503 for (PdfEngineMissing) as the same skip.
-          MAX_SKIPS: "338"
+          # 339: the Sales Tax PDF's render (#806, test_reports_806.py)
+          # landed in the same batch and was counted nowhere; main at 0885b09f
+          # skips 339 on Windows.
+          MAX_SKIPS: "339"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
