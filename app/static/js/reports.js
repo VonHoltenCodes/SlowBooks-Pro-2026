@@ -376,10 +376,14 @@ const ReportsPage = {
 
         // All reports is folded while there are stars to open on (#794),
         // unless it was left open, or Back returns to a card inside it.
-        let open = !ReportsPage._pins.length;
+        // by the starred cards this company type shows: a star saved under
+        // another type (a construction report, in a business) stays saved
+        // but opens nothing here, so it does not fold the list
+        const shownStars = ReportsPage._pins.filter(v => ReportsPage._cards().some(c => c.view === v));
+        let open = !shownStars.length;
         try { if (localStorage.getItem('sb_all_reports_open') === '1') open = true; } catch (e) { /* ignore */ }
         const back = history.state && history.state.focus;
-        if (back && back.startsWith('report:') && !ReportsPage._pins.includes(back.slice(7))) open = true;
+        if (back && back.startsWith('report:') && !shownStars.includes(back.slice(7))) open = true;
 
         return `
             <div class="page-header"><h2>Reports</h2></div>
@@ -547,7 +551,7 @@ const ReportsPage = {
                     <p id="${id}-text" style="font-size:13px; color:var(--gray-500);">${text}</p>
                 </a>
                 <button type="button" class="card-pin" data-write data-pin="${view}" aria-pressed="${pinned}"
-                    aria-label="Pin ${escapeHtml(title)}" title="${pinned ? 'Unstar' : 'Star: show at the top'}"
+                    aria-label="${pinned ? 'Unstar' : 'Star'} ${escapeHtml(title)}" title="${pinned ? 'Unstar' : 'Star: show at the top'}"
                     onclick="ReportsPage.togglePin('${view}')">${pinned ? '★' : '☆'}</button>
             </div>`;
     },
