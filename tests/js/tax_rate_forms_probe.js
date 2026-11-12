@@ -55,7 +55,7 @@ const ctx = {
   CostCodes: { load: async () => {}, headHtml: () => '', cellHtml: () => '<td></td>' },
   CostTypes: { load: async () => {}, any: () => false, optionsHtml: () => '', headHtml: () => '', cellHtml: () => '', fromRow: () => null },
   TradePackages: { load: async () => {}, any: () => false, optionsHtml: () => '', headHtml: () => '', cellHtml: () => '', fromRow: () => null, name: () => '' },
-  TaxExempt: { enforce() {} },
+  TaxExempt: { enforce() {}, switchHtml: () => '', watchJob() {}, value: () => undefined },
   ScanHelper: { scanRowHtml: () => '', wire() {} },
   $: (sel) => els[sel] || null,
   $$: (sel) => els[sel] || [],

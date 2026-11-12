@@ -2117,7 +2117,7 @@ const ReportsPage = {
                     <div style="font-size:12px;">Tax on sales ${formatCurrency(data.tax_on_sales)} less tax on credit memos ${formatCurrency(data.tax_credited)}</div>
                     <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">Tax Collected: ${formatCurrency(data.total_tax)}</div>
                     ${reconcile}
-                </div>${ReportsPage.useTaxHtml(data.use_tax, data.end_date)}`;
+                </div>${ReportsPage.exemptSalesHtml(data)}${ReportsPage.useTaxHtml(data.use_tax, data.end_date)}`;
         }, "Dates", false, { reportType: 'sales_tax', view: 'sales-tax', prefill, ...basisOpts });
     },
 
@@ -2146,6 +2146,26 @@ const ReportsPage = {
             <div style="margin-top:8px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200); font-size:12px;">
                 Accrued ${formatCurrency(u.accrued)} · Paid ${formatCurrency(u.paid)} · Owed at ${formatDate(endDate)}: <strong>${formatCurrency(u.balance)}</strong>
             </div>`;
+    },
+
+    // The Sales Tax report's Exempt sales (#864): the non-taxable sales by
+    // the reason they are untaxed, as the state returns ask for them. The
+    // rows add up to the Non-Taxable figure above.
+    exemptSalesHtml(data) {
+        const rows = (data.exempt_sales || []).map(e => `<tr>
+                <td>${escapeHtml(e.label)}</td>
+                <td class="amount">${formatCurrency(e.amount)}</td>
+            </tr>`).join('');
+        if (!rows) return '';
+        return `
+            <h3 style="margin:18px 0 6px; font-size:14px;">Exempt sales</h3>
+            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Sales with no tax, by why: the kind of certificate the document carries from its ${T('job').toLowerCase()} when the whole sale is exempt, exempt with no certificate on file, or lines left untaxed on a taxed sale.</p>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Reason</th><th scope="col" class="amount">Sales</th></tr></thead>
+                <tbody>${rows}
+                    <tr class="total-row"><td><strong>Total exempt sales</strong></td><td class="amount"><strong>${formatCurrency(data.total_non_taxable)}</strong></td></tr>
+                </tbody>
+            </table></div>`;
     },
 
     // The General Ledger's filters (#236): one account, one class, or both,

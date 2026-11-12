@@ -413,6 +413,10 @@ def build_sov(db: Session, job: Job, estimate: Estimate, replace: bool = True) -
         )
 
     lines = sov_from_estimate(estimate)
+    # An exempt job's schedule starts untaxed, whatever the bid taxed (#864).
+    if job.is_taxable is False:
+        for line in lines:
+            line["is_taxable"] = False
     # The owner contingency carried inside the contract is its own SOV line.
     if job.contingency_amount is not None:
         lines.append(
@@ -465,7 +469,10 @@ def shared_revenue_account_id(lines) -> int | None:
 def schedule_is_taxed(job: Job) -> bool:
     """Whether a line added to the schedule (a contingency or change-order
     line) is taxable: when any line already on it is, or the schedule is
-    empty. A job whose bid taxed nothing bills no tax on its changes."""
+    empty. A job whose bid taxed nothing bills no tax on its changes, and
+    an exempt job (#864) none on anything added."""
+    if job.is_taxable is False:
+        return False
     lines = list(job.sov_lines)
     return not lines or any(ln.is_taxable for ln in lines)
 
@@ -510,6 +517,9 @@ def change_order_sov_fields(db: Session, job: Job, co) -> dict:
     if taxable is None:
         lines = list(job.sov_lines)
         taxable = all(ln.is_taxable for ln in lines)
+    # an exempt job's change orders bill no tax (#864)
+    if job.is_taxable is False:
+        taxable = False
     revenue = (
         next((ln.revenue_account_id for ln in section if ln.revenue_account_id), None)
         or shared_revenue_account_id(job.sov_lines)

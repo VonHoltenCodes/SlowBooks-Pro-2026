@@ -354,7 +354,7 @@ def _due_date_from_terms(db: Session, base_date: date, terms: str | None) -> dat
     return due_date_for(db, base_date, terms)
 
 
-def resolve_line_taxable(db: Session, lines_data, customer=None) -> None:
+def resolve_line_taxable(db: Session, lines_data, customer=None, exempt=False) -> None:
     """Decide is_taxable on every line. A customer marked non-taxable (a
     reseller permit, an exempt organization) pays no sales tax on ANY line,
     whatever the line says — the page always sends each line's tax box,
@@ -364,11 +364,14 @@ def resolve_line_taxable(db: Session, lines_data, customer=None) -> None:
     takes the item's flag, else the company's "New lines and items are
     taxable" setting (#486; on by default, so taxable as before). Mutates
     the pydantic line objects in place so the same objects feed both the
-    totals and the stored rows."""
+    totals and the stored rows. ``exempt`` is the document's own "Tax
+    exempt" switch (#864), which unticks every line as the customer's flag
+    does."""
     from app.models.items import Item
     from app.services.settings_service import new_lines_taxable
 
     cust_taxable = True if customer is None else (customer.is_taxable is not False)
+    cust_taxable = cust_taxable and not exempt
     company_default = None
     for ln in lines_data:
         if not cust_taxable:

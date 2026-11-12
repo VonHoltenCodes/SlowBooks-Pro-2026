@@ -35,6 +35,7 @@
     .totals td.r { text-align: right; font-variant-numeric: tabular-nums; }
     .totals .label { font-weight: 700; color: #4a4a6a; }
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
+    .totals td.tax-exempt { padding-top: 6px; font-size: 8.5pt; font-style: italic; color: #333; text-align: right; }
     .totals.keep { float: none; margin-left: auto; break-inside: avoid; page-break-inside: avoid; }
     .alt-tag { font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #7a4b00; border: 1px solid #c9923a; border-radius: 3px; padding: 0 4px; margin-left: 4px; white-space: nowrap; }
     .terms-block { clear: both; margin-top: 24px; font-size: 9pt; color: #333; white-space: pre-wrap; }
@@ -125,6 +126,9 @@
             <tr><td class="label">Tax ({{ est.tax_rate | tax_percent }}%)</td><td class="r">{{ est.tax_amount | currency }}</td></tr>
             {% endif %}
             <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
+            {% set exempt_note = tax_exempt_line(est) %}{% if exempt_note %}
+            <tr><td colspan="2" class="tax-exempt">{{ exempt_note }}</td></tr>
+            {% endif %}
         </table>
     </div>{% else %}
     {# Construction bid (#551): lines AT COST grouped by package with the
@@ -237,6 +241,9 @@
             <tr><td class="label">Tax ({{ est.tax_rate | tax_percent }}%)</td><td class="r">{{ est.tax_amount | currency }}</td></tr>
             {% endif %}
             <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
+            {% set exempt_note = tax_exempt_line(est) %}{% if exempt_note %}
+            <tr><td colspan="2" class="tax-exempt">{{ exempt_note }}</td></tr>
+            {% endif %}
         </table>
     </div>{% endif %}
 
@@ -276,6 +283,9 @@
             <tr><td class="label">Tax ({{ est.tax_rate | tax_percent }}%)</td><td class="r">{{ est.tax_amount | currency }}</td></tr>
             {% endif %}
             <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
+            {% set exempt_note = tax_exempt_line(est) %}{% if exempt_note %}
+            <tr><td colspan="2" class="tax-exempt">{{ exempt_note }}</td></tr>
+            {% endif %}
         </table>
     </div>
     {% endif %}

@@ -48,6 +48,7 @@
     .totals td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .totals .label { font-weight: 700; color: #4a4a6a; }
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
+    .totals td.tax-exempt { padding-top: 6px; font-size: 8.5pt; font-style: italic; color: #333; text-align: right; }
     .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
     .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
     .footer .invoice-footer { font-size: 8pt; color: #4a4a6a; margin-bottom: 2px; }
@@ -214,6 +215,9 @@
             {% elif inv.amount_paid and inv.amount_paid != 0 %}
             <tr><td class="label">{% if nonprofit %}Received{% else %}Paid{% endif %}</td><td class="r">{{ inv.amount_paid | currency(cur) }}</td></tr>
             <tr><td class="label grand">{% if kind == 'Pledge' %}Balance{% else %}Balance Due{% endif %}</td><td class="r grand">{{ inv.balance_due | currency(cur) }}</td></tr>
+            {% endif %}
+            {% set exempt_note = tax_exempt_line(inv) %}{% if exempt_note %}
+            <tr><td colspan="2" class="tax-exempt">{{ exempt_note }}</td></tr>
             {% endif %}
         </table>
     </div>

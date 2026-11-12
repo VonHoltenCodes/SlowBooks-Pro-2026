@@ -52,6 +52,7 @@ from app.services.contracts import (
     sync_contingency_line,
 )
 from app.services.estimating import estimate_totals
+from app.services.tax_exemption import CERTIFICATE_COLUMNS, settle_job_certificate
 from app.services.accounting import _q
 from app.services.closing_date import check_closing_date
 from app.models.job_costing import JobBudget
@@ -706,11 +707,11 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
     )
 
 
-def _sov_mapping(line, row, shared=None) -> dict:
+def _sov_mapping(line, row, shared=None, job_taxable=True) -> dict:
     """A saved line's revenue account and taxable flag: what the request
     sent, else what the existing line `row` had, else for a new line the
     account `shared` every line on the schedule credits, else no account
-    (4050 at posting); and taxed."""
+    (4050 at posting); and taxed, unless the job is exempt (#864)."""
     sent = line.model_fields_set
     if "revenue_account_id" in sent:
         revenue = line.revenue_account_id
@@ -719,7 +720,7 @@ def _sov_mapping(line, row, shared=None) -> dict:
     if "is_taxable" in sent and line.is_taxable is not None:
         taxable = line.is_taxable
     else:
-        taxable = bool(row.is_taxable) if row is not None else True
+        taxable = bool(row.is_taxable) if row is not None else job_taxable
     return {"revenue_account_id": revenue, "is_taxable": taxable}
 
 
@@ -731,7 +732,8 @@ def _save_sov_replace(db: Session, job: Job, lines, kept, shared=None) -> None:
             SovLine.job_id == job.id, SovLine.kind != "change_order"
         )
     }
-    mapping = [_sov_mapping(line, old.get(line.id), shared) for line in lines]
+    taxed = job.is_taxable is not False
+    mapping = [_sov_mapping(line, old.get(line.id), shared, taxed) for line in lines]
     db.query(SovLine).filter(
         SovLine.job_id == job.id, SovLine.kind != "change_order"
     ).delete()
@@ -821,7 +823,7 @@ def _save_sov_with_billings(
                     cost_code_id=line.cost_code_id,
                     kind=line.kind,
                     scheduled_value=line.scheduled_value,
-                    **_sov_mapping(line, None, shared),
+                    **_sov_mapping(line, None, shared, job.is_taxable is not False),
                 )
             )
     for line_id, row in existing.items():
@@ -1018,7 +1020,11 @@ def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not db.get(Customer, data.customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
     _check_name_clash(db, data.customer_id, data.name)
-    job = Job(**data.model_dump())
+    values = data.model_dump()
+    # Charged unless it says exempt; exempt needs its certificate (#864)
+    values["is_taxable"] = values.get("is_taxable") is not False
+    settle_job_certificate(values)
+    job = Job(**values)
     _stamp_closed_on(job, None)
     db.add(job)
     db.commit()
@@ -1045,6 +1051,10 @@ def update_job(job_id: int, data: JobUpdate, db: Session = Depends(get_db)):
             changes["contract_amount"] = _q(changes["contract_amount"])
         _refuse_sum_change(db, job, changes["contract_amount"])
     _follow_original(job, changes)
+    # Exempt needs its certificate; back to charged clears it (#864). A
+    # document made exempt kept its own copy, so none of them changes.
+    if "is_taxable" in changes or any(col in changes for col in CERTIFICATE_COLUMNS):
+        settle_job_certificate(changes, job)
     was = job.status
     for key, value in changes.items():
         setattr(job, key, value)

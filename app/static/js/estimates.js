@@ -338,7 +338,7 @@ const EstimatesPage = {
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((est.tax_rate || 0) * 100).toFixed(4)}"
                             oninput="EstimatesPage.recalc()"></div>
-                    ${classGroup}${jobGroup}
+                    ${classGroup}${jobGroup}${TaxExempt.switchHtml(!!est.tax_exempt, 'EstimatesPage.recalc()')}
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <div class="table-container table-container--scroll"><table class="line-items-table">
@@ -368,6 +368,8 @@ const EstimatesPage = {
                 </div>
             </form>`, { wide: true, onClose: () => PendingFiles.discard() });
         typeof LineOrder !== 'undefined' && LineOrder.attach('#est-lines', { add: () => EstimatesPage.addLine(), changed: () => EstimatesPage.recalc() });
+        // the Tax exempt switch follows a change of job (#864)
+        TaxExempt.watchJob($('#est-form'), () => EstimatesPage.recalc());
         EstimatesPage.recalc();
     },
 
@@ -783,7 +785,7 @@ const EstimatesPage = {
 
     recalc() {
         if (Terms.isConstruction()) { EstimatesPage.liftAlternateMins(); EstimatesPage.syncRatesToCost(); }
-        TaxExempt.enforce(EstimatesPage._customers, $('#est-customer-select')?.value, $('#est-lines'));
+        TaxExempt.enforce(EstimatesPage._customers, $('#est-customer-select')?.value, $('#est-lines'), $('#est-form'));
         const t = SalesLines.totals($('#est-lines'), $('#est-form [name="tax_rate"]')?.value);
         // Construction replaces the plain Subtotal/Tax/Total panel with the
         // bid panel (lines at cost, markups under the subtotal, #551); the
@@ -893,6 +895,7 @@ const EstimatesPage = {
             notes: form.notes.value || null,
             class_id: classIdFromForm(form),
             job_id: jobIdFromForm(form),
+            tax_exempt: TaxExempt.value(form),
             lines,
         };
         // Compounding markups only exist on the commercial construction form;

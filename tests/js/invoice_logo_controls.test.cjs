@@ -24,6 +24,7 @@ function fixture(settings = {}) {
         })[character]),
         formatDate: value => value, formatCurrency: value => `$${value}`, statusBadge: value => value,
         todayISO: () => '2026-09-26', classFormGroupHtml: async () => '', jobFormGroupHtml: async () => '',
+        TaxExempt: { enforce() {}, switchHtml: () => '', watchJob() {}, value: () => undefined },
         currencyFormGroupsHtml: () => '', openModal: (title, html) => dialogs.push({ title, html }),
         // The form's currency listener and the view's credit note look
         // elements up (2.18.0); this fake dialog has none.

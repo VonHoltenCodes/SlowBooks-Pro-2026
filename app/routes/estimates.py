@@ -45,6 +45,7 @@ from app.services.estimating import (
 )
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
+from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
@@ -96,6 +97,7 @@ _FROZEN_ON_SETTLE = {
     "fee_pct",
     "bond_pct",
     "markup_allowances",
+    "tax_exempt",
 }
 
 
@@ -218,7 +220,9 @@ def _lines_changed(db: Session, estimate: Estimate, sent_lines) -> bool:
     get the same settling a save gives them (tax flag, at-cost rate, cost
     type) on copies, so an unchanged form payload compares equal."""
     sent = [ln.model_copy() for ln in sent_lines]
-    resolve_line_taxable(db, sent, db.get(Customer, estimate.customer_id))
+    resolve_line_taxable(
+        db, sent, db.get(Customer, estimate.customer_id), estimate.tax_exempt
+    )
     _enforce_at_cost(sent, terms_from_db(db).is_construction)
     for ln in sent:
         ln.cost_type = line_cost_type(db, ln.cost_code_id, ln.cost_type)
@@ -429,7 +433,10 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     # The estimate is addressed to the customer, as an invoice is; it was
     # never filled, so its PDF and the invoice it became had no address.
     bill_to = _customer_bill_to(customer)
-    resolve_line_taxable(db, data.lines, customer)
+    # the Tax exempt switch: as sent, else the job's, else the customer's
+    # (#864); on, no line is taxed
+    exempt = settle_tax_exempt(db, data.tax_exempt, customer, data.job_id)
+    resolve_line_taxable(db, data.lines, customer, exempt)
     # The markups are a construction-mode field: a Business or Nonprofit
     # estimate stores 0 whatever an API caller sent, so its totals, PDF and
     # the pure bid math all agree without a company gate inside the math.
@@ -480,6 +487,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             notes=data.notes,
             class_id=data.class_id,
             job_id=data.job_id,
+            tax_exempt=exempt,
             gc_pct=data.gc_pct,
             insurance_pct=data.insurance_pct,
             fee_pct=data.fee_pct,
@@ -592,8 +600,22 @@ def update_estimate(
     # must leave the estimate on its customer's jobs (NEW-36); what it
     # leaves alone is not judged.
     refuse_other_customers_jobs_on_edit(db, estimate, changes, data.lines, "estimate")
+    was_exempt = estimate.tax_exempt
+    was_job = estimate.job_id
     for key, val in changes.items():
         setattr(estimate, key, val)
+    # the switch as sent, else as it was; always on for a non-taxable
+    # customer (#864)
+    estimate.tax_exempt = settle_tax_exempt(
+        db,
+        changes.get("tax_exempt"),
+        db.get(Customer, estimate.customer_id),
+        estimate.job_id,
+        current=was_exempt,
+    )
+    # exempt with no copy of its job's certificate yet (or on another job
+    # now), it takes one; a copy already taken stays as it was (#864)
+    refresh_certificate_copy(db, estimate, estimate.job_id != was_job)
 
     # The markups are a construction-mode field: a Business or Nonprofit
     # estimate keeps them at 0 whatever an API caller sent (#551).
@@ -615,7 +637,12 @@ def update_estimate(
         # taxed on the invoice the estimate became (found integrating the
         # 2.17.3 exploratory fixes). The customer is the one the estimate
         # has after this edit.
-        resolve_line_taxable(db, data.lines, db.get(Customer, estimate.customer_id))
+        resolve_line_taxable(
+            db,
+            data.lines,
+            db.get(Customer, estimate.customer_id),
+            estimate.tax_exempt,
+        )
         # construction lines are priced from their cost before they are
         # stored (#551, #774)
         priced_warnings = _enforce_at_cost(data.lines, is_construction)
@@ -668,7 +695,7 @@ def update_estimate(
         estimate.subtotal = subtotal
         estimate.tax_amount = tax_amount
         estimate.total = total
-    elif any(
+    elif estimate.tax_exempt != was_exempt or any(
         k in changes
         for k in ("tax_rate", "customer_id", "markup_allowances", *_MARKUP_PCTS)
     ):
@@ -677,8 +704,14 @@ def update_estimate(
         # the old tax and total in place), and a non-taxable customer's
         # exemption covers them.
         stored = list(estimate.lines)
-        if "customer_id" in changes:
-            resolve_line_taxable(db, stored, db.get(Customer, estimate.customer_id))
+        if "customer_id" in changes or estimate.tax_exempt and not was_exempt:
+            # switched on (#864): every stored line goes untaxed
+            resolve_line_taxable(
+                db,
+                stored,
+                db.get(Customer, estimate.customer_id),
+                estimate.tax_exempt,
+            )
         subtotal, tax_amount, total = estimate_document_totals(
             stored,
             estimate.tax_rate,
@@ -930,7 +963,11 @@ def convert_to_invoice(
     # The bid's own lines only: unit prices are a rate card and an alternate
     # becomes scope only once accepted, so neither converts (#551).
     kept = [ln for ln in estimate.lines if is_included_line(ln)]
-    copied = taxed_copy_lines(kept, estimate.customer)
+    # the invoice keeps the estimate's Tax exempt switch (#864)
+    exempt = settle_tax_exempt(
+        db, bool(estimate.tax_exempt), estimate.customer, estimate.job_id
+    )
+    copied = taxed_copy_lines(kept, estimate.customer, exempt)
     # The four markups ride the invoice as their own lines under the copied
     # scope, so the invoice foots to the bid (#551): one line per non-zero
     # markup, split into the part on taxable lines and the rest as the
@@ -1015,6 +1052,7 @@ def convert_to_invoice(
         balance_due=total,
         class_id=estimate.class_id,
         job_id=header_job_id,
+        tax_exempt=exempt,
         # the estimate's own notes; else what a new invoice starts with (#392)
         notes=estimate.notes
         or default_message_body(db)

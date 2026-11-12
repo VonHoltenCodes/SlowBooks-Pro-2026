@@ -590,6 +590,9 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
             data.retainage_pct if data.retainage_pct is not None else job.retainage_pct
         ),
         tax_rate=_estimate_tax_rate(db, job),
+        # an exempt job's new application bills no tax (#864); one already
+        # made keeps its own Charge tax when the job changes
+        charge_tax=job.is_taxable is not False,
         notes=data.notes,
     )
     db.add(app)

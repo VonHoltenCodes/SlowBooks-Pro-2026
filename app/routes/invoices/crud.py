@@ -11,6 +11,7 @@ from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.items import Item
 from app.models.contacts import Customer
 from app.services.sub_customers import INVOICE_ADDRESS_FIELDS, invoice_addresses
+from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
 from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.accounting import (
     _q,
@@ -185,7 +186,10 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     due_date = data.due_date or _due_date_from_terms(db, data.date, data.terms)
     refuse_due_before_date(data.date, due_date)
     refuse_negative_lines(db, data.lines)
-    resolve_line_taxable(db, data.lines, customer)
+    # the Tax exempt switch: as sent, else the job's, else the customer's
+    # (#864); on, no line is taxed
+    exempt = settle_tax_exempt(db, data.tax_exempt, customer, data.job_id)
+    resolve_line_taxable(db, data.lines, customer, exempt)
     subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
     confirm_zero_total(total, data.allow_zero_total, noun)
     _check_fair_value(data.fair_value_amount, total)
@@ -244,6 +248,7 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
             notes=data.notes,
             class_id=data.class_id,
             job_id=data.job_id,
+            tax_exempt=exempt,
             is_pledge=data.is_pledge,
             fair_value_amount=data.fair_value_amount,
             fair_value_description=data.fair_value_description,
@@ -477,6 +482,16 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             db, currency, rate
         )
 
+    # The switch the edit leaves (#864): as sent, else as it was; on for a
+    # non-taxable customer, the one the invoice has after the edit.
+    exempt_after = settle_tax_exempt(
+        db,
+        update_data.get("tax_exempt"),
+        db.get(Customer, update_data.get("customer_id", invoice.customer_id)),
+        update_data.get("job_id", invoice.job_id),
+        current=invoice.tax_exempt,
+    )
+    update_data["tax_exempt"] = exempt_after
     repost_fields = {
         "tax_rate",
         "currency",
@@ -484,6 +499,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         "class_id",
         "job_id",
         "customer_id",
+        "tax_exempt",
     }
     needs_recompute = data.lines is not None or any(
         key in update_data and update_data[key] != getattr(invoice, key)
@@ -496,7 +512,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             customer = db.get(
                 Customer, update_data.get("customer_id", invoice.customer_id)
             )
-            resolve_line_taxable(db, data.lines, customer)
+            resolve_line_taxable(db, data.lines, customer, exempt_after)
             effective_lines = data.lines
         else:
             effective_lines = list(invoice.lines)
@@ -506,8 +522,14 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 # customer's exemption covers the stored lines too, as it
                 # does on create (found integrating the 2.17.3 fixes).
                 resolve_line_taxable(
-                    db, effective_lines, db.get(Customer, new_customer_id)
+                    db,
+                    effective_lines,
+                    db.get(Customer, new_customer_id),
+                    exempt_after,
                 )
+            elif exempt_after and not invoice.tax_exempt:
+                # switched on without resending the lines (#864)
+                resolve_line_taxable(db, effective_lines, None, True)
         tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
         subtotal, tax_amount, total = _compute_totals(effective_lines, tax_rate)
         kept = kept_tax(invoice, tax_rate, effective_lines)
@@ -591,6 +613,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 posting.date = data.date
 
     previous_customer_id = invoice.customer_id
+    previous_job_id = invoice.job_id
     terms_before = invoice.terms
     # An explicit pick of a list entry is set through picked_term_id below,
     # not straight onto the column, so a bad one is refused (#664).
@@ -607,6 +630,9 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     # so a legacy invoice can finally follow a term added since (#664).
     if pick is not None:
         invoice.payment_term_id = picked_term_id(db, invoice.terms, pick)
+    # Exempt with no copy of its job's certificate yet (or on another job
+    # now), it takes one; a copy already taken stays as it was (#864).
+    refresh_certificate_copy(db, invoice, invoice.job_id != previous_job_id)
     # Terms changed (or a pick) and no due date sent: recompute it from the
     # new rule, as bills.py does (#664). A recomputed date before the
     # invoice date (Net -5) is refused, as on create.

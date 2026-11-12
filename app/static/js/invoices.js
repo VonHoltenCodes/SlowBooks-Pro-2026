@@ -811,7 +811,7 @@ const InvoicesPage = {
                             title="Auto-calculated from Date + Terms. Edit to override."></div>
                     <div class="form-group"><label>PO #</label>
                         <input name="po_number" value="${escapeHtml(inv.po_number || '')}"></div>
-                    ${classGroup}${jobGroup}${pledgeGroup}
+                    ${classGroup}${jobGroup}${TaxExempt.switchHtml(!!inv.tax_exempt, 'InvoicesPage.recalc()')}${pledgeGroup}
                     ${currencyFormGroupsHtml(inv.currency, inv.exchange_rate)}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((inv.tax_rate || 0) * 100).toFixed(4)}"
@@ -849,6 +849,8 @@ const InvoicesPage = {
                 </div>
             </form>`, { onClose: () => PendingFiles.discard() });
         if (!id && inv.customer_id) InvoicesPage.customerSelected(inv.customer_id);
+        // the Tax exempt switch follows a change of job (#864)
+        TaxExempt.watchJob($('#invoice-form'), () => InvoicesPage.recalc());
         // the totals carry the document's currency; follow a change of it
         $('#invoice-form [name="currency"]')?.addEventListener('change', () => InvoicesPage.recalc());
         typeof LineOrder !== 'undefined' && LineOrder.attach('#inv-lines', { add: () => InvoicesPage.addLine(), changed: () => InvoicesPage.recalc() });
@@ -967,7 +969,7 @@ const InvoicesPage = {
     },
 
     recalc() {
-        TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'));
+        TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'), $('#invoice-form'));
         const cur = $('#invoice-form [name="currency"]')?.value;
         const rate = $('#invoice-form [name="tax_rate"]')?.value;
         const t = SalesLines.totals($('#inv-lines'), rate, cur);
@@ -1047,6 +1049,7 @@ const InvoicesPage = {
             is_pledge: form.is_pledge ? form.is_pledge.checked : false,
             class_id: classIdFromForm(form),
             job_id: jobIdFromForm(form),
+            tax_exempt: TaxExempt.value(form),
             ...currencyPayloadFromForm(form),
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
             notes: form.notes.value || null,

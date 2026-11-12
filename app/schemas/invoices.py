@@ -124,6 +124,13 @@ class InvoiceCreate(StrictModel):
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    tax_exempt: Optional[bool] = Field(
+        None,
+        description="The document's Tax exempt switch (#864): true untaxes "
+        "every line. Left out, a new one starts as its job is, else its "
+        "customer, and an edit keeps what it had. A non-taxable customer's "
+        "document is always exempt.",
+    )
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     lines: list[InvoiceLineCreate] = []
@@ -183,6 +190,7 @@ class InvoiceUpdate(StrictModel):
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    tax_exempt: Optional[bool] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     is_pledge: Optional[bool] = None
@@ -292,6 +300,13 @@ class InvoiceResponse(BaseModel):
     # QuickBooks Online import carried over, #704).
     notice: Optional[str] = None
     is_sales_receipt: bool = False
+    tax_exempt: bool = False
+    # its own copy of the job's certificate, taken when it was made exempt
+    # (#864); none: the PDF says plain "Sales tax exempt"
+    exempt_certificate_number: Optional[str] = None
+    exempt_certificate_state: Optional[str] = None
+    exempt_certificate_kind: Optional[str] = None
+    exempt_certificate_expires: Optional[dt_date] = None
     is_pledge: bool = False
     fair_value_amount: Optional[Decimal] = None
     fair_value_description: Optional[str] = None

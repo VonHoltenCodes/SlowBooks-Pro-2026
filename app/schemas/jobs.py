@@ -50,6 +50,25 @@ class JobCreate(StrictModel):
     end_date: Optional[dt_date] = None
     contract_amount: Optional[Money] = None
     notes: Optional[str] = None
+    # "Sales tax: charged" (true) or "exempt" (false), #864; left out,
+    # charged. Exempt needs the certificate below.
+    is_taxable: Optional[bool] = Field(
+        None,
+        description="Sales tax charged on the job's sales (true, the default) "
+        "or the job exempt (false). Exempt needs the certificate's number, "
+        "state and kind; new documents and new schedule-of-values lines for "
+        "the job start untaxed.",
+    )
+    exempt_certificate_number: Optional[str] = Field(None, max_length=50)
+    exempt_certificate_state: Optional[str] = Field(
+        None, max_length=20, description="The state or jurisdiction."
+    )
+    exempt_certificate_kind: Optional[str] = Field(
+        None,
+        max_length=20,
+        description="public_entity, nonprofit, resale or other.",
+    )
+    exempt_certificate_expires: Optional[dt_date] = None
 
     _name = field_validator("name")(_clean_name)
     _status = field_validator("status")(_check_status)
@@ -69,6 +88,13 @@ class JobUpdate(StrictModel):
     contract_amount: Optional[Money] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    # Changing it changes the job's new documents only (#864); back to
+    # charged clears the certificate.
+    is_taxable: Optional[bool] = None
+    exempt_certificate_number: Optional[str] = Field(None, max_length=50)
+    exempt_certificate_state: Optional[str] = Field(None, max_length=20)
+    exempt_certificate_kind: Optional[str] = Field(None, max_length=20)
+    exempt_certificate_expires: Optional[dt_date] = None
 
     @field_validator("name")
     @classmethod
@@ -95,6 +121,11 @@ class JobResponse(BaseModel):
     contract_amount: Optional[Decimal] = None
     notes: Optional[str] = None
     is_active: bool
+    is_taxable: bool = True
+    exempt_certificate_number: Optional[str] = None
+    exempt_certificate_state: Optional[str] = None
+    exempt_certificate_kind: Optional[str] = None
+    exempt_certificate_expires: Optional[dt_date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
