@@ -66,7 +66,7 @@ function sourceWord(type, kind) {
         job_cost: () => `${T('Job')} cost`, payroll: 'Pay run', pto: 'Time off accrual',
         in_kind_gift: 'In-kind gift', restriction_release: 'Release from restriction',
         functional_allocation: 'Functional allocation', late_fee: 'Late fee',
-        adjustment: 'Inventory adjustment', sales_tax_payment: 'Sales tax payment',
+        adjustment: 'Inventory adjustment', inventory_adjustment: 'Inventory adjustment', sales_tax_payment: 'Sales tax payment',
         iif_import: 'IIF import', depreciation: 'Depreciation',
         asset_acquisition: 'Asset acquisition', asset_disposal: 'Asset disposal',
         qbo_ledger: 'QuickBooks import', qbo_journal: 'QuickBooks journal', qbo_cogs: 'QuickBooks cost of goods',

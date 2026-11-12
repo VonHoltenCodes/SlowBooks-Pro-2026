@@ -573,6 +573,121 @@ def record_adjustment(
     )
 
 
+# The source an adjustment of several items posts under (#801): its entry
+# and its movements carry the InventoryAdjustment's id. A one-item
+# adjustment keeps "adjustment" and the item's id, as it always has.
+MULTI_ADJUSTMENT_SOURCE = "inventory_adjustment"
+
+
+def adjustment_offset_account_id(db: Session) -> Optional[int]:
+    """Where an adjustment's other side posts: #5900 Inventory Adjustments,
+    else the chart's first COGS account (record_adjustment's rule)."""
+    adj_acc = db.query(Account).filter(Account.account_number == "5900").first()
+    return adj_acc.id if adj_acc else get_cogs_account_id(db)
+
+
+def record_inventory_adjustment(
+    db: Session,
+    adjustment,
+    lines: list,
+) -> list:
+    """Post an adjustment of several items (#801): one journal entry for
+    the lot and one ADJUSTMENT movement per line, all under
+    (MULTI_ADJUSTMENT_SOURCE, adjustment.id), dated adjustment.date.
+
+    `lines` are (item, quantity_delta, unit_cost or None, memo), checked
+    by the caller: every item tracked, on one line only, every delta
+    non-zero. Each line is record_adjustment's posting: quantity x cost
+    (the average when no cost is given) on the item's inventory account
+    against the adjustment account (#5900, else COGS), and what the pool
+    cannot carry of a cost of its own (_pool_after's residue: a count up
+    into a count below zero, a count down that empties the shelf) on the
+    item's cost of goods account. All of it is lines of the one entry, so
+    the adjustment is one entry on the Journal Entries page and foots. A
+    line at no cost posts no lines; an adjustment whose every line is at no
+    cost posts no entry, as a one-item adjustment at no cost posts none.
+    The caller commits; a refusal from create_journal_entry (a closed
+    period) leaves nothing posted. Returns the movements, in line order."""
+    offset_id = adjustment_offset_account_id(db)
+    entry_lines = []
+    resolved = []
+    for item, quantity_delta, unit_cost, memo in lines:
+        quantity_delta = Decimal(str(quantity_delta))
+        if unit_cost is None:
+            unit_cost = Decimal(str(item.avg_cost or 0))
+        else:
+            unit_cost = Decimal(str(unit_cost))
+        resolved.append((item, quantity_delta, unit_cost, memo))
+        amount = _q(abs(quantity_delta) * unit_cost)
+        asset_id = get_inventory_asset_account_id(db, item)
+        if amount > 0 and asset_id and offset_id:
+            inventory_side = {
+                "account_id": asset_id,
+                "description": f"Inventory adj: {item.name}",
+            }
+            if quantity_delta > 0:
+                entry_lines += [
+                    {**inventory_side, "debit": amount, "credit": Decimal("0")},
+                    {
+                        "account_id": offset_id,
+                        "debit": Decimal("0"),
+                        "credit": amount,
+                        "description": f"Inventory adjustment gain: {item.name}",
+                    },
+                ]
+            else:
+                entry_lines += [
+                    {
+                        "account_id": offset_id,
+                        "debit": amount,
+                        "credit": Decimal("0"),
+                        "description": f"Inventory adjustment loss: {item.name}",
+                    },
+                    {**inventory_side, "debit": Decimal("0"), "credit": amount},
+                ]
+        # each item is on one line, so its pool is the item's own as it
+        # stands; the residue goes in this entry rather than one of its own
+        _qty, _avg, residue = _pool_after(
+            Decimal(str(item.quantity_on_hand or 0)),
+            Decimal(str(item.avg_cost or 0)),
+            quantity_delta,
+            unit_cost,
+        )
+        entry_lines += _residue_lines(
+            db, item, residue, MULTI_ADJUSTMENT_SOURCE, adjustment.id
+        )
+
+    txn_id = None
+    if entry_lines:
+        count = len(resolved)
+        what = adjustment.memo or (f"{count} item" + ("" if count == 1 else "s"))
+        txn = create_journal_entry(
+            db,
+            adjustment.date,
+            f"Inventory adjustment #{adjustment.id} — {what}",
+            entry_lines,
+            source_type=MULTI_ADJUSTMENT_SOURCE,
+            source_id=adjustment.id,
+        )
+        txn_id = txn.id
+    adjustment.transaction_id = txn_id
+
+    return [
+        _append_movement(
+            db,
+            item,
+            MovementType.ADJUSTMENT,
+            quantity=quantity_delta,
+            unit_cost=unit_cost,
+            source_type=MULTI_ADJUSTMENT_SOURCE,
+            source_id=adjustment.id,
+            transaction_id=txn_id,
+            memo=memo,
+        )
+        for item, quantity_delta, unit_cost, memo in resolved
+    ]
+
+
 def _returned_against(db: Session, sale_ids: list) -> dict:
     """Per sale posting id: the quantity that credit memo returns naming it
     have put back, net of the voids that took those returns out again (a
@@ -936,31 +1051,17 @@ def receipts_left(db: Session, source_type: str, source_id: int) -> list:
     return out
 
 
-def _post_residue(
-    db: Session,
-    item: Item,
-    residue: Decimal,
-    source_type: str,
-    source_id: int,
-    txn_date,
-    memo: Optional[str],
-) -> Optional[int]:
-    """Post what a movement at a cost of its own left between the ledger's
-    Inventory and quantity x average (_pool_after's residue, #647), under the
-    caller's source: Dr Cost of Goods Sold / Cr Inventory for value left
-    with no stock to carry it (a take-out that empties the shelf, stock into
-    a count below zero that cost more than the units sold ahead were costed
-    at), Dr Inventory / Cr Cost of Goods Sold for the reverse (a take-out
-    worth more than the stock held, stock into the hole that cost less). The
-    entry is "{memo} - Inventory set to quantity x average cost: {item}",
-    so a drill-down says why it is there. The cost side is the item's
-    COGS account (its own, else the chart's) and the asset side the item's
-    inventory account, where a sale of the item would post today. Returns
-    the entry's id, or None when there is nothing to post or no account to
-    post it to (logged, as reverse_sale logs a piece it cannot place)."""
+def _residue_lines(
+    db: Session, item: Item, residue: Decimal, source_type: str, source_id
+) -> list:
+    """The two lines that post a residue (_post_residue's, #647): Dr Cost of
+    Goods Sold / Cr Inventory when it is positive, the reverse when it is
+    negative, on the item's COGS and inventory accounts. Empty when there is
+    nothing to post or no account to post it to (logged). An adjustment of
+    several items (#801) puts these lines in its one entry."""
     amount = _q(residue)
     if amount == 0:
-        return None
+        return []
     asset_id = get_inventory_asset_account_id(db, item)
     cogs_id = get_cogs_account_id(db, item)
     if not (asset_id and cogs_id):
@@ -972,7 +1073,7 @@ def _post_residue(
             item.id,
             amount,
         )
-        return None
+        return []
     if amount > 0:
         lines = [
             {
@@ -1003,6 +1104,34 @@ def _post_residue(
                 "description": f"COGS: {item.name}",
             },
         ]
+    return lines
+
+
+def _post_residue(
+    db: Session,
+    item: Item,
+    residue: Decimal,
+    source_type: str,
+    source_id: int,
+    txn_date,
+    memo: Optional[str],
+) -> Optional[int]:
+    """Post what a movement at a cost of its own left between the ledger's
+    Inventory and quantity x average (_pool_after's residue, #647), under the
+    caller's source: Dr Cost of Goods Sold / Cr Inventory for value left
+    with no stock to carry it (a take-out that empties the shelf, stock into
+    a count below zero that cost more than the units sold ahead were costed
+    at), Dr Inventory / Cr Cost of Goods Sold for the reverse (a take-out
+    worth more than the stock held, stock into the hole that cost less). The
+    entry is "{memo} - Inventory set to quantity x average cost: {item}",
+    so a drill-down says why it is there. The cost side is the item's
+    COGS account (its own, else the chart's) and the asset side the item's
+    inventory account, where a sale of the item would post today. Returns
+    the entry's id, or None when there is nothing to post or no account to
+    post it to (logged, as reverse_sale logs a piece it cannot place)."""
+    lines = _residue_lines(db, item, residue, source_type, source_id)
+    if not lines:
+        return None
     from datetime import date as _date
 
     txn = create_journal_entry(

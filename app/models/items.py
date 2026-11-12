@@ -17,6 +17,7 @@ from sqlalchemy import (
     Enum,
     Boolean,
     Numeric,
+    Date,
     DateTime,
     Text,
     ForeignKey,
@@ -139,4 +140,26 @@ class InventoryMovement(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     item = relationship("Item", back_populates="movements")
+    transaction = relationship("Transaction", foreign_keys=[transaction_id])
+
+
+class InventoryAdjustment(Base):
+    """One inventory adjustment of several items (#801): a count that moves
+    twenty items is one adjustment, with one journal entry for the lot.
+    Its lines are its movements, source_type "inventory_adjustment" and
+    source_id this id, one per item, so an item's history names the
+    adjustment it was part of. A one-item adjustment made on the item
+    (POST /api/items/{id}/adjust) is not one of these: it keeps its own
+    source_type "adjustment", as before."""
+
+    __tablename__ = "inventory_adjustments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False)
+    memo = Column(Text, nullable=True)
+    # the entry the adjustment posted; None when every line moved stock at
+    # no cost, so there was nothing to post
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
     transaction = relationship("Transaction", foreign_keys=[transaction_id])

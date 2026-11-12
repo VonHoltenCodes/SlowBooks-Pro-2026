@@ -1152,7 +1152,7 @@ const App = {
         'BenefitsPage.retireCode', 'BenefitsPage.seedStandard', 'BenefitsPage.setupAccounts', 'BenefitsPage.rebuildYTD',
         'BenefitsPage.createRemittanceBill', 'BenefitsPage.deleteRate', 'BenefitsPage.deleteGroup',
         'OnboardingPage.completeTask', 'FixedAssetsPage.showPostPurchaseForm', 'FixedAssetsPage.showDisposeForm',
-        'FixedAssetsPage.showDepreciationForm', 'FixedAssetsPage.showImportForm', 'ItemsPage.showAdjust',
+        'FixedAssetsPage.showDepreciationForm', 'FixedAssetsPage.showImportForm', 'ItemsPage.showAdjust', 'ItemsPage.showAdjustMany',
         'BankingPage.voidEntry', 'BankingPage.toggleRegCleared', 'BankingPage.editEntry', 'BankingPage.uploadAttachment', 'BankingPage.deleteAttachment', 'BankingPage.saveEntryAnyway', 'BankingPage.voidTransfer', 'BankingPage.showEntryForm', 'BankingPage.showTransferForm',
         'BankingPage.showAccountForm', 'BankingPage.showOFXImport', 'BankingPage.confirmOFXImport', 'BankingPage.startReconcile',
         'BankingPage.finishReconcile', 'BankingPage.abandonReconcile', 'BankingPage.matchLine', 'BankingPage.showMatch',

@@ -43,6 +43,7 @@ from app.routes import (
     customers_past,
     vendors,
     items,
+    inventory_adjustments,
     invoices,
     estimates,
     payments,
@@ -1745,6 +1746,7 @@ app.include_router(customers_past.router)
 app.include_router(customers.router)
 app.include_router(vendors.router)
 app.include_router(items.router)
+app.include_router(inventory_adjustments.router)
 app.include_router(invoices.router)
 app.include_router(estimates.router)
 app.include_router(payments.router)

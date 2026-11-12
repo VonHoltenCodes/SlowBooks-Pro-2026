@@ -348,9 +348,14 @@ def list_journal_entries(
         # opening balances) are journal entries too, and list here (2.23.2,
         # NEW-118); their Type names the source. So do the Opening Balances
         # page's.
+        # An adjustment of several items (#801) lists too: it is one entry
+        # for the lot, and the Journal Entries page is where it is read.
+        # It is not one of _journal_sources, so it is not voided or
+        # reclassified as a journal of its own.
         q = q.filter(
             or_(
                 Transaction.source_type.in_(_journal_sources()),
+                Transaction.source_type == "inventory_adjustment",
                 (Transaction.source_type == "qbo_ledger")
                 & Transaction.id.in_(report_journals),
             )
@@ -709,6 +714,15 @@ def assert_voidable_kind(txn: Transaction) -> None:
             status_code=400,
             detail="An item's opening stock can't be voided here; correct it "
             "with an inventory adjustment on the item.",
+        )
+    if txn.source_type == "inventory_adjustment":
+        # A reversal would take the value off the books while the movements,
+        # counts and average costs stayed (#801), as with opening stock.
+        raise HTTPException(
+            status_code=400,
+            detail=f"This is inventory adjustment #{txn.source_id}'s entry. It "
+            "can't be voided here, since the counts it moved would stay; "
+            "correct them with another inventory adjustment.",
         )
     if (txn.source_type or "") in _DOCUMENTS_WITH_A_VOID:
         # A document's posting is voided with the document, whose own void
