@@ -186,3 +186,117 @@ def test_void_invoice_creates_reversing_entry(
     # Net effect of original + void should be zero debits and zero credits *per account*,
     # but at minimum totals equal and both nonzero
     assert total_dr == total_cr
+
+
+# ── W-149: a void refused by the closing date names the document ─────────
+
+
+def _close_books(client, iso="2026-09-30"):
+    r = client.put("/api/settings", json={"closing_date": iso})
+    assert r.status_code == 200, r.text
+
+
+def test_an_invoice_voided_in_a_closed_period_is_refused_by_name(
+    client, db_session, seed_accounts, seed_customer
+):
+    inv = _create_invoice(client, seed_customer.id, amount="100.00")
+    _close_books(client)
+    r = client.post(f"/api/invoices/{inv['id']}/void")
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == (
+        f"Invoice {inv['invoice_number']} is dated 2026-04-01, on or before the "
+        "closing date (2026-09-30). Modifications to closed periods are not "
+        "allowed."
+    )
+    from app.models.invoices import Invoice, InvoiceStatus
+
+    db_session.expire_all()
+    assert db_session.get(Invoice, inv["id"]).status != InvoiceStatus.VOID
+
+
+def test_a_sales_receipt_voided_in_a_closed_period_is_refused_by_name(
+    client, seed_accounts, seed_customer
+):
+    r = client.post(
+        "/api/sales-receipts",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "method": "Cash",
+            "lines": [
+                {"description": "Counter sale", "quantity": 1, "rate": 40},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    receipt = r.json()
+    _close_books(client)
+    # the page voids the receipt's payment first, then its invoice: each
+    # refusal names its document
+    r = client.post(f"/api/payments/{receipt['payment']['id']}/void")
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"].startswith(
+        "The 40.00 payment from Test Customer is dated 2026-04-01, on or "
+        "before the closing date (2026-09-30)."
+    )
+    # reopened, the payment voids; closed again, the invoice's own refusal
+    # names it
+    _close_books(client, "2026-01-01")
+    r = client.post(f"/api/payments/{receipt['payment']['id']}/void")
+    assert r.status_code == 200, r.text
+    _close_books(client)
+    r = client.post(f"/api/invoices/{receipt['invoice']['id']}/void")
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"].startswith(
+        f"Sales Receipt {receipt['invoice']['invoice_number']} is dated "
+        "2026-04-01, on or before the closing date (2026-09-30)."
+    )
+
+
+def test_a_credit_memo_voided_in_a_closed_period_is_refused_by_name(
+    client, seed_accounts, seed_customer
+):
+    r = client.post(
+        "/api/credit-memos",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "lines": [{"description": "Credit", "quantity": 1, "rate": 25}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    cm = r.json()
+    _close_books(client)
+    r = client.post(f"/api/credit-memos/{cm['id']}/void")
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"].startswith(
+        f"Credit memo {cm['memo_number']} is dated 2026-04-01, on or before the "
+        "closing date (2026-09-30)."
+    )
+
+
+def test_an_estimate_converted_into_a_closed_period_names_the_estimate(
+    client, seed_accounts, seed_customer
+):
+    from datetime import date, timedelta
+
+    r = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "tax_rate": 0,
+            "lines": [
+                {"description": "x", "quantity": 1, "rate": 100, "line_order": 0}
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    est = r.json()
+    _close_books(client, (date.today() + timedelta(days=1)).isoformat())
+    r = client.post(f"/api/estimates/{est['id']}/convert")
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"].startswith(
+        f"The invoice from estimate {est['estimate_number']} is dated "
+        f"{date.today().isoformat()}, on or before the closing date"
+    )

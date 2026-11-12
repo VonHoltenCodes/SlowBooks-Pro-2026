@@ -914,7 +914,15 @@ def void_payment_unchecked(
         raise HTTPException(status_code=404, detail="Payment not found")
     if payment.is_voided:
         raise HTTPException(status_code=400, detail="Payment already voided")
-    check_closing_date(db, payment.date)
+    payer = payment.customer.name if payment.customer else None
+    check_closing_date(
+        db,
+        payment.date,
+        document=(
+            f"The {Decimal(str(payment.amount or 0)):,.2f} payment"
+            + (f" from {payer}" if payer else "")
+        ),
+    )
     payout_warning = None
     # Money already taken to the bank in a deposit (or received straight
     # into a bank account that has since been reconciled) can't just be

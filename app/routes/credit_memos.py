@@ -413,7 +413,7 @@ def void_credit_memo_unchecked(db: Session, cm: CreditMemo) -> None:
     from app.services.accounting import all_lines, reversing_lines
     from app.services.inventory_hooks import reverse_return_for_credit_memo
 
-    check_closing_date(db, cm.date)
+    check_closing_date(db, cm.date, document=f"Credit memo {cm.memo_number}")
 
     for app_row in list(cm.applications):
         invoice = (

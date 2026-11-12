@@ -82,7 +82,13 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
                 "payment(s) first, then void the invoice."
             ),
         )
-    check_closing_date(db, invoice.date)
+    check_closing_date(
+        db,
+        invoice.date,
+        document=(
+            f"{document_label(invoice, terms_from_db(db))} {invoice.invoice_number}"
+        ),
+    )
 
     # An invoice or sales receipt the QuickBooks Online import created has
     # no posting of its own: the ledger import's posting for it is reversed
