@@ -482,6 +482,18 @@ def import_invoices(db: Session, csv_text: str, dry_run: bool = True) -> dict:
     # one transaction held back (each invoice in a savepoint, so one the
     # invoice path refuses is reported and the rest still add up). Kept
     # only when it is not a dry run and nothing was refused.
+    #
+    # On SQLite the transaction must be begun by hand first (W-148): the
+    # pysqlite driver emits no BEGIN before a SAVEPOINT, so with nothing
+    # written yet the savepoint opened a transaction of its own and its
+    # RELEASE committed the invoice, leaving the final rollback nothing to
+    # undo. begin_write() issues BEGIN IMMEDIATE on this session's
+    # connection when none is open (a no-op on PostgreSQL, and when one
+    # is), so every savepoint nests inside it. It is asked again before
+    # each invoice: a refusal that rolls the whole session back ends the
+    # transaction, and the next savepoint must not open one of its own.
+    from app.database import begin_write
+
     tax_rate = _default_tax_rate(db)
     default_terms = _default_terms(db)
     subtotal = tax = total = Decimal("0")
@@ -521,6 +533,7 @@ def import_invoices(db: Session, csv_text: str, dry_run: bool = True) -> dict:
                     for k, ln in enumerate(lines)
                 ],
             )
+            begin_write(db)
             savepoint = db.begin_nested()
             try:
                 resp = post_invoice(data, db, number=inv["number"])
