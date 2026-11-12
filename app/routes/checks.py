@@ -25,6 +25,7 @@ from app.services.check_numbers import (
 )
 from app.services.closing_date import check_closing_date
 from app.services import bank_check_details
+from app.services import check_memo as check_memo_service
 from app.services.pdf_service import (
     blank_stock,
     generate_check_pdf,
@@ -242,6 +243,7 @@ _SAMPLE_BANK = {
 def test_print_check(
     check_stock: str = Query(default=None),
     check_position: str = Query(default=None),
+    check_memo: str = Query(default=None),
     check_nudge_x_in: str = Query(default=None),
     check_nudge_y_in: str = Query(default=None),
     check_blank_stock: str = Query(default=None),
@@ -289,6 +291,13 @@ def test_print_check(
                 detail="check_position must be one of: bottom, top",
             )
         company["check_position"] = check_position
+    # The sample memo follows the Check memo choice (#800), the form's
+    # unsaved one when it is sent.
+    if check_memo is not None and check_memo not in check_memo_service.CHOICES:
+        raise HTTPException(status_code=422, detail=check_memo_service.REFUSAL)
+    check_data["memo"] = check_memo_service.SAMPLE[
+        check_memo or check_memo_service.choice(db)
+    ]
     for key, value in (
         ("check_blank_stock", check_blank_stock),
         ("check_micr_amount", check_micr_amount),

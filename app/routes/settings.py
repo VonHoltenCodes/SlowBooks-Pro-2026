@@ -21,6 +21,7 @@ from app.database import get_db
 from app.models.settings import DEFAULT_SETTINGS
 from app.schemas.common import StrictModel
 from app.services import bank_check_details
+from app.services import check_memo as _check_memo
 from app.services.nacha_export import validate_routing_number
 from app.services.settings_service import (
     ENCRYPTED_SETTINGS_KEYS,
@@ -89,6 +90,9 @@ ENUM_SETTINGS = {
     # Where the check face prints (#727): bottom = stub / stub / check,
     # top = check / voucher / voucher (QuickBooks' standard voucher stock).
     "check_position": frozenset({"bottom", "top"}),
+    # What a bill payment's check memo carries (#800): the bill's
+    # reference, the bill's memo, or nothing (app/services/check_memo.py).
+    "check_memo": _check_memo.CHOICES,
     "check_blank_stock": frozenset({"true", "false"}),
     "check_micr_amount": frozenset({"true", "false"}),
     "check_amount_no_dollar_sign": frozenset({"true", "false"}),
@@ -116,6 +120,10 @@ COMPANY_TYPE_RESTART_NOTE = (
     "its old words and pages until it is started again; restart it to see "
     "the {kind} ones."
 )
+
+
+# A refusal said in a bookkeeper's words where the bare list would not be.
+ENUM_REFUSALS = {"check_memo": _check_memo.REFUSAL}
 
 
 class SettingsUpdate(BaseModel):
@@ -510,7 +518,8 @@ def update_settings(
         if allowed is not None and value not in allowed:
             raise HTTPException(
                 status_code=422,
-                detail=(
+                detail=ENUM_REFUSALS.get(key)
+                or (
                     f"{key} must be one of: "
                     + ", ".join(sorted(x for x in allowed if x))
                 ),

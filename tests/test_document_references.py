@@ -132,8 +132,14 @@ def test_estimate_conversion_and_reissue_use_the_same_helper():
     for path in list((ROOT / "app/routes").rglob("*.py")) + list(
         (ROOT / "app/services").rglob("*.py")
     ):
-        if "iif_import" in path.name or "checks.py" in path.name:
-            continue  # QuickBooks interop keeps QuickBooks' words; a vendor's invoice is an invoice
+        if (
+            "iif_import" in path.name
+            or "checks.py" in path.name
+            or "check_memo.py" in path.name
+        ):
+            # QuickBooks interop keeps QuickBooks' words; a vendor's invoice is
+            # an invoice, on a check and on its memo line (#800)
+            continue
         lines = path.read_text(encoding="utf-8").splitlines()
         for n, line in enumerate(lines, 1):
             # black may put the wrapper on the line above the f-string
