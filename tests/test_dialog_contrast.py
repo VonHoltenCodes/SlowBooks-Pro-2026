@@ -377,6 +377,23 @@ def nonprofit(client, seed_accounts):
     return S
 
 
+def _toggle_to(page, handled, theme):
+    """The theme switched on a page already drawn, as the toolbar's toggle
+    switches it: App.toggleTheme sets the attribute and sends
+    slowbooks:themechange, and a page that draws for its theme repaints on
+    it (the dashboard's aging bar picks ink or white for each slice's
+    figure in the theme it is drawn in, NEW-60). Setting the attribute alone
+    left a figure drawn for one theme to be measured in the other (#814)."""
+    page.evaluate(
+        """(t) => { const now = document.documentElement.getAttribute('data-theme')
+                                || 'light';
+                    if (now !== t) App.toggleTheme(); }""",
+        theme,
+    )
+    _theme(page, theme)
+    settle(page, handled)
+
+
 def test_a_nonprofits_pages_and_dialogs_meet_aa_in_both_themes(
     browser, client, nonprofit
 ):
@@ -386,7 +403,7 @@ def test_a_nonprofits_pages_and_dialogs_meet_aa_in_both_themes(
         for route in NONPROFIT_PAGES:
             _visit(page, handled, route)
             for theme in ("dark", "light"):
-                _theme(page, theme)
+                _toggle_to(page, handled, theme)
                 swept[(theme, route)] = page.evaluate(PAGE_SWEEP)
         dialogs, unopened = _dialogs(page, handled, nonprofit, NONPROFIT_DIALOGS)
     finally:
@@ -395,6 +412,10 @@ def test_a_nonprofits_pages_and_dialogs_meet_aa_in_both_themes(
     assert len(dialogs) == 2 * len(NONPROFIT_DIALOGS)
     texts = {it["text"] for items in swept.values() for it in items}
     assert {"+ New Donor", "+ In-Kind Gift", "IK-0001"} <= texts
+    # the pledge's slice of the aging bar carries its figure in both themes,
+    # drawn for the theme it is measured in (#814)
+    for theme in ("dark", "light"):
+        assert "$1.2k" in {it["text"] for it in swept[(theme, "#/")]}
     assert below_threshold({**swept, **dialogs}) == []
 
 
