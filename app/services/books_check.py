@@ -931,8 +931,12 @@ def _payroll_liability_accounts(db: Session) -> list[int]:
             acct = default_account(db, piece)
             if acct is not None:
                 ids.add(acct.id)
-    umbrella = db.query(Account).filter(Account.account_number == "2300").first()
-    if umbrella is not None:
+    # the umbrella the seeded liability pieces sit under (2300 Payroll
+    # Liabilities), read from the pieces themselves rather than by number
+    umbrellas = {
+        n for piece in PIECES if "liability" in piece.kinds for n in piece.numbers[1:]
+    }
+    for umbrella in db.query(Account).filter(Account.account_number.in_(umbrellas)):
         ids.add(umbrella.id)
     if not ids:
         return []
