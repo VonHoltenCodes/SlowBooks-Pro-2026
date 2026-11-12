@@ -268,7 +268,7 @@ The register is the ledger account (v2.10, issue #114). Full guide: [docs/bankin
 ## Dashboard
 - Company Snapshot with Total Receivables, Overdue Invoices, Active Customers, Total Payables
 - **AR Aging Bar Chart** — Color-coded stacked bar (Current / 1–30 / 31–60 / 61+ days past due, with the credits not yet applied); each segment wide enough to hold it carries its figure (v2.22.2)
-- **Monthly Revenue Trend** — Bar chart showing the last 12 months of income from the ledger, the figure above each bar (v2.22.2)
+- **Monthly Revenue Trend** — Bar chart showing the last 12 months of income from the ledger, the figure above each bar (v2.22.2); the WIP schedule's as-of entry and its reversal are left out, so a contractor sees what was billed, with the caption "Billed revenue by month; WIP adjustments are on the P&L" (#805)
 - **Customize** (v2.16.0) — + Add a card from a catalog of sixteen, drag them into place, Reset, Save layout; a nonprofit starts with its own set. Total Payables nets vendor credits (#495)
 - Recent invoices and payments tables
 - Bank balances at a glance
