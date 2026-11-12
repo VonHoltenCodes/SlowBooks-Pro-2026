@@ -2818,6 +2818,7 @@ def run_window(port: int, log_fh=None) -> int:
         # Blocks until the window is closed. private_mode/storage_path:
         # see the comment above where storage_dir is created.
         install_mac_print_panel()
+        install_mac_window_menu()
         webview.start(gui=gui, private_mode=False, storage_path=str(storage_dir))
         # Clean exit: save again in case the closing event never fired.
         save_window_geometry(geometry_tracker.geometry(), geometry_path)
@@ -3387,6 +3388,70 @@ def _repair_schema(argv) -> int:
         print(f"dropped (empty) : {', '.join(result.dropped)}")
     print(f"result          : {'OK' if result.ok else 'FAILED'} - {result.message}")
     return 0 if result.ok else 1
+
+
+# The Mac app's Window menu (#813): pywebview's menu bar has the app menu,
+# View and Edit, and no Window menu, so there was no Minimize and no ⌘M.
+# What a Mac app's Window menu offers, as (title, AppKit action, key);
+# None is a separator.
+MAC_WINDOW_MENU = (
+    ("Minimize", "performMiniaturize:", "m"),
+    ("Zoom", "performZoom:", ""),
+    None,
+    ("Bring All to Front", "arrangeInFront:", ""),
+)
+
+
+def _add_mac_window_menu(AppKit, main_menu, app) -> None:
+    """Append the Window menu to a main menu that has none, and make it the
+    app's windows menu (AppKit lists the open windows under it)."""
+    for i in range(main_menu.numberOfItems()):
+        if main_menu.itemAtIndex_(i).title() == "Window":
+            return
+    menu = AppKit.NSMenu.alloc().initWithTitle_("Window")
+    for entry in MAC_WINDOW_MENU:
+        if entry is None:
+            menu.addItem_(AppKit.NSMenuItem.separatorItem())
+        else:
+            menu.addItemWithTitle_action_keyEquivalent_(*entry)
+    holder = AppKit.NSMenuItem.alloc().init()
+    holder.setTitle_("Window")
+    holder.setSubmenu_(menu)
+    main_menu.addItem_(holder)
+    app.setWindowsMenu_(menu)
+
+
+def install_mac_window_menu() -> bool:
+    """On a Mac, add a Window menu (Minimize ⌘M, Zoom, Bring All to Front)
+    to the menu bar pywebview builds. pywebview rebuilds the bar when the
+    window opens and when a window with its own menu takes the focus, so
+    the menu is added each time it is built. pywebview 6.2's own menu items
+    carry no key equivalent, so ⌘M is set here. Anything unexpected leaves
+    pywebview's bar as it was. Returns whether it was installed."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import AppKit
+        from webview.platforms.cocoa import BrowserView
+    except Exception:
+        return False
+    original = getattr(BrowserView, "_recreate_menus", None)
+    if original is None:
+        return False
+    if getattr(original, "_slowbooks", False):
+        return True
+
+    def recreate(self, user_menu):
+        main_menu = original(self, user_menu)
+        try:
+            _add_mac_window_menu(AppKit, main_menu, BrowserView.app)
+        except Exception:
+            pass  # the bar pywebview built still works
+        return main_menu
+
+    recreate._slowbooks = True
+    BrowserView._recreate_menus = recreate
+    return True
 
 
 def install_mac_print_panel() -> bool:

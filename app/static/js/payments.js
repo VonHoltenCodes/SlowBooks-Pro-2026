@@ -134,7 +134,8 @@ const PaymentsPage = {
                     <div class="form-group"><label for="take-discount-amount">Discount</label>
                         <input id="take-discount-amount" name="discount" class="money" type="number" step="0.01" min="0.01" required value="${cents > 0 ? (cents / 100).toFixed(2) : ''}"></div>
                     <div class="form-group"><label for="take-discount-account">Discount account</label>
-                        <select id="take-discount-account" name="account" data-no-search required>${PaymentTerms.discountAccountOptions(accounts, 'sales')}</select></div>
+                        <select id="take-discount-account" name="account" data-no-search required>${PaymentTerms.discountAccountOptions(accounts, 'sales')}</select>
+                        ${PaymentTerms.createDiscountAccountHtml(accounts, 'sales', 'take-discount-account')}</div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="PaymentsPage.view(${paymentId})">Back</button>
@@ -301,7 +302,7 @@ const PaymentsPage = {
                         <input name="reference"></div>
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
-                            <option value="">${blankDeposit}</option>${bankOpts}</select></div>
+                            <option value=""${undeposited ? ' data-choice' : ''}>${blankDeposit}</option>${bankOpts}</select></div>
                     ${PaymentClass.groupHtml('payment-class')}
                     <div class="form-group full-width"><label>Notes</label>
                         <textarea name="notes"></textarea></div>
@@ -405,6 +406,7 @@ const PaymentsPage = {
             <div class="form-group" id="discount-account-row" hidden style="margin-top:8px; max-width:360px;">
                 <label for="discount-account">Discount account</label>
                 <select id="discount-account" data-no-search>${PaymentTerms.discountAccountOptions(PaymentsPage._accounts || [], 'sales')}</select>
+                ${PaymentTerms.createDiscountAccountHtml(PaymentsPage._accounts || [], 'sales', 'discount-account')}
                 <div class="hint">Where the discounts the ${T('customer')} took post, as a credit memo applied to each ${T('invoice')}.</div></div>
             <div id="alloc-status" style="margin-top:8px; padding:8px 10px; border-radius:4px;
                 background:var(--gray-100); font-size:13px;"></div>`;

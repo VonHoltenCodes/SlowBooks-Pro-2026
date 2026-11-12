@@ -3,6 +3,18 @@
  * Feature 2: Weekly/monthly/quarterly/yearly templates
  */
 const RecurringPage = {
+    // Every frequency the API takes (recurring_service.FREQUENCIES): the
+    // form offered four of the six, so a daily or twice-a-month schedule
+    // was the API's alone (2.31.14 gate, #813).
+    FREQUENCIES: [
+        ['daily', 'daily'],
+        ['weekly', 'weekly'],
+        ['semimonthly', 'semimonthly (twice a month)'],
+        ['monthly', 'monthly'],
+        ['quarterly', 'quarterly'],
+        ['yearly', 'yearly'],
+    ],
+
     async render() {
         const recs = await API.get('/recurring');
         let html = `
@@ -80,8 +92,8 @@ const RecurringPage = {
                         <select name="customer_id" id="rec-customer-select" required ${locked} onchange="RecurringPage.customerSelected(this.value)"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>Frequency *</label>
                         <select name="frequency">
-                            ${['weekly','monthly','quarterly','yearly'].map(f =>
-                                `<option ${rec.frequency===f?'selected':''}>${f}</option>`).join('')}
+                            ${RecurringPage.FREQUENCIES.map(([f, words]) =>
+                                `<option value="${f}" ${rec.frequency===f?'selected':''}>${words}</option>`).join('')}
                         </select></div>
                     <div class="form-group"><label>Start Date *</label>
                         <input name="start_date" type="date" required ${locked} value="${rec.start_date}"></div>

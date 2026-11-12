@@ -253,8 +253,10 @@ class ComboBox {
                 explicit: opt.hasAttribute('data-explicit'),
                 blank: opt.value === '',        // "Select...": no choice
                 // ...unless its words are a choice: a report's "All" or
-                // "All classes" is the whole list, found by typing it (#813)
-                every: opt.value === '' && /^all\b/i.test(text),
+                // "All classes" is the whole list, and Deposit To's
+                // "Undeposited Funds (deposit later)" (data-choice) is an
+                // account; each is found by typing it (#813)
+                every: opt.value === '' && (/^all\b/i.test(text) || opt.hasAttribute('data-choice')),
             });
         }
         this._items = out;
@@ -287,12 +289,17 @@ class ComboBox {
         return { list, more, total: hits.length };
     }
 
+    // An empty-valued option marked data-choice is a choice, not a
+    // prompt: its words are the box's value, never its placeholder, which
+    // VoiceOver read Deposit To's "Undeposited Funds (deposit later)" as
+    // (2.31.7 gate, #813).
     sync() {
         const sel = this.sel, box = this.box;
         const opt = sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
         const blank = Array.from(sel.options).find(o => o.value === '');
-        box.placeholder = blank ? _cbxText(blank) : '';
-        if (!this.editing) box.value = opt && opt.value !== '' ? _cbxText(opt) : '';
+        const chosen = o => !!o && (o.value !== '' || o.hasAttribute('data-choice'));
+        box.placeholder = blank && !chosen(blank) ? _cbxText(blank) : '';
+        if (!this.editing) box.value = chosen(opt) ? _cbxText(opt) : '';
         box.setCustomValidity(sel.required && !sel.value ? 'Choose one from the list.' : '');
     }
 
