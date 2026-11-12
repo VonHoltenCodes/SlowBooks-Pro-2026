@@ -147,6 +147,9 @@ def test_an_upgraded_loss_is_the_notes_local_date(tmp_path, tz):
         assert _local_date(_parsed(got[2])) == date(2026, 2, 9)
         assert got[3] == "2026-02-10 23:30:00.000000"  # not the upgrade's
 
+        # the report reads through the models, which carry every later
+        # migration's columns: bring the file to the head first
+        command.upgrade(cfg, "head")
         engine = create_engine(f"sqlite:///{db}")
         try:
             with Session(engine) as s:
