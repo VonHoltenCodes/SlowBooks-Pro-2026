@@ -228,3 +228,78 @@ def test_last_emailed_at_carries_the_offset_and_matches_the_log(
     assert listed["last_emailed_at"] == log["sent_at"]
     row = db_session.query(EmailLog).filter(EmailLog.entity_id == inv["id"]).one()
     assert log["sent_at"].startswith(row.sent_at.isoformat()[:19])
+
+
+def test_the_invoice_email_failure_says_the_address_was_refused(
+    client, seed_accounts, smtp
+):
+    inv = _invoice(client)
+    smtp.refuse = True
+    r = _email(client, inv)
+    assert r.status_code == 502, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith("Email could not be sent. " + REFUSED)
+    assert "Settings → Email (SMTP) → Recent sends" in detail
+    # the raw reply stays in the log, not in the answer
+    assert "550" not in detail and "mx.example.net" not in detail
+    assert "Check the SMTP settings" not in detail
+
+
+def test_a_failure_with_nothing_to_say_still_points_at_the_settings(
+    client, seed_accounts, smtp, monkeypatch
+):
+    inv = _invoice(client)
+
+    def odd(*a, **k):
+        raise smtplib.SMTPException("something odd")
+
+    monkeypatch.setattr(smtplib.SMTP, "sendmail", odd, raising=False)
+    r = _email(client, inv)
+    assert r.status_code == 502, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith(
+        "Email could not be sent. Check the SMTP settings under Settings → Email (SMTP)."
+    )
+
+
+def test_the_estimate_email_failure_says_the_address_was_refused(
+    client, seed_accounts, smtp, monkeypatch
+):
+    import app.routes.estimates as estimates_routes
+
+    monkeypatch.setattr(
+        estimates_routes, "generate_estimate_pdf", lambda *a, **k: b"%PDF-"
+    )
+    cust = client.post(
+        "/api/customers", json={"name": "Probe Co", "email": "ap@probe.test"}
+    ).json()
+    est = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": cust["id"],
+            "date": "2026-06-01",
+            "lines": [{"description": "work", "quantity": 1, "rate": 100}],
+        },
+    )
+    assert est.status_code == 201, est.text
+    smtp.refuse = True
+    r = client.post(f"/api/estimates/{est.json()['id']}/email", json={})
+    assert r.status_code == 502, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith("Email could not be sent. " + REFUSED)
+    assert "550" not in detail
+
+
+def test_a_batch_statement_failure_says_the_address_was_refused(
+    client, seed_accounts, smtp, monkeypatch
+):
+    import app.routes.reports.receivables as receivables
+
+    monkeypatch.setattr(receivables, "generate_statement_pdf", lambda *a, **k: b"%PDF-")
+    inv = _invoice(client)
+    assert client.post(f"/api/invoices/{inv['id']}/send").status_code == 200
+    smtp.refuse = True
+    r = client.post("/api/reports/batch-email-statements")
+    assert r.status_code == 200, r.text
+    (error,) = r.json()["errors"]
+    assert error == "Probe Co: the statement could not be sent. " + REFUSED

@@ -220,3 +220,43 @@ def where_to_see_why(admin: bool) -> str:
     if admin:
         return "The reason is under Settings → Email (SMTP) → Recent sends."
     return "An administrator can see why under Settings → Recent sends."
+
+
+def sentence_for_last_send(db, entity_type: str, entity_id) -> str:
+    """The sentence for the send just made for this document, read from the
+    log row send_email() wrote, or "" when there is nothing more to say than
+    that it failed (#811). Call it only after send_email() ran and returned
+    False: every run writes a row, so the newest one for the document is
+    that send's. The raw SMTP text stays on the row, for an administrator."""
+    from app.models.email_log import EmailLog
+    from app.services.settings_service import get_setting_raw
+
+    row = (
+        db.query(EmailLog)
+        .filter(
+            EmailLog.entity_type == (entity_type or ""),
+            EmailLog.entity_id == (entity_id or 0),
+        )
+        .order_by(EmailLog.id.desc())
+        .first()
+    )
+    if row is None or row.status != "failed":
+        return ""
+    sentence = failure_sentence(
+        row.error_message or "", get_setting_raw(db, "smtp_host") or ""
+    )
+    return "" if sentence == _FALLBACK_SENTENCE else sentence
+
+
+def send_failed_detail(db, entity_type: str, entity_id, admin: bool) -> str:
+    """The 502 a document's Email button answers with when the send failed:
+    what went wrong in a sentence when the reply says (#811), else the
+    advice to check the SMTP settings (an administrator's), then where the
+    reason can be read."""
+    sentence = sentence_for_last_send(db, entity_type, entity_id)
+    detail = "Email could not be sent. "
+    if sentence:
+        detail += sentence + " "
+    elif admin:
+        detail += "Check the SMTP settings under Settings → Email (SMTP). "
+    return detail + where_to_see_why(admin)
