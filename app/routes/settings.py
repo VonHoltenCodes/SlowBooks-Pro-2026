@@ -100,6 +100,10 @@ ENUM_SETTINGS = {
     "check_memo": _check_memo.CHOICES,
     "check_blank_stock": frozenset({"true", "false"}),
     "check_micr_amount": frozenset({"true", "false"}),
+    # The deposit slip (#798): plain paper prints SlowBooks' own slip;
+    # preprinted lays the figures onto the bank's slip by
+    # deposit_slip_layout.
+    "deposit_slip_stock": frozenset({"plain", "preprinted"}),
     "check_amount_no_dollar_sign": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),

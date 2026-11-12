@@ -12,7 +12,7 @@ from app.routes._print import print_html
 from collections import Counter
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -215,6 +215,57 @@ def list_deposits(skip: int = 0, limit: int = 25, db: Session = Depends(get_db))
             )
         )
     return out
+
+
+@router.get("/test-slip")
+def test_print_deposit_slip(
+    deposit_slip_layout: str = Query(default=None),
+    deposit_slip_nudge_x_in: str = Query(default=None),
+    deposit_slip_nudge_y_in: str = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """A sample deposit laid onto pre-printed slip stock (#798): made-up
+    figures (two checks, some cash, today's date, "Sample Checking") at the
+    places the layout gives, through the same renderer as a real deposit,
+    so the layout can be lined up by holding the sheet against a slip.
+
+    The Settings page passes the form's current (unsaved) layout and
+    nudges, each checked the way saving it would be; any left out reads the
+    saved setting. It is always the pre-printed slip, whatever the stock
+    setting says, since that is what it lines up. Nothing is stored."""
+    from datetime import date
+
+    from fastapi.responses import Response
+
+    from app.services.pdf_service import SAMPLE_DEPOSIT, generate_deposit_pdf
+    from app.services.request_utils import content_disposition
+    from app.services.settings_service import (
+        SettingValueError,
+        clean_setting_value,
+        get_all_settings,
+    )
+
+    company = dict(get_all_settings(db))
+    for key, value in (
+        ("deposit_slip_layout", deposit_slip_layout),
+        ("deposit_slip_nudge_x_in", deposit_slip_nudge_x_in),
+        ("deposit_slip_nudge_y_in", deposit_slip_nudge_y_in),
+    ):
+        if value is not None:
+            try:
+                company[key] = clean_setting_value(key, value)
+            except SettingValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+    company["deposit_slip_stock"] = "preprinted"
+    sample = {**SAMPLE_DEPOSIT, "date": date.today()}
+    pdf = generate_deposit_pdf(sample, company)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": content_disposition("Deposit_slip_test_print.pdf")
+        },
+    )
 
 
 @router.get("/{deposit_id}", response_model=DepositDetailResponse)
