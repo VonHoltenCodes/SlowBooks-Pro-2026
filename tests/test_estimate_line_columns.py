@@ -3,7 +3,9 @@
 Header: Item, Description, Cost code, Cost, Qty, Rate, Tax, Amount.
 Cells:  Item, Description, Qty, Cost code, Cost, Rate, ...  — so what a
 person typed as a quantity sat under "Cost code". The cell order is pinned
-to the header order here, in the source that renders both.
+to the header order here, in the source that renders both. The Cost header
+and cell are EstimatesPage.costHead / costCell, which a read-only or
+accountant sign-in does not get (#824; tests/js/estimate_cost_roles_824).
 """
 
 import re
@@ -24,7 +26,9 @@ def test_estimate_line_cells_follow_the_header():
     head_order = [
         m
         for m in re.findall(
-            r"<th[^>]*>([^<]*)</th>|\$\{(CostCodes\.headHtml)\(\)\}", head
+            r"<th[^>]*>([^<]*)</th>"
+            r"|\$\{(CostCodes\.headHtml|EstimatesPage\.costHead)\(\)\}",
+            head,
         )
     ]
     head_names = [a or b for a, b in head_order]
@@ -32,14 +36,15 @@ def test_estimate_line_cells_follow_the_header():
         "Item",
         "Description",
         "CostCodes.headHtml",
-        "Cost",
+        "EstimatesPage.costHead",
         "Qty",
     ]
 
     row = JS[JS.index("lineRowHtml(idx, line, items) {") :]
     row = row[: row.index("</tr>`;")]
     cells = re.findall(
-        r'class="(line-item|line-desc|line-unit-cost|line-qty|line-rate)(?: money)?"|(CostCodes\.cellHtml)',
+        r'class="(line-item|line-desc|line-qty|line-rate)(?: money)?"'
+        r"|(CostCodes\.cellHtml|EstimatesPage\.costCell)",
         row,
     )
     cell_names = [a or b for a, b in cells]
@@ -47,7 +52,7 @@ def test_estimate_line_cells_follow_the_header():
         "line-item",
         "line-desc",
         "CostCodes.cellHtml",
-        "line-unit-cost",
+        "EstimatesPage.costCell",
         "line-qty",
         "line-rate",
     ]
