@@ -747,7 +747,7 @@ def email_estimate(
     import html as _html
 
     from app.routes._roles import is_admin
-    from app.services.email_errors import where_to_see_why
+    from app.services.email_errors import send_failed_detail
     from app.services.email_service import (
         _get_smtp_settings,
         bad_addresses,
@@ -805,11 +805,10 @@ def email_estimate(
     # send_email() returns False (and logs why) when SMTP is not set up or the
     # send fails; reporting "sent" regardless would be a lie.
     if not sent:
-        admin = is_admin(request)
-        detail = "Email could not be sent. " + (
-            "Check the SMTP settings under Settings → Email (SMTP). " if admin else ""
+        raise HTTPException(
+            status_code=502,
+            detail=send_failed_detail(db, "estimate", est.id, is_admin(request)),
         )
-        raise HTTPException(status_code=502, detail=detail + where_to_see_why(admin))
     return {"status": "sent"}
 
 
