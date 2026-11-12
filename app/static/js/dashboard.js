@@ -232,7 +232,8 @@ const DashboardPage = {
             return `<div style="display:flex;align-items:flex-end;gap:4px;height:132px">${d.months.map(m => `<div style="flex:1;text-align:center;height:100%;display:flex;flex-direction:column;justify-content:flex-end" title="${m.month} ${m.year}: ${formatCurrency(m.amount)}">
                 <div style="font-size:9px;color:var(--gray-500);line-height:12px">${m.amount ? compactMoney(m.amount) : ''}</div>
                 <div style="width:80%;margin:0 auto;background:var(--qb-blue);height:${Math.max(2, m.amount / max * 80)}%;border-radius:2px 2px 0 0"></div>
-                <div style="font-size:9px;color:var(--gray-500);margin-top:2px">${m.month}</div></div>`).join('')}</div>`;
+                <div style="font-size:9px;color:var(--gray-500);margin-top:2px">${m.month}</div></div>`).join('')}</div>${d.note ? `
+                <div class="dash-card__note" style="font-size:11px;color:var(--gray-500);margin-top:4px">${escapeHtml(d.note)}</div>` : ''}`;
         },
         recent_invoices(d) {
             if (!d.items.length) return '<div style="color:var(--gray-500);font-size:12px">No invoices yet.</div>';

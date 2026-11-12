@@ -268,7 +268,7 @@ The register is the ledger account (v2.10, issue #114). Full guide: [docs/bankin
 ## Dashboard
 - Company Snapshot with Total Receivables, Overdue Invoices, Active Customers, Total Payables
 - **AR Aging Bar Chart** — Color-coded stacked bar (Current / 1–30 / 31–60 / 61+ days past due, with the credits not yet applied); each segment wide enough to hold it carries its figure (v2.22.2)
-- **Monthly Revenue Trend** — Bar chart showing the last 12 months of income from the ledger, the figure above each bar (v2.22.2)
+- **Monthly Revenue Trend** — Bar chart showing the last 12 months of income from the ledger, the figure above each bar (v2.22.2); the WIP schedule's as-of entry and its reversal are left out, so a contractor sees what was billed, with the caption "Billed revenue by month; WIP adjustments are on the P&L" (#805)
 - **Customize** (v2.16.0) — + Add a card from a catalog of sixteen, drag them into place, Reset, Save layout; a nonprofit starts with its own set. Total Payables nets vendor credits (#495)
 - Recent invoices and payments tables
 - Bank balances at a glance
@@ -280,7 +280,7 @@ Real-time business intelligence layer that sits on top of the accounting engine.
 
 **Metrics computed:**
 - **Revenue by Customer** — Paid revenue per customer for the selected period, ranked high-to-low: invoices and sales receipts dated in the period and paid in full, before sales tax and in home currency — what the ledger booked to income for each (v2.22.3; it included the tax)
-- **12-Month Revenue Trend** — Monthly income from the ledger (what was credited to income accounts, by posting date), bucketed by calendar month, with a month-by-month table under the chart; each point's figure sits beside it, never across its own line (v2.22.3; it was paid invoices by invoice date)
+- **12-Month Revenue Trend** — Monthly income from the ledger (what was credited to income accounts, by posting date), bucketed by calendar month, with a month-by-month table under the chart; each point's figure sits beside it, never across its own line (v2.22.3; it was paid invoices by invoice date); like the dashboard card it leaves the WIP entry and its reversal out, with the same caption in construction mode (#805)
 - **Expenses by Category** — Everything posted to expense and cost-of-goods accounts in the period, grouped by account and named as the Profit & Loss names it ("6100 - Auto & Truck Expense"): bills when dated (paid or not), expenses, register entries, card charges, payroll and journal entries, as the Profit & Loss counts them (v2.22.3, #281; it was paid bills only, so a bank-fed, journal-entry company saw nothing). Voided postings net to zero. A slice's figure is drawn only where it reads at AA; the table has every figure. An account that nets to a credit for the period (a refund larger than the spending) keeps its row and its place in the totals but has no slice. The screen and the PDF say the basis
 - **A/R Aging** — Open invoice balances bucketed Current / 1–30 / 31–60 / over 60 days past due, read from the A/R Aging report (home currency, credits netted into Current), so the chart and the report agree. Table is sorted worst-offender first and includes a TOTAL row.
 - **A/P Aging** — Open bill balances bucketed the same way, from the A/P Aging report; as of a date, bills dated after it are left out (v2.22.3, #285). The 1099 Summary and the 1099 forms leave voided bill payments out (v2.22.3, #287)
