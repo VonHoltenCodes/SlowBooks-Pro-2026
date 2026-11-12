@@ -13,14 +13,6 @@
  * `last_verified_at`. That's the manual two-step audit trail.
  */
 const ResellerPermitsPage = {
-    // What a certificate exempts its holder as (#864), as the server names them.
-    KINDS: [
-        ['resale', 'Resale (reseller permit)'],
-        ['public_entity', 'Public entity'],
-        ['nonprofit', 'Nonprofit'],
-        ['other', 'Other exemption'],
-    ],
-
     async render() {
         const [permits, customers, vendors, expiring] = await Promise.all([
             API.get('/reseller-permits'),
@@ -39,16 +31,16 @@ const ResellerPermitsPage = {
 
         const expiringStrip = expiring.length === 0 ? `
             <div class="card note--ok" style="padding:14px;margin-bottom:16px">
-                <strong>All clear.</strong> No active permit or exemption certificate expires within 30 days.
+                <strong>All clear.</strong> No active permits expire within 30 days.
             </div>` : `
             <div class="card note--alert" style="padding:14px;margin-bottom:16px">
-                <strong>${expiring.length} certificate${expiring.length === 1 ? '' : 's'} need${expiring.length === 1 ? 's' : ''} attention</strong>
+                <strong>${expiring.length} permit${expiring.length === 1 ? '' : 's'} need attention</strong>
                 — expires within 30 days or already expired:
                 <ul style="margin:8px 0 0 18px;font-size:13px">
                     ${expiring.map(p => `
                         <li>
                             <strong>${escapeHtml(nameFor(p))}</strong>
-                            (${escapeHtml(p.kind_label || 'Resale')} · ${escapeHtml(p.jurisdiction)} · ${escapeHtml(p.permit_number)}):
+                            (${escapeHtml(p.jurisdiction)} · ${escapeHtml(p.permit_number)}):
                             ${p.is_expired
                                 ? `<span style="color:var(--text-danger)">EXPIRED ${escapeHtml(String(Math.abs(p.days_to_expire)))} day${Math.abs(p.days_to_expire) === 1 ? '' : 's'} ago</span>`
                                 : `expires in <strong>${p.days_to_expire}</strong> day${p.days_to_expire === 1 ? '' : 's'} (${escapeHtml(p.expires_at || '')})`}
@@ -57,7 +49,7 @@ const ResellerPermitsPage = {
             </div>`;
 
         const tableBody = permits.length === 0 ? `
-            <tr><td colspan="8"><em>No reseller permits or exemption certificates on file. Click "+ Add Permit" to record one.</em></td></tr>` :
+            <tr><td colspan="8"><em>No reseller permits on file. Click "+ Add Permit" to record one.</em></td></tr>` :
             permits.map(p => {
                 const status = p.is_expired
                     ? '<span style="color:var(--text-danger);font-weight:600">Expired</span>'
@@ -76,7 +68,6 @@ const ResellerPermitsPage = {
                 // name + tax ID into the state form without manual retyping.
                 return `<tr>
                     <td>${escapeHtml(businessName)}</td>
-                    <td>${escapeHtml(p.kind_label || 'Resale')}</td>
                     <td>${escapeHtml(p.jurisdiction)}</td>
                     <td><code>${escapeHtml(p.permit_number)}</code></td>
                     <td>${p.expires_at ? escapeHtml(p.expires_at) : '<em>—</em>'}</td>
@@ -100,7 +91,6 @@ const ResellerPermitsPage = {
                 <table>
                     <thead><tr>
                         <th scope="col">Held by</th>
-                        <th scope="col">Kind</th>
                         <th scope="col">State</th>
                         <th scope="col">Permit #</th>
                         <th scope="col">Expires</th>
@@ -112,8 +102,6 @@ const ResellerPermitsPage = {
                 </table>
             </div>
             <p style="font-size:12px;color:var(--text-muted);margin-top:12px">
-                Every kind of certificate is kept here: resale permits, and the exemption certificates of public entities and nonprofits.
-                A customer names the one its exempt sales stand on in its record, and an exempt ${T('invoice')} prints it.
                 Reseller permit verification is manual — click "Open WA lookup" (or your state's lookup) to
                 check the permit on the official state site, then click "Mark verified" here to record that you did.
                 Most states have no public real-time API.
@@ -133,7 +121,6 @@ const ResellerPermitsPage = {
         const p = existing || {
             entity_type: 'customer',
             entity_id: customers[0]?.id || null,
-            kind: 'resale',
             jurisdiction: 'WA',
             permit_number: '',
             issued_at: '',
@@ -157,12 +144,6 @@ const ResellerPermitsPage = {
                         <select name="entity_id" id="permit-entity-id">
                             <optgroup label="Customers" id="permit-cust-group">${custOpts}</optgroup>
                             <optgroup label="Vendors" id="permit-vend-group" style="display:none">${vendOpts}</optgroup>
-                        </select></div>
-                </div>
-                <div class="form-grid">
-                    <div class="form-group"><label>Kind</label>
-                        <select name="kind" title="What the certificate exempts the holder as">
-                            ${ResellerPermitsPage.KINDS.map(([k, label]) => `<option value="${k}"${(p.kind || 'resale') === k ? ' selected' : ''}>${label}</option>`).join('')}
                         </select></div>
                 </div>
                 <div class="form-grid">
@@ -236,7 +217,6 @@ const ResellerPermitsPage = {
         const body = {
             entity_type,
             entity_id: entity_type === 'company' ? null : (parseInt(f.entity_id.value, 10) || null),
-            kind: f.kind ? f.kind.value : 'resale',
             jurisdiction: f.jurisdiction.value.trim().toUpperCase(),
             permit_number: f.permit_number.value.trim(),
             issued_at: f.issued_at.value || null,
@@ -422,7 +402,6 @@ const ResellerPermitsPage = {
                 await API.put(`/reseller-permits/${id}`, {
                     entity_type: cur.entity_type,
                     entity_id: cur.entity_id,
-                    kind: cur.kind || 'resale',
                     jurisdiction: cur.jurisdiction,
                     permit_number: cur.permit_number,
                     issued_at: cur.issued_at,

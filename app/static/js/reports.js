@@ -2159,7 +2159,7 @@ const ReportsPage = {
         if (!rows) return '';
         return `
             <h3 style="margin:18px 0 6px; font-size:14px;">Exempt sales</h3>
-            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Sales with no tax, by why: the kind of certificate the ${T('customer')} names when the whole sale is exempt, exempt with no certificate on file, or lines left untaxed on a taxed sale.</p>
+            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Sales with no tax, by why: the kind of certificate the document carries from its ${T('job').toLowerCase()} when the whole sale is exempt, exempt with no certificate on file, or lines left untaxed on a taxed sale.</p>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Reason</th><th scope="col" class="amount">Sales</th></tr></thead>
                 <tbody>${rows}

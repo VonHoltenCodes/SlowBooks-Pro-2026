@@ -36,16 +36,6 @@ from sqlalchemy import (
 
 from app.database import Base
 
-# The certificate kinds (#864) and how the page, the PDF and the Sales Tax
-# report name each.
-CERTIFICATE_KINDS = ("resale", "public_entity", "nonprofit", "other")
-CERTIFICATE_KIND_LABELS = {
-    "resale": "Resale",
-    "public_entity": "Public entity",
-    "nonprofit": "Nonprofit",
-    "other": "Other exemption",
-}
-
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -70,13 +60,6 @@ class ResellerPermit(Base):
     # and bad codes here just won't match any verification URL.
     jurisdiction = Column(String(20), nullable=False, index=True)
     permit_number = Column(String(50), nullable=False, index=True)
-
-    # What the certificate exempts the holder as (#864): "resale" (a
-    # reseller permit, what every row was before), "public_entity" (a city,
-    # school district or other government owner), "nonprofit" (an exempt
-    # organization's certificate) or "other". The Sales Tax report's Exempt
-    # sales section groups by it.
-    kind = Column(String(20), nullable=False, default="resale", server_default="resale")
 
     # Dates as Date (not DateTime) — permits are valid for whole days.
     issued_at = Column(Date, nullable=True)

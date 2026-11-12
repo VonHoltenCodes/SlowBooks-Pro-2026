@@ -145,6 +145,12 @@ class Invoice(Base):
     # receipt's alike: on, no line is taxed and the PDF says so under the
     # totals. A new one starts as its job is, else its customer.
     tax_exempt = Column(Boolean, nullable=False, server_default=false())
+    # Its own copy of the job's exemption certificate (#864), taken when it
+    # is made exempt and never changed by a later edit of the job's.
+    exempt_certificate_number = Column(String(50), nullable=True)
+    exempt_certificate_state = Column(String(20), nullable=True)
+    exempt_certificate_kind = Column(String(20), nullable=True)
+    exempt_certificate_expires = Column(Date, nullable=True)
 
     # Multi-currency: document currency + rate it was booked at (GL is home)
     currency = Column(String(3), nullable=True)

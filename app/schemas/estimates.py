@@ -378,6 +378,12 @@ class EstimateResponse(BaseModel):
     job_name: Optional[str] = None
     job_site_address: Optional[str] = None
     tax_exempt: bool = False
+    # its own copy of the job's certificate, taken when it was made exempt
+    # (#864); none: the PDF says plain "Sales tax exempt"
+    exempt_certificate_number: Optional[str] = None
+    exempt_certificate_state: Optional[str] = None
+    exempt_certificate_kind: Optional[str] = None
+    exempt_certificate_expires: Optional[dt_date] = None
     converted_invoice_id: Optional[int]
     lines: list[EstimateLineResponse] = []
     customer_name: Optional[str] = None

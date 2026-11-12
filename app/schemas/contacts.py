@@ -52,9 +52,6 @@ class CustomerCreate(StrictModel):
     credit_limit: CreditLimit = None
     tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: bool = True
-    # The customer's own exemption certificate on the reseller-permit record
-    # (#864); a new customer has none on file yet, so it is named on an edit.
-    exemption_certificate_id: Optional[int] = None
     notes: Optional[str] = None
     # Nonprofit donor record
     donor_type: Optional[str] = Field(None, max_length=20)
@@ -92,8 +89,6 @@ class CustomerUpdate(StrictModel):
     credit_limit: CreditLimit = None
     tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: Optional[bool] = None
-    # One of this customer's certificates on file (#864); null names none.
-    exemption_certificate_id: Optional[int] = None
     notes: Optional[str] = None
     # Nonprofit donor record
     donor_type: Optional[str] = Field(None, max_length=20)
@@ -147,7 +142,6 @@ class CustomerResponse(BaseModel):
     credit_limit: Optional[Decimal]
     tax_id: Optional[str]
     is_taxable: bool
-    exemption_certificate_id: Optional[int] = None
     notes: Optional[str]
     is_active: bool
     balance: Decimal

@@ -2,7 +2,8 @@
 // is unticked and held off, a new line starts untaxed, and the boxes come
 // back as they were when it goes off. A non-taxable customer holds the
 // switch on. A change of job sets the switch to the job's. The job form's
-// "Sales tax: charged / exempt" follows a new job's customer until set.
+// "Sales tax: charged / exempt" shows and requires the job's certificate
+// when Exempt, and sends none when Charged.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -128,24 +129,98 @@ test('the three document forms carry the switch and send it', () => {
     assert.match(read('utils.js'), /data-taxable="\$\{j\.is_taxable === false \? '0' : '1'\}"/);
 });
 
-test('a new job takes its customer\'s Sales tax until it is set by hand', () => {
+function loadJobsSalesTax() {
     const src = read('jobs.js');
-    const start = src.indexOf('salesTaxGroupHtml(job, id) {');
+    const start = src.indexOf('// "Sales tax: charged / exempt" (#864).');
     const end = src.indexOf('// Active customers only', start);
-    const body = src.slice(start, end);
-    const ctx = {};
+    const ctx = { escapeHtml: (v) => String(v), T: (w) => w };
     vm.createContext(ctx);
-    vm.runInContext(`this.JobsPage = { ${body} };`, ctx);
-    const JobsPage = ctx.JobsPage;
-    JobsPage._formCustomers = customers;
-    assert.match(JobsPage.salesTaxGroupHtml({ is_taxable: false }, null), /<option value="false" selected>Exempt<\/option>/);
-    assert.match(JobsPage.salesTaxGroupHtml({ is_taxable: true }, null), /<option value="true" selected>Charged<\/option>/);
-    const tax = { value: 'true', dataset: {} };
-    const form = { querySelector: () => tax };
-    JobsPage.customerPicked({ form, value: '2' });
-    assert.equal(tax.value, 'false');
-    tax.dataset.touched = '1';
-    JobsPage.customerPicked({ form, value: '1' });
-    assert.equal(tax.value, 'false');
+    vm.runInContext(`this.JobsPage = { ${src.slice(start, end)} };`, ctx);
+    return ctx.JobsPage;
+}
+
+function jobFormOf(values) {
+    const fields = Object.fromEntries(Object.entries(values).map(([name, value]) =>
+        [name, { name, value, disabled: false, required: false }]));
+    const box = { style: { display: 'none' }, querySelectorAll: () => Object.values(fields).filter(f => f.name.startsWith('exempt_')) };
+    return {
+        fields,
+        box,
+        querySelector: (sel) => {
+            if (sel === '.job-exempt-certificate') return box;
+            const m = sel.match(/\[name="([^"]+)"\]/);
+            return m ? fields[m[1]] || null : null;
+        },
+    };
+}
+
+test('the job form asks for the certificate when Exempt and requires it', () => {
+    const JobsPage = loadJobsSalesTax();
+    const charged = JobsPage.salesTaxGroupHtml({ is_taxable: true });
+    assert.match(charged, /<option value="true" selected>Charged<\/option>/);
+    assert.match(charged, /name="exempt_certificate_number" maxlength="50" disabled/);
+    assert.match(charged, /display:none;/);
+    const exempt = JobsPage.salesTaxGroupHtml({
+        is_taxable: false,
+        exempt_certificate_number: 'E-77',
+        exempt_certificate_state: 'IL',
+        exempt_certificate_kind: 'public_entity',
+        exempt_certificate_expires: '2027-06-30',
+    });
+    assert.match(exempt, /<option value="false" selected>Exempt<\/option>/);
+    for (const name of ['exempt_certificate_number', 'exempt_certificate_state', 'exempt_certificate_kind']) {
+        assert.match(exempt, new RegExp(`name="${name}"[^>]* required`), name);
+    }
+    assert.doesNotMatch(exempt, /name="exempt_certificate_expires"[^>]* required/);
+    assert.match(exempt, /value="E-77"/);
+    assert.match(exempt, /<option value="public_entity" selected>Public entity<\/option>/);
+    for (const k of ['public_entity', 'nonprofit', 'resale', 'other']) assert.ok(exempt.includes(`value="${k}"`), k);
+});
+
+test('switching to Exempt shows and requires the certificate; Charged sends none', () => {
+    const JobsPage = loadJobsSalesTax();
+    const form = jobFormOf({
+        is_taxable: 'true',
+        exempt_certificate_number: ' E-9 ',
+        exempt_certificate_state: 'WI',
+        exempt_certificate_kind: 'nonprofit',
+        exempt_certificate_expires: '',
+    });
+    const select = { form, value: 'false' };
+    JobsPage.salesTaxPicked(select);
+    assert.equal(form.box.style.display, '');
+    assert.equal(form.fields.exempt_certificate_number.required, true);
+    assert.equal(form.fields.exempt_certificate_expires.required, false);
+    assert.equal(form.fields.exempt_certificate_expires.disabled, false);
+    form.fields.is_taxable.value = 'false';
     assert.equal(JobsPage.formTaxable(form), false);
+    assert.deepEqual({ ...JobsPage.formCertificate(form) }, {
+        exempt_certificate_number: 'E-9',
+        exempt_certificate_state: 'WI',
+        exempt_certificate_kind: 'nonprofit',
+        exempt_certificate_expires: null,
+    });
+    select.value = 'true';
+    form.fields.is_taxable.value = 'true';
+    JobsPage.salesTaxPicked(select);
+    assert.equal(form.box.style.display, 'none');
+    assert.equal(form.fields.exempt_certificate_number.disabled, true);
+    assert.deepEqual({ ...JobsPage.formCertificate(form) }, {});
+});
+
+test('the job form sends the certificate and the header badge names it', () => {
+    const src = read('jobs.js');
+    assert.ok(src.includes('...JobsPage.formCertificate(form),'));
+    assert.ok(!src.includes('customerPicked'), 'a new job no longer follows its customer');
+    const JobsPage = loadJobsSalesTax();
+    const title = JobsPage.certificateTitle({
+        exempt_certificate_number: 'E-1', exempt_certificate_state: 'IL',
+        exempt_certificate_kind: 'resale', exempt_certificate_expires: '2027-01-31',
+    });
+    assert.match(title, /^Resale certificate E-1 \(IL\), expires 2027-01-31\./);
+});
+
+test('the customer form and the permits page carry no certificate pieces', () => {
+    assert.ok(!read('customers.js').includes('exemption_certificate_id'));
+    assert.ok(!read('reseller_permits.js').includes('kind_label'));
 });

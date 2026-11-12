@@ -1,18 +1,22 @@
-"""Sales tax exemption on file (#864).
+"""Sales tax exemption on the job (#864).
 
-The reseller-permit record holds every exemption certificate (resale, public
-entity, nonprofit, other) and a customer names the one its exempt sales
-stand on. A job is charged sales tax or exempt; an exempt job's new
-documents and new schedule-of-values lines start untaxed. Estimates,
-invoices and sales receipts carry their own Tax exempt switch, which
-unticks every line and prints "Sales tax exempt" (with the certificate)
-under the totals. The Sales Tax report adds the exempt sales by reason, on
-the screen, the PDF and the CSV.
+A job is charged sales tax or exempt. An exempt job holds its own exemption
+certificate: number, state (or jurisdiction) and kind are required, the
+expiry is optional; switching the job back to charged clears it, so a
+certificate lives and dies with its job. Estimates, invoices and sales
+receipts carry their own Tax exempt switch, which unticks every line; one
+made exempt copies its job's certificate into its own columns, and a later
+edit of the job's certificate never changes that copy, so an old PDF and an
+old report reason stay as they were. The PDF prints "Sales tax exempt —
+certificate <number> (<state>)" from the copy, "(expired)" when the copy
+expired before the document's date, plain "Sales tax exempt" with no copy.
+The Sales Tax report lists the exempt sales by reason, from the copies.
 
-What was there stays: a customer marked not taxable is never charged, the
-"new lines taxable" setting starts new lines as before, and a line's own
-Tax box wins on a taxed document. A read-only or accountant role reads all
-of it and writes none; a bookkeeper writes it.
+What was there stays: a customer marked not taxable is never charged and
+its documents are exempt, the "new lines taxable" setting starts new lines
+as before, a line's own Tax box wins on a taxed document, the customer
+record and the Reseller Permits page are as they were. A read-only or
+accountant role reads all of it and writes none; a bookkeeper writes it.
 """
 
 import csv
@@ -32,6 +36,7 @@ from app.services import auth as auth_service
 ROOT = Path(__file__).resolve().parents[1]
 PERIOD = "start_date=2026-07-01&end_date=2026-07-31"
 PW = "exemption-password-864"
+REFUSAL_START = "A tax-exempt job needs its exemption certificate, so enter"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -45,35 +50,29 @@ def _customer(client, name, taxable=True):
     return r.json()
 
 
-def _permit(client, customer_id, number, kind=None, **extra):
-    body = {
-        "entity_type": "customer",
-        "entity_id": customer_id,
-        "jurisdiction": "IL",
-        "permit_number": number,
-        **extra,
-    }
-    if kind is not None:
-        body["kind"] = kind
-    r = client.post("/api/reseller-permits", json=body)
-    assert r.status_code == 201, r.text
-    return r.json()
-
-
-def _name_certificate(client, customer_id, permit_id):
-    r = client.put(
-        f"/api/customers/{customer_id}", json={"exemption_certificate_id": permit_id}
-    )
-    assert r.status_code == 200, r.text
-    return r.json()
-
-
 def _job(client, customer_id, name="Library", **extra):
     r = client.post(
         "/api/jobs", json={"customer_id": customer_id, "name": name, **extra}
     )
     assert r.status_code == 201, r.text
     return r.json()
+
+
+def _certificate(number="E-1234-5678", state="IL", kind="public_entity", expires=None):
+    cert = {
+        "exempt_certificate_number": number,
+        "exempt_certificate_state": state,
+        "exempt_certificate_kind": kind,
+    }
+    if expires is not None:
+        cert["exempt_certificate_expires"] = expires
+    return cert
+
+
+def _exempt_job(client, customer_id, name="Public Work", **cert):
+    return _job(
+        client, customer_id, name=name, is_taxable=False, **_certificate(**cert)
+    )
 
 
 def _invoice(client, customer_id, lines, **extra):
@@ -89,6 +88,19 @@ def _invoice(client, customer_id, lines, **extra):
     return r.json()
 
 
+def _estimate(client, customer_id, lines, **extra):
+    body = {
+        "customer_id": customer_id,
+        "date": "2026-07-01",
+        "tax_rate": 0.10,
+        "lines": lines,
+        **extra,
+    }
+    r = client.post("/api/estimates", json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
 def _line(rate, taxable=True, description="Work"):
     return {
         "description": description,
@@ -96,6 +108,26 @@ def _line(rate, taxable=True, description="Work"):
         "rate": rate,
         "is_taxable": taxable,
     }
+
+
+def _copy(doc):
+    return (
+        doc["exempt_certificate_number"],
+        doc["exempt_certificate_state"],
+        doc["exempt_certificate_kind"],
+        doc["exempt_certificate_expires"],
+    )
+
+
+def _invoice_html(db_session, invoice_id):
+    from app.models.invoices import Invoice
+    from app.services.pdf_service import render_invoice_html
+    from app.services.settings_service import get_all_settings as get_settings
+
+    db_session.expire_all()
+    return render_invoice_html(
+        db_session.get(Invoice, invoice_id), get_settings(db_session)
+    )
 
 
 def _signed_in(db_session, role):
@@ -128,144 +160,151 @@ def _who(client, db_session, role, how):
     return _signed_in(db_session, role) if how == "session" else _token(client, role)
 
 
-# ── 1. the certificate kind ─────────────────────────────────────────────
+# ── 1. the job holds the certificate ─────────────────────────────────────
 
 
-def test_a_certificate_is_resale_unless_it_says_otherwise(client, seed_accounts):
-    c = _customer(client, "City of Joliet")
-    plain = _permit(client, c["id"], "R-1")
-    assert plain["kind"] == "resale" and plain["kind_label"] == "Resale"
-    for kind, label in (
-        ("public_entity", "Public entity"),
-        ("nonprofit", "Nonprofit"),
-        ("other", "Other exemption"),
-    ):
-        p = _permit(client, c["id"], f"K-{kind}", kind)
-        assert (p["kind"], p["kind_label"]) == (kind, label)
-    listed = client.get("/api/reseller-permits?kind=public_entity").json()
-    assert [p["permit_number"] for p in listed] == ["K-public_entity"]
+def test_an_exempt_job_holds_its_certificate(client, seed_accounts):
+    c = _customer(client, "Water District")
+    job = _exempt_job(client, c["id"], state=" il ", expires="2027-06-30")
+    assert job["is_taxable"] is False
+    assert _copy(job) == ("E-1234-5678", "IL", "public_entity", "2027-06-30")
+    got = client.get(f"/api/jobs/{job['id']}").json()
+    assert _copy(got) == _copy(job)
+    for kind in ("nonprofit", "resale", "other"):
+        j = _exempt_job(client, c["id"], name=f"K {kind}", kind=kind)
+        assert j["exempt_certificate_kind"] == kind
+
+
+@pytest.mark.parametrize(
+    "left_out, named",
+    [
+        (("exempt_certificate_number",), "number."),
+        (("exempt_certificate_state",), "state or jurisdiction."),
+        (
+            ("exempt_certificate_kind",),
+            "kind (public entity, nonprofit, resale or other).",
+        ),
+        (
+            ("exempt_certificate_number", "exempt_certificate_kind"),
+            "number and kind (public entity, nonprofit, resale or other).",
+        ),
+        (
+            (
+                "exempt_certificate_number",
+                "exempt_certificate_state",
+                "exempt_certificate_kind",
+            ),
+            "number, state or jurisdiction, and kind (public entity, "
+            "nonprofit, resale or other).",
+        ),
+    ],
+)
+def test_exempt_without_the_certificate_is_refused_in_one_sentence(
+    client, seed_accounts, left_out, named
+):
+    c = _customer(client, "Park District")
+    body = {"customer_id": c["id"], "name": "Pavilion", "is_taxable": False}
+    body.update({k: v for k, v in _certificate().items() if k not in left_out})
+    r = client.post("/api/jobs", json=body)
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail == f"{REFUSAL_START} the certificate's {named}"
+    # a blank one is missing too
+    body.update({k: "  " for k in left_out})
+    assert client.post("/api/jobs", json=body).json()["detail"] == detail
 
 
 def test_a_certificate_of_no_known_kind_is_refused_in_a_sentence(client, seed_accounts):
     c = _customer(client, "Odd Kind")
     r = client.post(
-        "/api/reseller-permits",
+        "/api/jobs",
         json={
-            "entity_type": "customer",
-            "entity_id": c["id"],
-            "jurisdiction": "IL",
-            "permit_number": "X-1",
-            "kind": "diplomat",
+            "customer_id": c["id"],
+            "name": "Embassy",
+            "is_taxable": False,
+            **_certificate(kind="diplomat"),
         },
     )
     assert r.status_code == 422
-    assert "resale, public entity, nonprofit or other" in r.text
+    assert r.json()["detail"] == (
+        "A certificate's kind is public entity, nonprofit, resale or other, "
+        "so choose one of those."
+    )
 
 
-def test_an_edit_that_leaves_the_kind_out_keeps_it(client, seed_accounts):
-    c = _customer(client, "School District 202")
-    p = _permit(client, c["id"], "PE-9", "public_entity")
+def test_switching_a_job_exempt_needs_the_certificate_and_charged_clears_it(
+    client, seed_accounts
+):
+    c = _customer(client, "School Board")
+    job = _job(client, c["id"])
+    assert job["is_taxable"] is True and _copy(job) == (None, None, None, None)
+    r = client.put(f"/api/jobs/{job['id']}", json={"is_taxable": False})
+    assert r.status_code == 422
+    assert r.json()["detail"].startswith(REFUSAL_START)
     r = client.put(
-        f"/api/reseller-permits/{p['id']}",
-        json={
-            "entity_type": "customer",
-            "entity_id": c["id"],
-            "jurisdiction": "IL",
-            "permit_number": "PE-9",
-            "notes": "renewed",
-        },
+        f"/api/jobs/{job['id']}",
+        json={"is_taxable": False, **_certificate(kind="nonprofit")},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["kind"] == "public_entity"
-
-
-def test_the_expiring_view_covers_every_kind(client, seed_accounts):
-    c = _customer(client, "Food Pantry")
-    soon = date.today().replace(day=1)
-    _permit(client, c["id"], "NP-1", "nonprofit", expires_at=soon.isoformat())
-    _permit(client, c["id"], "PE-1", "public_entity", expires_at=soon.isoformat())
-    _permit(client, c["id"], "R-1", expires_at=soon.isoformat())
-    kinds = {p["kind"] for p in client.get("/api/reseller-permits/expiring").json()}
-    assert kinds == {"nonprofit", "public_entity", "resale"}
-
-
-# ── 1b. a customer names its certificate ────────────────────────────────
-
-
-def test_a_customer_names_its_own_certificate(client, seed_accounts):
-    c = _customer(client, "Village Hall", taxable=False)
-    p = _permit(client, c["id"], "PE-77", "public_entity")
-    named = _name_certificate(client, c["id"], p["id"])
-    assert named["exemption_certificate_id"] == p["id"]
-    assert client.get(f"/api/customers/{c['id']}").json()[
-        "exemption_certificate_id"
-    ] == (p["id"])
-    cleared = _name_certificate(client, c["id"], None)
-    assert cleared["exemption_certificate_id"] is None
-
-
-def test_a_customer_cannot_name_another_customers_certificate(client, seed_accounts):
-    mine = _customer(client, "Church")
-    theirs = _customer(client, "Retailer")
-    p = _permit(client, theirs["id"], "R-5")
-    r = client.put(
-        f"/api/customers/{mine['id']}", json={"exemption_certificate_id": p["id"]}
-    )
+    # an edit of the rest keeps it; clearing the number alone is refused
+    r = client.put(f"/api/jobs/{job['id']}", json={"notes": "renewed"})
+    assert r.json()["exempt_certificate_number"] == "E-1234-5678"
+    r = client.put(f"/api/jobs/{job['id']}", json={"exempt_certificate_number": None})
     assert r.status_code == 422
-    assert r.json()["detail"].startswith("That certificate is on file for someone")
-    r = client.put(
-        f"/api/customers/{mine['id']}", json={"exemption_certificate_id": 99999}
-    )
-    assert r.status_code == 404
-    assert r.json()["detail"] == "That exemption certificate is not on file."
-    # a new customer has no certificate on file to name yet
-    r = client.post(
-        "/api/customers?force=true",
-        json={"name": "New One", "exemption_certificate_id": p["id"]},
-    )
-    assert r.status_code == 422
-
-
-def test_deleting_or_moving_a_named_certificate_unnames_it(client, seed_accounts):
-    c = _customer(client, "Park District", taxable=False)
-    other = _customer(client, "Elsewhere")
-    p = _permit(client, c["id"], "PE-3", "public_entity")
-    _name_certificate(client, c["id"], p["id"])
-    r = client.put(
-        f"/api/reseller-permits/{p['id']}",
-        json={
-            "entity_type": "customer",
-            "entity_id": other["id"],
-            "jurisdiction": "IL",
-            "permit_number": "PE-3",
-        },
-    )
+    assert r.json()["detail"] == f"{REFUSAL_START} the certificate's number."
+    r = client.put(f"/api/jobs/{job['id']}", json={"is_taxable": True})
     assert r.status_code == 200
-    assert (
-        client.get(f"/api/customers/{c['id']}").json()["exemption_certificate_id"]
-        is None
+    assert r.json()["is_taxable"] is True
+    assert _copy(r.json()) == (None, None, None, None)
+    # charged with a certificate sent keeps none
+    r = client.put(
+        f"/api/jobs/{job['id']}", json={"is_taxable": True, **_certificate()}
     )
-    q = _permit(client, c["id"], "PE-4", "public_entity")
-    _name_certificate(client, c["id"], q["id"])
-    assert client.delete(f"/api/reseller-permits/{q['id']}").status_code == 200
+    assert _copy(r.json()) == (None, None, None, None)
+
+
+def test_the_customer_and_the_reseller_permits_are_as_they_were(client, seed_accounts):
+    c = _customer(client, "Plain Customer")
     assert (
-        client.get(f"/api/customers/{c['id']}").json()["exemption_certificate_id"]
-        is None
+        "exemption_certificate_id" not in client.get(f"/api/customers/{c['id']}").json()
     )
+    r = client.put(f"/api/customers/{c['id']}", json={"exemption_certificate_id": 1})
+    assert r.status_code == 422
+    body = {
+        "entity_type": "customer",
+        "entity_id": c["id"],
+        "jurisdiction": "IL",
+        "permit_number": "R-1",
+    }
+    p = client.post("/api/reseller-permits", json=body)
+    assert p.status_code == 201, p.text
+    assert "kind" not in p.json() and "kind_label" not in p.json()
+    r = client.post(
+        "/api/reseller-permits", json={**body, "permit_number": "R-2", "kind": "x"}
+    )
+    assert r.status_code == 422
+    from app.models.contacts import Customer
+    from app.models.reseller_permit import ResellerPermit
+
+    assert "exemption_certificate_id" not in Customer.__table__.columns
+    assert "kind" not in ResellerPermit.__table__.columns
+    import app.services.tax_exemption as te
+
+    assert not hasattr(te, "check_certificate")
+    assert not hasattr(te, "certificate_for")
 
 
 # ── 2. the job ───────────────────────────────────────────────────────────
 
 
-def test_a_new_job_is_charged_as_its_customer_is(client, seed_accounts):
+def test_a_new_job_is_charged_unless_it_says_exempt(client, seed_accounts):
     taxed = _customer(client, "Homeowner")
     exempt = _customer(client, "County", taxable=False)
     assert _job(client, taxed["id"])["is_taxable"] is True
-    assert _job(client, exempt["id"])["is_taxable"] is False
-    assert (
-        _job(client, taxed["id"], name="Public", is_taxable=False)["is_taxable"]
-        is False
-    )
+    # a non-taxable customer's job is charged too: the customer's own flag
+    # keeps its documents exempt, and no certificate is asked for
+    assert _job(client, exempt["id"])["is_taxable"] is True
+    assert _exempt_job(client, taxed["id"])["is_taxable"] is False
 
 
 def test_a_job_switched_exempt_changes_new_documents_only(client, seed_accounts):
@@ -273,10 +312,13 @@ def test_a_job_switched_exempt_changes_new_documents_only(client, seed_accounts)
     job = _job(client, gc["id"])
     before = _invoice(client, gc["id"], [_line(100)], job_id=job["id"])
     assert before["tax_amount"] == "10.00" and before["tax_exempt"] is False
-    r = client.put(f"/api/jobs/{job['id']}", json={"is_taxable": False})
+    r = client.put(
+        f"/api/jobs/{job['id']}", json={"is_taxable": False, **_certificate()}
+    )
     assert r.status_code == 200 and r.json()["is_taxable"] is False
     still = client.get(f"/api/invoices/{before['id']}").json()
     assert still["tax_amount"] == "10.00" and still["tax_exempt"] is False
+    assert still["exempt_certificate_number"] is None
     after = _invoice(client, gc["id"], [_line(100)], job_id=job["id"])
     assert after["tax_exempt"] is True
     assert after["tax_amount"] == "0.00"
@@ -285,7 +327,7 @@ def test_a_job_switched_exempt_changes_new_documents_only(client, seed_accounts)
 
 def test_an_exempt_jobs_new_schedule_lines_start_untaxed(client, seed_accounts):
     gc = _customer(client, "Builder")
-    job = _job(client, gc["id"], is_taxable=False)
+    job = _exempt_job(client, gc["id"])
     r = client.put(
         f"/api/jobs/{job['id']}/sov",
         json={
@@ -308,7 +350,7 @@ def test_an_exempt_jobs_new_schedule_lines_start_untaxed(client, seed_accounts):
 
 def test_an_exempt_jobs_new_pay_application_charges_no_tax(client, seed_accounts):
     gc = _customer(client, "Owner Rep")
-    job = _job(client, gc["id"], is_taxable=False)
+    job = _exempt_job(client, gc["id"])
     client.put(
         f"/api/jobs/{job['id']}/contract",
         json={"contract_type": "lump_sum", "contract_amount": 1000},
@@ -366,7 +408,7 @@ def test_the_switch_on_unticks_every_line_and_off_lets_the_lines_decide(
     assert on["tax_amount"] == "0.00"
     assert [ln["is_taxable"] for ln in on["lines"]] == [False, False]
     # an exempt job's document can be taxed by saying so
-    job = _job(client, c["id"], is_taxable=False)
+    job = _exempt_job(client, c["id"])
     off = _invoice(
         client,
         c["id"],
@@ -409,7 +451,7 @@ def test_switching_an_invoice_exempt_untaxes_its_stored_lines_and_reposts(
 
 def test_an_estimate_carries_the_switch_and_its_invoice_keeps_it(client, seed_accounts):
     c = _customer(client, "Township")
-    job = _job(client, c["id"], is_taxable=False)
+    job = _exempt_job(client, c["id"])
     r = client.post(
         "/api/estimates",
         json={
@@ -472,30 +514,179 @@ def test_a_sales_receipt_takes_the_switch(client, seed_accounts):
     assert r.json()["invoice"]["tax_amount"] == "0.00"
 
 
-def test_the_pdf_says_exempt_under_the_totals_with_the_certificate(
+# ── 3b. the document's own copy of the certificate ─────────────────────
+
+
+def test_a_document_copies_its_jobs_certificate_when_it_is_made(client, seed_accounts):
+    c = _customer(client, "Library Board")
+    job = _exempt_job(client, c["id"], kind="nonprofit", expires="2027-06-30")
+    want = ("E-1234-5678", "IL", "nonprofit", "2027-06-30")
+    inv = _invoice(client, c["id"], [_line(100)], job_id=job["id"])
+    assert inv["tax_exempt"] is True and _copy(inv) == want
+    est = _estimate(client, c["id"], [_line(100)], job_id=job["id"])
+    assert est["tax_exempt"] is True and _copy(est) == want
+    r = client.post(
+        "/api/sales-receipts",
+        json={
+            "customer_id": c["id"],
+            "date": "2026-07-05",
+            "tax_rate": 0.10,
+            "job_id": job["id"],
+            "lines": [_line(80)],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert _copy(r.json()["invoice"]) == want
+    # a document taxed on purpose on the exempt job keeps no copy
+    taxed = _invoice(client, c["id"], [_line(100)], job_id=job["id"], tax_exempt=False)
+    assert _copy(taxed) == (None, None, None, None)
+
+
+def test_a_later_job_edit_leaves_the_old_document_as_it_was(
+    client, db_session, seed_accounts
+):
+    c = _customer(client, "Township")
+    job = _exempt_job(client, c["id"], number="OLD-1", kind="public_entity")
+    inv = _invoice(client, c["id"], [_line(100)], job_id=job["id"])
+    # the certificate renewed, then the job switched back to charged
+    client.put(
+        f"/api/jobs/{job['id']}",
+        json={"exempt_certificate_number": "NEW-2", "exempt_certificate_kind": "other"},
+    )
+    later = _invoice(client, c["id"], [_line(100)], job_id=job["id"])
+    assert later["exempt_certificate_number"] == "NEW-2"
+    client.put(f"/api/jobs/{job['id']}", json={"is_taxable": True})
+    old = client.get(f"/api/invoices/{inv['id']}").json()
+    assert _copy(old) == ("OLD-1", "IL", "public_entity", None)
+    # an edit of the old document itself keeps its copy too
+    r = client.put(f"/api/invoices/{inv['id']}", json={"notes": "re-sent"})
+    assert r.status_code == 200, r.text
+    assert r.json()["exempt_certificate_number"] == "OLD-1"
+    html = _invoice_html(db_session, inv["id"])
+    assert "Sales tax exempt — certificate OLD-1 (IL)" in html
+    data = client.get(f"/api/reports/sales-tax?{PERIOD}&basis=accrual").json()
+    assert {e["reason"]: e["amount"] for e in data["exempt_sales"]} == {
+        "public_entity": 100.0,
+        "other": 100.0,
+    }
+
+
+def test_an_exempt_document_takes_a_copy_when_it_gets_a_job(client, seed_accounts):
+    c = _customer(client, "Fire District")
+    # an estimate before its job exists: exempt, no copy
+    est = _estimate(client, c["id"], [_line(100)], tax_exempt=True)
+    assert est["tax_exempt"] is True and est["exempt_certificate_number"] is None
+    job = _exempt_job(client, c["id"], number="FD-9")
+    r = client.put(f"/api/estimates/{est['id']}", json={"job_id": job["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["exempt_certificate_number"] == "FD-9"
+    # an invoice on the job switched on later takes it then
+    inv = _invoice(client, c["id"], [_line(100)], job_id=job["id"], tax_exempt=False)
+    r = client.put(f"/api/invoices/{inv['id']}", json={"tax_exempt": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["exempt_certificate_number"] == "FD-9"
+    # switched off, it keeps none
+    r = client.put(f"/api/invoices/{inv['id']}", json={"tax_exempt": False})
+    assert r.json()["exempt_certificate_number"] is None
+
+
+def test_a_converted_estimate_and_a_duplicate_copy_the_job(client, seed_accounts):
+    c = _customer(client, "Sanitary District")
+    job = _exempt_job(client, c["id"], number="SD-1")
+    est = _estimate(client, c["id"], [_line(400)], job_id=job["id"])
+    inv = client.post(f"/api/estimates/{est['id']}/convert").json()
+    assert inv["exempt_certificate_number"] == "SD-1"
+    dup = client.post(f"/api/invoices/{inv['id']}/duplicate").json()
+    assert dup["tax_exempt"] is True and dup["exempt_certificate_number"] == "SD-1"
+
+
+def test_an_import_or_a_run_copies_the_jobs_certificate_on_insert(
     client, db_session, seed_accounts
 ):
     from app.models.invoices import Invoice
-    from app.services.pdf_service import render_invoice_html
-    from app.services.settings_service import get_all_settings as get_settings
 
-    c = _customer(client, "Water Reclamation District", taxable=False)
-    p = _permit(client, c["id"], "E-1234-5678", "public_entity")
-    _name_certificate(client, c["id"], p["id"])
-    inv = _invoice(client, c["id"], [_line(500)])
+    c = _customer(client, "Imported Owner")
+    job = _exempt_job(client, c["id"], number="IMP-1", kind="resale")
+    inv = Invoice(
+        invoice_number="IMP-0001",
+        customer_id=c["id"],
+        job_id=job["id"],
+        date=date(2026, 7, 3),
+        subtotal=Decimal("50"),
+        tax_amount=Decimal("0"),
+        total=Decimal("50"),
+        balance_due=Decimal("50"),
+    )
+    db_session.add(inv)
+    db_session.commit()
+    assert inv.tax_exempt is True
+    assert inv.exempt_certificate_number == "IMP-1"
+    assert inv.exempt_certificate_kind == "resale"
+
+
+def test_a_non_taxable_customers_document_without_a_job_carries_no_copy(
+    client, db_session, seed_accounts
+):
+    c = _customer(client, "Exempt Buyer", taxable=False)
+    inv = _invoice(client, c["id"], [_line(100)])
+    assert inv["tax_exempt"] is True and inv["exempt_certificate_number"] is None
+    html = _invoice_html(db_session, inv["id"])
+    assert "Sales tax exempt" in html
+    assert "certificate" not in html.split("Sales tax exempt")[1].split("<")[0]
+
+
+def test_the_pdf_says_exempt_under_the_totals_with_the_certificate(
+    client, db_session, seed_accounts
+):
+    c = _customer(client, "Water Reclamation District")
+    job = _exempt_job(client, c["id"], expires="2026-12-31")
+    inv = _invoice(client, c["id"], [_line(500)], job_id=job["id"])
     other = _customer(client, "Plain Exempt")
     bare = _invoice(client, other["id"], [_line(100)], tax_exempt=True)
     taxed = _invoice(client, other["id"], [_line(100)])
-    settings = get_settings(db_session)
-    html = render_invoice_html(db_session.get(Invoice, inv["id"]), settings)
-    assert "Sales tax exempt — certificate E-1234-5678 (IL)" in html
-    html = render_invoice_html(db_session.get(Invoice, bare["id"]), settings)
+    html = _invoice_html(db_session, inv["id"])
+    assert "Sales tax exempt — certificate E-1234-5678 (IL)<" in html
+    html = _invoice_html(db_session, bare["id"])
     assert (
         "Sales tax exempt" in html
         and "certificate" not in html.split("Sales tax exempt")[1].split("<")[0]
     )
-    html = render_invoice_html(db_session.get(Invoice, taxed["id"]), settings)
-    assert "Sales tax exempt" not in html
+    assert "Sales tax exempt" not in _invoice_html(db_session, taxed["id"])
+
+
+def test_the_pdf_notes_a_copy_that_expired_before_the_documents_date(
+    client, db_session, seed_accounts
+):
+    from app.services.tax_exemption import exemption_line
+
+    c = _customer(client, "Lapsed Owner")
+    job = _exempt_job(client, c["id"], number="EX-1", expires="2026-07-01")
+    on_the_day = _invoice(
+        client, c["id"], [_line(100)], job_id=job["id"], date="2026-07-01"
+    )
+    after = _invoice(client, c["id"], [_line(100)], job_id=job["id"], date="2026-07-02")
+    assert "certificate EX-1 (IL)<" in _invoice_html(db_session, on_the_day["id"])
+    html = _invoice_html(db_session, after["id"])
+    assert "Sales tax exempt — certificate EX-1 (IL) (expired)" in html
+    est = _estimate(client, c["id"], [_line(100)], job_id=job["id"], date="2026-08-01")
+    page = client.get(f"/api/estimates/{est['id']}/print-preview")
+    assert page.status_code == 200
+    assert "certificate EX-1 (IL) (expired)" in page.text
+    from types import SimpleNamespace
+
+    assert (
+        exemption_line(
+            SimpleNamespace(
+                tax_exempt=True,
+                date=date(2026, 7, 2),
+                exempt_certificate_number="N",
+                exempt_certificate_state="WI",
+                exempt_certificate_kind="resale",
+                exempt_certificate_expires=None,
+            )
+        )
+        == "Sales tax exempt — certificate N (WI)"
+    )
 
 
 def test_the_estimate_print_preview_says_exempt(client, seed_accounts):
@@ -523,27 +714,20 @@ def small_book(client, seed_accounts):
     """Five sales in July, worked by hand:
 
     taxable sale       100.00, taxed 100.00, tax 10.00
-    resale exempt      200.00 (customer not taxable, resale certificate)
+    resale exempt      200.00 (an exempt job, resale certificate)
     public entity      300.00 (an exempt job, public-entity certificate)
-    customer exempt    400.00 (not taxable, no certificate)
+    customer exempt    400.00 (not taxable, no job, so no certificate)
     line by line        75.00, 50.00 taxed (tax 5.00), 25.00 untaxed
 
     Sales 1,075.00; taxable 150.00; non-taxable 925.00; tax 15.00.
     """
     shop = _customer(client, "Corner Shop")
     _invoice(client, shop["id"], [_line(100)])
-    reseller = _customer(client, "Wholesale Buyer", taxable=False)
-    _name_certificate(
-        client, reseller["id"], _permit(client, reseller["id"], "R-1")["id"]
-    )
-    _invoice(client, reseller["id"], [_line(200)])
+    reseller = _customer(client, "Wholesale Buyer")
+    stock = _exempt_job(client, reseller["id"], name="Stock", kind="resale")
+    _invoice(client, reseller["id"], [_line(200)], job_id=stock["id"])
     gc = _customer(client, "GC With Public Work")
-    _name_certificate(
-        client,
-        gc["id"],
-        _permit(client, gc["id"], "PE-1", "public_entity")["id"],
-    )
-    job = _job(client, gc["id"], name="City Hall", is_taxable=False)
+    job = _exempt_job(client, gc["id"], name="City Hall", number="PE-1")
     _invoice(client, gc["id"], [_line(300)], job_id=job["id"])
     church = _customer(client, "Church Without Paper", taxable=False)
     _invoice(client, church["id"], [_line(400)])
@@ -644,33 +828,18 @@ def test_the_sales_tax_screen_draws_the_exempt_sales():
 def test_a_reader_reads_the_exemption_and_writes_none_of_it(
     client, db_session, seed_accounts, role, how
 ):
-    c = _customer(client, "Exempt Owner", taxable=False)
-    p = _permit(client, c["id"], "PE-8", "public_entity")
-    _name_certificate(client, c["id"], p["id"])
-    job = _job(client, c["id"])
-    inv = _invoice(client, c["id"], [_line(100)])
+    c = _customer(client, "Exempt Owner")
+    job = _exempt_job(client, c["id"], number="PE-8")
+    inv = _invoice(client, c["id"], [_line(100)], job_id=job["id"])
     who = _who(client, db_session, role, how)
-    assert who.get("/api/reseller-permits").json()[0]["kind"] == "public_entity"
-    assert (
-        who.get(f"/api/customers/{c['id']}").json()["exemption_certificate_id"]
-        == p["id"]
-    )
-    assert who.get(f"/api/jobs/{job['id']}").json()["is_taxable"] is False
-    assert who.get(f"/api/invoices/{inv['id']}").json()["tax_exempt"] is True
+    got = who.get(f"/api/jobs/{job['id']}").json()
+    assert got["is_taxable"] is False and got["exempt_certificate_number"] == "PE-8"
+    got = who.get(f"/api/invoices/{inv['id']}").json()
+    assert got["tax_exempt"] is True and got["exempt_certificate_number"] == "PE-8"
     assert who.get(f"/api/reports/sales-tax?{PERIOD}").json()["exempt_sales"]
     writes = (
-        who.post(
-            "/api/reseller-permits",
-            json={
-                "entity_type": "customer",
-                "entity_id": c["id"],
-                "jurisdiction": "IL",
-                "permit_number": "NO",
-                "kind": "nonprofit",
-            },
-        ),
-        who.put(f"/api/customers/{c['id']}", json={"exemption_certificate_id": None}),
         who.put(f"/api/jobs/{job['id']}", json={"is_taxable": True}),
+        who.put(f"/api/jobs/{job['id']}", json={"exempt_certificate_number": "X"}),
         who.put(f"/api/invoices/{inv['id']}", json={"tax_exempt": False}),
     )
     for r in writes:
@@ -682,26 +851,17 @@ def test_a_reader_reads_the_exemption_and_writes_none_of_it(
 def test_a_bookkeeper_writes_the_exemption(client, db_session, seed_accounts, how):
     c = _customer(client, "Bookkept Owner")
     who = _who(client, db_session, "bookkeeper", how)
-    p = who.post(
-        "/api/reseller-permits",
-        json={
-            "entity_type": "customer",
-            "entity_id": c["id"],
-            "jurisdiction": "IL",
-            "permit_number": "NP-2",
-            "kind": "nonprofit",
-        },
-    )
-    assert p.status_code == 201, p.text
-    r = who.put(
-        f"/api/customers/{c['id']}", json={"exemption_certificate_id": p.json()["id"]}
-    )
-    assert r.status_code == 200, r.text
     job = who.post(
         "/api/jobs",
-        json={"customer_id": c["id"], "name": "Shelter", "is_taxable": False},
+        json={
+            "customer_id": c["id"],
+            "name": "Shelter",
+            "is_taxable": False,
+            **_certificate(number="NP-2", kind="nonprofit"),
+        },
     )
-    assert job.status_code == 201 and job.json()["is_taxable"] is False
+    assert job.status_code == 201, job.text
+    assert job.json()["is_taxable"] is False
     inv = who.post(
         "/api/invoices",
         json={
@@ -714,6 +874,7 @@ def test_a_bookkeeper_writes_the_exemption(client, db_session, seed_accounts, ho
     )
     assert inv.status_code == 201, inv.text
     assert inv.json()["tax_exempt"] is True
+    assert inv.json()["exempt_certificate_number"] == "NP-2"
 
 
 # ── imports ──────────────────────────────────────────────────────────────
@@ -754,36 +915,42 @@ def _cols(db, table):
         return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def test_the_certificate_kind_migration(tmp_path):
+def test_the_job_certificate_migration(tmp_path):
     from alembic import command
     from alembic.script import ScriptDirectory
 
-    db = tmp_path / "kind.db"
+    db = tmp_path / "cert.db"
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("b8640a1c2e3f").down_revision == "a4c8e2f6b0d3"
     command.upgrade(cfg, "a4c8e2f6b0d3")  # the step below it (#795)
     with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO customers (id, name, is_active) VALUES (1, 'C', 1)")
         conn.execute(
-            "INSERT INTO customers (id, name, is_active, is_taxable) VALUES "
-            "(1, 'One Permit', 1, 0), (2, 'Two Permits', 1, 0), (3, 'Taxed', 1, 1)"
+            "INSERT INTO jobs (id, customer_id, name, status, is_active)"
+            " VALUES (1, 1, 'J', 'in_progress', 1)"
         )
-        for pid, cust in ((1, 1), (2, 2), (3, 2), (4, 3)):
-            conn.execute(
-                "INSERT INTO reseller_permits (id, entity_type, entity_id,"
-                " jurisdiction, permit_number, is_active) VALUES"
-                " (?, 'customer', ?, 'IL', ?, 1)",
-                (pid, cust, f"P-{pid}"),
-            )
+    customers_before = _cols(db, "customers")
+    permits_before = _cols(db, "reseller_permits")
     command.upgrade(cfg, "b8640a1c2e3f")  # its own step, not the chain (#770)
+    added = {
+        "exempt_certificate_number",
+        "exempt_certificate_state",
+        "exempt_certificate_kind",
+        "exempt_certificate_expires",
+    }
+    assert added <= _cols(db, "jobs")
     with sqlite3.connect(db) as conn:
-        kinds = {r[0] for r in conn.execute("SELECT kind FROM reseller_permits")}
-        named = dict(conn.execute("SELECT id, exemption_certificate_id FROM customers"))
-    assert kinds == {"resale"}
-    assert named == {1: 1, 2: None, 3: None}
+        row = conn.execute(
+            "SELECT exempt_certificate_number, exempt_certificate_state,"
+            " exempt_certificate_kind, exempt_certificate_expires FROM jobs"
+        ).fetchone()
+    assert row == (None, None, None, None)
+    # the customer and the permit record are untouched
+    assert _cols(db, "customers") == customers_before
+    assert _cols(db, "reseller_permits") == permits_before
     command.downgrade(cfg, "a4c8e2f6b0d3")
-    assert "kind" not in _cols(db, "reseller_permits")
-    assert "exemption_certificate_id" not in _cols(db, "customers")
+    assert not added & _cols(db, "jobs")
 
 
 def test_the_job_is_taxable_migration(tmp_path):
@@ -840,9 +1007,17 @@ def test_the_document_tax_exempt_migration(tmp_path):
             got = dict(conn.execute(f"SELECT id, tax_exempt FROM {table}"))
             # exempt where it already was: a non-taxable customer, no tax on it
             assert got == {1: 1, 2: 0, 3: 0}, table
+        for table in ("invoices", "estimates"):
+            copies = conn.execute(
+                f"SELECT exempt_certificate_number, exempt_certificate_state,"
+                f" exempt_certificate_kind, exempt_certificate_expires FROM {table}"
+            ).fetchall()
+            assert set(copies) == {(None, None, None, None)}, table
     command.downgrade(cfg, "b8640b2d3f4a")
-    assert "tax_exempt" not in _cols(db, "invoices")
-    assert "tax_exempt" not in _cols(db, "estimates")
+    for table in ("invoices", "estimates"):
+        left = _cols(db, table)
+        assert "tax_exempt" not in left, table
+        assert not {c for c in left if c.startswith("exempt_certificate_")}, table
 
 
 def test_a_credit_memo_on_an_exempt_invoice_gives_back_no_tax(client, seed_accounts):

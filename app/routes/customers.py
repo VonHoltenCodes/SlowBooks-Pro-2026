@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session, aliased
 from app.database import get_db
 from app.models.contacts import Customer
 from app.schemas.contacts import CustomerCreate, CustomerUpdate, CustomerResponse
-from app.services.tax_exemption import check_certificate
 from app.routes._helpers import get_or_404, reject_null_updates
 from app.services.contact_balances import ZERO, customer_balances
 from app.services.sub_customers import (
@@ -299,8 +298,6 @@ def create_customer(
     # (active) sub-customer needs an active parent.
     check_parent(db, None, values.get("parent_customer_id"))
     _check_bill_with_parent(values.get("parent_customer_id"), values)
-    # a certificate on file names its customer, which a new one isn't yet
-    check_certificate(db, None, values.get("exemption_certificate_id"))
     refuse_inactive_parent(db, values["name"], values.get("parent_customer_id"))
     customer = Customer(**values)
     db.add(customer)
@@ -333,8 +330,6 @@ def update_customer(
 ):
     customer = get_or_404(db, Customer, customer_id)
     update_data = reject_null_updates(Customer, data.model_dump(exclude_unset=True))
-    if "exemption_certificate_id" in update_data:
-        check_certificate(db, customer.id, update_data["exemption_certificate_id"])
     if "parent_customer_id" in update_data:
         check_parent(db, customer, update_data["parent_customer_id"])
         if update_data["parent_customer_id"] is None:

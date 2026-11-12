@@ -471,18 +471,31 @@ not-to-exceed). The type decides how the fee and the cap read:
   `contractor_pays`). See *Sales tax and use tax on a job* below.
 
 **A tax-exempt job** (#864). Separate from who pays the tax, the job form says
-whether sales tax is charged on the job at all: **Sales tax: Charged** or
-**Exempt** (`is_taxable` on the job; a new job starts as its customer's Taxable
-flag). A public owner's job for a general contractor who is otherwise taxable
-is the usual case. On an exempt job a new estimate, invoice or sales receipt
-starts with its **Sales tax exempt** switch on and every line untaxed, a new
-pay application starts with *Charge tax* off, and a new schedule-of-values
-line, a contingency line and a change order's line start untaxed (a Tax box
-ticked by hand still counts). The job's header shows *Sales tax exempt*.
-Changing the job later changes new documents and new lines only: what is
-already made keeps its own tax. The exempt document prints "Sales tax exempt —
-certificate <number> (<state>)" under its totals when the customer names a
-certificate on file (see *Sales Tax* in features.md).
+whether sales tax is charged on the job at all: **Sales tax: Charged** (a new
+job's default) or **Exempt** (`is_taxable` on the job). A public owner's job
+for a general contractor who is otherwise taxable is the usual case. Exempt
+asks for the job's exemption certificate: its **number**, **state or
+jurisdiction** and **kind** (public entity, nonprofit, resale or other) are
+required and the **expiry** is optional; the save is refused, in a sentence
+naming what is missing, without them. The certificate lives and dies with the
+job, so a customer who never comes back leaves nothing to manage, and a job
+switched back to Charged drops it. On an exempt job a new estimate, invoice or
+sales receipt starts with its **Sales tax exempt** switch on and every line
+untaxed, a new pay application starts with *Charge tax* off, and a new
+schedule-of-values line, a contingency line and a change order's line start
+untaxed (a Tax box ticked by hand still counts). The job's header shows
+*Sales tax exempt*. Changing the job later changes new documents and new
+lines only: what is already made keeps its own tax.
+
+Each exempt document keeps **its own copy** of the job's certificate, taken
+when it is made exempt, so renewing, correcting or clearing the job's
+certificate never rewrites an invoice already sent: its PDF and its line on
+the Sales Tax report stay as they were. The document prints "Sales tax exempt
+— certificate <number> (<state>)" under its totals, with **(expired)** after
+it when the copy's expiry date is before the document's date: the sale was
+made on a lapsed certificate, worth chasing a renewal for. A document with no
+copy (an estimate made before its job, a non-taxable customer's sale with no
+exempt job) prints plain "Sales tax exempt".
 
 **Sales tax and use tax on a job.** On a *charge the owner* job the pay
 applications tax the taxable SOV lines (see *Progress billing*). On a

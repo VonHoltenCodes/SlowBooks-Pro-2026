@@ -297,6 +297,12 @@ class InvoiceResponse(BaseModel):
     notice: Optional[str] = None
     is_sales_receipt: bool = False
     tax_exempt: bool = False
+    # its own copy of the job's certificate, taken when it was made exempt
+    # (#864); none: the PDF says plain "Sales tax exempt"
+    exempt_certificate_number: Optional[str] = None
+    exempt_certificate_state: Optional[str] = None
+    exempt_certificate_kind: Optional[str] = None
+    exempt_certificate_expires: Optional[dt_date] = None
     is_pledge: bool = False
     fair_value_amount: Optional[Decimal] = None
     fair_value_description: Optional[str] = None

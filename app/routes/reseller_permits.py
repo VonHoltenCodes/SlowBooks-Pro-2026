@@ -9,16 +9,12 @@ from typing import Optional
 from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.reseller_permit import (
-    CERTIFICATE_KIND_LABELS,
-    CERTIFICATE_KINDS,
-    ResellerPermit,
-)
+from app.models.reseller_permit import ResellerPermit
 
 router = APIRouter(prefix="/api/reseller-permits", tags=["reseller-permits"])
 
@@ -90,12 +86,6 @@ _LOOKUP_URLS: dict[str, str] = {
 class ResellerPermitIn(StrictModel):
     entity_type: str  # "customer" / "vendor" / "company"
     entity_id: Optional[int] = None
-    # What the certificate exempts its holder as (#864): resale (a reseller
-    # permit), public_entity, nonprofit or other. Left out, resale.
-    kind: str = Field(
-        "resale",
-        description="resale, public_entity, nonprofit or other; left out, resale.",
-    )
     jurisdiction: str
     permit_number: str
     issued_at: Optional[date] = None
@@ -103,24 +93,11 @@ class ResellerPermitIn(StrictModel):
     notes: Optional[str] = None
     is_active: bool = True
 
-    @field_validator("kind")
-    @classmethod
-    def _kind(cls, v):
-        v = (v or "resale").strip().lower().replace(" ", "_").replace("-", "_")
-        if v not in CERTIFICATE_KINDS:
-            raise ValueError(
-                "A certificate is a resale, public entity, nonprofit or other "
-                "exemption certificate; choose one of those."
-            )
-        return v
-
 
 class ResellerPermitOut(BaseModel):
     id: int
     entity_type: str
     entity_id: Optional[int]
-    kind: str = "resale"
-    kind_label: str = "Resale"
     jurisdiction: str
     permit_number: str
     issued_at: Optional[date]
@@ -160,8 +137,6 @@ def _enrich(permit: ResellerPermit) -> ResellerPermitOut:
         id=permit.id,
         entity_type=permit.entity_type,
         entity_id=permit.entity_id,
-        kind=permit.kind or "resale",
-        kind_label=CERTIFICATE_KIND_LABELS.get(permit.kind or "resale", "Other"),
         jurisdiction=permit.jurisdiction,
         permit_number=permit.permit_number,
         issued_at=permit.issued_at,
@@ -200,17 +175,11 @@ def list_permits(
     entity_id: Optional[int] = Query(default=None),
     jurisdiction: Optional[str] = Query(default=None),
     active_only: bool = Query(default=False),
-    kind: Optional[str] = Query(
-        default=None,
-        description="resale, public_entity, nonprofit or other (#864)",
-    ),
     db: Session = Depends(get_db),
 ):
     """List permits with optional filters. Most common SPA call is
     `?entity_type=customer&entity_id=X` to show the customer's permits."""
     q = db.query(ResellerPermit)
-    if kind:
-        q = q.filter(ResellerPermit.kind == kind)
     if entity_type:
         q = q.filter(ResellerPermit.entity_type == entity_type)
     if entity_id is not None:
@@ -227,8 +196,7 @@ def expiring_permits(
     within_days: int = Query(default=30, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
-    """Certificates of every kind (#864) expiring within N days — powers
-    the permits page's reminder.
+    """Permits expiring within N days — powers the dashboard reminder.
 
     Already-expired permits are included so the operator sees them too;
     they sort to the front because their `days_to_expire` is negative.
@@ -264,7 +232,6 @@ def create_permit(data: ResellerPermitIn, db: Session = Depends(get_db)):
     permit = ResellerPermit(
         entity_type=data.entity_type,
         entity_id=data.entity_id,
-        kind=data.kind,
         jurisdiction=jur,
         permit_number=_normalize_permit_number(jur, data.permit_number),
         issued_at=data.issued_at,
@@ -278,17 +245,6 @@ def create_permit(data: ResellerPermitIn, db: Session = Depends(get_db)):
     return _enrich(permit)
 
 
-def _unname(db: Session, permit: ResellerPermit) -> None:
-    """A customer stops naming a certificate that is deleted or moved to
-    someone else (#864). The column's SET NULL does it on Postgres; SQLite
-    keeps no foreign keys, so it is said here for both."""
-    from app.models.contacts import Customer
-
-    db.query(Customer).filter(Customer.exemption_certificate_id == permit.id).update(
-        {Customer.exemption_certificate_id: None}, synchronize_session=False
-    )
-
-
 @router.put("/{permit_id}", response_model=ResellerPermitOut)
 def update_permit(
     permit_id: int, data: ResellerPermitIn, db: Session = Depends(get_db)
@@ -296,13 +252,8 @@ def update_permit(
     permit = db.query(ResellerPermit).filter(ResellerPermit.id == permit_id).first()
     if not permit:
         raise HTTPException(status_code=404, detail="Permit not found")
-    if (data.entity_type, data.entity_id) != (permit.entity_type, permit.entity_id):
-        _unname(db, permit)
     permit.entity_type = data.entity_type
     permit.entity_id = data.entity_id
-    # a full-body PUT from before the kind (#864) keeps the stored kind
-    if "kind" in data.model_fields_set:
-        permit.kind = data.kind
     permit.jurisdiction = (data.jurisdiction or "").upper().strip()
     permit.permit_number = _normalize_permit_number(
         permit.jurisdiction, data.permit_number
@@ -321,7 +272,6 @@ def delete_permit(permit_id: int, db: Session = Depends(get_db)):
     permit = db.query(ResellerPermit).filter(ResellerPermit.id == permit_id).first()
     if not permit:
         raise HTTPException(status_code=404, detail="Permit not found")
-    _unname(db, permit)
     db.delete(permit)
     db.commit()
     return {"deleted": permit_id}

@@ -286,10 +286,12 @@ def _sales_tax_cash(db: Session, start_date, end_date):
 class _ExemptSales:
     """The report's Exempt sales section (#864): each sale's untaxed amount
     (its sales less its taxable amount, so the section adds up to the
-    Non-taxable sales line) under the reason it is untaxed: the kind of the
-    certificate its customer names when the sale is exempt as a whole, no
-    certificate on file when none is named, or lines left untaxed one by
-    one on a taxed sale (services/tax_exemption.exempt_reason)."""
+    Non-taxable sales line) under the reason it is untaxed: the kind on the
+    document's own copy of its job's certificate when the sale is exempt as
+    a whole, no certificate on file when it has no copy, or lines left
+    untaxed one by one on a taxed sale (services/tax_exemption.exempt_reason).
+    The copy is the document's, so an edit of the job never moves a sale
+    already made to another reason."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -301,7 +303,7 @@ class _ExemptSales:
         untaxed = _q(untaxed)
         if untaxed == 0:
             return None
-        reason = exempt_reason(self.db, doc)
+        reason = exempt_reason(doc)
         self.amounts[reason] = self.amounts.get(reason, Decimal(0)) + untaxed
         return reason
 

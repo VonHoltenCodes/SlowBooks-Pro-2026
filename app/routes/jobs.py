@@ -52,6 +52,7 @@ from app.services.contracts import (
     sync_contingency_line,
 )
 from app.services.estimating import estimate_totals
+from app.services.tax_exemption import CERTIFICATE_COLUMNS, settle_job_certificate
 from app.services.accounting import _q
 from app.services.closing_date import check_closing_date
 from app.models.job_costing import JobBudget
@@ -1016,14 +1017,13 @@ def _stamp_closed_on(job: Job, was: Optional[str]) -> None:
 
 @router.post("", response_model=JobResponse, status_code=201)
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
-    customer = db.get(Customer, data.customer_id)
-    if not customer:
+    if not db.get(Customer, data.customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
     _check_name_clash(db, data.customer_id, data.name)
     values = data.model_dump()
-    if values.get("is_taxable") is None:
-        # a new job is charged sales tax as its customer is (#864)
-        values["is_taxable"] = customer.is_taxable is not False
+    # Charged unless it says exempt; exempt needs its certificate (#864)
+    values["is_taxable"] = values.get("is_taxable") is not False
+    settle_job_certificate(values)
     job = Job(**values)
     _stamp_closed_on(job, None)
     db.add(job)
@@ -1051,6 +1051,10 @@ def update_job(job_id: int, data: JobUpdate, db: Session = Depends(get_db)):
             changes["contract_amount"] = _q(changes["contract_amount"])
         _refuse_sum_change(db, job, changes["contract_amount"])
     _follow_original(job, changes)
+    # Exempt needs its certificate; back to charged clears it (#864). A
+    # document made exempt kept its own copy, so none of them changes.
+    if "is_taxable" in changes or any(col in changes for col in CERTIFICATE_COLUMNS):
+        settle_job_certificate(changes, job)
     was = job.status
     for key, value in changes.items():
         setattr(job, key, value)

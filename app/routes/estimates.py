@@ -44,7 +44,7 @@ from app.services.estimating import (
 )
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
-from app.services.tax_exemption import settle_tax_exempt
+from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
@@ -595,6 +595,7 @@ def update_estimate(
     # leaves alone is not judged.
     refuse_other_customers_jobs_on_edit(db, estimate, changes, data.lines, "estimate")
     was_exempt = estimate.tax_exempt
+    was_job = estimate.job_id
     for key, val in changes.items():
         setattr(estimate, key, val)
     # the switch as sent, else as it was; always on for a non-taxable
@@ -606,6 +607,9 @@ def update_estimate(
         estimate.job_id,
         current=was_exempt,
     )
+    # exempt with no copy of its job's certificate yet (or on another job
+    # now), it takes one; a copy already taken stays as it was (#864)
+    refresh_certificate_copy(db, estimate, estimate.job_id != was_job)
 
     # The markups are a construction-mode field: a Business or Nonprofit
     # estimate keeps them at 0 whatever an API caller sent (#551).

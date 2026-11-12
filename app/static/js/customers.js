@@ -154,8 +154,7 @@ const CustomersPage = {
                 else if (p.days_to_expire !== null && p.days_to_expire <= 30) badge = `<span style="color:var(--text-warning);font-weight:600">Expires in ${p.days_to_expire}d</span>`;
                 else if (!p.is_active) badge = '<span style="color:var(--text-muted)">Inactive</span>';
                 const link = p.verification_url ? ` · <a href="${escapeHtml(p.verification_url)}" target="_blank" rel="noopener">Open ${escapeHtml(p.jurisdiction)} lookup</a>` : '';
-                const named = customer.exemption_certificate_id === p.id ? ' · <strong>on exempt sales</strong>' : '';
-                return `<li>${escapeHtml(p.kind_label || 'Resale')} · ${escapeHtml(p.jurisdiction)} · <code>${escapeHtml(p.permit_number)}</code> · ${badge}${p.expires_at ? ` · exp ${escapeHtml(p.expires_at)}` : ''}${named}${link}</li>`;
+                return `<li>${escapeHtml(p.jurisdiction)} · <code>${escapeHtml(p.permit_number)}</code> · ${badge}${p.expires_at ? ` · exp ${escapeHtml(p.expires_at)}` : ''}${link}</li>`;
             }).join('') + '</ul>';
 
         // -- Invoices + payments — last 10 each, click-through to detail --
@@ -281,7 +280,7 @@ const CustomersPage = {
 
             <!-- reseller permits -->
             <div style="margin-bottom:14px">
-                <h4 style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin:0 0 4px 0">Reseller permits and exemption certificates</h4>
+                <h4 style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin:0 0 4px 0">Reseller permits</h4>
                 ${permitsBody}
             </div>
 
@@ -411,11 +410,8 @@ const CustomersPage = {
             bill_address1: '', bill_address2: '', bill_city: '', bill_state: '', bill_zip: '', bill_country: 'US',
             ship_address1: '', ship_address2: '', ship_city: '', ship_state: '', ship_zip: '', ship_country: 'US',
             terms: 'Net 30', credit_limit: '', tax_id: '', is_taxable: true, is_active: true, notes: '' };
-        let certificates = [];
         if (id) {
             c = await API.get(`/customers/${id}`);
-            // the customer's own certificates on file, any kind (#864)
-            certificates = await API.get(`/reseller-permits?entity_type=customer&entity_id=${id}`).catch(() => []);
         } else {
             // A new customer starts on the company's default terms
             // (Settings), not a hard-coded Net 30.
@@ -511,7 +507,6 @@ const CustomersPage = {
                     <div class="form-group"><label>Sales Tax</label>
                         <label style="font-weight:normal;"><input type="checkbox" name="tax_exempt" ${c.is_taxable === false ? 'checked' : ''}>
                             Tax exempt: no sales tax on anything sold to them (a reseller, a church, a school)</label></div>
-                    ${id ? CustomersPage.certificateGroupHtml(c, certificates) : ''}
                     ${id ? `<div class="form-group"><label>Status</label>
                         <label style="font-weight:normal;"><input type="checkbox" name="is_active" ${c.is_active === false ? '' : 'checked'}>
                             Active (an inactive one is left out of the lists you pick from)</label></div>` : ''}
@@ -573,10 +568,6 @@ const CustomersPage = {
         // "Active" is on the edit form only.
         delete data.tax_exempt;
         data.is_taxable = !(e.target.tax_exempt && e.target.tax_exempt.checked);
-        // the certificate the exemption stands on (#864), or none
-        if ('exemption_certificate_id' in data) {
-            data.exemption_certificate_id = data.exemption_certificate_id ? parseInt(data.exemption_certificate_id, 10) : null;
-        }
         if (e.target.is_active) data.is_active = e.target.is_active.checked;
 
         try {
@@ -603,20 +594,6 @@ const CustomersPage = {
             }
             toast(err.message, 'error');
         }
-    },
-
-    // The certificate an exempt customer's sales stand on (#864): one of its
-    // own on the Reseller Permits page, any kind. Its number and state print
-    // under an exempt document's totals.
-    certificateGroupHtml(c, certificates) {
-        const opts = (certificates || []).map(p => {
-            const label = `${p.kind_label || 'Resale'} · ${p.jurisdiction} ${p.permit_number}${p.is_expired ? ' (expired)' : (p.is_active === false ? ' (inactive)' : '')}`;
-            return `<option value="${p.id}" ${c.exemption_certificate_id === p.id ? 'selected' : ''}>${escapeHtml(label)}</option>`;
-        }).join('');
-        const none = (certificates || []).length === 0;
-        return `<div class="form-group"><label>Exemption certificate</label>
-            <select name="exemption_certificate_id" ${none ? 'disabled' : ''}><option value="">${none ? 'None on file' : '— None named —'}</option>${opts}</select>
-            <div class="hint">Printed on an exempt ${T('invoice')} or estimate. Add one on the <a href="#/reseller-permits" onclick="closeModal()">Reseller Permits</a> page.</div></div>`;
     },
 
     _confirmDuplicate(formEl, id, data, duplicates) {

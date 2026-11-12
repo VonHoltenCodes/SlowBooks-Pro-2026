@@ -1,6 +1,7 @@
 # ============================================================================
-# Sales tax exemption (#864): the certificate on file, the job's and the
-# document's exempt switch, and the reason an exempt sale is exempt.
+# Sales tax exemption (#864): the job's certificate, the document's exempt
+# switch and its own copy of the certificate, and the reason an exempt sale
+# is exempt.
 #
 # Three things say a sale is untaxed, in this order:
 #   1. the customer is marked not taxable: never charged, whatever else says;
@@ -9,8 +10,13 @@
 #      customer is;
 #   3. a line's own Tax box, as before.
 # The first two untick every line; the third is a person's choice per line.
-# The customer may name the certificate its exemption stands on (any kind on
-# the reseller-permit record); an exempt document prints it under the totals.
+#
+# The certificate lives on the job: an exempt job needs its number, state
+# and kind (the expiry is optional), and every exempt job takes its own, so
+# nothing is kept for a customer who never comes back. A document made
+# exempt copies its job's certificate into its own columns; editing or
+# clearing the job's later never changes that copy, so an old PDF and an old
+# report reason stay as they were.
 # ============================================================================
 
 from __future__ import annotations
@@ -19,13 +25,30 @@ from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm import Session
 
-from app.models.reseller_permit import CERTIFICATE_KIND_LABELS
+# What a certificate exempts the buyer as, and how the job form, the PDF and
+# the Sales Tax report name each.
+CERTIFICATE_KINDS = ("public_entity", "nonprofit", "resale", "other")
+CERTIFICATE_KIND_LABELS = {
+    "resale": "Resale",
+    "public_entity": "Public entity",
+    "nonprofit": "Nonprofit",
+    "other": "Other exemption",
+}
 
-# The Sales Tax report's Exempt sales reasons (#864), in the order it lists
-# them: a certificate's kind, an exempt sale with no certificate named, and
-# lines left untaxed one by one on a taxed sale.
+# The certificate's four columns, the same names on jobs, estimates and
+# invoices.
+CERTIFICATE_COLUMNS = (
+    "exempt_certificate_number",
+    "exempt_certificate_state",
+    "exempt_certificate_kind",
+    "exempt_certificate_expires",
+)
+
+# The Sales Tax report's Exempt sales reasons, in the order it lists them:
+# the kind on the document's copy, an exempt sale with no copy, and lines
+# left untaxed one by one on a taxed sale.
 EXEMPT_REASONS = (
     "resale",
     "public_entity",
@@ -76,35 +99,144 @@ def settle_tax_exempt(
     return default_tax_exempt(db, customer, job_id)
 
 
+# ── the job's certificate ────────────────────────────────────────────────
+
+
+def _clean_kind(value) -> Optional[str]:
+    if value is None:
+        return None
+    kind = str(value).strip().lower().replace(" ", "_").replace("-", "_")
+    return kind or None
+
+
+def _join(words: list[str]) -> str:
+    if len(words) == 1:
+        return words[0]
+    if len(words) == 2:
+        return f"{words[0]} and {words[1]}"
+    return ", ".join(words[:-1]) + f", and {words[-1]}"
+
+
+def settle_job_certificate(values: dict, stored=None) -> None:
+    """Settle the certificate fields of a job save in ``values`` (a create's
+    fields, or an edit's changes over the ``stored`` job). Charged, the four
+    are cleared. Exempt, the number, state and kind are required (from what
+    was sent, else what the job holds) and the kind must be a known one;
+    otherwise the save is refused with one sentence naming what is missing.
+    """
+    taxable = values.get("is_taxable")
+    if taxable is None:
+        taxable = True if stored is None else stored.is_taxable is not False
+    if taxable:
+        for col in CERTIFICATE_COLUMNS:
+            values[col] = None
+        return
+
+    def current(col):
+        if col in values:
+            return values[col]
+        return getattr(stored, col, None) if stored is not None else None
+
+    number = (current("exempt_certificate_number") or "").strip() or None
+    state = (current("exempt_certificate_state") or "").strip().upper() or None
+    kind = _clean_kind(current("exempt_certificate_kind"))
+    missing = []
+    if not number:
+        missing.append("number")
+    if not state:
+        missing.append("state or jurisdiction")
+    if not kind:
+        missing.append("kind (public entity, nonprofit, resale or other)")
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "A tax-exempt job needs its exemption certificate, so enter "
+                f"the certificate's {_join(missing)}."
+            ),
+        )
+    if kind not in CERTIFICATE_KINDS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "A certificate's kind is public entity, nonprofit, resale or "
+                "other, so choose one of those."
+            ),
+        )
+    values["exempt_certificate_number"] = number
+    values["exempt_certificate_state"] = state
+    values["exempt_certificate_kind"] = kind
+    if "exempt_certificate_expires" not in values and stored is not None:
+        values["exempt_certificate_expires"] = stored.exempt_certificate_expires
+
+
+# ── the document's copy ──────────────────────────────────────────────────
+
+
+def _put_copy(doc, source) -> None:
+    """Copy ``source``'s certificate (a job, or a row of its columns) onto
+    the document, or clear the copy when ``source`` has none."""
+    has = source is not None and getattr(source, CERTIFICATE_COLUMNS[0], None)
+    for col in CERTIFICATE_COLUMNS:
+        value = getattr(source, col, None) if has else None
+        if getattr(doc, col, None) != value:
+            setattr(doc, col, value)
+
+
 def fill_tax_exempt(connection, target) -> None:
     """On insert, a document made without setting its switch (an import, a
     recurring run, a pay application's invoice) starts as its job is, else
-    its customer: unless it carries tax, which a switch on would contradict."""
-    if getattr(target, "tax_exempt", None) is not None:
-        return
-    target.tax_exempt = False
-    if target.tax_amount and target.tax_amount != 0:
-        return
+    its customer: unless it carries tax, which a switch on would contradict.
+    An exempt one with no copy yet then copies its job's certificate, the
+    one rule every create path shares."""
     from app.models.contacts import Customer
     from app.models.jobs import Job
 
-    if target.customer_id is not None:
-        taxable = connection.execute(
-            select(Customer.__table__.c.is_taxable).where(
-                Customer.__table__.c.id == target.customer_id
-            )
-        ).scalar()
-        if taxable is False:
-            target.tax_exempt = True
-            return
-    if target.job_id is not None:
-        taxable = connection.execute(
-            select(Job.__table__.c.is_taxable).where(
-                Job.__table__.c.id == target.job_id
-            )
-        ).scalar()
-        if taxable is False:
-            target.tax_exempt = True
+    if getattr(target, "tax_exempt", None) is None:
+        target.tax_exempt = False
+        if not (target.tax_amount and target.tax_amount != 0):
+            if target.customer_id is not None:
+                taxable = connection.execute(
+                    select(Customer.__table__.c.is_taxable).where(
+                        Customer.__table__.c.id == target.customer_id
+                    )
+                ).scalar()
+                if taxable is False:
+                    target.tax_exempt = True
+            if not target.tax_exempt and target.job_id is not None:
+                taxable = connection.execute(
+                    select(Job.__table__.c.is_taxable).where(
+                        Job.__table__.c.id == target.job_id
+                    )
+                ).scalar()
+                if taxable is False:
+                    target.tax_exempt = True
+    if not target.tax_exempt:
+        _put_copy(target, None)
+        return
+    if getattr(target, CERTIFICATE_COLUMNS[0], None) or target.job_id is None:
+        return
+    t = Job.__table__.c
+    row = connection.execute(
+        select(*(t[col] for col in CERTIFICATE_COLUMNS)).where(t.id == target.job_id)
+    ).first()
+    if row is not None:
+        _put_copy(target, row)
+
+
+def refresh_certificate_copy(db: Session, doc, job_changed: bool = False) -> None:
+    """After an edit: a document switched off keeps no copy; one exempt with
+    no copy yet, or moved to another job, takes its job's certificate as it
+    stands. A copy already taken is otherwise left alone, whatever the job
+    says now."""
+    from app.models.jobs import Job
+
+    if not doc.tax_exempt:
+        _put_copy(doc, None)
+        return
+    if doc.exempt_certificate_number and not job_changed:
+        return
+    _put_copy(doc, db.get(Job, doc.job_id) if doc.job_id else None)
 
 
 def document_exempt(doc) -> bool:
@@ -120,67 +252,43 @@ def document_exempt(doc) -> bool:
     return customer_exempt(getattr(doc, "customer", None))
 
 
-def certificate_for(db: Session, customer):
-    """The active certificate the customer names, else None."""
-    from app.models.reseller_permit import ResellerPermit
-
-    if customer is None or not customer.exemption_certificate_id or db is None:
-        return None
-    cert = db.get(ResellerPermit, customer.exemption_certificate_id)
-    if cert is None or cert.is_active is False:
-        return None
-    if cert.entity_type != "customer" or cert.entity_id != customer.id:
-        return None
-    return cert
+def _copy_holder(doc):
+    """The document whose copy says the certificate: its own, or for a
+    credit memo the invoice it credits."""
+    if hasattr(doc, "tax_exempt"):
+        return doc
+    return getattr(doc, "original_invoice", None)
 
 
 def exemption_line(doc) -> Optional[str]:
-    """The line an exempt document prints under its totals, else None."""
+    """The line an exempt document prints under its totals, else None:
+    the certificate on its own copy, noted expired when the copy's expiry
+    is before the document's date; plain "Sales tax exempt" with no copy."""
     if not document_exempt(doc):
         return None
-    try:
-        db = object_session(doc)
-    except Exception:  # not a mapped row (a preview's stand-in)
-        db = None
-    cert = certificate_for(db, getattr(doc, "customer", None))
-    if cert is None:
+    holder = _copy_holder(doc)
+    number = getattr(holder, "exempt_certificate_number", None)
+    if not number:
         return "Sales tax exempt"
-    return f"Sales tax exempt — certificate {cert.permit_number} ({cert.jurisdiction})"
+    state = getattr(holder, "exempt_certificate_state", None)
+    line = f"Sales tax exempt — certificate {number}"
+    if state:
+        line += f" ({state})"
+    expires = getattr(holder, "exempt_certificate_expires", None)
+    when = getattr(doc, "date", None)
+    if expires is not None and when is not None and expires < when:
+        line += " (expired)"
+    return line
 
 
-def exempt_reason(db: Session, doc) -> str:
-    """Why a sale's untaxed amount is untaxed (EXEMPT_REASONS): the kind of
-    the certificate its customer names when the sale is exempt as a whole,
-    no certificate when none is named, else its lines were left untaxed
-    one by one."""
+def exempt_reason(doc) -> str:
+    """Why a sale's untaxed amount is untaxed (EXEMPT_REASONS): the kind on
+    the document's copy when the sale is exempt as a whole, no certificate
+    when it has no copy, else its lines were left untaxed one by one."""
     if not document_exempt(doc):
         return "line_by_line"
-    cert = certificate_for(db, getattr(doc, "customer", None))
-    if cert is None:
+    holder = _copy_holder(doc)
+    if holder is None or not getattr(holder, "exempt_certificate_number", None):
         return "no_certificate"
-    return cert.kind if cert.kind in CERTIFICATE_KIND_LABELS else "other"
-
-
-def check_certificate(db: Session, customer_id: Optional[int], certificate_id) -> None:
-    """A customer names only a certificate on file for that customer."""
-    from app.models.reseller_permit import ResellerPermit
-
-    if certificate_id is None:
-        return
-    cert = db.get(ResellerPermit, certificate_id)
-    if cert is None:
-        raise HTTPException(
-            status_code=404,
-            detail="That exemption certificate is not on file.",
-        )
-    if customer_id is None or (
-        cert.entity_type != "customer" or cert.entity_id != customer_id
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "That certificate is on file for someone else. Add this "
-                "customer's own certificate on the Reseller Permits page, "
-                "then name it here."
-            ),
-        )
+    kind = getattr(holder, "exempt_certificate_kind", None)
+    return kind if kind in CERTIFICATE_KIND_LABELS else "other"

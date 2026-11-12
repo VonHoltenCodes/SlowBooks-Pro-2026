@@ -11,7 +11,7 @@ from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.items import Item
 from app.models.contacts import Customer
 from app.services.sub_customers import INVOICE_ADDRESS_FIELDS, invoice_addresses
-from app.services.tax_exemption import settle_tax_exempt
+from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
 from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.accounting import (
     _q,
@@ -589,6 +589,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 posting.date = data.date
 
     previous_customer_id = invoice.customer_id
+    previous_job_id = invoice.job_id
     terms_before = invoice.terms
     # An explicit pick of a list entry is set through picked_term_id below,
     # not straight onto the column, so a bad one is refused (#664).
@@ -605,6 +606,9 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     # so a legacy invoice can finally follow a term added since (#664).
     if pick is not None:
         invoice.payment_term_id = picked_term_id(db, invoice.terms, pick)
+    # Exempt with no copy of its job's certificate yet (or on another job
+    # now), it takes one; a copy already taken stays as it was (#864).
+    refresh_certificate_copy(db, invoice, invoice.job_id != previous_job_id)
     # Terms changed (or a pick) and no due date sent: recompute it from the
     # new rule, as bills.py does (#664). A recomputed date before the
     # invoice date (Net -5) is refused, as on create.

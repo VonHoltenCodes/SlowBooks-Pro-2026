@@ -215,7 +215,7 @@ const JobsPage = {
                     <h2 style="margin:2px 0 0 0;">${escapeHtml(job.name)}
                         <span class="badge" style="font-size:11px; vertical-align:middle;">${escapeHtml(JobsPage.STATUS_LABELS[job.status] || job.status)}</span>
                         ${job.is_active ? '' : '<span style="font-size:11px;color:var(--text-danger);">inactive</span>'}
-                        ${job.is_taxable === false ? '<span class="badge" style="font-size:11px; vertical-align:middle;" title="New documents for this job start with every line untaxed">Sales tax exempt</span>' : ''}
+                        ${job.is_taxable === false ? `<span class="badge" style="font-size:11px; vertical-align:middle;" title="${escapeHtml(JobsPage.certificateTitle(job))}">Sales tax exempt</span>` : ''}
                     </h2>
                 </div>
                 <div>
@@ -1916,9 +1916,6 @@ const JobsPage = {
             contract_amount: '', notes: '', is_active: true };
         if (id) { try { job = await API.get(`/jobs/${id}`); } catch (err) { toast(err.message, 'error'); return; } }
         const customers = await JobsPage._pickerCustomers(job);
-        JobsPage._formCustomers = customers;
-        // a new job is charged sales tax as its customer is (#864)
-        if (!id) job.is_taxable = JobsPage.customerTaxable(customers, job.customer_id);
         const custOpts = customers.map(c => `<option value="${c.id}" ${String(job.customer_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
         const statusOpts = Object.entries(JobsPage.STATUS_LABELS)
             .map(([k, v]) => `<option value="${k}" ${job.status === k ? 'selected' : ''}>${v}</option>`).join('');
@@ -1926,7 +1923,7 @@ const JobsPage = {
             <form id="job-form" onsubmit="JobsPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" required ${id ? '' : 'onchange="JobsPage.customerPicked(this)"'}><option value="">Select...</option>${custOpts}</select></div>
+                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>${T('Job')} name *</label>
                         <input name="name" required maxlength="200" value="${escapeHtml(job.name)}" placeholder="Kitchen remodel"></div>
                     <div class="form-group"><label>${T('Job')} #</label>
@@ -1937,7 +1934,7 @@ const JobsPage = {
                         <input name="job_type" maxlength="100" value="${escapeHtml(job.job_type || '')}" placeholder="Remodel, New build, Service…"></div>
                     <div class="form-group"><label>Contract amount</label>
                         <input name="contract_amount" type="number" step="0.01" min="0" value="${job.contract_amount ?? ''}"></div>
-                    ${JobsPage.salesTaxGroupHtml(job, id)}
+                    ${JobsPage.salesTaxGroupHtml(job)}
                     <div class="form-group"><label>Start date</label>
                         <input name="start_date" type="date" value="${job.start_date || ''}"></div>
                     <div class="form-group"><label>Projected end</label>
@@ -1962,34 +1959,81 @@ const JobsPage = {
         openModal(id ? `Edit ${T('Job')}` : `New ${T('Job')}`, html);
     },
 
-    // "Sales tax: charged / exempt" (#864). Exempt, the job's new documents
-    // and new schedule-of-values lines start untaxed; a change reaches new
-    // ones only. Not the Contract tab's "who pays the tax" setting.
-    salesTaxGroupHtml(job, id) {
+    // "Sales tax: charged / exempt" (#864). Exempt needs the job's own
+    // exemption certificate: number, state and kind, the expiry optional.
+    // The certificate lives and dies with the job; a document made exempt
+    // keeps its own copy, so changing it here never changes one already made.
+    // Not the Contract tab's "who pays the tax" setting.
+    CERTIFICATE_KINDS: [
+        ['public_entity', 'Public entity'],
+        ['nonprofit', 'Nonprofit'],
+        ['resale', 'Resale'],
+        ['other', 'Other exemption'],
+    ],
+
+    salesTaxGroupHtml(job) {
         const exempt = job.is_taxable === false;
+        const kinds = JobsPage.CERTIFICATE_KINDS.map(([k, label]) =>
+            `<option value="${k}" ${job.exempt_certificate_kind === k ? 'selected' : ''}>${label}</option>`).join('');
+        const need = exempt ? 'required' : 'disabled';
         return `<div class="form-group"><label>Sales tax</label>
-            <select name="is_taxable" data-touched="${id ? '1' : ''}" onchange="this.dataset.touched='1'" title="Exempt: new estimates, invoices, sales receipts, pay applications and change orders for this job start with every line untaxed. What is already made keeps its tax.">
+            <select name="is_taxable" onchange="JobsPage.salesTaxPicked(this)" title="Exempt: new estimates, invoices, sales receipts, pay applications and change orders for this job start with every line untaxed. What is already made keeps its tax.">
                 <option value="true" ${exempt ? '' : 'selected'}>Charged</option>
                 <option value="false" ${exempt ? 'selected' : ''}>Exempt</option>
-            </select></div>`;
+            </select></div>
+            <fieldset class="job-exempt-certificate form-group" style="grid-column:1/-1; border:1px solid var(--gray-200); padding:8px 10px; ${exempt ? '' : 'display:none;'}">
+                <legend style="font-size:12px;">Exemption certificate</legend>
+                <div class="form-grid">
+                    <div class="form-group"><label>Certificate number *</label>
+                        <input name="exempt_certificate_number" maxlength="50" ${need} value="${escapeHtml(job.exempt_certificate_number || '')}"></div>
+                    <div class="form-group"><label>State or jurisdiction *</label>
+                        <input name="exempt_certificate_state" maxlength="20" ${need} value="${escapeHtml(job.exempt_certificate_state || '')}" placeholder="IL"></div>
+                    <div class="form-group"><label>Kind *</label>
+                        <select name="exempt_certificate_kind" ${need}><option value="">Select...</option>${kinds}</select></div>
+                    <div class="form-group"><label>Expires</label>
+                        <input name="exempt_certificate_expires" type="date" ${exempt ? '' : 'disabled'} value="${job.exempt_certificate_expires || ''}"></div>
+                </div>
+                <div class="hint">Printed under the totals of this ${T('job').toLowerCase()}'s exempt estimates and ${T('invoices').toLowerCase()}. Each document keeps the certificate it was made with.</div>
+            </fieldset>`;
     },
 
-    customerTaxable(customers, customerId) {
-        const c = (customers || []).find(x => String(x.id) === String(customerId));
-        return !(c && c.is_taxable === false);
-    },
-
-    // A new job's Sales tax follows its customer until it is set by hand.
-    customerPicked(select) {
+    // Exempt shows the certificate and requires it; Charged hides it (the
+    // save then clears it).
+    salesTaxPicked(select) {
         const form = select.form || select.closest('form');
-        const tax = form ? form.querySelector('[name="is_taxable"]') : null;
-        if (!tax || tax.dataset.touched) return;
-        tax.value = JobsPage.customerTaxable(JobsPage._formCustomers, select.value) ? 'true' : 'false';
+        const box = form ? form.querySelector('.job-exempt-certificate') : null;
+        if (!box) return;
+        const exempt = select.value === 'false';
+        box.style.display = exempt ? '' : 'none';
+        box.querySelectorAll('input, select').forEach(el => {
+            el.disabled = !exempt;
+            if (el.name !== 'exempt_certificate_expires') el.required = exempt;
+        });
+    },
+
+    // The job header badge's tooltip: the certificate on file.
+    certificateTitle(job) {
+        const kind = (JobsPage.CERTIFICATE_KINDS.find(([k]) => k === job.exempt_certificate_kind) || [null, 'Exemption'])[1];
+        const exp = job.exempt_certificate_expires ? `, expires ${job.exempt_certificate_expires}` : '';
+        return `${kind} certificate ${job.exempt_certificate_number || ''} (${job.exempt_certificate_state || ''})${exp}. New documents for this job start with every line untaxed.`;
     },
 
     formTaxable(form) {
         const tax = form ? form.querySelector('[name="is_taxable"]') : null;
         return tax ? tax.value !== 'false' : undefined;
+    },
+
+    // The certificate fields for the save body: sent when Exempt, else none
+    // (the server clears a Charged job's certificate).
+    formCertificate(form) {
+        if (JobsPage.formTaxable(form) !== false) return {};
+        const v = n => { const el = form.querySelector(`[name="${n}"]`); return el && el.value.trim() ? el.value.trim() : null; };
+        return {
+            exempt_certificate_number: v('exempt_certificate_number'),
+            exempt_certificate_state: v('exempt_certificate_state'),
+            exempt_certificate_kind: v('exempt_certificate_kind'),
+            exempt_certificate_expires: v('exempt_certificate_expires'),
+        };
     },
 
     // Active customers only — the picker listed inactive ones too — plus the
@@ -2025,6 +2069,7 @@ const JobsPage = {
             description: val('description'),
             notes: val('notes'),
             is_taxable: JobsPage.formTaxable(form),
+            ...JobsPage.formCertificate(form),
         };
         if (form.is_active) data.is_active = form.is_active.value === 'true';
         try {

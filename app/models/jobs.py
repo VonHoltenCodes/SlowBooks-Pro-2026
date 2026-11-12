@@ -101,13 +101,22 @@ class Job(Base):
     contract_date = Column(Date, nullable=True)
     sales_tax_treatment = Column(String(20), nullable=True)  # SALES_TAX_TREATMENTS
     # Sales tax charged on the job's sales, or the job exempt (#864): a
-    # public owner's job for a customer who is otherwise taxable. A new
-    # job starts as its customer is. Exempt, a new estimate, invoice, sales
-    # receipt, pay application or change order for the job starts with
-    # every line untaxed, and so does a new schedule-of-values line; what
-    # is already made keeps its flags when this changes. Not the same as
-    # sales_tax_treatment, which says who pays the tax on a taxed job.
+    # public owner's or nonprofit's job. Exempt, a new estimate, invoice,
+    # sales receipt, pay application or change order for the job starts
+    # with every line untaxed, and so does a new schedule-of-values line;
+    # what is already made keeps its flags when this changes. Not the same
+    # as sales_tax_treatment, which says who pays the tax on a taxed job.
     is_taxable = Column(Boolean, nullable=False, default=True, server_default=true())
+    # The exemption certificate an exempt job stands on (#864): it lives and
+    # dies with the job, so every exempt job takes its own. Number, state
+    # (or jurisdiction) and kind are required while the job is exempt; the
+    # expiry is optional. Switching the job back to charged clears them. A
+    # document made exempt keeps its own copy (exempt_certificate_* on
+    # estimates and invoices), so a later edit here never changes it.
+    exempt_certificate_number = Column(String(50), nullable=True)
+    exempt_certificate_state = Column(String(20), nullable=True)
+    exempt_certificate_kind = Column(String(20), nullable=True)
+    exempt_certificate_expires = Column(Date, nullable=True)
     contract_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )
@@ -165,6 +174,16 @@ class SovLine(Base):
         Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
     )
     is_taxable = Column(Boolean, nullable=False, default=True, server_default=true())
+    # The exemption certificate an exempt job stands on (#864): it lives and
+    # dies with the job, so every exempt job takes its own. Number, state
+    # (or jurisdiction) and kind are required while the job is exempt; the
+    # expiry is optional. Switching the job back to charged clears them. A
+    # document made exempt keeps its own copy (exempt_certificate_* on
+    # estimates and invoices), so a later edit here never changes it.
+    exempt_certificate_number = Column(String(50), nullable=True)
+    exempt_certificate_state = Column(String(20), nullable=True)
+    exempt_certificate_kind = Column(String(20), nullable=True)
+    exempt_certificate_expires = Column(Date, nullable=True)
     source_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )

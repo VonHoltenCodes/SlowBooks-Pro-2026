@@ -267,7 +267,9 @@ from app.services.estimate_bid import (  # noqa: E402
 _jinja_env.globals["estimate_totals"] = _estimate_totals
 
 # The line an exempt estimate, invoice or sales receipt prints under its
-# totals (#864): "Sales tax exempt", with the certificate when one is named.
+# totals (#864): "Sales tax exempt", with the certificate from the
+# document's own copy when it has one, noted expired when the copy expired
+# before the document's date.
 from app.services.tax_exemption import exemption_line as _exemption_line  # noqa: E402
 
 _jinja_env.globals["tax_exempt_line"] = _exemption_line

@@ -54,13 +54,6 @@ class Customer(Base):
     credit_limit = Column(Numeric(15, 2), nullable=True)
     tax_id = Column(String(50), nullable=True)
     is_taxable = Column(Boolean, default=True)
-    # The exemption certificate on file that this customer's exempt sales
-    # stand on (#864): one of its own rows in reseller_permits (any kind).
-    # Printed under an exempt document's totals and read by the Sales Tax
-    # report's Exempt sales section. NULL: none named.
-    exemption_certificate_id = Column(
-        Integer, ForeignKey("reseller_permits.id", ondelete="SET NULL"), nullable=True
-    )
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     balance = Column(Numeric(15, 2), default=0)
