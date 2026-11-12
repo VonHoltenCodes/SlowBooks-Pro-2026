@@ -11,7 +11,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import sqlalchemy as sa
 
 from app.models.document_audit import DocumentAudit
 from app.models.payroll import PayRun, PayRunStatus
@@ -363,29 +362,6 @@ def test_the_desktop_probe_still_passes_with_the_history_card():
         timeout=60,
     )
     assert out.returncode == 0, out.stderr
-
-
-WHO_REVISION = "c5e7a9b1d3f5"  # who generated a tax form (#263)
-
-
-def test_the_migration_adds_who_and_keeps_one_head(tmp_path):
-    from alembic import command
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    db = tmp_path / "fresh.db"
-    url = "sqlite:///" + db.as_posix()
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = url
-    assert len(ScriptDirectory.from_config(cfg).get_heads()) == 1
-    command.upgrade(cfg, WHO_REVISION)  # its own step, not the chain (#770)
-    engine = sa.create_engine(url)
-    cols = {c["name"] for c in sa.inspect(engine).get_columns("document_audits")}
-    assert "username" in cols
-    command.downgrade(cfg, "b4d6f8a0c2e4")
-    cols = {c["name"] for c in sa.inspect(engine).get_columns("document_audits")}
-    assert "username" not in cols
 
 
 def test_rows_from_before_carry_no_name_and_still_list(client, db_session):

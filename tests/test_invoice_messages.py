@@ -3,8 +3,6 @@ them the default, chosen on the invoice form and copied into its Notes."""
 
 from pathlib import Path
 
-import sqlalchemy as sa
-
 from app.models.users import ROLE_BOOKKEEPER, ROLE_READONLY, User
 from app.services import auth as auth_service
 
@@ -248,52 +246,6 @@ def test_an_estimate_converted_without_notes_starts_with_the_default(
     r = client.post(f"/api/estimates/{r.json()['id']}/convert")
     assert r.status_code in (200, 201), r.text
     assert r.json()["notes"] == "Pay by Zelle."
-
-
-# ---------------------------------------------------------------------------
-# The migration
-# ---------------------------------------------------------------------------
-
-
-MESSAGES_REVISION = "e4f5a6b7c8d9"  # the saved invoice messages migration (#392)
-
-
-def test_the_migration_makes_the_table_and_keeps_one_head(tmp_path):
-    from alembic import command
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    db = tmp_path / "fresh.db"
-    url = "sqlite:///" + db.as_posix()
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = url
-    script = ScriptDirectory.from_config(cfg)
-    assert len(script.get_heads()) == 1
-    assert script.get_revision("e4f5a6b7c8d9").down_revision == "a1f2e3d4c5b6"
-    command.upgrade(cfg, MESSAGES_REVISION)  # its own step, not the chain (#770)
-    engine = sa.create_engine(url)
-    insp = sa.inspect(engine)
-    assert "invoice_messages" in insp.get_table_names()
-    cols = {c["name"]: c for c in insp.get_columns("invoice_messages")}
-    assert set(cols) >= {"id", "name", "body", "is_default", "created_at", "updated_at"}
-    assert cols["is_default"]["nullable"] is False
-    # the unique name, as the model declares it
-    uniques = [
-        tuple(u["column_names"])
-        for u in insp.get_unique_constraints("invoice_messages")
-    ]
-    indexes = [
-        tuple(i["column_names"])
-        for i in insp.get_indexes("invoice_messages")
-        if i.get("unique")
-    ]
-    assert ("name",) in uniques + indexes
-    # a second run is a no-op, as a file create_all already made
-    command.downgrade(cfg, "a1f2e3d4c5b6")
-    assert "invoice_messages" not in sa.inspect(engine).get_table_names()
-    command.upgrade(cfg, MESSAGES_REVISION)  # its own step, not the chain (#770)
-    engine.dispose()
 
 
 # ---------------------------------------------------------------------------

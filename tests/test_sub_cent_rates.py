@@ -15,7 +15,6 @@ four places and the documents print them only when they are there.
 
 import json
 import shutil
-import sqlite3
 import subprocess
 from decimal import Decimal
 from pathlib import Path
@@ -157,63 +156,3 @@ def test_the_form_rounds_each_line_to_the_cent():
     assert got["rates"] == ["$0.045", "$12.50", "EUR 1.0055", "$1,234.50"]
     assert got["subCentAmounts"] == ["$45.00", "$1.00"]
     assert got["subCent"] == {"subtotal": 46, "tax": 0, "total": 46}
-
-
-def test_the_migration_widens_the_rate_and_keeps_every_value(tmp_path):
-    from alembic import command
-    from alembic.config import Config
-
-    db = tmp_path / "old.db"
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
-    command.upgrade(cfg, "a9b0c1d2e3f4")
-
-    con = sqlite3.connect(db)
-    con.execute(
-        "INSERT INTO customers (name, is_active, send_year_end_statement) "
-        "VALUES ('Harbor Light', 1, 1)"
-    )
-    con.execute(
-        "INSERT INTO invoices (invoice_number, customer_id, date, is_sales_receipt, "
-        "is_pledge) VALUES ('1001', 1, '2026-09-01', 0, 0)"
-    )
-    for rate, amount in ((0.045, 45.0), (120.5, 241.0)):
-        con.execute(
-            "INSERT INTO invoice_lines (invoice_id, quantity, rate, amount, "
-            "is_taxable, line_order) VALUES (1, ?, ?, ?, 1, 0)",
-            (amount / rate, rate, amount),
-        )
-    con.commit()
-    con.close()
-
-    def rate_types():
-        c = sqlite3.connect(db)
-        try:
-            return {
-                t: next(
-                    col[2]
-                    for col in c.execute(f"PRAGMA table_info({t})")
-                    if col[1] == "rate"
-                )
-                for t in (
-                    "invoice_lines",
-                    "estimate_lines",
-                    "credit_memo_lines",
-                    "recurring_invoice_lines",
-                )
-            }
-        finally:
-            c.close()
-
-    command.upgrade(cfg, "6f57f762f464")
-    assert set(rate_types().values()) == {"NUMERIC(17, 4)"}
-    con = sqlite3.connect(db)
-    assert con.execute("SELECT rate FROM invoice_lines ORDER BY id").fetchall() == [
-        (0.045,),
-        (120.5,),
-    ]
-    con.close()
-
-    command.downgrade(cfg, "a9b0c1d2e3f4")
-    assert set(rate_types().values()) == {"NUMERIC(15, 2)"}

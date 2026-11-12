@@ -77,17 +77,19 @@ def test_a_database_behind_head_is_refused(tmp_path, monkeypatch):
     db = tmp_path / "behind.db"
     command.upgrade(_cfg(db), "head")
     # Wind the stamp back to something older without touching the schema —
-    # the same end state as a file that was created by an older build.
+    # the same end state as a file that was created by an older build. The
+    # migration floor (2.29.0's head): a file below it gets its own sentence
+    # (#769, tests/test_migration_floor_769.py).
     engine = create_engine(f"sqlite:///{db}")
     with engine.begin() as conn:
-        conn.execute(text("UPDATE alembic_version SET version_num = 'd6e7f8a9b0c1'"))
+        conn.execute(text("UPDATE alembic_version SET version_num = 'c4e5d6f7a8b9'"))
 
     monkeypatch.setattr(main, "engine", engine)
     with pytest.raises(RuntimeError) as e:
         main._refuse_a_database_behind_head()
 
     detail = str(e.value)
-    assert "d6e7f8a9b0c1" in detail, "say which revision the database is at"
+    assert "c4e5d6f7a8b9" in detail, "say which revision the database is at"
     assert _head() in detail, "say which revision the build expects"
     assert "alembic upgrade head" in detail, "say what to do about it"
 
