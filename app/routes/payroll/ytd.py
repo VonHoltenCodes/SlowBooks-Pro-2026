@@ -111,9 +111,10 @@ def wage_base_ytd(
         if not stub_state:
             if home is None:
                 emp = db.query(Employee).filter(Employee.id == employee_id).first()
-                home = ((emp.work_state if emp else None) or "WA").strip().upper()
+                home = ((emp.work_state if emp else None) or "").strip().upper()
             stub_state = home
-        if stub_state == state:
+        # a blank state is no state (#818): it fills no state's base
+        if state and stub_state == state:
             bases["suta"] += fica
             bases["state"] += gross
     opening = po.opening_for(db, employee_id, year)

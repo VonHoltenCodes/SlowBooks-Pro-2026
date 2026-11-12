@@ -20,6 +20,7 @@ from app.services.tax_forms.form_940 import compute_940, generate_940_pdf
 from app.services.tax_forms.form_941 import compute_941, generate_941_pdf
 from app.services.tax_forms.w2_w3 import (
     compute_w2,
+    missing_work_state,
     w2_state_lines,
     compute_w3,
     generate_w2_pdf,
@@ -81,6 +82,10 @@ def generate_w2_form(
         }
         for line in w2_state_lines(db, year, emp_id)
     ]
+    # paychecks figured with no work state are in no state's boxes (#818)
+    warnings = missing_work_state(db, year, employee_id=emp_id)
+    if warnings:
+        w2_data["warnings"] = warnings
 
     return JSONResponse(content=w2_data, status_code=200)
 

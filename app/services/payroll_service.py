@@ -16,6 +16,13 @@
 #     https://www.irs.gov/pub/irs-pdf/p15.pdf
 #   * SSA, "Contribution and Benefit Base" (2027 base announced 2026-10-14).
 #     https://www.ssa.gov/oact/cola/cbb.html
+#   * IRS Publication 15-T (2025), Dec. 2024 — the "2025 Percentage Method
+#     Tables for Automated Payroll Systems", page 10, for a run dated 2025.
+#     https://www.irs.gov/pub/irs-prior/p15t--2025.pdf
+#
+# Every year's schedules are kept (FEDERAL_TABLES) and a pay run is figured
+# with those of its pay date's year (#818); a pay date in a year with none
+# is refused (check_tables_year).
 # ============================================================================
 
 from decimal import Decimal
@@ -146,6 +153,123 @@ _CHECKBOX = {
     ],
 }
 
+# The 2025 schedules, Pub 15-T (2025) page 10 (Worksheet 1A line 1g was
+# the same $12,900 / $8,600). Transcribed from the publication; the derived
+# cumulative amounts equal its column C to the cent.
+_STANDARD_2025 = {
+    "single": [
+        (Decimal("0"), Decimal("0")),
+        (Decimal("6400"), Decimal("0.10")),
+        (Decimal("18325"), Decimal("0.12")),
+        (Decimal("54875"), Decimal("0.22")),
+        (Decimal("109750"), Decimal("0.24")),
+        (Decimal("203700"), Decimal("0.32")),
+        (Decimal("256925"), Decimal("0.35")),
+        (Decimal("632750"), Decimal("0.37")),
+    ],
+    "married": [
+        (Decimal("0"), Decimal("0")),
+        (Decimal("17100"), Decimal("0.10")),
+        (Decimal("40950"), Decimal("0.12")),
+        (Decimal("114050"), Decimal("0.22")),
+        (Decimal("223800"), Decimal("0.24")),
+        (Decimal("411700"), Decimal("0.32")),
+        (Decimal("518150"), Decimal("0.35")),
+        (Decimal("768700"), Decimal("0.37")),
+    ],
+    "head_of_household": [
+        (Decimal("0"), Decimal("0")),
+        (Decimal("13900"), Decimal("0.10")),
+        (Decimal("30900"), Decimal("0.12")),
+        (Decimal("78750"), Decimal("0.22")),
+        (Decimal("117250"), Decimal("0.24")),
+        (Decimal("211200"), Decimal("0.32")),
+        (Decimal("264400"), Decimal("0.35")),
+        (Decimal("640250"), Decimal("0.37")),
+    ],
+}
+_CHECKBOX_2025 = {
+    "single": [
+        (Decimal("0"), Decimal("0")),
+        (Decimal("7500"), Decimal("0.10")),
+        (Decimal("13463"), Decimal("0.12")),
+        (Decimal("31738"), Decimal("0.22")),
+        (Decimal("59175"), Decimal("0.24")),
+        (Decimal("106150"), Decimal("0.32")),
+        (Decimal("132763"), Decimal("0.35")),
+        (Decimal("320675"), Decimal("0.37")),
+    ],
+    "married": [
+        (Decimal("0"), Decimal("0")),
+        (Decimal("15000"), Decimal("0.10")),
+        (Decimal("26925"), Decimal("0.12")),
+        (Decimal("63475"), Decimal("0.22")),
+        (Decimal("118350"), Decimal("0.24")),
+        (Decimal("212300"), Decimal("0.32")),
+        (Decimal("265525"), Decimal("0.35")),
+        (Decimal("390800"), Decimal("0.37")),
+    ],
+    "head_of_household": [
+        (Decimal("0"), Decimal("0")),
+        (Decimal("11250"), Decimal("0.10")),
+        (Decimal("19750"), Decimal("0.12")),
+        (Decimal("43675"), Decimal("0.22")),
+        (Decimal("62925"), Decimal("0.24")),
+        (Decimal("109900"), Decimal("0.32")),
+        (Decimal("136500"), Decimal("0.35")),
+        (Decimal("324425"), Decimal("0.37")),
+    ],
+}
+
+# Each year's federal schedules: the standard and Step 2 checkbox rate
+# schedules and the line 1g add-back. A pay run uses its pay date's year.
+FEDERAL_TABLES = {
+    2025: {
+        "standard": _STANDARD_2025,
+        "checkbox": _CHECKBOX_2025,
+        "addback": STD_DEDUCTION_ADDBACK,
+    },
+    2026: {
+        "standard": _STANDARD,
+        "checkbox": _CHECKBOX,
+        "addback": STD_DEDUCTION_ADDBACK,
+    },
+}
+TABLE_YEARS = tuple(sorted(FEDERAL_TABLES))
+# The newest year's tables: what a caller that names no year is figured with.
+TABLES_YEAR = max(TABLE_YEARS)
+
+
+class PayrollYearError(ValueError):
+    """A pay date in a year SlowBooks keeps no payroll tables for."""
+
+
+def has_tables(year: int | None) -> bool:
+    """Whether SlowBooks keeps the federal schedules for `year`."""
+    return year in FEDERAL_TABLES
+
+
+def tables_year_refusal(year: int) -> str:
+    """The sentence a pay run dated in a year with no tables is refused with."""
+    years = " and ".join(str(y) for y in TABLE_YEARS)
+    return (
+        f"SlowBooks keeps payroll tables for {years}, not for {year}, so a "
+        f"pay run dated {year} cannot be figured. Date the run in "
+        f"{' or '.join(str(y) for y in TABLE_YEARS)}."
+    )
+
+
+def check_tables_year(year: int | None) -> None:
+    """Raise PayrollYearError with the sentence when `year` has no tables."""
+    if year is not None and not has_tables(year):
+        raise PayrollYearError(tables_year_refusal(year))
+
+
+def _federal_tables(year: int | None) -> dict:
+    check_tables_year(year)
+    return FEDERAL_TABLES[TABLES_YEAR if year is None else year]
+
+
 # Supplemental wage withholding (Pub 15 (2026) section 7 / Pub 15-T
 # Worksheet 4): "The withholding rate on supplemental wages remains 22% (37%
 # if supplemental wages paid to an employee during the calendar year exceed
@@ -180,12 +304,15 @@ def federal_income_tax(
     other_income_annual: Decimal = Decimal("0"),
     deductions_annual: Decimal = Decimal("0"),
     extra_withholding: Decimal = Decimal("0"),
+    year: int | None = None,
 ) -> Decimal:
     """Federal income tax to withhold for one pay period — Pub 15-T Worksheet 1A.
 
     `taxable_wages` is gross for the period already net of any pre-tax
-    deductions that reduce federal taxable wages.
+    deductions that reduce federal taxable wages. `year` is the pay date's:
+    the schedules are that year's (the newest SlowBooks keeps when None).
     """
+    tables = _federal_tables(year)
     taxable_wages = Decimal(str(taxable_wages))
     if taxable_wages <= 0:
         return Decimal("0")
@@ -194,14 +321,14 @@ def federal_income_tax(
     # Step 1 — adjusted annual wage amount
     annual_wage = taxable_wages * pay_periods
     line_1e = annual_wage + Decimal(str(other_income_annual))
-    addback = Decimal("0") if multiple_jobs else STD_DEDUCTION_ADDBACK[fs]
+    addback = Decimal("0") if multiple_jobs else tables["addback"][fs]
     line_1h = Decimal(str(deductions_annual)) + addback
     adjusted_annual = line_1e - line_1h
     if adjusted_annual < 0:
         adjusted_annual = Decimal("0")
 
     # Step 2 — tentative withholding from the percentage-method schedule
-    table = _CHECKBOX[fs] if multiple_jobs else _STANDARD[fs]
+    table = tables["checkbox"][fs] if multiple_jobs else tables["standard"][fs]
     tentative_annual = _tax_from_brackets(adjusted_annual, table)
     tentative_period = tentative_annual / pay_periods
 
@@ -244,6 +371,7 @@ def supplemental_aggregate_tax(
     dependents_amount: Decimal = Decimal("0"),
     other_income_annual: Decimal = Decimal("0"),
     deductions_annual: Decimal = Decimal("0"),
+    year: int | None = None,
 ) -> Decimal:
     """Aggregate-method federal withholding on supplemental wages.
 
@@ -262,6 +390,7 @@ def supplemental_aggregate_tax(
         dependents_amount,
         other_income_annual,
         deductions_annual,
+        year=year,
     )
     base = federal_income_tax(
         regular_wages,
@@ -271,6 +400,7 @@ def supplemental_aggregate_tax(
         dependents_amount,
         other_income_annual,
         deductions_annual,
+        year=year,
     )
     return _q(max(Decimal("0"), combined - base))
 
@@ -290,26 +420,61 @@ def ss_wage_base(year: int | None = None) -> Decimal:
     return SS_WAGE_BASES[nearest]
 
 
-# The year the withholding schedules and state tables in this build are for.
-# Only the Social Security wage base is kept per year (SS_WAGE_BASES); a pay
-# run dated in another year is figured with these and says so.
-TABLES_YEAR = 2026
+# Pay stubs figured with per-year tables carry the year they were figured
+# with in their detail (META_TABLES_YEAR); a stub without it was figured by
+# a version before 2.32.0, which kept only 2026's federal schedules, state
+# tables and leave rates and used them whatever the pay date.
+META_TABLES_YEAR = "meta:tables_year"
+LEGACY_TABLES_YEAR = 2026
 
 
-def tables_year_note(year: int | None) -> str | None:
-    """The sentence a pay run carries when its pay date is not in the year
-    the federal schedules and state tables are for; None when it is."""
-    if year is None or year == TABLES_YEAR:
+def tables_year_note(year: int | None, states=()) -> str | None:
+    """The sentence a pay run carries when a state it was figured in has no
+    tables of the pay date's own year here (its nearest year's were used);
+    None when every table was the year's own. `states` are the work and
+    withholding states of the run's stubs."""
+    from app.services.state_tax import state_name, state_tables_year
+
+    if year is None or not has_tables(year):
         return None
-    # true of a run made by an earlier version too: each version keeps one
-    # year's tables and figures every run with them, whatever its pay date
-    return (
-        f"This run is dated {year}. SlowBooks keeps one year's federal "
-        f"schedules, state tables and leave rates ({TABLES_YEAR}'s in this "
-        f"version) and figures every run with them, whatever its pay date; "
-        f"only the Social Security wage base is {year}'s own. Check the "
-        f"figures against {year}'s publications before relying on them."
+    used: dict[int, list[str]] = {}
+    for code in sorted({(c or "").strip().upper() for c in states} - {""}):
+        got = state_tables_year(code, year)
+        if got != year:
+            used.setdefault(got, []).append(state_name(code))
+    if not used:
+        return None
+    parts = " and ".join(
+        f"{got}'s tables for {_and(names)}" for got, names in sorted(used.items())
     )
+    return (
+        f"This run is dated {year}. SlowBooks keeps {year}'s federal schedules "
+        f"but not every state's {year} tables: this run used {parts}. Check "
+        f"those figures against the state's {year} publications before "
+        f"relying on them."
+    )
+
+
+def legacy_tables_note(year: int | None) -> str | None:
+    """The sentence a run figured before per-year tables (2.32.0) carries
+    when its pay date is not in 2026: that version figured it with 2026's
+    tables whatever its date. None for a 2026 run."""
+    if year is None or year == LEGACY_TABLES_YEAR:
+        return None
+    return (
+        f"This run is dated {year} and was figured by an earlier version of "
+        f"SlowBooks, which kept one year's federal schedules, state tables "
+        f"and leave rates ({LEGACY_TABLES_YEAR}'s) and used them whatever "
+        f"the pay date; only the Social Security wage base is {year}'s own. "
+        f"Check the figures against {year}'s publications before relying on "
+        f"them."
+    )
+
+
+def _and(names: list[str]) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def wage_base_note(year: int | None) -> str | None:
@@ -460,7 +625,11 @@ def calculate_withholdings(
     Medicare threshold), "futa", "suta" (the work state's own) and "state"
     (the work state's capped taxes). Any key left out is measured by
     ``ytd_gross``, as before. ``year`` is the pay date's: the Social
-    Security wage base is that year's (ss_wage_base).
+    Security wage base is that year's (ss_wage_base), and so are the
+    federal schedules and the state tables (#818); a year SlowBooks keeps
+    no tables for raises PayrollYearError with the sentence. A blank
+    ``work_state`` figures no state taxes at all: no income tax, leave
+    premiums, L&I or state unemployment (the run says the state is missing).
 
     ``pretax_deductions`` is the total of pre-tax deductions that reduce
     federal income-tax wages; ``pretax_fica`` is the subset of those that
@@ -475,6 +644,7 @@ def calculate_withholdings(
     """
     from app.config import SUTA_RATE
 
+    check_tables_year(year)
     gross = _q(gross_pay)
     ytd = Decimal(str(ytd_gross))
     pretax = Decimal(str(pretax_deductions))
@@ -520,6 +690,7 @@ def calculate_withholdings(
                 dependents_amount,
                 other_income_annual,
                 deductions_annual,
+                year=year,
             )
         else:
             # YTD supplemental wages drive the $1M/37% mandatory-flat-rate
@@ -535,6 +706,7 @@ def calculate_withholdings(
             other_income_annual,
             deductions_annual,
             extra_withholding,
+            year=year,
         )
 
     bases = {k: ytd for k in ("ss", "medicare", "futa", "suta", "state")}
@@ -567,7 +739,7 @@ def calculate_withholdings(
         employee_count=employee_count,
         state_employee_count=state_employee_count,
     )
-    engine = get_engine(work_state)
+    engine = get_engine(work_state, year)
     state = engine.calculate(
         gross=gross,
         taxable=state_taxable,
@@ -584,7 +756,7 @@ def calculate_withholdings(
         withholding_state
         and (work_state or "").strip().upper() != withholding_state.strip().upper()
     ):
-        wh = get_engine(withholding_state).calculate(
+        wh = get_engine(withholding_state, year).calculate(
             gross=gross,
             taxable=state_taxable,
             ytd_gross=bases["state"],
@@ -605,7 +777,11 @@ def calculate_withholdings(
                 state.detail[k] = v
 
     rate = Decimal(str(suta_rate)) if suta_rate is not None else Decimal(str(SUTA_RATE))
-    suta_tax = suta(fica_wages, bases["suta"], rate, engine.suta_wage_base)
+    if (work_state or "").strip():
+        suta_tax = suta(fica_wages, bases["suta"], rate, engine.suta_wage_base)
+    else:
+        # no work state, no SUTA situs: nothing is charged until it is set
+        suta_tax = Decimal("0.00")
 
     total_employee = federal + state_income + state.employee_other + ss_emp + med_emp
     total_employer = ss_empr + med_empr + futa_tax + suta_tax + state.employer_other

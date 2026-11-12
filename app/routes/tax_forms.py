@@ -104,6 +104,15 @@ def get_w2_pdf(employee_id: int, year: TaxYear, db: Session = Depends(get_db)):
     return _pdf(pdf, "W-2", year, emp.full_name if emp else None)
 
 
+# --- Paychecks with no work state (#818) -----------------------------------
+@router.get("/work-state-missing")
+def get_work_state_missing(year: TaxYear, db: Session = Depends(get_db)):
+    """The employees paid in the year with no work state: their wages are
+    on no state's SUI report and the W-2 leaves the state boxes empty. The
+    Tax Forms page shows these sentences."""
+    return {"year": year, "warnings": w2_w3.missing_work_state(db, year)}
+
+
 # --- State unemployment ----------------------------------------------------
 @router.get("/sui")
 def get_sui(
