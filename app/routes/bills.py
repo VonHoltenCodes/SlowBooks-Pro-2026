@@ -90,7 +90,8 @@ def list_bills(
         )
     bills = q.order_by(Bill.date.desc(), Bill.id.desc()).offset(skip).limit(limit).all()
     results = []
-    terms_reader = DocumentTerms(db, "bill")
+    # the discounts taken, one query for the page (not one a row)
+    terms_reader = DocumentTerms(db, "bill").prefetch(bills)
     for b in bills:
         resp = BillResponse.model_validate(b)
         terms_reader.fill(resp, b)
