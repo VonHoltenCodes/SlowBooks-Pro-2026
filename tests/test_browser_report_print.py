@@ -1,7 +1,8 @@
 """Reports: Print beside Save PDF, in the page (#683).
 
 A report with a PDF route shows a Print button, named Print, beside Save
-PDF; a report with no PDF (the agings, CSV only, #393) shows none."""
+PDF. The agings were the reports with only a CSV (#393) and showed none;
+since #808 they print and save as PDF too, so every report has the pair."""
 
 import pytest
 
@@ -24,7 +25,7 @@ def _buttons(page):
     )
 
 
-def test_print_is_beside_save_pdf_and_absent_without_one(browser, company, books):
+def test_print_is_beside_save_pdf_on_every_report_with_one(browser, company, books):
     page, handled = _open_at(browser, company, PL_URL)
     try:
         page.wait_for_selector("#report-content table")
@@ -37,10 +38,14 @@ def test_print_is_beside_save_pdf_and_absent_without_one(browser, company, books
         )
         assert "/api/reports/profit-loss/print?start_date=2026-09-01" in onclick
 
+        # The agings were the reports with only a CSV, and so no Print; since
+        # #808 they print and save as PDF too, so no report is without one.
         _visit(page, handled, "#/reports/ar-aging?period=this_year_to_date")
         page.wait_for_selector("#report-content table")
         assert page.get_by_role("button", name="Save CSV").count() == 1
-        assert page.get_by_role("button", name="Print", exact=True).count() == 0
-        assert page.get_by_role("button", name="Save PDF").count() == 0
+        assert page.get_by_role("button", name="Print", exact=True).count() == 1
+        assert page.get_by_role("button", name="Save PDF").count() == 1
+        labels = _buttons(page)
+        assert labels.index("Print") + 1 == labels.index("Save PDF"), labels
     finally:
         page.close()
