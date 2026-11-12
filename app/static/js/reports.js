@@ -2519,8 +2519,9 @@ const ReportsPage = {
     async arAging(prefill) {
         await ReportsPage.openPeriodModal(T("Accounts Receivable Aging"), ReportsPage.defaultPeriod(), async (_period, params) => {
             const data = await API.get(`/reports/ar-aging?as_of_date=${params.as_of_date}`);
-            // Save CSV writes the file the Accountant's Package carries (#393):
-            // the whole company, as the screen shows it.
+            // Save CSV writes the file the Accountant's Package carries (#393),
+            // Print and Save PDF the same sheet (#808): the whole company, as
+            // the screen shows it.
             const csvQs = `as_of_date=${params.as_of_date}`;
             // The API nets a customer's credits (unapplied payments and
             // credit memos) into Current; show Current gross and the
@@ -2547,7 +2548,7 @@ const ReportsPage = {
             let rows = data.items.map(i => agingRow(i, name(i)) + (i.subs || []).map(subRow).join("")).join("");
             const t = data.totals;
             rows += agingRow(t, 'TOTAL', 'font-weight:700; background:var(--gray-50);');
-            return `${ReportsPage._exportButtons('ar-aging', csvQs, ['csv'])}
+            return `${ReportsPage._exportButtons('ar-aging', csvQs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div style="margin-bottom:12px; display:flex; gap:8px;" data-write>
                     <button class="btn btn-sm btn-secondary" onclick="ReportsPage.applyLateFees()">Apply Late Fees</button>
@@ -2598,7 +2599,7 @@ const ReportsPage = {
                 <td class="amount">${formatCurrency(t.over_90)}</td>
                 <td class="amount">${formatCurrency(t.total)}</td>
             </tr>`;
-            return `${ReportsPage._exportButtons('ap-aging', csvQs, ['csv'])}
+            return `${ReportsPage._exportButtons('ap-aging', csvQs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div class="table-container"><table>
                     <thead><tr>
@@ -4466,7 +4467,7 @@ ReportsPage.restoreDuplicate = async function (id) {
 };
 
 // Save PDF and Save CSV for a report with both routes; a report with only
-// a CSV (the agings, #393) passes kinds = ['csv']. Print sits beside Save
+// a CSV passes kinds = ['csv'] (the agings did until they printed, #808). Print sits beside Save
 // PDF (#683): the page the PDF is drawn from, opening the print dialog.
 ReportsPage._exportButtons = function (path, qs, kinds = ['pdf', 'csv']) {
     const pdf = kinds.includes('pdf') ? `<button class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/${path}/print?${qs}','_blank')">Print</button>

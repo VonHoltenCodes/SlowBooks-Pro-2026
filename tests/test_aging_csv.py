@@ -197,9 +197,10 @@ def test_signed_out_is_refused(unauthed_client):
 
 
 def test_both_reports_offer_save_csv():
+    """Save CSV, and since #808 Print and Save PDF beside it."""
     js = (ROOT / "app/static/js/reports.js").read_text(encoding="utf-8")
-    assert "ReportsPage._exportButtons('ar-aging', csvQs, ['csv'])" in js
-    assert "ReportsPage._exportButtons('ap-aging', csvQs, ['csv'])" in js
+    assert "ReportsPage._exportButtons('ar-aging', csvQs)" in js
+    assert "ReportsPage._exportButtons('ap-aging', csvQs)" in js
     assert (
         "customer_id"
         not in js.split("async arAging")[1]
