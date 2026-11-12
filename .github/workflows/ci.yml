@@ -293,7 +293,11 @@ jobs:
           # test_browser_check_field_layout.py, a browser module that skips as
           # one where playwright is absent. 301 with the bottom layout's date
           # test (test_the_bottom_layouts_date_box_never_wraps, one render).
-          MAX_SKIPS: "301"
+          # 338 in v2.32.0: 34 WeasyPrint renders with the paper-size and
+          # VOID-mark tests (#807, test_pdf_807.py) and five with the aging
+          # PDFs (#808, test_aging_pdfs_808.py); conftest now counts a render
+          # the app answered 503 for (PdfEngineMissing) as the same skip.
+          MAX_SKIPS: "338"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

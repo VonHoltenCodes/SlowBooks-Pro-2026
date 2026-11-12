@@ -3808,7 +3808,7 @@ ReportsPage.financialStatementsPdf = async function (prefill) {
             <div style="font-size:12px;">The statements pack has opened as a PDF —
             ${T('P&L')} and Trial Balance for ${escapeHtml(range.start)} — ${escapeHtml(range.end)},
             ${T('Balance Sheet')} as of ${escapeHtml(range.end)}. Paper size follows
-            Settings → Report PDF Paper Size.</div>`;
+            Settings → PDF Paper Size.</div>`;
     }, "Dates", false, { view: 'financial-statements', prefill, fileOnly: true });
 };
 

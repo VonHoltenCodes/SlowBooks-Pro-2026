@@ -3,7 +3,8 @@
 <head>
     <title>Statement</title>
 <style>
-    @page { size: letter; margin: 0.6in 0.75in; }
+    {# The paper follows the pdf_paper_size setting, as the report PDFs do (#807). #}
+    @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
     .company-info { font-size: 9pt; color: #4a4a6a; }

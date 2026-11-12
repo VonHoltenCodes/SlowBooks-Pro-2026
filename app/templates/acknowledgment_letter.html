@@ -3,7 +3,7 @@
 <head>
     <title>Acknowledgment letter</title>
 <style>
-    @page { size: letter; margin: 0.75in 0.75in 0.6in 0.75in; }
+    @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.75in 0.75in 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11pt; color: #333; line-height: 1.5; }
     .header { border-bottom: 3px solid #003366; padding-bottom: 12px; margin-bottom: 24px; }
     .company-name { font-size: 18pt; font-weight: 700; color: #003366; }

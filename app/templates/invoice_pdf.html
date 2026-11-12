@@ -8,7 +8,7 @@
     {# The printed face is literal — the screen vocabulary (Invoice -> Pledge) must not leak onto a program-fee invoice. #}
     <title>{% if kind == 'DonationReceipt' %}Donation Receipt{% elif kind == 'Pledge' %}Pledge{% elif kind == 'SalesReceipt' %}Sales Receipt{% else %}Invoice{% endif %}</title>
 <style>
-    @page { size: letter; margin: 0.6in 0.75in; }
+    @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
     .company-info { font-size: 9pt; color: #4a4a6a; }
@@ -17,6 +17,7 @@
     .invoice-title { text-align: right; }
     .invoice-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
     .invoice-number { font-size: 12pt; color: #666; margin-top: 4px; }
+    .invoice-title .void { color: #b00020; }
     /* Labels over values, one column each: side by side, four labels at a
        fixed 80px squeezed the values until "Sep 01, 2026" and "Net 30" broke
        over two lines whenever a PO # was present (2.17.3 exploratory W-L1). */
@@ -71,7 +72,7 @@
             </div>
         </div>
         <div class="invoice-title">
-            <h1>{% if kind == 'DonationReceipt' %}DONATION RECEIPT{% elif kind == 'Pledge' %}PLEDGE{% elif kind == 'SalesReceipt' %}SALES RECEIPT{% else %}INVOICE{% endif %}</h1>
+            <h1>{% if kind == 'DonationReceipt' %}DONATION RECEIPT{% elif kind == 'Pledge' %}PLEDGE{% elif kind == 'SalesReceipt' %}SALES RECEIPT{% else %}INVOICE{% endif %}{% if inv.status == 'void' %} <span class="void">VOID</span>{% endif %}</h1>
             <div class="invoice-number">#{{ inv.invoice_number }}</div>
         </div>
     </div>

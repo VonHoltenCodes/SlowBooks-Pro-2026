@@ -14,10 +14,10 @@
        above it to the last gift row. With no footer the margin stays as it
        was. */
     {% if footer_text %}
-    @page { size: letter; margin: 0.6in 0.75in 1.4in 0.75in; }
+    @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in 1.4in 0.75in; }
     @page { @bottom-center { content: element(statement-footer); vertical-align: top; padding-top: 4pt; } }
     {% else %}
-    @page { size: letter; margin: 0.6in 0.75in; }
+    @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     {% endif %}
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .statement { page-break-after: always; }
