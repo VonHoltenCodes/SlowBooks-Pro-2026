@@ -303,3 +303,36 @@ def test_a_batch_statement_failure_says_the_address_was_refused(
     assert r.status_code == 200, r.text
     (error,) = r.json()["errors"]
     assert error == "Probe Co: the statement could not be sent. " + REFUSED
+
+
+def test_the_donor_acknowledgment_failure_says_the_address_was_refused(
+    client, seed_accounts, seed_customer, smtp
+):
+    from tests.test_donor_documents import _nonprofit, _receipt
+
+    _nonprofit(client)
+    client.put(f"/api/customers/{seed_customer.id}", json={"email": "ap@probe.test"})
+    inv = _receipt(client, seed_customer.id).json()["invoice"]
+    smtp.refuse = True
+    r = client.post(
+        f"/api/donors/gifts/invoice/{inv['id']}/acknowledgment/email", json={}
+    )
+    assert r.status_code == 502, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith("Email could not be sent. " + REFUSED)
+    assert "550" not in detail and "check SMTP settings" not in detail
+
+
+def test_a_giving_statement_failure_says_the_address_was_refused(
+    client, seed_accounts, seed_customer, smtp
+):
+    from tests.test_donor_documents import _giving_year
+
+    _giving_year(client, seed_accounts, seed_customer)
+    smtp.refuse = True
+    r = client.post("/api/donors/giving-statements/batch-email", json={"year": 2026})
+    assert r.status_code == 200, r.text
+    assert r.json()["errors"] == [
+        "Test Customer: the giving statement could not be sent. "
+        + REFUSED.replace("ap@probe.test", "d@example.org")
+    ]
