@@ -62,7 +62,7 @@ from app.models.vendor_credits import (
     VendorCreditStatus,
 )
 from app.routes.reports._router import router
-from app.schemas.common import BIGINT_MAX
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN
 from app.services.accounting import _q
 from app.services.contact_balances import home_amount
 from app.services.fiscal_year import fiscal_year_start
@@ -703,9 +703,10 @@ def _item_key(item_id: Optional[str]):
         )
     # an id past a 64-bit integer cannot exist; refused rather than left to
     # overflow the database bind (#855)
-    if key > BIGINT_MAX:
+    if not BIGINT_MIN <= key <= BIGINT_MAX:
         raise HTTPException(
-            status_code=422, detail=f"item_id must be {BIGINT_MAX} or less"
+            status_code=422,
+            detail=f"item_id must be between {BIGINT_MIN} and {BIGINT_MAX}",
         )
     return key
 
@@ -717,9 +718,9 @@ def _item_key(item_id: Optional[str]):
 def sales_by_item(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    customer_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    customer_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     """What sold, by item (#435). See module docstring for the tie to the P&L."""
@@ -731,9 +732,9 @@ def sales_by_item_lines(
     item_id: Optional[str] = Query(default=None),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    customer_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    customer_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     """The documents behind one Sales by Item row (item_id=none for No item)."""
@@ -746,9 +747,9 @@ def sales_by_item_lines(
 def purchases_by_item(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    vendor_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    vendor_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     """What was bought, by item (#435). Bills and vendor credits only —
@@ -761,9 +762,9 @@ def purchases_by_item_lines(
     item_id: Optional[str] = Query(default=None),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    vendor_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    vendor_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     """The documents behind one Purchases by Item row (item_id=none for No item)."""
@@ -808,9 +809,9 @@ def _pdf_response(sections, db: Session, filename: str):
 def sales_by_item_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    customer_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    customer_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     from app.services.ledger_exports import sales_by_item_sections
@@ -826,9 +827,9 @@ def sales_by_item_csv_route(
     request: Request,
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    customer_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    customer_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     from app.services.ledger_exports import sales_by_item_csv
@@ -845,9 +846,9 @@ def sales_by_item_csv_route(
 def purchases_by_item_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    vendor_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    vendor_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     from app.services.ledger_exports import purchases_by_item_sections
@@ -865,9 +866,9 @@ def purchases_by_item_csv_route(
     request: Request,
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    vendor_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    vendor_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     from app.services.ledger_exports import purchases_by_item_csv

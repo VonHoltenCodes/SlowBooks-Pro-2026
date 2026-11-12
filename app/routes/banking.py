@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import Optional
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -25,7 +25,7 @@ from app.models.banking import (
     Reconciliation,
     ReconciliationStatus,
 )
-from app.schemas.common import StrictModel
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN, StrictModel
 from app.schemas.banking import (
     BankAccountCreate,
     BankAccountUpdate,
@@ -1403,7 +1403,9 @@ def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/reconciliations/{recon_id}/report")
-def reconciliation_report(recon_id: int, db: Session = Depends(get_db)):
+def reconciliation_report(
+    recon_id: int = Path(ge=BIGINT_MIN, le=BIGINT_MAX), db: Session = Depends(get_db)
+):
     """A completed reconciliation's report: beginning and ending balances,
     the items it cleared, what was outstanding on the statement date."""
     from app.services import reconciliation as rc

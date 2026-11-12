@@ -12,7 +12,7 @@ from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel
-from app.schemas.common import BIGINT_MAX, StrictModel
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN, StrictModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -138,14 +138,14 @@ def create_saved_report(data: SavedReportCreate, db: Session = Depends(get_db)):
 
 @router.get("/{report_id}", response_model=SavedReportResponse)
 def get_saved_report(
-    report_id: int = Path(le=BIGINT_MAX), db: Session = Depends(get_db)
+    report_id: int = Path(ge=BIGINT_MIN, le=BIGINT_MAX), db: Session = Depends(get_db)
 ):
     return get_or_404(db, SavedReport, report_id)
 
 
 @router.put("/{report_id}", response_model=SavedReportResponse)
 def update_saved_report(
-    report_id: Annotated[int, Path(le=BIGINT_MAX)],
+    report_id: Annotated[int, Path(ge=BIGINT_MIN, le=BIGINT_MAX)],
     data: SavedReportUpdate,
     db: Session = Depends(get_db),
 ):
@@ -162,7 +162,7 @@ def update_saved_report(
 
 @router.delete("/{report_id}")
 def delete_saved_report(
-    report_id: int = Path(le=BIGINT_MAX), db: Session = Depends(get_db)
+    report_id: int = Path(ge=BIGINT_MIN, le=BIGINT_MAX), db: Session = Depends(get_db)
 ):
     report = get_or_404(db, SavedReport, report_id)
     db.delete(report)

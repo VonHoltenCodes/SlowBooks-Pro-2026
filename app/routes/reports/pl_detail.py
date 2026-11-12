@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.routes.reports._router import router
-from app.schemas.common import BIGINT_MAX
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN
 from app.routes.reports.financial import (
     _EXCLUDE_ADJUSTING,
     _BASIS_QUERY,
@@ -68,12 +68,17 @@ def profit_loss_detail(
     # directly with db as the third argument
     class_id: Annotated[
         Optional[int],
-        Query(description="Only this class's lines; omit for all", le=BIGINT_MAX),
+        Query(
+            description="Only this class's lines; omit for all",
+            ge=BIGINT_MIN,
+            le=BIGINT_MAX,
+        ),
     ] = None,
     job_id: Annotated[
         Optional[int],
         Query(
             description="Only this job's lines; 0 for the lines with no job",
+            ge=BIGINT_MIN,
             le=BIGINT_MAX,
         ),
     ] = None,
@@ -328,8 +333,8 @@ def profit_loss_detail_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     sort: str = _SORT_QUERY,
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,
@@ -361,8 +366,8 @@ def profit_loss_detail_csv_route(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    job_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     sort: str = _SORT_QUERY,
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,

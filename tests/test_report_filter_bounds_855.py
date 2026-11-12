@@ -119,3 +119,84 @@ def test_path_ids_past_64_bits_on_delete_are_a_422(client, url):
 def test_saved_report_update_past_64_bits_is_a_422(client):
     r = client.put(f"/api/saved-reports/{HUGE}", json={"name": "x"})
     assert r.status_code == 422, r.text
+
+
+NEG_HUGE = "-" + HUGE  # far below -(2**63)
+INT64_MIN = "-9223372036854775808"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/reports/sales-by-item?customer_id={}",
+        "/api/reports/sales-by-item/lines?item_id={}",
+        "/api/reports/purchases-by-item?vendor_id={}",
+        "/api/reports/general-ledger?account_id={}",
+        "/api/reports/account-transactions?account_id=1&job_id={}",
+        "/api/reports/profit-loss-detail?job_id={}",
+        "/api/reports/pledges?customer_id={}",
+        "/api/reports/customer-statement/{}/pdf",
+        "/api/saved-reports/{}",
+    ],
+)
+def test_an_id_below_64_bits_is_a_422(client, url):
+    r = client.get(url.format(NEG_HUGE))
+    assert r.status_code == 422, r.text
+
+
+def test_the_smallest_64_bit_id_is_not_refused(client):
+    r = client.get(f"/api/reports/sales-by-item?customer_id={INT64_MIN}")
+    assert r.status_code == 404, r.text
+
+
+def test_job_id_zero_still_means_no_job(client, seed_accounts):
+    acct = seed_accounts["4000"].id
+    for url in [
+        "/api/reports/profit-loss-detail?job_id=0",
+        f"/api/reports/account-transactions?account_id={acct}&job_id=0",
+    ]:
+        r = client.get(url)
+        assert r.status_code == 200, (url, r.text)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/banking/reconciliations/{}/report",
+        "/api/onboarding/{}/new-hire-report",
+        "/api/onboarding/{}/new-hire-report/pdf",
+    ],
+)
+@pytest.mark.parametrize("value", [HUGE, NEG_HUGE])
+def test_report_paths_outside_reports_refuse_an_id_past_64_bits(client, url, value):
+    r = client.get(url.format(value))
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/banking/reconciliations/{}/report",
+        "/api/onboarding/{}/new-hire-report",
+        "/api/onboarding/{}/new-hire-report/pdf",
+    ],
+)
+def test_report_paths_outside_reports_still_404_an_unknown_id(client, url):
+    r = client.get(url.format(INT64_MAX))
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.parametrize("year", ["1999", "2101", HUGE, "-5"])
+def test_1099_summary_refuses_a_year_out_of_range(client, year):
+    r = client.get(f"/api/reports/1099-summary?year={year}")
+    assert r.status_code == 422, r.text
+    entry = r.json()["detail"][0]
+    assert entry["loc"] == ["query", "year"]
+    assert entry.get("message"), entry  # a sentence for the page
+
+
+@pytest.mark.parametrize("year", ["2000", "2026", "2100"])
+def test_1099_summary_takes_a_year_in_range(client, year):
+    r = client.get(f"/api/reports/1099-summary?year={year}")
+    assert r.status_code == 200, r.text
+    assert r.json()["year"] == int(year)

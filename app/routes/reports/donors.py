@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.routes.reports._router import router
-from app.schemas.common import BIGINT_MAX
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN
 from app.routes.reports.financial import _money, _pdf_response
 from app.services.csv_export import _SafeWriter
 from app.services.fiscal_year import fiscal_year_start
@@ -44,8 +44,8 @@ def _period(db, start_date, end_date):
 def pledges(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    class_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
-    customer_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    customer_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
 ):
     start_date, end_date = _period(db, start_date, end_date)
