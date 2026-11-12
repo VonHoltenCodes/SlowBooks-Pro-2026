@@ -79,6 +79,20 @@ def test_the_server_still_refuses_a_read_only_write(client):
     assert _role_allows("readonly", "GET", "/api/items")
     assert not _role_allows("readonly", "POST", "/api/items")
     assert not _role_allows("readonly", "PUT", "/api/accounts/1")
+    # a read that is a step in sending: the invoice's pay link (#822)
+    assert _role_allows("readonly", "GET", "/api/invoices/1")
+    assert not _role_allows("readonly", "GET", "/api/payments/payment-link/1")
+    r = client.post("/api/tokens", json={"label": "reader-822", "role": "readonly"})
+    assert r.status_code == 201, r.text
+    headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    client.post("/api/auth/logout")
+    r = client.get("/api/payments/payment-link/1", headers=headers)
+    assert r.status_code == 403
+    assert r.json()["detail"] == (
+        "Copying a payment link is a bookkeeper's; ask one to send it."
+    )
+    # and Copy Payment Link is not offered to a locked sign-in
+    assert "'InvoicesPage.copyPaymentLink'" in _js("app.js")
 
 
 # What skytech's 52-route sweep and macbase1 still found offered to a

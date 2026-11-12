@@ -1192,6 +1192,13 @@ _ACCOUNTANT_WRITE_RE = _re.compile(
     r"^/api/(journal(/\d+/void)?|attachments/journal_entry/\d+|reclassify"
     r"|reports/wip-schedule/(post|void))$"
 )
+# Reads that are a step in sending a document, so a bookkeeper's or an
+# administrator's (#822): an invoice's public pay link opens the invoice to
+# anyone holding it, and copying it is how the invoice goes out. A
+# read-only or accountant sign-in or token never writes or sends, so it is
+# refused the read too; the customer's page at /pay/<token> stays public.
+_SENDING_READ_RE = _re.compile(r"^/api/payments/payment-link/[^/]+$")
+PAY_LINK_REFUSAL = "Copying a payment link is a bookkeeper's; ask one to send it."
 ACCOUNTANT_REFUSAL = (
     "An accountant's sign-in posts journal entries and reads everything "
     "else; it cannot make this change. An administrator can change the "
@@ -1215,12 +1222,18 @@ def _role_allows(role: str, method: str, path: str) -> bool:
         # Field finding: audit payloads snapshot full record contents
         # (tax ids, addresses) — "read the books" shouldn't mean "read
         # every historical value of every field".
-        return is_read and not path.startswith("/api/audit")
+        return (
+            is_read
+            and not path.startswith("/api/audit")
+            and not _SENDING_READ_RE.match(path)
+        )
     if role == "accountant":
         # an outside role: the employee directory (pay rates, filing status,
         # the last four of a Social Security number) is HR's, not the
         # books' (2.24.0 gate, macbase1's question on round 1)
         if path.startswith("/api/employees"):
+            return False
+        if is_read and _SENDING_READ_RE.match(path):
             return False
         return is_read or (method == "POST" and bool(_ACCOUNTANT_WRITE_RE.match(path)))
     # bookkeeper: full read, all daily-books writes, no admin writes
@@ -1287,11 +1300,14 @@ ACCOUNTANT_READ_REFUSAL = (
 )
 
 
-def _role_refusal(role: str, method: str = "POST") -> str:
+def _role_refusal(role: str, method: str = "POST", path: str = "") -> str:
     """The sentence a refused request gets: the accountant's says what the
     role is for (#340), and for a read, what it cannot see (#659: the
     employee routes are an administrator's even to read); the others keep
-    the one the pages pin."""
+    the one the pages pin. A read that is a step in sending (the pay link,
+    #822) says whose it is, to either role."""
+    if method in _READ_METHODS and _SENDING_READ_RE.match(path):
+        return PAY_LINK_REFUSAL
     if role == "accountant":
         return (
             ACCOUNTANT_READ_REFUSAL if method in _READ_METHODS else ACCOUNTANT_REFUSAL
@@ -1469,7 +1485,7 @@ async def _require_session(request: Request, call_next):
     ):
         return JSONResponse(
             status_code=403,
-            content={"detail": _role_refusal(role, request.method)},
+            content={"detail": _role_refusal(role, request.method, path)},
         )
     # An accountant's copy (#346) takes journal entries and nothing else,
     # whoever is signed in: the one permission the copy has.

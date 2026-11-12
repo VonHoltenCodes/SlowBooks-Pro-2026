@@ -108,11 +108,12 @@ def test_success_banner_not_shown_on_unverified_return(unauthed_client, invoice)
 
 def test_a_read_never_makes_a_payment_link(client, db_session, invoice):
     """#659 (and the 2.18.0 gate before it): GET /payment-link answers the
-    link that exists and never makes one, whoever asks; POST makes it, so
-    a read-only sign-in cannot, and a bookkeeper's token can."""
+    link that exists and never makes one; POST makes it, so a read-only
+    sign-in cannot, and a bookkeeper's token can. Since #822 the read is a
+    bookkeeper's too (tests/test_pay_link_roles_822.py)."""
     from fastapi.testclient import TestClient
 
-    from app.main import app
+    from app.main import PAY_LINK_REFUSAL, app
 
     def bearer(role, label):
         r = client.post("/api/tokens", json={"label": label, "role": role})
@@ -123,26 +124,21 @@ def test_a_read_never_makes_a_payment_link(client, db_session, invoice):
 
     reader, keeper = bearer("readonly", "reader"), bearer("bookkeeper", "keeper")
     had = invoice.payment_token
-    ok = reader.get(f"/api/payments/payment-link/{invoice.id}")
+    ok = keeper.get(f"/api/payments/payment-link/{invoice.id}")
     assert ok.status_code == 200 and f"/pay/{had}" in ok.json()["url"]
+    refused = reader.get(f"/api/payments/payment-link/{invoice.id}")
+    assert refused.status_code == 403
+    assert refused.json()["detail"] == PAY_LINK_REFUSAL
     invoice.payment_token = None
     db_session.commit()
-    for who in (reader, keeper, client):
+    for who in (keeper, client):
         none = who.get(f"/api/payments/payment-link/{invoice.id}")
         assert none.status_code == 200, none.text
         assert none.json()["url"] is None
         assert "no payment link yet" in none.json()["note"]
-    # The read-only reader is told who to ask, not to POST (skeptic pass).
-    assert "ask an administrator or bookkeeper" in (
-        reader.get(f"/api/payments/payment-link/{invoice.id}").json()["note"]
-    )
-    assert "Copy Payment Link" in (
-        keeper.get(f"/api/payments/payment-link/{invoice.id}").json()["note"]
-    )
-    cpa = bearer("accountant", "cpa")
-    assert "an accountant's sign-in can't make one" in (
-        cpa.get(f"/api/payments/payment-link/{invoice.id}").json()["note"]
-    )
+        assert "Copy Payment Link" in none.json()["note"]
+    # with no link a reader is refused the same, and nothing is made
+    assert reader.get(f"/api/payments/payment-link/{invoice.id}").status_code == 403
     db_session.refresh(invoice)
     assert invoice.payment_token is None
     assert reader.post(f"/api/payments/payment-link/{invoice.id}").status_code == 403
