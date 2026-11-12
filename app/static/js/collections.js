@@ -212,10 +212,13 @@ const CollectionsPage = {
         CollectionsPage.reload();
     },
 
-    // "Acme · 1001 · 7 days overdue → acme@example.com", for the confirm dialogs
+    // "Acme · 1001 · 7 days overdue → acme@example.com", for the confirm dialogs,
+    // with the subject the customer will read under it (#827: "is due today")
     _dueLine(i) {
+        const subject = i.subject
+            ? `<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(i.subject)}</div>` : '';
         return `<li>${escapeHtml(i.customer_name)} &middot; ${escapeHtml(i.invoice_number || '#' + i.invoice_id)} &middot; ${escapeHtml(i.label)}` +
-            `<span style="color:var(--text-muted)"> &rarr; ${escapeHtml(i.recipient || '')}</span></li>`;
+            `<span style="color:var(--text-muted)"> &rarr; ${escapeHtml(i.recipient || '')}</span>${subject}</li>`;
     },
 
     // What a run would send today: the list and the dialog body, shared with
