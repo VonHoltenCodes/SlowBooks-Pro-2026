@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.accounts import Account, AccountType, DetailType
 from app.models.transactions import Transaction, TransactionLine
 from app.routes.reports._router import router
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN
 from app.services import cash_basis
 from app.services.fiscal_year import fiscal_year_start
 from app.services.account_label import account_label
@@ -268,7 +269,12 @@ def profit_loss(
     # after db, and a plain None by default: other routes call this
     # directly, with db as the third argument
     class_id: Annotated[
-        Optional[int], Query(description="Only this class's lines (#213); omit for all")
+        Optional[int],
+        Query(
+            description="Only this class's lines (#213); omit for all",
+            ge=BIGINT_MIN,
+            le=BIGINT_MAX,
+        ),
     ] = None,
     sort: str = _SORT_QUERY,
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
@@ -1092,13 +1098,17 @@ def _bs_layout(db, data: dict, chart: dict) -> dict:
 def general_ledger(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    account_id: int = Query(default=None),
+    account_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     # after db, and a plain None by default: the csv and pdf routes call
     # this directly with db as the fourth argument
     class_id: Annotated[
         Optional[int],
-        Query(description="Only this class's lines (#236); omit for all"),
+        Query(
+            description="Only this class's lines (#236); omit for all",
+            ge=BIGINT_MIN,
+            le=BIGINT_MAX,
+        ),
     ] = None,
     basis: str = _BASIS_QUERY,
 ):
@@ -1251,6 +1261,8 @@ def account_transactions(
     account_id: int = Query(
         default=None,
         description="Account to drill into; or section / family for several",
+        ge=BIGINT_MIN,
+        le=BIGINT_MAX,
     ),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -1258,11 +1270,20 @@ def account_transactions(
     # after db, and a plain None by default: other routes call this
     # directly, with db as the third argument
     class_id: Annotated[
-        Optional[int], Query(description="Only this class's lines (#213); omit for all")
+        Optional[int],
+        Query(
+            description="Only this class's lines (#213); omit for all",
+            ge=BIGINT_MIN,
+            le=BIGINT_MAX,
+        ),
     ] = None,
     job_id: Annotated[
         Optional[int],
-        Query(description="Only this job's lines (#242); 0 for the lines with no job"),
+        Query(
+            description="Only this job's lines (#242); 0 for the lines with no job",
+            ge=BIGINT_MIN,
+            le=BIGINT_MAX,
+        ),
     ] = None,
     section: Annotated[
         Optional[str],
@@ -1274,7 +1295,11 @@ def account_transactions(
     ] = None,
     family: Annotated[
         Optional[int],
-        Query(description="A parent account and its sub-accounts (#479)"),
+        Query(
+            description="A parent account and its sub-accounts (#479)",
+            ge=BIGINT_MIN,
+            le=BIGINT_MAX,
+        ),
     ] = None,
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,
@@ -2015,7 +2040,8 @@ def profit_loss_by_job(
         ),
     ] = None,
     customer_id: Annotated[
-        Optional[int], Query(description="Only this customer's jobs")
+        Optional[int],
+        Query(description="Only this customer's jobs", ge=BIGINT_MIN, le=BIGINT_MAX),
     ] = None,
     show: Annotated[
         str, Query(description="all (inactive jobs too) or active")
@@ -2137,7 +2163,7 @@ def profit_loss_by_job_pdf(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
     job_ids: Optional[list[str]] = Query(default=None),
-    customer_id: Optional[int] = None,
+    customer_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     show: str = "all",
     include_empty: bool = False,
     basis: str = _BASIS_QUERY,
@@ -2160,7 +2186,7 @@ def profit_loss_by_job_csv_route(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
     job_ids: Optional[list[str]] = Query(default=None),
-    customer_id: Optional[int] = None,
+    customer_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     show: str = "all",
     include_empty: bool = False,
     layout: str = Query(default="wide"),
@@ -2196,7 +2222,7 @@ def _contracts_as_of(db: Session, rows: list[dict], end_date: date) -> None:
 def job_profitability_report(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    customer_id: int = Query(default=None),
+    customer_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     basis: str = _BASIS_QUERY,
 ):
@@ -2757,7 +2783,7 @@ def _pl_filename(data: dict, t, ext: str, by: str | None = None) -> str:
 def profit_loss_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    class_id: Optional[int] = Query(default=None),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     sort: str = _SORT_QUERY,
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
@@ -2922,8 +2948,8 @@ def trial_balance_csv_route(
 def general_ledger_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    account_id: int = Query(default=None),
-    class_id: int = Query(default=None),
+    account_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     basis: str = _BASIS_QUERY,
 ):
@@ -2942,8 +2968,8 @@ def general_ledger_csv_route(
     request: Request,
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    account_id: int = Query(default=None),
-    class_id: int = Query(default=None),
+    account_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    class_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     basis: str = _BASIS_QUERY,
 ):
@@ -3112,14 +3138,14 @@ def _drill_data(
 @router.get("/account-transactions/csv")
 def account_transactions_csv_route(
     request: Request,
-    account_id: int = Query(default=None),
+    account_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    class_id: Optional[int] = Query(default=None),
-    job_id: Optional[int] = Query(default=None),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     section: Optional[str] = Query(default=None),
-    family: Optional[int] = Query(default=None),
+    family: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,
 ):
@@ -3149,14 +3175,14 @@ def account_transactions_csv_route(
 
 @router.get("/account-transactions/pdf")
 def account_transactions_pdf_route(
-    account_id: int = Query(default=None),
+    account_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    class_id: Optional[int] = Query(default=None),
-    job_id: Optional[int] = Query(default=None),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
+    job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     section: Optional[str] = Query(default=None),
-    family: Optional[int] = Query(default=None),
+    family: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,
     basis: str = _BASIS_QUERY,
 ):
@@ -3188,7 +3214,7 @@ def profit_loss_csv_route(
     request: Request,
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    class_id: Optional[int] = Query(default=None),
+    class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
     sort: str = _SORT_QUERY,
     exclude_adjusting: bool = _EXCLUDE_ADJUSTING,

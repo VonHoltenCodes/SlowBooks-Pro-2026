@@ -5,13 +5,14 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
 from app.models.payroll import Employee
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN
 from app.models.hr import (
     DEFAULT_ONBOARDING_TASKS,
     OnboardingTask,
@@ -155,7 +156,9 @@ def complete_task(
 
 
 @router.get("/{emp_id}/new-hire-report")
-def new_hire_report(emp_id: int, db: Session = Depends(get_db)):
+def new_hire_report(
+    emp_id: int = Path(ge=BIGINT_MIN, le=BIGINT_MAX), db: Session = Depends(get_db)
+):
     """State new-hire report data — must be filed within 20 days of hire."""
     try:
         return compute_new_hire_report(db, emp_id, _employer(db))
@@ -164,7 +167,9 @@ def new_hire_report(emp_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{emp_id}/new-hire-report/pdf")
-def new_hire_report_pdf(emp_id: int, db: Session = Depends(get_db)):
+def new_hire_report_pdf(
+    emp_id: int = Path(ge=BIGINT_MIN, le=BIGINT_MAX), db: Session = Depends(get_db)
+):
     try:
         pdf = generate_new_hire_report_pdf(
             db, emp_id, _employer(db), company_settings=get_all_settings(db)

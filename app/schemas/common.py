@@ -384,6 +384,9 @@ Discount = Annotated[Decimal, AfterValidator(_check_discount)]
 # (#665: discount_account_id/invoice_id/bill_id of 2**63 or more). The 422's
 # sentence names the field ("Discount account must be ... or less.").
 BIGINT_MAX = 9223372036854775807
+# The smallest a signed 64-bit column holds; a filter id below it overflowed
+# the same way (#855).
+BIGINT_MIN = -BIGINT_MAX - 1
 
 StrictId = Annotated[StrictInt, Field(ge=1, le=BIGINT_MAX)]
 

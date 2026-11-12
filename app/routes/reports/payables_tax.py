@@ -900,7 +900,9 @@ def ap_aging_pdf(as_of_date: date = Query(default=None), db: Session = Depends(g
 
 @router.get("/1099-summary")
 def report_1099_summary(
-    year: int = Query(default=None),
+    year: int = Query(
+        default=None, ge=2000, le=2100, description="A tax year, 2000 to 2100"
+    ),
     db: Session = Depends(get_db),
 ):
     """1099 Summary: total payments to 1099 vendors for a year."""

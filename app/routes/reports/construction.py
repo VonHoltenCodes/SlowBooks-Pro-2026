@@ -21,7 +21,7 @@ from app.models.users import ROLE_ACCOUNTANT, ROLE_ADMIN
 from app.routes._helpers import refuse_unknown_filters
 from app.routes._roles import current_role
 from app.routes.reports._router import router
-from app.schemas.common import StrictModel
+from app.schemas.common import BIGINT_MAX, BIGINT_MIN, StrictModel
 from app.routes.reports.nonprofit import _cash_words
 from app.routes.reports.financial import (
     _company_name,
@@ -109,8 +109,14 @@ _STATUS_Q = Annotated[
     Optional[str],
     Query(description="One job status; default leaves out closed and not-awarded"),
 ]
-_JOB_Q = Annotated[Optional[int], Query(description="Only this job")]
-_CUST_Q = Annotated[Optional[int], Query(description="Only this customer's jobs")]
+# bounded so an id past a 64-bit integer is a 422, not a database overflow
+_JOB_Q = Annotated[
+    Optional[int], Query(description="Only this job", ge=BIGINT_MIN, le=BIGINT_MAX)
+]
+_CUST_Q = Annotated[
+    Optional[int],
+    Query(description="Only this customer's jobs", ge=BIGINT_MIN, le=BIGINT_MAX),
+]
 _CLOSED_Q = Annotated[bool, Query(description="Include closed jobs")]
 
 
@@ -1347,7 +1353,7 @@ def _job_profitability_grid(data: dict) -> dict:
 def job_profitability_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    customer_id: int = Query(default=None),
+    customer_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     basis: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
@@ -1391,7 +1397,7 @@ def job_profitability_csv(
     request: Request,
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
-    customer_id: int = Query(default=None),
+    customer_id: int = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     basis: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
