@@ -489,6 +489,13 @@ async def migration_dry_run(
         result = module.dry_run(db, upload.bundle)
     except DataProblem as e:
         raise _refused(db, e, upload, classify)
+    # what the source says of the files that came (a QuickBooks Online
+    # export with no customer list names its files and the names it reads)
+    name_notes = getattr(module, "dry_run_notes", None)
+    if name_notes is not None:
+        result["warnings"] = list(result.get("warnings") or []) + name_notes(
+            upload.bundle, upload.names
+        )
     return _with_employee_choice(_say_what_was_left(result, upload, classify), chosen)
 
 
