@@ -648,6 +648,84 @@ def backup_revision_problem(filename: str) -> str | None:
     )
 
 
+def _postgres_dump_revisions(path: Path) -> list[str] | None:
+    """The alembic_version rows a pg_dump custom-format backup holds, read
+    with ``pg_restore --data-only --table=alembic_version -f -``: the dump
+    is read as a script on stdout and no database is touched. None when it
+    cannot be read here (no pg_restore, not a dump)."""
+    try:
+        result = subprocess.run(
+            [
+                "pg_restore",
+                "--data-only",
+                "--table=alembic_version",
+                "-f",
+                "-",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    revisions, copying = [], False
+    for line in result.stdout.splitlines():
+        if copying:
+            if line == "\\.":
+                copying = False
+            elif line.strip():
+                revisions.append(line.split("\t", 1)[0].strip())
+        elif line.startswith("COPY ") and "alembic_version" in line:
+            copying = True
+        elif line.startswith("INSERT INTO ") and "alembic_version" in line:
+            found = re.search(r"VALUES \('([^']+)'\)", line)
+            if found:
+                revisions.append(found.group(1))
+    return revisions
+
+
+def backup_floor_problem(filename: str, recovery_key: str | None = None) -> str | None:
+    """The sentence when a backup holds books from before SlowBooks Pro
+    2.29.0, which this build does not migrate (#769); asked before anything
+    is written. A SQLite copy is read as it lies (with this company's key,
+    or the recovery key given, when it is encrypted); a Postgres dump is
+    read by pg_restore without touching a database. None for every other
+    backup, and for one that cannot be read here."""
+    from app.services import migration_floor
+
+    path = backup_path(filename)
+    if path is None or not path.exists():
+        return None
+    if path.suffix == ".db":
+        key = None
+        if company_file.is_encrypted_file(path):
+            key = company_file.resolve_key()
+            if key is not None:
+                try:
+                    company_file.verify_key(path, key)
+                except company_file.CompanyFileLocked:
+                    key = None
+            if key is None and (recovery_key or "").strip():
+                from app.services import company_keyring
+
+                try:
+                    key = company_keyring.unlock_with_recovery(path, recovery_key)
+                except company_file.CompanyFileLocked:
+                    key = None
+            if key is None:
+                return None
+        return migration_floor.file_problem(path, key)
+    revisions = _postgres_dump_revisions(path)
+    if revisions is None:
+        return None
+    if migration_floor.is_below_floor(revisions):
+        return migration_floor.BELOW_FLOOR_MESSAGE
+    return None
+
+
 def bring_restored_books_up_to_date() -> dict:
     """After a SQLite restore: an older backup is brought to this build's
     schema, the way the desktop app does when it opens a company, so the
@@ -675,7 +753,11 @@ def bring_restored_books_up_to_date() -> dict:
         cfg.attributes["database_url"] = "sqlite:///" + path.as_posix()
         cfg.attributes["company_file_key"] = key
         command.upgrade(cfg, "head")
-    except Exception:
+    except Exception as exc:
+        from app.services.migration_floor import BelowMigrationFloor
+
+        if isinstance(exc, BelowMigrationFloor):  # from before 2.29.0 (#769)
+            return {"success": False, "error": str(exc)}
         logger.exception("Could not upgrade the restored books")
         return {
             "success": False,

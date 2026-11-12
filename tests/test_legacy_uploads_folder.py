@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services import legacy_uploads
+from app.services.migration_floor import MIGRATION_FLOOR
 
 ROOT = Path(__file__).resolve().parents[1]
 BEFORE = "d3d40d716684"  # the release before the upgrade that copies files in
@@ -118,26 +119,21 @@ def _old_books(template: Path, path: Path) -> None:
         engine.dispose()
 
 
-def _open_on_this_version(path: Path) -> None:
-    """What opening a company does first: the upgrade, which copies its
-    files in from the shared folder."""
-    command.upgrade(_cfg(_url(path)), "head")
-
-
-def _stored_copy(path: Path, filename: str) -> bytes | None:
+def _opened_with_2_31_14(path: Path) -> None:
+    """Books from before 2.18.0 are below the migration floor (#769): this
+    build does not migrate them, and 2.31.14 is the release that does (the
+    copy step its upgrade runs takes the company's files in). The folder
+    reads only where a company's migrations stand, so a company opened that
+    way is books stamped past the copy step."""
     engine = sa.create_engine(_url(path))
     try:
-        with engine.connect() as conn:
-            data = conn.execute(
-                sa.text(
-                    "SELECT s.data FROM attachments a JOIN stored_files s "
-                    "ON s.id = a.stored_file_id WHERE a.filename = :f"
-                ),
-                {"f": filename},
-            ).scalar()
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text("UPDATE alembic_version SET version_num = :r"),
+                {"r": MIGRATION_FLOOR},
+            )
     finally:
         engine.dispose()
-    return bytes(data) if data is not None else None
 
 
 def _manifest(data: Path, *companies: tuple[str, str]) -> None:
@@ -210,7 +206,7 @@ def test_the_folder_waits_for_every_company_then_an_administrator_clears_it(
     acme = data_folder / "companies" / "acme.db"
     beta = data_folder / "companies" / "beta.db"
     _old_books(books_before, acme)
-    _open_on_this_version(acme)
+    _opened_with_2_31_14(acme)
     _old_books(books_before, beta)  # not opened since the update
     _manifest(data_folder, ("Acme Consulting", "acme.db"), ("Beta Bakery", "beta.db"))
     assert _link_folder(uploads / "elsewhere", outside)
@@ -232,8 +228,7 @@ def test_the_folder_waits_for_every_company_then_an_administrator_clears_it(
     assert "Acme" not in r.json()["detail"]
     assert _shared_files_left(uploads) == SHARED
 
-    _open_on_this_version(beta)
-    assert _stored_copy(beta, "W-4.pdf") == W4
+    _opened_with_2_31_14(beta)
 
     r = client.get("/api/uploads/legacy")
     assert r.json() == {
@@ -257,9 +252,6 @@ def test_the_folder_waits_for_every_company_then_an_administrator_clears_it(
     )
     assert (outside / "keep.pdf").read_bytes() == OUTSIDE
     assert os.listdir(outside) == ["keep.pdf"]
-    # Each company still has its own copy, in its company file.
-    assert _stored_copy(beta, "W-4.pdf") == W4
-    assert _stored_copy(acme, "receipt.pdf") == RECEIPT
 
     r = client.get("/api/uploads/legacy")
     assert r.json() == {
@@ -369,7 +361,7 @@ def test_a_company_file_another_program_is_writing_keeps_the_folder(
     monkeypatch.setattr(legacy_uploads, "BUSY_SECONDS", 0.1)
     busy = data_folder / "companies" / "busy.db"
     _old_books(books_before, busy)
-    _open_on_this_version(busy)
+    _opened_with_2_31_14(busy)
     _manifest(data_folder, ("Busy Books", "busy.db"))
     # the other program's lock, held through the library the sweep reads with:
     # in one process only the same SQLite library sees the lock (NEW-156)
@@ -397,7 +389,7 @@ def test_a_server_checks_every_database_its_companies_table_lists(
 
     server = tmp_path / "server"
     _old_books(books_before, server / "harbor.db")
-    _open_on_this_version(server / "harbor.db")
+    _opened_with_2_31_14(server / "harbor.db")
     _old_books(books_before, server / "beta.db")
     (server / "broken.db").write_bytes(b"not a database " * 64)
     for name, database in (
@@ -429,7 +421,7 @@ def test_a_server_checks_every_database_its_companies_table_lists(
     assert client.delete("/api/uploads/legacy").status_code == 409
 
     # Beta is opened, and the broken database is dropped from the server.
-    _open_on_this_version(server / "beta.db")
+    _opened_with_2_31_14(server / "beta.db")
     monkeypatch.setattr(
         legacy_uploads, "_server_databases", lambda db: {"served", "harbor", "beta"}
     )

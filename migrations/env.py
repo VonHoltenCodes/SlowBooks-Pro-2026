@@ -85,6 +85,26 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _refuse_a_file_below_the_floor(connection) -> None:
+    """A company file from before 2.29.0 is not migrated (#769), whoever
+    runs the upgrade: the desktop launcher, Server Edition, the Docker
+    entrypoint, a self-managed `alembic upgrade head`, a restore. Refused
+    before the first migration runs, so the file is left as it was. A new
+    database (no alembic_version) is built through the whole chain as
+    before. `alembic current` only reads, and still answers."""
+    cmd = getattr(config.cmd_opts, "cmd", None) if config.cmd_opts else None
+    if cmd and getattr(cmd[0], "__name__", "") == "current":
+        return
+    from app.services.migration_floor import refuse_below_floor
+
+    try:
+        refuse_below_floor(connection)
+    finally:
+        # the read began a transaction; end it, so alembic begins its own
+        # (inside one already begun it would commit nothing)
+        connection.rollback()
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
@@ -128,6 +148,7 @@ def run_migrations_online() -> None:
             cur.close()
 
     with connectable.connect() as connection:
+        _refuse_a_file_below_the_floor(connection)
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():

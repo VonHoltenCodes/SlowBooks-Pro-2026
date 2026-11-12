@@ -9,7 +9,8 @@ to launcher.log, and the launcher keeps waiting for as long as that file
 keeps changing, showing the text in the company picker.
 
 The file holds the job's label, "done" and "total" where there is a count,
-the server's pid and the time of the write. Nothing is written when the
+the server's pid and the time of the write; a start-up that refuses the
+file (#769) writes its sentence as "error" instead. Nothing is written when the
 data folder is not set (a plain uvicorn run, the tests).
 """
 
@@ -70,6 +71,35 @@ def report(label: str, done: int | None = None, total: int | None = None) -> Non
         os.replace(tmp, path)
     except OSError:
         pass
+
+
+def refuse(reason: str, path: Path | None = None) -> None:
+    """Record why the start-up will not open the company file (#769: a file
+    from before 2.29.0). The launcher's wait reads it and names it as the
+    reason, instead of waiting out its timeout. Never raises."""
+    path = path or progress_path()
+    if path is None:
+        return
+    state = {
+        "label": None,
+        "error": reason,
+        "pid": os.getpid(),
+        "updated": time.time(),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def reason(state: dict | None) -> str:
+    """The sentence a refused start-up recorded, or ""."""
+    if not state or not state.get("error"):
+        return ""
+    return str(state["error"])
 
 
 def clear(path: Path | None = None) -> None:

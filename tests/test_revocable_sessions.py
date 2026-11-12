@@ -6,9 +6,7 @@ row, not the cookie, so a demotion takes effect at once. Single-user desktop
 and API-token paths are untouched.
 """
 
-import sqlite3
 from datetime import date, timedelta
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -391,58 +389,3 @@ def test_an_admin_still_sets_a_new_company_up_at_a_switch(served):
     assert _sign_in(client, "pat", A_PW).status_code == 200
     r = client.post("/api/auth/company", json={"file": "charlie.db"})
     assert r.json() == {"status": "ok", "authenticated": False, "setup": True}
-
-
-# ---------------------------------------------------------------------------
-# The migration adds the column and takes it back
-# ---------------------------------------------------------------------------
-
-
-SESSION_VERSION_REVISION = "d3e4f5a6b7c8"  # users_session_version
-
-
-def _alembic_cfg(db):
-    from alembic.config import Config
-
-    root = Path(__file__).resolve().parent.parent
-    cfg = Config(str(root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(root / "migrations"))
-    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
-    return cfg
-
-
-def _user_columns(db):
-    con = sqlite3.connect(db)
-    try:
-        return {r[1] for r in con.execute("PRAGMA table_info(users)")}
-    finally:
-        con.close()
-
-
-def test_migration_adds_and_drops_session_version(tmp_path):
-    from alembic import command
-
-    db = tmp_path / "company.db"
-    cfg = _alembic_cfg(db)
-
-    command.upgrade(cfg, "c2d3e4f5a6b7")  # the head before this fix
-    assert "session_version" not in _user_columns(db)
-
-    command.upgrade(cfg, SESSION_VERSION_REVISION)  # its own step, not the chain (#770)
-    assert "session_version" in _user_columns(db)
-    # Existing rows get a concrete value, never NULL.
-    con = sqlite3.connect(db)
-    try:
-        con.execute(
-            "INSERT INTO users (username, display_name, password_hash, role, "
-            "is_active, created_at) VALUES "
-            "('x', 'X', 'h', 'admin', 1, '2026-01-01')"
-        )
-        con.commit()
-        val = con.execute("SELECT session_version FROM users").fetchone()[0]
-        assert val is not None
-    finally:
-        con.close()
-
-    command.downgrade(cfg, "c2d3e4f5a6b7")
-    assert "session_version" not in _user_columns(db)

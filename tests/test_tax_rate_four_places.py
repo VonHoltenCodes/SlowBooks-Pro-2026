@@ -15,7 +15,6 @@ shown and printed as typed on every document that has one.
 
 import json
 import shutil
-import sqlite3
 import subprocess
 from decimal import Decimal
 from pathlib import Path
@@ -417,91 +416,6 @@ def test_the_forms_take_and_show_four_places(
         "value": "8.875",
         "note": "— tax rate set to 8.875%.",
     }
-
-
-def test_the_migration_keeps_every_rate_and_takes_six_places(tmp_path):
-    from alembic import command
-    from alembic.config import Config
-    import sqlalchemy as sa
-
-    db = tmp_path / "old.db"
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
-    command.upgrade(cfg, "4c7e2a9d1b05")
-
-    documents = {
-        "invoices": ("invoice_number, customer_id, date", "'1001', 1", 0.0825),
-        "estimates": ("estimate_number, customer_id, date", "'E-1', 1", 0.07),
-        "credit_memos": ("memo_number, customer_id, date", "'CM-1', 1", 0.1),
-        "recurring_invoices": (
-            "customer_id, frequency, next_due, start_date",
-            "1, 'monthly', '2026-10-01'",
-            0.0625,
-        ),
-        "bills": ("bill_number, vendor_id, date", "'B-1', 1", 0.0725),
-        "purchase_orders": ("po_number, vendor_id, date", "'PO-1', 1", 0.06),
-        "vendor_credits": ("credit_number, vendor_id, date", "'VC-1', 1", 0),
-    }
-    con = sqlite3.connect(db)
-    con.execute("INSERT INTO customers (name) VALUES ('Harbor Light')")
-    con.execute("INSERT INTO vendors (name) VALUES ('Cascade Flour Mill')")
-    for table, (columns, values, rate) in documents.items():
-        con.execute(
-            f"INSERT INTO {table} ({columns}, tax_rate) "
-            f"VALUES ({values}, '2026-09-01', ?)",
-            (rate,),
-        )
-    con.commit()
-    con.close()
-
-    def rates():
-        c = sqlite3.connect(db)
-        try:
-            return {
-                t: (
-                    next(
-                        col[2]
-                        for col in c.execute(f"PRAGMA table_info({t})")
-                        if col[1] == "tax_rate"
-                    ),
-                    c.execute(f"SELECT tax_rate FROM {t}").fetchone()[0],
-                )
-                for t in documents
-            }
-        finally:
-            c.close()
-
-    before = rates()
-    assert {t: kind for t, (kind, _) in before.items()} == dict.fromkeys(
-        documents, "NUMERIC(5, 4)"
-    )
-
-    command.upgrade(cfg, "d3d40d716684")
-    after = rates()
-    assert {t: kind for t, (kind, _) in after.items()} == dict.fromkeys(
-        documents, "NUMERIC(7, 6)"
-    )
-    # every rate as it was
-    assert {t: v for t, (_, v) in after.items()} == {
-        t: v for t, (_, v) in before.items()
-    }
-
-    # 8.875% goes in and comes out as 8.875%
-    engine = sa.create_engine("sqlite:///" + db.as_posix())
-    try:
-        invoices = sa.Table("invoices", sa.MetaData(), autoload_with=engine)
-        with engine.begin() as conn:
-            conn.execute(invoices.update().values(tax_rate=Decimal("0.08875")))
-            stored = conn.execute(sa.select(invoices.c.tax_rate)).scalar_one()
-        assert stored == Decimal("0.08875")
-    finally:
-        engine.dispose()
-
-    command.downgrade(cfg, "4c7e2a9d1b05")
-    assert {t: kind for t, (kind, _) in rates().items()} == dict.fromkeys(
-        documents, "NUMERIC(5, 4)"
-    )
 
 
 def test_an_old_default_with_more_places_does_not_hold_back_settings():

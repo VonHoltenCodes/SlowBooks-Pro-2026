@@ -434,6 +434,18 @@ def _refuse_a_database_behind_head(target=None) -> None:
     if current is None:
         return
 
+    # #769: a file from before 2.29.0 is not migrated by this build. Said in
+    # one sentence, and recorded for the desktop launcher's wait, which
+    # names it instead of a timeout.
+    from app.services import migration_floor
+
+    if migration_floor.is_below_floor(current):
+        if target is None:  # the company this server starts for
+            from app.services import startup_progress
+
+            startup_progress.refuse(migration_floor.BELOW_FLOOR_MESSAGE)
+        raise migration_floor.BelowMigrationFloor()
+
     try:
         from alembic.config import Config
         from alembic.script import ScriptDirectory

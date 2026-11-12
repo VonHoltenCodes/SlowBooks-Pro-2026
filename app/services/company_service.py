@@ -195,15 +195,39 @@ def _current_company_file() -> str | None:
 
 def manifest_list_companies() -> list[dict]:
     current = _current_company_file()
-    return [
-        {
+    companies = []
+    for c in _read_manifest()["companies"]:
+        filename = c.get("file", "")
+        is_current = bool(filename) and filename == current
+        entry = {
             "name": c.get("name", ""),
-            "file": c.get("file", ""),
-            "is_current": bool(c.get("file")) and c.get("file") == current,
+            "file": filename,
+            "is_current": is_current,
             "sample": bool(c.get("sample")),
         }
-        for c in _read_manifest()["companies"]
-    ]
+        note = None if is_current else _below_floor_note(filename)
+        if note:
+            entry["note"] = note
+        companies.append(entry)
+    return companies
+
+
+def _below_floor_note(filename: str) -> str | None:
+    """The sentence the picker shows under a company file from before
+    2.29.0 (#769), which this build does not open. Read as the file lies;
+    None for every other file, and for one that cannot be read here (an
+    encrypted file: opening it says the same, once it is unlocked)."""
+    path = company_db_path(filename) if filename else None
+    if path is None or not path.exists():
+        return None
+    try:
+        from app.services.migration_floor import file_problem
+
+        # a plain file only: an encrypted one says so when it is opened
+        return file_problem(path, resolve_key=False)
+    except Exception:
+        logger.exception("Could not read the migration state of %s", filename)
+        return None
 
 
 def sync_manifest_name(company_name: str | None) -> bool:

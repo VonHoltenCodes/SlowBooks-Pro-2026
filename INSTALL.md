@@ -421,6 +421,40 @@ python run.py
 
 ---
 
+## Upgrading a company file from before 2.29.0
+
+SlowBooks Pro upgrades a company file the first time a new version opens
+it. From 2.32.0 on, that upgrade starts at 2.29.0 (October 2026): a company
+file, or a backup, that has not been opened since a release before 2.29.0
+is left exactly as it is, and the app says so in one sentence:
+
+> This company file is from before SlowBooks Pro 2.29.0. Open it once with
+> 2.31.14, then upgrade: https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/tag/v2.31.14
+
+The company picker shows the same sentence under that file, and every other
+company opens as before. To bring the file forward:
+
+1. Install **2.31.14** from its release page,
+   <https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/tag/v2.31.14>
+   (the Windows and macOS installers stay downloadable there), over the
+   current install. Your companies and settings are kept.
+2. Open the company file once, and sign in: 2.31.14 upgrades it from any
+   earlier release.
+3. Install the current release again. It opens the file as usual.
+
+The same applies to a backup from before 2.29.0: restore it with 2.31.14,
+then upgrade. A restore on the current release refuses it before anything
+is written, and the books you have are left as they are.
+
+Docker and native installs: `alembic upgrade head` refuses a database from
+before 2.29.0 with the same sentence and changes nothing. Run the 2.31.14
+image (`git checkout v2.31.14` for a native install) against it once with
+`alembic upgrade head`, then come back to the current release. A new,
+empty database is not affected: it is built through every migration as
+before.
+
+---
+
 ## Troubleshooting
 
 ### WeasyPrint fails with "cannot load library" (macOS/Linux native)

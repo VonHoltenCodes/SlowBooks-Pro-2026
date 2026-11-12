@@ -14,13 +14,7 @@ return the rendered HTML — the template context and escaping are what these
 assert, as the other giving-statement HTML tests do.
 """
 
-import os
-import uuid
-
-import sqlalchemy as sa
 from fastapi.testclient import TestClient
-
-import pytest
 
 from app.main import app
 from app.models.audit import AuditLog
@@ -398,7 +392,7 @@ def test_only_an_admin_writes_the_words_but_anyone_may_preview(
 
 
 # ---------------------------------------------------------------------------
-# The migration adds the kind column and keeps existing rows as invoices
+# The settings page
 # ---------------------------------------------------------------------------
 
 from pathlib import Path  # noqa: E402
@@ -419,98 +413,3 @@ def test_settings_page_has_the_giving_statement_section():
     assert 'name="giving_statement_footer"' in js
     assert 'maxlength="500"' in js
     assert "SettingsPage.previewGivingStatement()" in js
-
-
-def _alembic_cfg(url):
-    from alembic.config import Config
-
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = url
-    return cfg
-
-
-KIND_REVISION = "f9a0b1c2d3e4"  # the invoice message kind migration
-
-
-def _check_kind_migration(url):
-    from alembic import command
-    from alembic.script import ScriptDirectory
-
-    cfg = _alembic_cfg(url)
-    script = ScriptDirectory.from_config(cfg)
-    # one head still: the new migration stacks on #407's
-    assert len(script.get_heads()) == 1
-    assert script.get_revision("f9a0b1c2d3e4").down_revision == "e4f5a6b7c8d9"
-
-    engine = sa.create_engine(url)
-    # bring the table up to #407's state and seed a pre-kind row
-    command.upgrade(cfg, "e4f5a6b7c8d9")
-    with engine.begin() as conn:
-        conn.execute(
-            sa.text(
-                "INSERT INTO invoice_messages (name, body, is_default) "
-                "VALUES ('Old note', 'Pay soon.', FALSE)"
-            )
-        )
-    # apply the kind migration
-    command.upgrade(cfg, KIND_REVISION)  # its own step, not the chain (#770)
-    insp = sa.inspect(engine)
-    cols = {c["name"]: c for c in insp.get_columns("invoice_messages")}
-    assert "kind" in cols
-    assert cols["kind"]["nullable"] is False
-    # the existing row stayed an invoice (server default), not a giving message
-    with engine.connect() as conn:
-        kinds = [
-            r[0] for r in conn.execute(sa.text("SELECT kind FROM invoice_messages"))
-        ]
-    assert kinds == ["invoice"]
-    # downgrade drops the column; a second upgrade re-adds it
-    command.downgrade(cfg, "e4f5a6b7c8d9")
-    assert "kind" not in {
-        c["name"] for c in sa.inspect(engine).get_columns("invoice_messages")
-    }
-    command.upgrade(cfg, KIND_REVISION)  # its own step, not the chain (#770)
-    assert "kind" in {
-        c["name"] for c in sa.inspect(engine).get_columns("invoice_messages")
-    }
-    engine.dispose()
-
-
-def test_the_kind_migration_on_sqlite(tmp_path):
-    url = "sqlite:///" + (tmp_path / "fresh.db").as_posix()
-    _check_kind_migration(url)
-
-
-@pytest.fixture
-def postgres_url():
-    admin_url = os.environ.get("SLOWBOOKS_TEST_POSTGRES_URL")
-    if not admin_url:
-        pytest.skip("SLOWBOOKS_TEST_POSTGRES_URL is not set")
-    pytest.importorskip("psycopg2")
-    name = "slowbooks_msgkind_" + uuid.uuid4().hex[:12]
-    admin = sa.create_engine(admin_url, isolation_level="AUTOCOMMIT")
-    try:
-        with admin.connect() as conn:
-            conn.execute(sa.text(f'CREATE DATABASE "{name}"'))
-    except Exception as exc:  # pragma: no cover - depends on the machine
-        admin.dispose()
-        pytest.skip(f"cannot create a scratch PostgreSQL database: {exc}")
-    url = sa.engine.make_url(admin_url).set(database=name)
-    try:
-        yield url.render_as_string(hide_password=False)
-    finally:
-        with admin.connect() as conn:
-            conn.execute(
-                sa.text(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                    "WHERE datname = :n AND pid <> pg_backend_pid()"
-                ),
-                {"n": name},
-            )
-            conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{name}"'))
-        admin.dispose()
-
-
-def test_the_kind_migration_on_postgresql(postgres_url):
-    _check_kind_migration(postgres_url)
