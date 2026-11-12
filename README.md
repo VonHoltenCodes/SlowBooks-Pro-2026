@@ -55,25 +55,28 @@ Details, known gaps and how to report a barrier:
 
 ## What's New
 
-**v2.31 — Split expenses, lines that move, and stock that comes back.** An
-expense splits across several accounts, each line with its own job, cost
-code, class and billable mark, and the check stub lists every line (#599);
-every line form moves a line up or down, drags it, and inserts one in the
-middle (#604); Enter Bill shows the vendor's balance, last bills and
-payments and notes beside the form (#601); a register entry takes
-attachments (#600). A credit memo's lines take their own class and job
-(#640), a return puts the cost back with the quantity, at the original
-sale's cost when the memo names the invoice (#641), an item of your own can
-carry a negative price as a discount (#639), and a sale past what is on hand
-says so, or is refused by a setting (#642). The statements hide zero
-balances on request (#625), each piece of a pay run posts to an account you
-choose, with net pay able to wait in 2300 Payroll Liabilities (#620), the
-job reports read a timestamp on the local day (#644), Cc and Bcc addresses
-are read the way a mail program reads them (#611), the Windows installer
-replaces the program file on a same-version reinstall (#643), and About
-credits the artists from the community art repo (#635).
+**v2.32 — Tax-exempt jobs, deposits that hold every line, and estimates
+priced line by line.** A job can be sales-tax exempt with its certificate
+on file, a document carries its own exempt switch and says so on the PDF,
+and the Sales Tax report lists exempt sales by reason (#864); Make Deposits
+takes lines for money never invoiced (#792) and lists only customer money
+(#821), and a deposit prints onto the bank's pre-printed slips (#798, #883);
+every new document takes attachments before its first save (#796, #881);
+one inventory adjustment holds several items (#801). A construction estimate
+can price each line as cost plus a markup (#774), and its cost side is the
+contractor's own (#824); the Estimate Closing Rate report shows bids won,
+lost and open (#795); the Reports page opens on the starred reports (#794)
+and Budget vs Actual shows every month (#797). Invoices import from a CSV in
+SlowBooks' own template (#882); a check's memo can be the bill's invoice
+number (#800) and its amount can drop the dollar sign (#799); payroll
+figures each run with its own year's tables (#818), a Washington or Oregon
+employer share follows the agency's letter (#825) and salaried L&I goes on
+160 hours (#826); online payments can clear through an account per provider
+with the fee and the payout (#583, #584); a file from before 2.29.0 is sent
+to 2.31.14 first (#769), the Server Edition runs with debug off (#812), and
+Settings points an agent to SlowBooks Switchboard (#829).
 
-Patch releases and everything before 2.31 are in [CHANGELOG.md](CHANGELOG.md).
+Patch releases and everything before 2.32 are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Wait — it does *that*?
 
@@ -120,11 +123,12 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   credits, AP aging
 - **Double-entry core** — auto + manual journals, closing-date
   enforcement, automatic audit log, 50-account contractor chart
-- **Banking** — the register is the ledger (entries post, feeds are a review queue, reconciliation over ledger lines), transfers, deposits, check printing,
+- **Banking** — the register is the ledger (entries post, feeds are a review queue, reconciliation over ledger lines), transfers, deposits (onto the bank's pre-printed slips too), check printing,
   OFX/QFX + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN and Mercury bank feeds,
   shared auto-categorization rules
 - **Reports & tax** — P&L (plain & by Class), Balance Sheet, Trial
-  Balance, agings, GL, Cash Flow, Sales Tax with pay-to-government flow,
+  Balance, agings, GL, Cash Flow, Sales Tax with pay-to-government flow
+  and exempt sales by reason (exemption certificates on the job),
   Schedule C, printable PDF pack
 - **Payroll & HR** — full US module with W-2/W-3/940/941, deductions,
   garnishments, PTO, onboarding, and a token-accessed employee portal
@@ -152,7 +156,7 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   receipts, and QuickBooks Online from its own Export data zip with no
   Intuit developer app ([docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md)),
   Migrate Data for Xero / MYOB / Sage 50 / Wave / Zoho Books / GnuCash,
-  Opening Balances wizard
+  invoices from a CSV in SlowBooks' own template, Opening Balances wizard
 - **Fixed assets** — register, depreciation runs, disposal with
   gain/loss, reconciliation report
 - **Nonprofit mode** — your own words on every screen and document; funds
