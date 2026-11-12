@@ -131,11 +131,16 @@ def _supplied_password(db: Session) -> str | None:
     return closing_date_password.get()
 
 
-def check_closing_date(db: Session, txn_date: date, password: str = None):
+def check_closing_date(
+    db: Session, txn_date: date, password: str = None, document: str | None = None
+):
     """Raise HTTPException if txn_date is on or before the closing date.
     If a closing_date_password is set and the caller provides it (as the
     argument, or as the signed-in person's PASSWORD_HEADER on this request),
-    allow the change and record that the lock was overridden."""
+    allow the change and record that the lock was overridden.
+
+    `document` names what is being changed ("Invoice 1011"); given, the
+    refusal names it and its date, as the check batch's does (W-149)."""
     closing = get_closing_date(db)
     if closing is None:
         return  # No closing date configured
@@ -154,10 +159,16 @@ def check_closing_date(db: Session, txn_date: date, password: str = None):
                 stored = ""
         if password is None:
             password = _supplied_password(db)
-        detail = (
-            f"Transaction date {txn_date} is on or before the closing date "
-            f"({closing}). Modifications to closed periods are not allowed."
-        )
+        if document:
+            detail = (
+                f"{document} is dated {txn_date}, on or before the closing date "
+                f"({closing}). Modifications to closed periods are not allowed."
+            )
+        else:
+            detail = (
+                f"Transaction date {txn_date} is on or before the closing date "
+                f"({closing}). Modifications to closed periods are not allowed."
+            )
         key = _company_key(db)
         now = time.monotonic()
         if stored:

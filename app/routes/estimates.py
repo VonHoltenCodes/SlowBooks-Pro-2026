@@ -952,7 +952,11 @@ def convert_to_invoice(
     # exploratory W-L10). Its journal posts on that date, so that is the
     # date the closing lock is checked against.
     today = date.today()
-    check_closing_date(db, today)
+    check_closing_date(
+        db,
+        today,
+        document=f"The invoice from estimate {estimate.estimate_number}",
+    )
 
     # A new invoice gets the customer's CURRENT tax treatment, computed —
     # not the estimate's stored tax (see taxed_copy_lines).

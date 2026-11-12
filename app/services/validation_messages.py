@@ -114,12 +114,20 @@ def _sentence(text: str) -> str:
 
 
 def _number(v) -> str:
-    """ctx limits arrive as numbers or strings; print 0 not 0.0."""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
+    """ctx limits arrive as numbers or strings; print 0 not 0.0. A whole
+    number prints exactly (NEW-224): through float(), 2**63 - 1 read as
+    9223372036854775808, a limit its own bound refuses."""
+    from decimal import Decimal, InvalidOperation
+
+    if isinstance(v, bool):
         return str(v)
-    return str(int(f)) if f.is_integer() else str(v)
+    try:
+        d = Decimal(str(v))
+    except (InvalidOperation, ValueError):
+        return str(v)
+    if d.is_finite() and d == d.to_integral_value():
+        return str(int(d))
+    return str(v)
 
 
 def plain_message(error: dict) -> str:
