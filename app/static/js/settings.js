@@ -1140,11 +1140,11 @@ const SettingsPage = {
                         </div>
                         <div class="form-group full-width"><label for="settings-check-memo">Check memo</label>
                             <select name="check_memo" id="settings-check-memo" aria-describedby="settings-check-memo-help">
-                                <option value="reference" ${!['memo', 'none'].includes(s.check_memo) ? 'selected' : ''}>The bill's reference (Invoice 196132)</option>
+                                <option value="reference" ${!['memo', 'none'].includes(s.check_memo) ? 'selected' : ''}>The bill's number (196132)</option>
                                 <option value="memo" ${s.check_memo === 'memo' ? 'selected' : ''}>The bill's memo</option>
                                 <option value="none" ${s.check_memo === 'none' ? 'selected' : ''}>Nothing</option>
                             </select>
-                            <div id="settings-check-memo-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">What Pay Bills puts on the memo line of the check: the vendor's invoice number the bill was entered under, the bill's whole memo, or nothing. A check paying several bills lists their invoice numbers (Invoices 196132, 196140). A bill numbered by SlowBooks because its number was left blank has no reference, so its memo is used instead. The memo can still be changed on the payment before the check prints, and a memo typed there is kept.</div>
+                            <div id="settings-check-memo-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">What Pay Bills puts on the memo line of the check: the number the bill was entered under (the vendor's own numbering), the bill's whole memo, or nothing. A check paying several bills lists their numbers (196132, 196140). A bill numbered by SlowBooks because its number was left blank has no reference, so its memo is used instead. The memo can still be changed on the payment before the check prints, and a memo typed there is kept.</div>
                         </div>
                         <div class="form-group"><label>Horizontal nudge (in)</label>
                             <input name="check_nudge_x_in" type="number" min="-0.5" max="0.5" step="0.01"
