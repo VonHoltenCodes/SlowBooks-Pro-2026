@@ -349,3 +349,75 @@ def use_tax_lines(
             "job_id": job_id,
         },
     ]
+
+
+# Purchase lines already sitting on a control (#821). #785 refuses a new one;
+# a line saved before 2.31.14 keeps its account until the bookkeeper moves it.
+# Make Deposits no longer offers one on 1200 (services/undeposited_funds.py),
+# and the start-up pass counts them so the bookkeeper knows to look.
+_MISPLACED_LEDGER_SOURCES = ("expense", "cc_charge")
+
+
+def purchase_lines_on_controls(db: Session) -> int:
+    """How many purchase lines sit on 1200 Undeposited Funds or 1300
+    Inventory: a line of a posted bill (not a draft, not void) whose account
+    is one of them — on 1300 only when the line moves no inventory item,
+    since a stocked item's purchase belongs there — and a line of a live
+    expense or card charge posted to one of them."""
+    from app.models.bills import Bill, BillLine, BillStatus
+    from app.models.items import Item
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services.control_accounts import is_control
+    from app.services.undeposited_funds import dead_transaction_ids
+
+    by_number = {
+        a.account_number: a.id
+        for a in db.query(Account).filter(Account.account_number.in_(("1200", "1300")))
+        if is_control(a.account_number, a.account_type)
+    }
+    if not by_number:
+        return 0
+    uf_id, inv_id = by_number.get("1200"), by_number.get("1300")
+
+    count = 0
+    rows = (
+        db.query(BillLine, Item)
+        .join(Bill, BillLine.bill_id == Bill.id)
+        .outerjoin(Item, BillLine.item_id == Item.id)
+        .filter(
+            BillLine.account_id.in_(list(by_number.values())),
+            Bill.status.notin_((BillStatus.DRAFT, BillStatus.VOID)),
+        )
+        .all()
+    )
+    for line, item in rows:
+        if line.account_id == uf_id:
+            count += 1
+        elif line.account_id == inv_id and not (item and item.track_inventory):
+            count += 1
+
+    ledger = (
+        db.query(TransactionLine, Transaction)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(
+            TransactionLine.account_id.in_(list(by_number.values())),
+            TransactionLine.debit > 0,
+            Transaction.source_type.in_(_MISPLACED_LEDGER_SOURCES),
+        )
+        .all()
+    )
+    dead = dead_transaction_ids(db, (t for _, t in ledger))
+    count += sum(1 for _, t in ledger if t.id not in dead)
+    return count
+
+
+def purchase_lines_sentence(count: int) -> Optional[str]:
+    """The start-up log line for `purchase_lines_on_controls`, or None when
+    there are none (#821)."""
+    if not count:
+        return None
+    lines = "purchase line sits" if count == 1 else "purchase lines sit"
+    return (
+        f"{count} {lines} on Undeposited Funds or Inventory; open each bill "
+        "and move the line."
+    )

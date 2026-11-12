@@ -1121,8 +1121,54 @@ def current_valuation(db: Session) -> dict:
             str(it.reorder_point)
         ):
             low_stock += 1
+    total_value = _q(total_value)
+    ledger = inventory_ledger_balance(db, items)
     return {
-        "total_value": float(_q(total_value)),
+        "total_value": float(total_value),
         "item_count": item_count,
         "low_stock_count": low_stock,
+        "ledger_balance": float(ledger) if ledger is not None else None,
+        "ledger_note": ledger_difference_note(ledger, total_value),
     }
+
+
+def inventory_ledger_balance(db: Session, items) -> Optional[Decimal]:
+    """The ledger's Inventory balance (#821): what 1300 Inventory and every
+    tracked item's own asset account hold, debits less credits. None for a
+    chart with neither."""
+    ids = {get_inventory_asset_account_id(db, it) for it in items}
+    inv = db.query(Account).filter(Account.account_number == "1300").first()
+    if inv is not None:
+        ids.add(inv.id)
+    ids.discard(None)
+    if not ids:
+        return None
+    debit, credit = (
+        db.query(
+            func.coalesce(func.sum(TransactionLine.debit), 0),
+            func.coalesce(func.sum(TransactionLine.credit), 0),
+        )
+        .filter(TransactionLine.account_id.in_(ids))
+        .one()
+    )
+    return _q(Decimal(str(debit)) - Decimal(str(credit)))
+
+
+def ledger_difference_note(ledger: Optional[Decimal], valuation) -> Optional[str]:
+    """The line under the valuation's totals when the ledger's Inventory
+    balance is not what the items are worth (#821): a purchase line saved on
+    Inventory before 2.31.14, or a hand journal entry to it, moves the
+    ledger and no item. None when they agree."""
+    if ledger is None:
+        return None
+    valuation = _q(valuation)
+    if ledger == valuation:
+        return None
+    return (
+        f"The ledger's Inventory balance is {_money(ledger)}, the valuation "
+        f"{_money(valuation)}; the difference is on postings that moved no item"
+    )
+
+
+def _money(amount: Decimal) -> str:
+    return f"-${-amount:,.2f}" if amount < 0 else f"${amount:,.2f}"

@@ -676,6 +676,27 @@ async def lifespan(app: FastAPI):
                     "for each. They are tried again at the next start",
                     redone["failed"],
                 )
+            # #821: purchase lines saved on Undeposited Funds or Inventory
+            # before #785 refused them stay until the bookkeeper moves them;
+            # say how many, printed so it reaches launcher.log like the line
+            # above. Nothing when there are none.
+            from app.services.purchase_posting import (
+                purchase_lines_on_controls,
+                purchase_lines_sentence,
+            )
+
+            try:
+                misplaced = purchase_lines_sentence(purchase_lines_on_controls(_db))
+            except Exception:
+                _db.rollback()
+                misplaced = None
+                logging.getLogger(__name__).warning(
+                    "could not count purchase lines on control accounts",
+                    exc_info=True,
+                )
+            if misplaced:
+                print(misplaced)
+                logging.getLogger(__name__).info("%s", misplaced)
         finally:
             _db.close()
             startup_progress.clear()
