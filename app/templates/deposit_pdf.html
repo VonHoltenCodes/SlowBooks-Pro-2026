@@ -100,10 +100,10 @@
 
     <div class="summary">
         <table>
-            {% set slip = (deposit.payments | default([])) + others %}
-            {% set checks = slip | selectattr('method', 'equalto', 'Check') | list %}
+            {% set split = deposit_slip_split(deposit.payments | default([]), others) %}
+            {% set checks = split.checks %}
             {% if checks %}<tr><td class="label">{{ checks | length }} check{{ '' if checks | length == 1 else 's' }}</td><td class="r">{{ checks | sum(attribute='amount') | currency }}</td></tr>{% endif %}
-            {% set cash = slip | selectattr('method', 'equalto', 'Cash') | list %}
+            {% set cash = split.cash %}
             {% if cash %}<tr><td class="label">Cash</td><td class="r">{{ cash | sum(attribute='amount') | currency }}</td></tr>{% endif %}
             {% if others and deposit.payments %}<tr><td class="label">Payments</td><td class="r">{{ deposit.payments_total | currency }}</td></tr>
             <tr><td class="label">Other deposits</td><td class="r">{{ deposit.other_total | currency }}</td></tr>{% endif %}
