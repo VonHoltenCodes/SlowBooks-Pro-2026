@@ -30,6 +30,7 @@ from app.routes._helpers import (
 )
 from app.routes.invoice_messages import default_message_body
 from app.services.audit import audited_bulk_delete
+from app.services import pending_attachments
 from app.services.payment_terms import DocumentTerms, term_id_for
 from app.services.job_costing import line_cost_type, budgets_from_estimate
 from app.services.estimating import (
@@ -415,6 +416,9 @@ def get_estimate(request: Request, estimate_id: int, db: Session = Depends(get_d
 
 @router.post("", response_model=EstimateResponse, status_code=201)
 def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
+    # files attached on the form before this save (#881): checked before
+    # anything is written, attached with the estimate below
+    pending = pending_attachments.take(db, data.pending_attachments)
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -531,6 +535,8 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     )
     if numeric_part.isdigit():
         set_setting(db, "estimate_next_number", str(int(numeric_part) + 1))
+    db.flush()
+    pending_attachments.bind(db, pending, "estimate", estimate.id)
 
     db.commit()
     db.refresh(estimate)

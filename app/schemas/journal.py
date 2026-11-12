@@ -5,6 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 from app.models.transactions import BASES
 from app.schemas.common import StrictModel, clean_line_cost_type
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class JournalLineCreate(StrictModel):
@@ -64,6 +65,9 @@ class JournalEntryCreate(StrictModel):
     # "cash" (cash reports only). On an edit, left out keeps the entry's.
     basis: Optional[str] = None
     lines: list[JournalLineCreate]
+    # Files attached on the form before this first save (#881, as #796):
+    # the ids POST /api/attachments/pending gave.
+    pending_attachments: PendingAttachmentIds = []
 
     @field_validator("basis")
     @classmethod

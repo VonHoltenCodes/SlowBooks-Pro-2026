@@ -31,6 +31,7 @@ from app.services.field_tickets import (
 )
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_po_number
+from app.services import pending_attachments
 from app.services.payment_terms import term_id_for
 from app.services.request_utils import content_disposition
 from app.services.purchase_posting import (
@@ -140,6 +141,9 @@ def get_po(po_id: int, db: Session = Depends(get_db)):
 
 @router.post("", response_model=POResponse, status_code=201)
 def create_po(data: POCreate, db: Session = Depends(get_db)):
+    # files attached on the form before this save (#881): checked before
+    # anything is written, attached with the purchase order below
+    pending = pending_attachments.take(db, data.pending_attachments)
     vendor = db.query(Vendor).filter(Vendor.id == data.vendor_id).first()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -204,6 +208,8 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
             line_order=i,
         )
         db.add(line)
+    db.flush()
+    pending_attachments.bind(db, pending, "purchase_order", po.id)
 
     db.commit()
     db.refresh(po)

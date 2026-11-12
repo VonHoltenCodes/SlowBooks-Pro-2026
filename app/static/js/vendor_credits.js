@@ -50,7 +50,9 @@ const VendorCreditsPage = {
             </table></div>
             <p style="margin-top:8px;">Total ${formatCurrency(c.total)} &middot; applied ${formatCurrency(c.amount_applied)} &middot; remaining <strong>${formatCurrency(c.balance_remaining)}</strong></p>
             ${typeof Replace === 'undefined' ? '' : Replace.links(c, 'vendor_credit', n => `#/vendor-credits/${n}`)}
+            ${InvoicesPage.attachmentsPanelHtml('vendor_credit', c.id)}
             <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+        InvoicesPage.loadAttachments('vendor_credit', c.id);
         // the document's own address, so Back returns to the list and the Open group lists it (NEW-164)
         if (App.documentAddress) App.documentAddress(`#/vendor-credits/${Number(id)}`);
         return '';
@@ -87,6 +89,7 @@ const VendorCreditsPage = {
 
         const vendOpts = vendors.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
 
+        PendingFiles.reset();  // files attached before the first save (#881)
         openModal('New Vendor Credit', `
             <form id="vc-form" onsubmit="VendorCreditsPage.save(event)">
                 <p class="form-hint">Enter the credit as a positive amount. It reduces what you owe this vendor, and you choose which bill it settles afterwards.</p>
@@ -114,11 +117,12 @@ const VendorCreditsPage = {
                 </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
+                ${PendingFiles.stripHtml()}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Create Vendor Credit</button>
                 </div>
-            </form>`);
+            </form>`, { onClose: () => PendingFiles.discard() });
         typeof LineOrder !== 'undefined' && LineOrder.attach('#vc-lines', { add: () => VendorCreditsPage.addLine(), changed: () => VendorCreditsPage.recalc() });
     },
 
@@ -245,7 +249,9 @@ const VendorCreditsPage = {
                 notes: form.notes.value || null,
                 class_id: classIdFromForm(form),
                 lines,
+                pending_attachments: PendingFiles.ids(),
             });
+            PendingFiles.saved();
             if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Vendor credit voided and replaced by vendor credit ${saved.credit_number || `#${saved.id}`}`);
             else toastPosted('Vendor credit created');
             // stock the return took below what was on hand (W-74): posted, and said

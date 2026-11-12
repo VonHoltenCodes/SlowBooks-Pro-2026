@@ -2089,6 +2089,7 @@ const BankingPage = {
         // a new entry opens on the register's last posted date (#566); an
         // edit fills in its own
         const carried = (!entry && BankingPage._lastDate[accountId]) || '';
+        PendingFiles.reset();  // files attached before the first save (#881)
         openModal('New Register Entry', `
             <form onsubmit="BankingPage.saveEntry(event, ${accountId})">
                 <div class="form-grid">
@@ -2124,12 +2125,13 @@ const BankingPage = {
                         <button type="button" class="btn btn-sm btn-secondary" id="entry-split-toggle" onclick="BankingPage.toggleSplits()">Split this entry…</button>
                     </div>
                 </div>
+                ${entry ? '' : PendingFiles.stripHtml()}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Post Entry</button>
                 </div>
             </form>
-            ${entry ? BankingPage._attachmentsHtml(entry.id) : ''}`);
+            ${entry ? BankingPage._attachmentsHtml(entry.id) : ''}`, { onClose: () => PendingFiles.discard() });
         BankingPage._splitCats = catOpts;
         if (entry) BankingPage._fillEntryForm(entry);
         if (entry) BankingPage.loadAttachments(entry.id);
@@ -2544,9 +2546,10 @@ const BankingPage = {
         if (entryId) { await BankingPage._putEntry(entryId, data, accountId); return; }
         try {
             const posted = await CheckNumberWarn.send(
-                q => API.post('/banking/transactions', data, q ? { query: q } : undefined),
+                q => API.post('/banking/transactions', { ...data, pending_attachments: PendingFiles.ids() }, q ? { query: q } : undefined),
                 form.check_number || null);
             if (!posted) return;
+            PendingFiles.saved();
             BankingPage._lastDate[accountId] = data.date;
             const outside = BankingPage._outsideFilter(data.date);
             toastPosted(outside ? `Entry posted. ${outside}` : 'Entry posted');

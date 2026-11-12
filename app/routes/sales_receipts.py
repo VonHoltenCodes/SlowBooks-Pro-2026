@@ -24,6 +24,7 @@ from app.routes.payments import create_payment
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse
 from app.schemas.payments import PaymentAllocationCreate, PaymentCreate
 from app.schemas.sales_receipts import SalesReceiptCreate, SalesReceiptResponse
+from app.services import pending_attachments
 from app.services.donor_documents import document_label
 from app.services.jobs_service import refuse_other_customers_jobs
 from app.services.terminology import terms_from_db
@@ -90,6 +91,9 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     GET /api/invoices/{id} answers it, the payment, the customer's name as
     the list answers it, and a sentence for each stock item the sale took
     past what was on hand."""
+    # files attached on the form before this save (#881): checked before
+    # anything is written, attached to the receipt once its payment is in
+    pending = pending_attachments.take(db, data.pending_attachments)
     # Validate up front so nothing is written on inputs the payment step
     # would reject after the invoice already exists: a $0 payment is
     # refused by the payments route, and a bad deposit account would only
@@ -181,6 +185,10 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
         except Exception:
             pass
         raise
+    # the receipt's files: on the receipt (its invoice), now that the whole
+    # of it is saved; a receipt voided above leaves them on the form
+    pending_attachments.bind(db, pending, "invoice", inv_resp.id)
+    db.commit()
 
     # the invoice step's stock warnings (#642) ride on the receipt's answer
     invoice_out = get_invoice(inv_resp.id, db)

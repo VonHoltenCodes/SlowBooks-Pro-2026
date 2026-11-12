@@ -68,6 +68,8 @@ const ctx = {
   closeModal: () => {},
   T: (s) => s,
   Terms: { init() {}, text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
+  // leaving Quick Entry discards its held files (#881)
+  PendingFiles: { discard() {} },
   API: { get: async () => ({ company_name: 'Harbor Light Bakery Two', company_type: 'business' }) },
 };
 ctx.window = { addEventListener(name, fn) { listeners[name] = fn; } };

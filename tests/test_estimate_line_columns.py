@@ -60,7 +60,8 @@ def test_estimate_line_cells_follow_the_header():
 
 def test_picking_an_item_fills_its_cost_and_the_form_opens_wide():
     assert "cost.value = item.cost && Number(item.cost) !== 0 ? item.cost : ''" in JS
-    assert "`, { wide: true });" in JS
+    # wide, and (#881) a new estimate's held files are discarded on close
+    assert "`, { wide: true, onClose: () => PendingFiles.discard() });" in JS
     assert (
         'class="table-container table-container--scroll"><table class="line-items-table">'
         in JS

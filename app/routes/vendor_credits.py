@@ -49,6 +49,7 @@ from app.services.inventory_service import get_inventory_asset_account_id
 from app.services.job_costing import line_cost_type
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_vendor_credit_number
+from app.services import pending_attachments
 from app.services.purchase_posting import (
     expense_account_for,
     spread,
@@ -102,6 +103,9 @@ def get_vendor_credit(vc_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=VendorCreditResponse, status_code=201)
 def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
+    # files attached on the form before this save (#881): checked before
+    # anything is written, attached with the credit below
+    pending = pending_attachments.take(db, data.pending_attachments)
 
     vendor = db.query(Vendor).filter(Vendor.id == data.vendor_id).first()
     if not vendor:
@@ -316,6 +320,8 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
                 # return can say which one it is (as bills do, W-68)
                 memo=f"Vendor credit {vc.credit_number} line {line_no}",
             )
+    db.flush()
+    pending_attachments.bind(db, pending, "vendor_credit", vc.id)
 
     db.commit()
     db.refresh(vc)

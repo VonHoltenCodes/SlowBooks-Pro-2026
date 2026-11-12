@@ -46,6 +46,8 @@ function fixture(invoice) {
         $, $$: selector => selector === '#inv-lines tr' ? form.rows : [],
     };
     vm.createContext(context);
+    // the files a new document holds before its first save (#881): not this test's
+    context.PendingFiles = { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} };
     // the line's item picker (#445)
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/item_quick_add.js'), 'utf8'), context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/payment_terms.js'), 'utf8'), context);

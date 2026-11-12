@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.schemas.common import StrictModel
 
 from app.models.banking import ReconciliationStatus
+from app.schemas.attachments import PendingAttachmentIds
 
 
 class BankAccountCreate(StrictModel):
@@ -110,6 +111,9 @@ class BankTransactionCreate(StrictModel):
     # is the name on the income line; with `splits` it is the default for
     # the lines that name none.
     customer_id: Optional[int] = None
+    # Files attached on the form before this first save (#881, as #796):
+    # the ids POST /api/attachments/pending gave.
+    pending_attachments: PendingAttachmentIds = []
 
 
 class BankEntryUpdate(BankTransactionCreate):

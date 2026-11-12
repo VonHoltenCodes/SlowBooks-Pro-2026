@@ -70,6 +70,8 @@ function page({ jobs = JOBS, entries = [], entry = null, accountant = false, row
         document: { querySelector: () => null },
     };
     vm.createContext(context);
+    // the files a new document holds before its first save (#881): not this test's
+    context.PendingFiles = { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} };
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/journal.js'), 'utf8') + '\nthis.JournalPage = JournalPage;', context);
     return { JournalPage: context.JournalPage, calls };
 }

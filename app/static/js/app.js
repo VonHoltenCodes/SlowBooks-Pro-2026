@@ -58,13 +58,13 @@ const App = {
         '/reports/:view': { page: 'reports',         label: 'Report',             render: (view, query) => App.withDocument(() => ReportsPage.render(), () => ReportsPage.openView(view, query)) },
         '/settings':      { page: 'settings',        label: 'Company Settings',   render: () => SettingsPage.render() },
         '/iif':           { page: 'iif',             label: 'Interoperability',   render: () => IIFPage.render() },
-        '/quick-entry':   { page: 'quick-entry',     label: 'Quick Entry',        render: () => App.renderQuickEntry() },
+        '/quick-entry':   { page: 'quick-entry',     label: 'Quick Entry',        render: () => App.renderQuickEntry(), mount: () => () => PendingFiles.discard() },
         // Phase 1: Foundation
         '/audit':         { page: 'audit',           label: 'Audit Log',          render: () => AuditPage.render() },
         // Phase 2: Accounts Payable
         '/purchase-orders': { page: 'purchase-orders', label: 'Purchase Orders',  render: () => PurchaseOrdersPage.render() },
         '/bills':         { page: 'bills',           label: 'Bills',              render: () => BillsPage.render() },
-        '/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',   render: () => BillQuickEntry.render() },
+        '/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',   render: () => BillQuickEntry.render(), mount: () => () => PendingFiles.discard() },
         '/bills/:id':         { page: 'bills',      label: 'Bill',          document: true, render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.view(id)) },
         '/bill-payments/:id': { page: 'bills',      label: 'Bill Payment',  document: true, render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.viewPayment(id)) },
         '/credit-memos':  { page: 'credit-memos',    label: 'Credit Memos',       render: () => CreditMemosPage.render() },
@@ -2337,6 +2337,9 @@ const App = {
         // lines are taxable"); nothing for a non-taxable customer.
         const taxPct = +(parseFloat(settings.default_tax_rate || '0') || 0).toFixed(4);
         App._qeTaxPct = taxPct;
+        // files attached before the save (#881): this page's form holds
+        // them, and leaving the page discards what is left (the route's mount)
+        PendingFiles.reset();
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
         // "+ New Customer", as on the New Invoice form (#484): the customer
         // is added in place and picked, and nothing else typed is lost. A
@@ -2385,6 +2388,7 @@ const App = {
                     <tbody id="qe-lines">${App._qeLineHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="App.qeAddLine()">+ Add Line</button>
+                ${PendingFiles.stripHtml()}
                 <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <div id="qe-tax-summary" style="font-size:11px; color:var(--text-muted);">Subtotal: <span id="qe-subtotal">$0.00</span> · Tax: <span id="qe-tax">$0.00</span></div>
@@ -2588,7 +2592,10 @@ const App = {
         App.qeRecalc();
         const data = App.qeInvoiceData(form);
         try {
-            const inv = await API.post('/invoices', data);
+            const inv = await API.post('/invoices', { ...data, pending_attachments: PendingFiles.ids() });
+            // the files are the invoice's now; the next one starts with none
+            PendingFiles.saved();
+            PendingFiles.render();
             const log = $('#qe-log');
             log.insertAdjacentHTML('afterbegin',
                 `<div style="padding:4px 0; font-size:11px; border-bottom:1px solid var(--gray-200);">

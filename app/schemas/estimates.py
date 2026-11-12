@@ -25,6 +25,7 @@ from app.schemas.common import (
     quantity_text,
 )
 from app.schemas.invoices import RateOut
+from app.schemas.attachments import PendingAttachmentIds
 
 # The four compounding markups (#551), by the label the Markups block uses.
 _MARKUP_LABELS = dict(
@@ -223,6 +224,9 @@ class EstimateCreate(StrictModel):
     show_markup_rows: bool = True
     terms: Optional[str] = None
     lines: list[EstimateLineCreate] = []
+    # Files attached on the form before this first save (#881, as #796):
+    # the ids POST /api/attachments/pending gave.
+    pending_attachments: PendingAttachmentIds = []
 
     @field_validator(*_MARKUP_LABELS)
     @classmethod

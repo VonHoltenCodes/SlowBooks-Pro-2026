@@ -41,6 +41,7 @@ from app.services.bank_posting import (
 )
 from app.services.bank_register import date_text
 from app.services.closing_date import check_closing_date
+from app.services import pending_attachments
 from app.services.job_costing import line_cost_type
 from app.services.safe_errors import safe_message
 from app.services.entry_text import header_text
@@ -491,6 +492,9 @@ def create_manual_journal_entry(
     from app.services.accountants_copy import check_entry_date
 
     check_entry_date(db, data.date)
+    # files attached on the form before this save (#881): checked before
+    # anything is written, attached with the entry below
+    pending = pending_attachments.take(db, data.pending_attachments)
     # An accountant's entries are adjustments unless the box is cleared;
     # everyone else's are ordinary unless it is ticked (#341).
     is_adjusting = (
@@ -517,6 +521,8 @@ def create_manual_journal_entry(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    db.flush()
+    pending_attachments.bind(db, pending, "journal_entry", txn.id)
 
     db.commit()
     db.refresh(txn)

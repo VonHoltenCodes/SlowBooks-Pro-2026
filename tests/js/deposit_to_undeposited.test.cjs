@@ -45,6 +45,8 @@ function load(file, name, accounts) {
     };
     context.fetchAllPages = url => context.API.get(url);
     vm.createContext(context);
+    // the files a new document holds before its first save (#881): not this test's
+    context.PendingFiles = { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} };
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js', file), 'utf8') + `\nthis.${name} = ${name};`, context);
     return { page: context[name], modal: () => modal };
 }

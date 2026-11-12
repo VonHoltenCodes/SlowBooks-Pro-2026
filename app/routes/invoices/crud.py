@@ -28,6 +28,7 @@ from app.services.payment_terms import (
     retie,
 )
 from app.services.closing_date import check_closing_date
+from app.services import pending_attachments
 
 from app.routes.invoices._router import router
 from app.services.contact_balances import home_amount
@@ -167,6 +168,9 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     assigned."""
     words = terms_from_db(db)
     check_closing_date(db, data.date)
+    # files attached on the form before this save (#881): checked before
+    # anything is written, attached with the invoice below
+    pending = pending_attachments.take(db, data.pending_attachments)
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -316,6 +320,8 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
                 memo=document_reference(face, invoice_number),
                 txn_date=data.date,
             )
+    db.flush()
+    pending_attachments.bind(db, pending, "invoice", invoice.id)
 
     db.commit()
     db.refresh(invoice)
