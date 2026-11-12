@@ -3,6 +3,7 @@
 # invoices; exact Decimal math throughout.
 # ============================================================================
 
+from contextlib import contextmanager
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
@@ -45,6 +46,29 @@ from app.services.audit import _actor
 from app.schemas.common import BIGINT_MAX
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
+
+
+@contextmanager
+def _all_or_nothing(rows: int, what: str):
+    """Several invoices in one request are applied together or not at all
+    (#803): a row refused part-way raises before the commit, so the rows
+    above it are rolled back with it, and the sentence that names the
+    refused row says so. One row needs no such sentence."""
+    try:
+        yield
+    except HTTPException as exc:
+        detail = exc.detail
+        # the discount question the form asks and resends keeps its wording
+        if (
+            rows > 1
+            and isinstance(detail, str)
+            and "allow_discount_override" not in detail
+        ):
+            detail = detail.rstrip()
+            if not detail.endswith((".", "!", "?")):
+                detail += "."
+            exc.detail = f"{detail} {what}"
+        raise
 
 
 def _response(payment: Payment, customer_name: str = None) -> PaymentResponse:
@@ -254,29 +278,33 @@ def create_payment(
 
     # Validate every allocation owner before creating or applying the payment.
     allocated_invoices = []
-    for alloc_data in data.allocations:
-        # Lock the invoice row for the read-check-write so two concurrent
-        # payments to the same invoice can't both pass the balance check and
-        # over-apply (driving balance_due negative). No-op on SQLite; real
-        # row lock on Postgres.
-        invoice = (
-            db.query(Invoice)
-            .filter(Invoice.id == alloc_data.invoice_id)
-            .with_for_update()
-            .first()
-        )
-        if not invoice:
-            raise HTTPException(
-                status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+    not_recorded = (
+        "Nothing was recorded: the payment and its invoices are as they were."
+    )
+    with _all_or_nothing(len(data.allocations), not_recorded):
+        for alloc_data in data.allocations:
+            # Lock the invoice row for the read-check-write so two concurrent
+            # payments to the same invoice can't both pass the balance check and
+            # over-apply (driving balance_due negative). No-op on SQLite; real
+            # row lock on Postgres.
+            invoice = (
+                db.query(Invoice)
+                .filter(Invoice.id == alloc_data.invoice_id)
+                .with_for_update()
+                .first()
             )
-        # The payer's own invoice, or one of a sub-customer billed with
-        # it (#638): a property's payment pays its tenants' invoices.
-        if not pays_for(db, data.customer_id, invoice):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invoice {invoice.invoice_number} does not belong to payment customer",
-            )
-        allocated_invoices.append(invoice)
+            if not invoice:
+                raise HTTPException(
+                    status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+                )
+            # The payer's own invoice, or one of a sub-customer billed with
+            # it (#638): a property's payment pays its tenants' invoices.
+            if not pays_for(db, data.customer_id, invoice):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invoice {invoice.invoice_number} does not belong to payment customer",
+                )
+            allocated_invoices.append(invoice)
 
     payment = Payment(
         customer_id=data.customer_id,
@@ -303,77 +331,84 @@ def create_payment(
 
     may_override = request is None or is_admin(request)
     # Apply allocations to the invoices locked and validated above.
-    for alloc_data, invoice in zip(data.allocations, allocated_invoices):
-        if alloc_data.amount > invoice.balance_due:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}",
-            )
-        discount = _q(alloc_data.discount)
-        if discount > 0 and alloc_data.amount + discount > invoice.balance_due:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"${_q(alloc_data.amount):,.2f} paid and a ${discount:,.2f} "
-                    f"discount is more than the ${invoice.balance_due:,.2f} still "
-                    f"due on invoice {invoice.invoice_number}."
-                ),
-            )
-        # the discount the invoice's own terms offer, or the override
-        # (an administrator's, recorded with the reason)
-        against = early_pay_discounts.check_against_terms(
-            db,
-            invoice,
-            "invoice",
-            invoice.invoice_number,
-            discount,
-            invoice.total,
-            data.date,
-            data.allow_discount_override,
-            may_override,
-        )
-
-        inv_currency = document_currency(invoice, db)
-        if inv_currency != pay_currency:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Payment currency {pay_currency} does not match invoice "
-                    f"{invoice.invoice_number} currency {inv_currency}; pay each "
-                    f"currency with a separate payment"
-                ),
-            )
-        ar_home_credits.append(
-            to_home(alloc_data.amount, invoice.exchange_rate or Decimal("1"))
-        )
-        alloc = PaymentAllocation(
-            payment_id=payment.id,
-            invoice_id=alloc_data.invoice_id,
-            amount=alloc_data.amount,
-        )
-        db.add(alloc)
-
-        invoice.amount_paid += alloc_data.amount
-        invoice.balance_due -= alloc_data.amount
-        # Only an exact zero is PAID; a negative balance means something
-        # over-applied — surface it rather than masking corruption as PAID.
-        if invoice.balance_due < 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Allocation drives invoice {invoice.invoice_number} balance negative",
-            )
-        invoice.status = (
-            InvoiceStatus.PAID if invoice.balance_due == 0 else InvoiceStatus.PARTIAL
-        )
-        if discount > 0:
-            early_pay_discounts.refuse_foreign(
+    with _all_or_nothing(len(data.allocations), not_recorded):
+        for alloc_data, invoice in zip(data.allocations, allocated_invoices):
+            if alloc_data.amount > invoice.balance_due:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"${_q(alloc_data.amount):,.2f} is more than the "
+                        f"${invoice.balance_due:,.2f} still due on invoice "
+                        f"{invoice.invoice_number}."
+                    ),
+                )
+            discount = _q(alloc_data.discount)
+            if discount > 0 and alloc_data.amount + discount > invoice.balance_due:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"${_q(alloc_data.amount):,.2f} paid and a ${discount:,.2f} "
+                        f"discount is more than the ${invoice.balance_due:,.2f} still "
+                        f"due on invoice {invoice.invoice_number}."
+                    ),
+                )
+            # the discount the invoice's own terms offer, or the override
+            # (an administrator's, recorded with the reason)
+            against = early_pay_discounts.check_against_terms(
+                db,
                 invoice,
-                inv_currency,
-                home_currency(db),
-                invoice.invoice_number,
                 "invoice",
+                invoice.invoice_number,
+                discount,
+                invoice.total,
+                data.date,
+                data.allow_discount_override,
+                may_override,
             )
-            discounts.append((invoice, discount, against))
+
+            inv_currency = document_currency(invoice, db)
+            if inv_currency != pay_currency:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Payment currency {pay_currency} does not match invoice "
+                        f"{invoice.invoice_number} currency {inv_currency}; pay each "
+                        f"currency with a separate payment"
+                    ),
+                )
+            ar_home_credits.append(
+                to_home(alloc_data.amount, invoice.exchange_rate or Decimal("1"))
+            )
+            alloc = PaymentAllocation(
+                payment_id=payment.id,
+                invoice_id=alloc_data.invoice_id,
+                amount=alloc_data.amount,
+            )
+            db.add(alloc)
+
+            invoice.amount_paid += alloc_data.amount
+            invoice.balance_due -= alloc_data.amount
+            # Only an exact zero is PAID; a negative balance means something
+            # over-applied — surface it rather than masking corruption as PAID.
+            if invoice.balance_due < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Allocation drives invoice {invoice.invoice_number} balance negative",
+                )
+            invoice.status = (
+                InvoiceStatus.PAID
+                if invoice.balance_due == 0
+                else InvoiceStatus.PARTIAL
+            )
+            if discount > 0:
+                early_pay_discounts.refuse_foreign(
+                    invoice,
+                    inv_currency,
+                    home_currency(db),
+                    invoice.invoice_number,
+                    "invoice",
+                )
+                discounts.append((invoice, discount, against))
 
     # The discounts post once every row has passed (#665): a refused row
     # never leaves a numbered memo behind to be named and rolled back.
@@ -521,64 +556,67 @@ def apply_payment(payment_id: int, data: PaymentApply, db: Session = Depends(get
     fx_home = Decimal("0")  # A/R still to relieve (+) or over-relieved (−)
     latest = payment.date
     applied_now: list[tuple] = []  # (invoice, home amount) for the cash basis
-    for alloc_data in data.allocations:
-        invoice = (
-            db.query(Invoice)
-            .filter(Invoice.id == alloc_data.invoice_id)
-            .with_for_update()
-            .first()
-        )
-        if not invoice:
-            raise HTTPException(
-                status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+    with _all_or_nothing(len(data.allocations), "Nothing was applied."):
+        for alloc_data in data.allocations:
+            invoice = (
+                db.query(Invoice)
+                .filter(Invoice.id == alloc_data.invoice_id)
+                .with_for_update()
+                .first()
             )
-        # A payment pays its own customer's invoices only (#189), and
-        # those of a sub-customer billed with it (#638).
-        refuse_unless_pays_for(db, payment.customer_id, invoice, "payment")
-        if invoice.status == InvoiceStatus.VOID:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invoice {invoice.invoice_number} is void.",
+            if not invoice:
+                raise HTTPException(
+                    status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+                )
+            # A payment pays its own customer's invoices only (#189), and
+            # those of a sub-customer billed with it (#638).
+            refuse_unless_pays_for(db, payment.customer_id, invoice, "payment")
+            if invoice.status == InvoiceStatus.VOID:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invoice {invoice.invoice_number} is void.",
+                )
+            amount = _q(alloc_data.amount)
+            if amount > invoice.balance_due:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"${amount:,.2f} is more than the ${invoice.balance_due:,.2f} "
+                        f"still due on invoice {invoice.invoice_number}."
+                    ),
+                )
+            inv_currency = document_currency(invoice, db)
+            if inv_currency != pay_currency:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Payment currency {pay_currency} does not match invoice "
+                        f"{invoice.invoice_number} currency {inv_currency}; apply "
+                        "it to an invoice in the same currency"
+                    ),
+                )
+            fx_home += to_home(
+                amount, Decimal(str(invoice.exchange_rate or 1))
+            ) - to_home(amount, pay_rate)
+            applied_now.append(
+                (invoice, to_home(amount, Decimal(str(invoice.exchange_rate or 1))))
             )
-        amount = _q(alloc_data.amount)
-        if amount > invoice.balance_due:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"${amount:,.2f} is more than the ${invoice.balance_due:,.2f} "
-                    f"still due on invoice {invoice.invoice_number}."
-                ),
+            latest = max(latest, invoice.date)
+            db.add(
+                PaymentAllocation(
+                    payment_id=payment.id,
+                    invoice_id=invoice.id,
+                    amount=amount,
+                    from_remainder=True,
+                )
             )
-        inv_currency = document_currency(invoice, db)
-        if inv_currency != pay_currency:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Payment currency {pay_currency} does not match invoice "
-                    f"{invoice.invoice_number} currency {inv_currency}; apply "
-                    "it to an invoice in the same currency"
-                ),
+            invoice.amount_paid += amount
+            invoice.balance_due -= amount
+            invoice.status = (
+                InvoiceStatus.PAID
+                if invoice.balance_due == 0
+                else InvoiceStatus.PARTIAL
             )
-        fx_home += to_home(amount, Decimal(str(invoice.exchange_rate or 1))) - to_home(
-            amount, pay_rate
-        )
-        applied_now.append(
-            (invoice, to_home(amount, Decimal(str(invoice.exchange_rate or 1))))
-        )
-        latest = max(latest, invoice.date)
-        db.add(
-            PaymentAllocation(
-                payment_id=payment.id,
-                invoice_id=invoice.id,
-                amount=amount,
-                from_remainder=True,
-            )
-        )
-        invoice.amount_paid += amount
-        invoice.balance_due -= amount
-        invoice.status = (
-            InvoiceStatus.PAID if invoice.balance_due == 0 else InvoiceStatus.PARTIAL
-        )
 
     if fx_home != 0:
         customer = db.query(Customer).filter(Customer.id == payment.customer_id).first()

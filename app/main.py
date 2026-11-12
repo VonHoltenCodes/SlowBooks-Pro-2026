@@ -435,6 +435,18 @@ def _refuse_a_database_behind_head(target=None) -> None:
     if current is None:
         return
 
+    # #769: a file from before 2.29.0 is not migrated by this build. Said in
+    # one sentence, and recorded for the desktop launcher's wait, which
+    # names it instead of a timeout.
+    from app.services import migration_floor
+
+    if migration_floor.is_below_floor(current):
+        if target is None:  # the company this server starts for
+            from app.services import startup_progress
+
+            startup_progress.refuse(migration_floor.BELOW_FLOOR_MESSAGE)
+        raise migration_floor.BelowMigrationFloor()
+
     try:
         from alembic.config import Config
         from alembic.script import ScriptDirectory
@@ -853,9 +865,10 @@ app.add_exception_handler(DataError, _data_error_handler)
 
 
 # ---- Validation errors (422), in sentences ----
-# FastAPI's own body, unchanged, with a plain "message" added to each entry
-# ("Name is required.") for the page to show instead of validator text
-# ("name: String should have at least 1 character" — explore 2.17.3, L5).
+# FastAPI's own body with a plain "message" added to each entry ("Name is
+# required.") for the page to show instead of validator text ("name: String
+# should have at least 1 character" — explore 2.17.3, L5), and any text the
+# entry echoes back in "input" cut to 200 characters (#810).
 def _json_safe(value):
     """A 422 echoes what was sent, and JSON has no NaN or Infinity: a body
     carrying one (Python's JSON reader accepts them) turned the refusal
@@ -869,16 +882,39 @@ def _json_safe(value):
     return value
 
 
+# How much of a refused value a 422 echoes back (#810): a 5,000-character
+# name came back whole in the detail list. Each entry's "message" is the
+# sentence; "input" is only a reminder of what was sent.
+ECHO_LIMIT = 200
+
+
+def _trim_echo(value):
+    """The echoed input with every text in it cut to ECHO_LIMIT characters
+    and an ellipsis (a body-level error echoes the whole body)."""
+    if isinstance(value, str):
+        return value if len(value) <= ECHO_LIMIT else value[:ECHO_LIMIT] + "…"
+    if isinstance(value, dict):
+        return {k: _trim_echo(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_trim_echo(v) for v in value]
+    return value
+
+
 async def _request_validation_handler(request: Request, exc: RequestValidationError):
     from app.services.validation_messages import with_messages
 
     terms = _company_terms()
     wording = terms.text if terms.has_words else None
     errors = _json_safe(jsonable_encoder(exc.errors()))
-    return JSONResponse(
-        status_code=422,
-        content={"detail": with_messages(errors, wording)},
-    )
+    detail = [
+        (
+            {**e, "input": _trim_echo(e["input"])}
+            if isinstance(e, dict) and "input" in e
+            else e
+        )
+        for e in with_messages(errors, wording)
+    ]
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 app.add_exception_handler(RequestValidationError, _request_validation_handler)

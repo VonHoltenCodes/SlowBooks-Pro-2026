@@ -100,6 +100,77 @@ _BRACKETS = {
 }
 
 
+# --- 2025 (a run dated 2025, #818) ----------------------------------------
+# EDD, "California Withholding Schedules for 2025 — Method B, Exact
+# Calculation Method": Table 1 $18,368 / $36,736, Table 3 $5,540 / $11,080,
+# Table 4 $163.90 per allowance, Annual Payroll Period Tables 5-7.
+# https://edd.ca.gov/siteassets/files/pdf_pub_ctr/25methb.pdf
+# EDD DE 44 (2025): "The 2025 SDI withholding rate is 1.2 percent (.012)";
+# UI taxable wage limit $7,000.
+_BRACKETS_2025 = {
+    "single": [
+        (Decimal("0"), Decimal("0.011")),
+        (Decimal("10756"), Decimal("0.022")),
+        (Decimal("25499"), Decimal("0.044")),
+        (Decimal("40245"), Decimal("0.066")),
+        (Decimal("55866"), Decimal("0.088")),
+        (Decimal("70606"), Decimal("0.1023")),
+        (Decimal("360659"), Decimal("0.1133")),
+        (Decimal("432787"), Decimal("0.1243")),
+        (Decimal("721314"), Decimal("0.1353")),
+        (Decimal("1000000"), Decimal("0.1463")),
+    ],
+    "married": [
+        (Decimal("0"), Decimal("0.011")),
+        (Decimal("21512"), Decimal("0.022")),
+        (Decimal("50998"), Decimal("0.044")),
+        (Decimal("80490"), Decimal("0.066")),
+        (Decimal("111732"), Decimal("0.088")),
+        (Decimal("141212"), Decimal("0.1023")),
+        (Decimal("721318"), Decimal("0.1133")),
+        (Decimal("865574"), Decimal("0.1243")),
+        (Decimal("1000000"), Decimal("0.1353")),
+        (Decimal("1442628"), Decimal("0.1463")),
+    ],
+    "head_of_household": [
+        (Decimal("0"), Decimal("0.011")),
+        (Decimal("21527"), Decimal("0.022")),
+        (Decimal("51000"), Decimal("0.044")),
+        (Decimal("65744"), Decimal("0.066")),
+        (Decimal("81364"), Decimal("0.088")),
+        (Decimal("96107"), Decimal("0.1023")),
+        (Decimal("490493"), Decimal("0.1133")),
+        (Decimal("588593"), Decimal("0.1243")),
+        (Decimal("980987"), Decimal("0.1353")),
+        (Decimal("1000000"), Decimal("0.1463")),
+    ],
+}
+
+# Each year's figures (#818). The module constants above are 2026's.
+CA_YEARS = {
+    2025: {
+        "sdi_rate": Decimal("0.012"),
+        "std_deduction_low": Decimal("5540"),
+        "std_deduction_high": Decimal("11080"),
+        "low_income_low": Decimal("18368"),
+        "low_income_high": Decimal("36736"),
+        "exemption_credit": Decimal("163.90"),
+        "brackets": _BRACKETS_2025,
+        "suta_wage_base": Decimal("7000"),
+    },
+    2026: {
+        "sdi_rate": SDI_RATE,
+        "std_deduction_low": STD_DEDUCTION_LOW,
+        "std_deduction_high": STD_DEDUCTION_HIGH,
+        "low_income_low": LOW_INCOME_EXEMPTION_LOW,
+        "low_income_high": LOW_INCOME_EXEMPTION_HIGH,
+        "exemption_credit": EXEMPTION_CREDIT,
+        "brackets": _BRACKETS,
+        "suta_wage_base": Decimal("7000"),
+    },
+}
+
+
 def _tax_from_brackets(wage: Decimal, brackets) -> Decimal:
     """Progressive tax on `wage` given ascending (lower_bound, rate) brackets."""
     if wage <= 0:
@@ -121,6 +192,11 @@ class CAEngine(StateEngine):
     # DE 44 Rev. 52: "The 2026 taxable wage limit is $7,000 per employee."
     suta_wage_base: Decimal = Decimal("7000")
 
+    def __init__(self, year: int = 2026) -> None:
+        self.year = year
+        self.t = CA_YEARS[year]
+        self.suta_wage_base = self.t["suta_wage_base"]
+
     def calculate(
         self,
         *,
@@ -136,7 +212,8 @@ class CAEngine(StateEngine):
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()
 
-        fs = filing_status if filing_status in _BRACKETS else "single"
+        t = self.t
+        fs = filing_status if filing_status in t["brackets"] else "single"
         # The employee's "State W-4 allowances" are the DE 4 regular
         # allowances; the pay run passes them as state_allowances.
         allowances = max(0, int(_extra.get("state_allowances") or 0))
@@ -145,8 +222,8 @@ class CAEngine(StateEngine):
         # Married with 2+ allowances and Head of Household use the higher
         # standard deduction and low-income exemption (Tables 1 and 3).
         high = fs == "head_of_household" or (fs == "married" and allowances >= 2)
-        std_deduction = STD_DEDUCTION_HIGH if high else STD_DEDUCTION_LOW
-        low_income = LOW_INCOME_EXEMPTION_HIGH if high else LOW_INCOME_EXEMPTION_LOW
+        std_deduction = t["std_deduction_high"] if high else t["std_deduction_low"]
+        low_income = t["low_income_high"] if high else t["low_income_low"]
 
         # Income tax — annualize, apply Method B, divide back to the period.
         annual = taxable * pay_periods
@@ -154,14 +231,14 @@ class CAEngine(StateEngine):
             annual_tax = Decimal("0")  # Step 1: low income exemption
         else:
             annual_taxable = max(Decimal("0"), annual - std_deduction)  # Step 3
-            annual_tax = _tax_from_brackets(annual_taxable, _BRACKETS[fs])  # Step 4
-            annual_tax -= EXEMPTION_CREDIT * allowances  # Step 5
+            annual_tax = _tax_from_brackets(annual_taxable, t["brackets"][fs])  # 4
+            annual_tax -= t["exemption_credit"] * allowances  # Step 5
             if annual_tax < 0:
                 annual_tax = Decimal("0")
         income_tax = _q(max(Decimal("0"), _q(annual_tax / pay_periods) + extra))
 
-        # SDI — 1.3% of full gross, employee only, no wage cap.
-        sdi = _q(gross * SDI_RATE)
+        # SDI — the year's rate on full gross, employee only, no wage cap.
+        sdi = _q(gross * t["sdi_rate"])
 
         return StateTaxResult(
             income_tax=income_tax,

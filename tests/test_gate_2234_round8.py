@@ -193,7 +193,7 @@ def test_the_pay_run_form_never_counts_imported_time_and_the_run_says_why(
         json={
             "period_start": "2024-01-01",
             "period_end": "2024-01-31",
-            "pay_date": "2024-02-05",
+            "pay_date": "2026-02-05",
             "stubs": [{"employee_id": alvarez["id"], "use_time_entries": True}],
         },
     )
@@ -223,7 +223,7 @@ def test_the_pay_run_form_never_counts_imported_time_and_the_run_says_why(
         json={
             "period_start": "2024-01-01",
             "period_end": "2024-01-31",
-            "pay_date": "2024-02-05",
+            "pay_date": "2026-02-05",
             "stubs": [{"employee_id": alvarez["id"], "use_time_entries": True}],
         },
     ).json()

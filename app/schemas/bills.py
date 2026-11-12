@@ -279,6 +279,15 @@ class BillResponse(BaseModel):
     # amount, shown in place of the offer, which is then cleared.
     discount_taken: Optional[DiscountTaken] = None
     terms_note: Optional[str] = None
+    # The terms-list entry the bill is tied to (#664), as an invoice's (#810).
+    payment_term_id: Optional[int] = Field(
+        None,
+        description=(
+            "The payment term (GET /api/payment-terms/{id}) the bill is tied "
+            "to, which its due date and discount follow; null when it is "
+            "tied to none."
+        ),
+    )
     model_config = {"from_attributes": True}
 
 

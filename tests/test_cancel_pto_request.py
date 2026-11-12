@@ -297,36 +297,6 @@ def test_the_portal_only_withdraws_the_employees_own_pending_request(client):
     assert listed[0]["status"] == "pending"
 
 
-# ---------------------------------------------------------------------------
-# The migration
-# ---------------------------------------------------------------------------
-# the migration under test: a PTO request can be cancelled (#262), down to e2b7c4d9a1f3
-PTO_DRAW_REVISION = "b4d6f8a0c2e4"
-
-
-def test_the_migration_adds_the_draw_columns_and_keeps_one_head(tmp_path):
-    from alembic import command
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-    import sqlalchemy as sa
-
-    db = tmp_path / "fresh.db"
-    url = "sqlite:///" + db.as_posix()
-    root = Path(__file__).resolve().parent.parent
-    cfg = Config(str(root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(root / "migrations"))
-    cfg.attributes["database_url"] = url
-    assert len(ScriptDirectory.from_config(cfg).get_heads()) == 1
-    command.upgrade(cfg, PTO_DRAW_REVISION)  # its own step, not the chain (#770)
-    engine = sa.create_engine(url)
-    cols = {c["name"] for c in sa.inspect(engine).get_columns("pto_requests")}
-    assert {"hours_drawn", "dollars_relieved"} <= cols
-    # and the way back
-    command.downgrade(cfg, "e2b7c4d9a1f3")
-    cols = {c["name"] for c in sa.inspect(engine).get_columns("pto_requests")}
-    assert not ({"hours_drawn", "dollars_relieved"} & cols)
-
-
 def test_the_cancel_question_uses_the_readers_day_and_the_singular():
     """Gate round 2, NEW-65: the date compared was UTC's, so at 11 pm a request
     for today read as past; and "1 hours"."""

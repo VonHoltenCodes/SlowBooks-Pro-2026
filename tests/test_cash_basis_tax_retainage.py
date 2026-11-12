@@ -343,7 +343,8 @@ def test_a_pay_run_reads_the_same_on_both_bases(client, db_session, seed_account
         ln for ln in bs_cash["liabilities"] if D(str(ln["amount"])) != 0
     ]
     assert payroll_liabilities, "withholdings stay on the cash Balance Sheet"
-    assert bs_cash["total_assets"] == bs_cash["total_liabilities"] + (
-        bs_cash["total_equity"]
+    # the totals are JSON floats: compare them to the cent
+    assert round(bs_cash["total_assets"], 2) == round(
+        bs_cash["total_liabilities"] + bs_cash["total_equity"], 2
     )
     _assert_cash_invariant(client, "2026-04-01", "2026-04-30")
