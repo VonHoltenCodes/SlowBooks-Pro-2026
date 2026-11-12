@@ -64,7 +64,9 @@ def compute_sui(db, year: int, quarter: int, state: str | None = None) -> dict:
     def stub_state(stub) -> str:
         # a stub's own work state (multi-state), else the employee's
         emp = stub.employee
-        return (stub.work_state or (emp.work_state if emp else None) or "WA").upper()
+        # a blank one is no state (#818): such a stub is on no state's
+        # report, and the report names the employee (warnings)
+        return (stub.work_state or (emp.work_state if emp else None) or "").upper()
 
     # SUTA-taxable wages are what the paycheck taxed: the stub's SUTA wages
     # (gross less Section 125 and the like) up to what is left of the
@@ -76,6 +78,8 @@ def compute_sui(db, year: int, quarter: int, state: str | None = None) -> dict:
     taxable_of: dict[int, Decimal] = {}
     for s in year_stubs:
         st = stub_state(s)
+        if not st:
+            continue
         key = (s.employee_id, st)
         if key not in filled:
             o = openings.get(s.employee_id)
@@ -93,7 +97,9 @@ def compute_sui(db, year: int, quarter: int, state: str | None = None) -> dict:
     stubs = [
         s
         for s in year_stubs
-        if s.pay_run.pay_date >= start and (not state or stub_state(s) == state)
+        if s.pay_run.pay_date >= start
+        and stub_state(s)
+        and (not state or stub_state(s) == state)
     ]
 
     # Accumulate per employee: gross, the SUTA-taxable wages, and the SUTA
@@ -173,7 +179,7 @@ def compute_sui(db, year: int, quarter: int, state: str | None = None) -> dict:
             }
         )
 
-    return {
+    result = {
         "year": year,
         "quarter": quarter,
         "state": state,
@@ -184,3 +190,11 @@ def compute_sui(db, year: int, quarter: int, state: str | None = None) -> dict:
         "total_suta_tax": _q(total_suta_tax),
         "employees": breakdown,
     }
+    # who was paid with no work state this quarter (#818), so a missing
+    # employee is explained rather than silently absent
+    from app.services.tax_forms.w2_w3 import missing_work_state
+
+    warnings = missing_work_state(db, year, quarter)
+    if warnings:
+        result["warnings"] = warnings
+    return result
