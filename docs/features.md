@@ -505,6 +505,7 @@ Canonical list of security measures lives in [SECURITY.md](../SECURITY.md); engi
 - **Sidebar you can trim** (v2.23.5) — Settings → Sidebar hides the sections and links a company doesn't use; a hidden page still opens by its address
 - Authentic QB2003 "Default Blue" skin with navy/gold color palette (+ dark mode)
 - About dialog with the version, what's new in this release, the licence terms and the artists
+- **Build identity on every platform** (#816). About shows the build as `Version <version>+<sha>` (the 12-character commit, e.g. `2.32.0+0123456789ab`), the same string as the macOS bundle's CFBundleVersion, the frozen smoke test's `smoke: version` line and the `Version:` line of Contact support's environment block, so two builds of one release can be told apart. The Windows and macOS builds bake the commit into the bundle (`APP_BUILD_SHA` in CI, the checkout's `git rev-parse HEAD` on a local build); `SLOWBOOKS_COMMIT` sets it for a Docker or source run, which otherwise shows the bare version. Both workflows refuse a bundle whose smoke test does not name its commit
 - **Artists on About** (#635). The About dialog credits every artist whose work ships in the app: name, pieces and where each is used, with a link when they gave one. The list is `app/static/artists.json`, one entry per artist and no code change; while it is empty the dialog says the turtle is waiting for its first artist and points at the [art repo](https://github.com/VonHoltenCodes/SlowBooks-Pro-Art)
 - Windows XP-era toolbar, sidebar navigator with icons, status bar
 - **Type-ahead pickers** (v2.19.0) — customer, vendor, item, account, employee, job and class pickers, and any list of 15 or more, search as you type; "+ New Customer" opens its quick add with the typed name
@@ -868,6 +869,8 @@ Shared parameters on the statements: `basis=accrual|cash` (#483), `hide_zero=tru
 ### System
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
+| `/api/system` | GET | The version, the build's commit (`commit`, null when not known) and `build_version` (`<version>+<sha>`, the bare version without a commit), and the desktop / Server Edition / update-check flags (#816) |
+| `/api/support/diagnostics` | GET | Contact support's environment block (its `Version:` line is `v<version>+<sha>`), `commit` and `build_version` as above, and the redacted log tail |
 | `/api/audit` | GET | Audit log viewer |
 | `/api/backups` | GET, POST | List this company's backups; make one (an administrator, or a token with Can make backups) |
 | `/api/backups/download/{filename}` | GET | Download a backup file (the same) |

@@ -20,7 +20,7 @@ import time
 import httpx
 from fastapi import APIRouter
 
-from app import __version__
+from app import __version__, build_info
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -93,8 +93,13 @@ def runs_here(data: dict) -> bool:
 
 @router.get("")
 async def system_info():
+    # The build identity (#816): About shows <version>+<sha>, the same
+    # string the smoke test and Contact support's diagnostics carry.
+    sha = build_info.build_sha()
     return {
         "version": __version__,
+        "commit": sha,
+        "build_version": build_info.version_string(__version__, sha or ""),
         "desktop": _is_desktop(),
         "server_mode": _is_server_mode(),
         "update_check_enabled": _update_check_enabled(),

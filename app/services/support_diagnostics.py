@@ -189,11 +189,16 @@ def is_native():
 
 
 def app_commit():
-    """Best-effort source commit, or None. Baked builds can set
-    SLOWBOOKS_COMMIT; a source checkout has none unless the env says so. Never
+    """The 12-character commit this build was made from, or None (#816).
+    One source of truth with About and the smoke test: app.build_info reads
+    SLOWBOOKS_COMMIT, then the BUILD_SHA file the packaged builds bake. Never
     shells out — a frozen app has no git, and this must not fail."""
-    commit = os.environ.get("SLOWBOOKS_COMMIT", "").strip()
-    return commit or None
+    try:
+        from app.build_info import build_sha
+
+        return build_sha()
+    except Exception:
+        return None
 
 
 def python_version():
@@ -206,7 +211,9 @@ def environment_block(version, commit, platform_name, python, deployment, browse
     / web-view UA is included whenever known — it matters most on the native
     window, where the WebView2 / WKWebView version is the common culprit."""
     lines = [
-        f"Version: v{version}" + (f" ({commit})" if commit else ""),
+        # <version>+<sha>, the build identity About and the smoke test show
+        # (#816); the bare version when the commit is not known.
+        f"Version: v{version}" + (f"+{commit}" if commit else ""),
         f"Platform: {platform_name}",
         f"Python: {python}",
         f"Deployment: {deployment}",

@@ -3052,6 +3052,20 @@ def _serve() -> int:
     return 0
 
 
+def _smoke_build_identity() -> bool:
+    """Print ``smoke: version <version>+<sha>``. A frozen bundle with no
+    commit baked in fails: two builds of one release could not be told
+    apart in the field (#816). A source run may have none."""
+    from app import build_info
+
+    sha = build_info.build_sha()
+    print(f"smoke: version {build_info.version_string(sha=sha or '')}")
+    if getattr(sys, "frozen", False) and not sha:
+        print("smoke: FAIL the bundle carries no build commit (app/BUILD_SHA)")
+        return False
+    return True
+
+
 def run_smoke_test(port: int = 3999) -> int:
     """Headless self-test for CI: prove the frozen bundle can prepare an
     environment, create + migrate a company database, serve the app, and —
@@ -3069,6 +3083,13 @@ def run_smoke_test(port: int = 3999) -> int:
 
     prepare_env()
     os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
+
+    # Build identity (#816): the workflows read this line and refuse a bundle
+    # that does not say which commit it is; About and Contact support show
+    # the same string.
+    if not _smoke_build_identity():
+        return 1
+
     from app.services import company_service
 
     print("smoke: creating company...")
