@@ -2861,3 +2861,86 @@ const PendingFiles = {
         }
     },
 };
+
+/**
+ * Activity on every document (#894): what happened to the record, who did it
+ * and when, in sentences, newest first (GET /api/activity). The panel sits
+ * under the Attachments panel, closed, its heading "Activity (N)"; the count
+ * is asked for when it is drawn and the rows when it is opened. A read, so a
+ * read-only sign-in sees it too. The sentences come from the server in the
+ * company's own words.
+ */
+const ActivityPanel = {
+    _seq: 0,
+
+    // the panel's HTML for one record; the count loads once it is on the page
+    html(type, id) {
+        const n = Number(id);
+        if (!type || !(n > 0)) return '';
+        const key = `activity-panel-${++ActivityPanel._seq}`;
+        const t = escapeHtml(type);
+        if (typeof setTimeout === 'function') setTimeout(() => ActivityPanel.loadCount(key), 0);
+        return `
+            <details id="${key}" class="activity-panel" data-activity-type="${t}" data-activity-id="${n}"
+                ontoggle="ActivityPanel.toggled(this)"
+                style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
+                <summary style="font-size:13px; font-weight:600; cursor:pointer;">Activity<span class="activity-count"></span></summary>
+                <div class="activity-list" aria-live="polite" style="margin-top:8px; font-size:11px;"></div>
+            </details>`;
+    },
+
+    url(type, id, countOnly) {
+        let offset = 0;
+        try { offset = new Date().getTimezoneOffset(); } catch (e) { offset = 0; }
+        return `/activity?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`
+            + `&tz_offset=${offset}` + (countOnly ? '&count_only=true' : '');
+    },
+
+    setCount(panel, count) {
+        const el = panel && panel.querySelector('.activity-count');
+        if (el) el.textContent = ` (${Number(count) || 0})`;
+    },
+
+    async loadCount(key) {
+        const panel = typeof document === 'undefined' ? null : document.getElementById(key);
+        if (!panel) return;
+        try {
+            const found = await API.get(ActivityPanel.url(panel.dataset.activityType, panel.dataset.activityId, true));
+            ActivityPanel.setCount(panel, found.count);
+        } catch (e) { /* the heading stays "Activity" */ }
+    },
+
+    toggled(panel) {
+        if (panel.open && !panel.dataset.loaded) ActivityPanel.load(panel);
+    },
+
+    async load(panel) {
+        const list = panel.querySelector('.activity-list');
+        if (!list) return;
+        list.innerHTML = 'Loading...';
+        try {
+            const found = await API.get(ActivityPanel.url(panel.dataset.activityType, panel.dataset.activityId, false));
+            panel.dataset.loaded = '1';
+            ActivityPanel.setCount(panel, found.count);
+            list.innerHTML = ActivityPanel.rowsHtml(found.events || []);
+        } catch (e) {
+            list.innerHTML = `<span style="color:var(--text-muted);">${escapeHtml(e.message || 'The activity could not be read.')}</span>`;
+        }
+    },
+
+    rowsHtml(events) {
+        if (!events.length) return '<span style="color:var(--text-muted);">Nothing recorded yet.</span>';
+        return `<ul style="list-style:none; margin:0; padding:0;">${events.map(e => `
+            <li style="padding:4px 0; border-bottom:1px solid var(--gray-100);">
+                <div>${escapeHtml(e.text)}</div>
+                <div style="color:var(--gray-500);">${escapeHtml(e.when_local)}</div>
+                ${(e.details || []).length ? `<ul style="margin:2px 0 0 16px; padding:0;">${e.details.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>` : ''}
+            </li>`).join('')}</ul>`;
+    },
+};
+
+// the shared helper each document view calls under its Attachments panel
+function activityPanelHtml(type, id) { return ActivityPanel.html(type, id); }
+
+window.ActivityPanel = ActivityPanel;
+window.activityPanelHtml = activityPanelHtml;

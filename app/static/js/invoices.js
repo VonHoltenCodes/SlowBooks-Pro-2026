@@ -353,6 +353,7 @@ const InvoicesPage = {
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
             <div id="inv-credit-note"></div>
             ${InvoicesPage.attachmentsPanelHtml('invoice', inv.id)}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('invoice', inv.id)}
             <div class="form-actions">
                 <button class="btn btn-secondary" data-invoice-logo-action onclick="window.open('/api/invoices/${inv.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" data-invoice-logo-action onclick="window.open('/api/invoices/${inv.id}/print-preview','_blank')">Print</button>

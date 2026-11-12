@@ -87,6 +87,7 @@ const PurchaseOrdersPage = {
             </div>
             ${po.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(po.notes)}</p>` : ''}
             ${InvoicesPage.attachmentsPanelHtml('purchase_order', po.id)}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('purchase_order', po.id)}
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/print-preview','_blank')">Print</button>

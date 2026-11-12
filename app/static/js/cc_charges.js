@@ -139,6 +139,7 @@ const CCChargesPage = {
                 <input type="file" id="cc-attach-file" aria-label="File to attach" style="font-size:11px;">
                 <button class="btn btn-sm btn-secondary" onclick="CCChargesPage.uploadAttachment(${Number(id)})">Attach</button>
             </div>
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('cc_charge', id)}
             <div class="form-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);

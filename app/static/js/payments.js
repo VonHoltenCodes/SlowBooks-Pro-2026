@@ -106,6 +106,7 @@ const PaymentsPage = {
             </div>` : ''}
             ${p.is_voided ? '<div style="color:var(--danger);font-weight:700;margin:12px 0;">This payment has been voided.</div>' : ''}
             ${typeof Replace === 'undefined' ? '' : Replace.links(p, 'payment', n => `#/payments/${n}`)}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('payment', p.id)}
             <div class="form-actions">
                 ${ack && ack.eligible ? `<button class="btn btn-secondary" onclick="window.open('/api/donors/gifts/payment/${p.id}/acknowledgment/pdf','_blank')">Acknowledgment (PDF)</button>
                 <button class="btn btn-secondary" onclick="Donors.emailAcknowledgment('payment', ${p.id})">Email Acknowledgment</button>` : ''}

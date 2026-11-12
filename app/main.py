@@ -56,6 +56,7 @@ from app.routes import (
 
 # Phase 1: Foundation
 from app.routes import audit, search
+from app.routes import activity as activity_routes
 from app.routes import email_log as email_log_routes
 
 # Phase 2: Accounts Payable
@@ -159,6 +160,8 @@ from app.database import SessionLocal, Base, engine
 from app.database import _served_company
 from app.services.audit import register_audit_hooks
 from app.services.request_context import acting_username as _acting_username
+from app.services.request_context import acting_source as _acting_source
+from app.services.request_context import import_source as _import_source
 from app.services.request_context import (
     closing_date_password as _closing_date_password,
 )
@@ -1621,6 +1624,10 @@ class ActingUserContextMiddleware:
                 if name == wanted:
                     override = _closing_password_from_header(value.decode("latin-1"))
         token = _acting_username.set(acting)
+        # an import's writes say which import made them (#894)
+        source_token = _acting_source.set(
+            _import_source(scope.get("method") or "", scope.get("path") or "")
+        )
         override_token = _closing_date_password.set(override)
         # The company this request works in (#358), here for the same reason
         # as the username: every Session the request opens binds to it.
@@ -1630,6 +1637,7 @@ class ActingUserContextMiddleware:
         finally:
             _served_company.reset(company_token)
             _closing_date_password.reset(override_token)
+            _acting_source.reset(source_token)
             _acting_username.reset(token)
 
 
@@ -1813,6 +1821,8 @@ app.include_router(checks.router)
 app.include_router(bank_rules.router)
 app.include_router(budgets.router)
 app.include_router(attachments.router)
+# what happened to each document, in sentences (#894)
+app.include_router(activity_routes.router)
 app.include_router(email_templates.router)
 # the saved invoice messages, chosen on the invoice form (#392)
 app.include_router(invoice_messages_routes.router)

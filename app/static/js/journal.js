@@ -331,6 +331,7 @@ const JournalPage = {
                     <button class="btn btn-sm btn-secondary" onclick="JournalPage.uploadAttachment(${entry.id})">Attach</button>
                 </div>
             </div>
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('journal_entry', entry.id)}
             <div class="form-actions">
                 ${JournalPage.canEdit(entry) ? `<button class="btn btn-secondary" data-write onclick="JournalPage.editEntry(${entry.id})">Edit</button>` : ''}
                 ${JournalPage.canVoid(entry) ? `<button data-destructive data-accountant-ok class="btn btn-danger" onclick="JournalPage.void(${entry.id})">Void</button>` : ''}

@@ -67,6 +67,7 @@ const SalesReceiptsPage = {
             </div>
             ${sr.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(sr.notes)}</p>` : ''}
             ${InvoicesPage.attachmentsPanelHtml('invoice', sr.id)}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('sales_receipt', sr.id)}
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/print-preview','_blank')">Print</button>
