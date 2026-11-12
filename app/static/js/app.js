@@ -843,6 +843,13 @@ const App = {
         };
         if (adminOnly()) return showAdminOnly();
 
+        // a setting changed elsewhere reaches the page about to draw (#828);
+        // a 304 while nothing changed, and never a refusal. A shell with no
+        // API layer (a page probe) has nothing to ask and does not wait.
+        if (typeof API !== 'undefined' && API && typeof API.revalidate === 'function') {
+            await App.refreshSettings('page');
+        }
+
         try {
             const html = await route.render(param, query);
             if (adminOnly()) return showAdminOnly();
@@ -2516,16 +2523,78 @@ const App = {
     },
 
     settings: {},   // one cached copy of /api/settings for the shell (company name, company type)
+    settingsTag: null,   // its ETag: what refreshSettings sends back as If-None-Match (#828)
+    _settingsCheck: null,   // the one refreshSettings request in flight
 
     // Load company settings: the status-bar name, and the vocabulary
     // (Terms) that every page renders with. Never rejects — pre-login this
-    // 401s and auth.js reloads the page after login, same as before.
+    // 401s and auth.js reloads the page after login, same as before. The
+    // first read keeps the answer's ETag; a refused one (before sign-in)
+    // falls back to API.get, which asks for the sign-in as it always did.
     async loadCompanySettings() {
         try {
-            const s = await API.get('/settings');
+            let s = null;
+            const r = typeof API.revalidate === 'function'
+                ? await API.revalidate('/settings', null).catch(() => null) : null;
+            if (r && r.status === 200 && r.body) {
+                s = r.body;
+                App.settingsTag = r.etag || null;
+            } else {
+                s = await API.get('/settings');
+            }
             Terms.init(s);
             App.showCompany(s);
         } catch (e) { Terms.init(null); /* business words until signed in */ }
+    },
+
+    // The shell's copy of the settings follows a change made elsewhere — an
+    // agent, a script, an API token, another window (#828). It used to be
+    // read once per session, so Deposit To's order followed an API write
+    // only after a Save in this window (2.31.10 gate, mac settings cache).
+    // Asked when the window regains focus and when a page opens; the
+    // server answers 304 with no body while the ETag still matches, and
+    // nothing happens then. A different answer replaces the copy (the
+    // status bar, the hidden menu with it) and, when a value really
+    // differs, tells the open page with `slowbooks:settings-changed`
+    // ({settings, previous, reason}); the Settings page asks before it
+    // draws over unsaved edits. No timer: nothing is asked while the
+    // window sits unused. One request at a time; a second ask shares it.
+    // The vocabulary (Terms) stays as the window started: a change of the
+    // company type reloads the window that made it, as it always has.
+    // Resolves true when the copy changed; never rejects.
+    refreshSettings(reason) {
+        if (App._settingsCheck) return App._settingsCheck;
+        const check = (async () => {
+            try {
+                if (typeof API === 'undefined' || typeof API.revalidate !== 'function') return false;
+                const r = await API.revalidate('/settings', App.settingsTag);
+                if (!r || r.status !== 200 || !r.body) return false;
+                App.settingsTag = r.etag || null;
+                const previous = App.settings || {};
+                if (App._sameSettings(previous, r.body)) return false;
+                App.showCompany(r.body);
+                try {
+                    window.dispatchEvent(new CustomEvent('slowbooks:settings-changed', {
+                        detail: { settings: r.body, previous, reason: reason || '' },
+                    }));
+                } catch (e) { /* old browser: the copy is fresh all the same */ }
+                return true;
+            } catch (e) {
+                return false;
+            } finally {
+                App._settingsCheck = null;
+            }
+        })();
+        App._settingsCheck = check;
+        return check;
+    },
+
+    // Every value the server sent equals the copy's. Keys only the copy
+    // has are left out: a save's answer carries a few extra (the equity
+    // accounts it moved, clearing warnings) that a plain read does not.
+    _sameSettings(held, fresh) {
+        if (!held || !fresh) return false;
+        return Object.keys(fresh).every(k => JSON.stringify(held[k]) === JSON.stringify(fresh[k]));
     },
 
     // The shell's copy of the settings, and the company's name where the
@@ -2815,6 +2884,8 @@ const App = {
         App.setupSidebarSections();
         App.setupSidebarToggle();
         window.addEventListener('hashchange', () => App.navigate(location.hash));
+        // back to this window: a setting changed meanwhile shows (#828)
+        window.addEventListener('focus', () => { App.refreshSettings('focus'); });
         // Back or Forward: the dialog over the page left closes as the
         // history moves, before the page gone to renders (App.navigate
         // closes it too; this is sooner, so nothing of the view left is
