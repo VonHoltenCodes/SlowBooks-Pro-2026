@@ -363,25 +363,47 @@ const ReportsPage = {
             }
         } catch (e) { /* render anyway */ }
 
-        // The pinned cards (#395): the preference report_center_pins, read
-        // beside the saved reports; none, or a failed read, is the fixed
-        // order. A name no view has (a nonprofit's, in a business) is left out.
+        // The starred cards (#395, #794): the preference report_center_pins,
+        // read beside the saved reports. Never set is the company's starting
+        // stars (_defaultPins); an empty list is none; a failed read is none.
+        // A name no view has (a nonprofit's, in a business) is left out.
         ReportsPage._pins = [];
         try {
             const pref = await API.get('/preferences/report_center_pins');
-            const pinned = pref && pref.value && pref.value.pinned;
+            const pinned = pref && pref.value ? pref.value.pinned : ReportsPage._defaultPins();
             if (Array.isArray(pinned)) ReportsPage._pins = pinned.filter(v => typeof v === 'string' && ReportsPage._view(v));
-        } catch (e) { /* the fixed order */ }
+        } catch (e) { /* none starred */ }
+
+        // All reports is folded while there are stars to open on (#794),
+        // unless it was left open, or Back returns to a card inside it.
+        let open = !ReportsPage._pins.length;
+        try { if (localStorage.getItem('sb_all_reports_open') === '1') open = true; } catch (e) { /* ignore */ }
+        const back = history.state && history.state.focus;
+        if (back && back.startsWith('report:') && !ReportsPage._pins.includes(back.slice(7))) open = true;
 
         return `
             <div class="page-header"><h2>Reports</h2></div>
+            <div class="card-grid" id="starred-reports" style="margin-bottom:20px;">${ReportsPage._starredGrid()}</div>
             ${savedHtml}
-            <div class="card-grid">${ReportsPage._cardGrid()}</div>`;
+            <div style="display:flex; align-items:center; gap:10px; margin:0 0 8px;">
+                <button type="button" class="btn btn-sm btn-secondary" id="all-reports-toggle" aria-expanded="${open}" aria-controls="all-reports" onclick="ReportsPage.toggleAll()">${open ? '▾' : '▸'} All reports</button>
+            </div>
+            <div class="card-grid" id="all-reports" ${open ? '' : 'hidden'}>${ReportsPage._allGrid()}</div>`;
     },
 
-    // The views pinned to the top of the grid, in the order they were pinned
-    // (render reads them; togglePin writes them).
+    // The views starred, in the order they were starred (render reads them;
+    // togglePin writes them).
     _pins: [],
+
+    // A fresh company's stars (#794): the statements and agings most people
+    // run, Job Profitability in construction mode, a nonprofit's own two
+    // statements in place of the P&L and Balance Sheet.
+    _defaultPins() {
+        const statements = Terms.isNonprofit()
+            ? ['statement-of-activities', 'statement-of-financial-position']
+            : ['profit-loss', 'balance-sheet'];
+        return [...statements, 'ar-aging', 'ap-aging', ...(Terms.isConstruction() ? ['job-profitability'] : [])];
+    },
 
     // The Report Center's cards in their fixed order, each as its view and
     // its html (ReportsPage._pick): the nonprofit's own statements lead in
@@ -452,17 +474,33 @@ const ReportsPage = {
         return { view, html: ReportsPage._card(view, title, text) };
     },
 
-    // The grid: the pinned cards first, in the order they were pinned, then
-    // the rest in their fixed order (#395).
-    _cardGrid() {
+    // The starred cards, in the order they were starred (#395, #794).
+    _starredGrid() {
         const cards = ReportsPage._cards();
         const pinned = ReportsPage._pins.map(v => cards.find(c => c.view === v)).filter(Boolean);
-        return [...pinned, ...cards.filter(c => !pinned.includes(c))].map(c => c.html).join('');
+        return pinned.length ? pinned.map(c => c.html).join('')
+            : '<p style="color:var(--text-muted); margin:0;">Star a report under All reports to keep it here.</p>';
     },
 
-    // Pin or unpin a card (#395): the list is saved as the preference
-    // report_center_pins ({ pinned: [view, …] }), the grid redrawn with
-    // focus back on the same star. A refused save (a read-only role: the
+    // All reports: every card not starred, in the fixed order.
+    _allGrid() {
+        return ReportsPage._cards().filter(c => !ReportsPage._pins.includes(c.view)).map(c => c.html).join('');
+    },
+
+    // Fold or open All reports; the choice sticks.
+    toggleAll() {
+        const grid = $('#all-reports');
+        const btn = $('#all-reports-toggle');
+        if (!grid || !btn) return;
+        grid.hidden = !grid.hidden;
+        btn.textContent = `${grid.hidden ? '▸' : '▾'} All reports`;
+        btn.setAttribute('aria-expanded', grid.hidden ? 'false' : 'true');
+        try { localStorage.setItem('sb_all_reports_open', grid.hidden ? '0' : '1'); } catch (e) { /* ignore */ }
+    },
+
+    // Star or unstar a card (#395): the list is saved as the preference
+    // report_center_pins ({ pinned: [view, …] }), the card moved between
+    // the starred grid and All reports, focus back on the same star. A refused save (a read-only role: the
     // star is data-write, hidden for one, and the server refuses the PUT)
     // puts the list back and says so.
     async togglePin(view) {
@@ -475,11 +513,15 @@ const ReportsPage = {
             toast(err.message, 'error');
             return;
         }
-        const grid = document.querySelector('#page-content .card-grid');
-        if (!grid) return;
-        grid.innerHTML = ReportsPage._cardGrid();
-        const star = grid.querySelector(`.card-pin[data-pin="${view}"]`);
-        if (star) star.focus();
+        const starred = $('#starred-reports');
+        const all = $('#all-reports');
+        if (!starred || !all) return;
+        starred.innerHTML = ReportsPage._starredGrid();
+        all.innerHTML = ReportsPage._allGrid();
+        const star = document.querySelector(`#page-content .card-pin[data-pin="${view}"]`);
+        // unstarred into a folded All reports: focus its toggle instead
+        if (star && !star.closest('[hidden]')) star.focus();
+        else $('#all-reports-toggle').focus();
     },
 
     // A report's card on the Report Center. The cards were a <div> with a
@@ -505,7 +547,7 @@ const ReportsPage = {
                     <p id="${id}-text" style="font-size:13px; color:var(--gray-500);">${text}</p>
                 </a>
                 <button type="button" class="card-pin" data-write data-pin="${view}" aria-pressed="${pinned}"
-                    aria-label="Pin ${escapeHtml(title)}" title="${pinned ? 'Unpin' : 'Pin to the top'}"
+                    aria-label="Pin ${escapeHtml(title)}" title="${pinned ? 'Unstar' : 'Star: show at the top'}"
                     onclick="ReportsPage.togglePin('${view}')">${pinned ? '★' : '☆'}</button>
             </div>`;
     },

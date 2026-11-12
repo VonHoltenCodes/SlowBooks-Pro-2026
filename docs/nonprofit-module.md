@@ -234,7 +234,7 @@ the PDF and in the CSV (`?compare=prior_year` on the API).
 a "Saved to …" notice with a *Show in folder* button. Filenames carry the
 period, so two runs never overwrite each other. Saved report *definitions*
 (the "Add to Saved Reports…" button) are a different thing: they are listed under
-Saved Reports at the top of the Report Center, as a collapsible list.
+Saved Reports on the Report Center, below the starred reports, as a collapsible list.
 
 ## Driving nonprofit mode from the API
 

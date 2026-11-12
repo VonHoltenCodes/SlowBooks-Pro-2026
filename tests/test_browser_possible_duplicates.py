@@ -48,6 +48,7 @@ def test_the_card_opens_the_report_and_its_buttons_work(
 
     page, handled = _open_at(browser, company, "#/reports")
     try:
+        page.click("#all-reports-toggle")
         page.click("a[data-row-key='report:possible-duplicates']")
         page.wait_for_selector("#report-content tr.dup-group")
         settle(page, handled)
