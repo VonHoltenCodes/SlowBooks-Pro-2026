@@ -49,6 +49,9 @@
     table.report tr.subtotal td { font-weight: 700; border-top: 1px solid #999; }
     {# a group or family heading inside a section: Current Assets, Travel #}
     table.report tr.group td { font-weight: 600; }
+    {# a detail row under the row that counts it: a sub-customer billed
+       with its parent on the A/R Aging (#638, #808), not added again #}
+    table.report tr.detail td { color: #666; font-size: 9.5px; }
     table.report tr.grand-total td {
         font-weight: 700; border-top: 2px solid #1a1a2e;
         border-bottom: 3px double #1a1a2e; font-size: 11px;

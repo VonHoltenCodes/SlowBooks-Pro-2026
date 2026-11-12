@@ -96,6 +96,23 @@ def ar_aging_csv_route(
     )
 
 
+@router.get("/ar-aging/pdf", dependencies=[Depends(refuse_unknown_filters)])
+def ar_aging_pdf(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
+    """The A/R Aging in the report PDF theme (#808): the as-of date, the
+    buckets, a row per customer and the totals, as the screen shows them.
+    Always the whole company, as the screen and Save CSV are."""
+    from app.routes.reports.financial import _pdf_response
+    from app.services.ledger_exports import aging_section
+    from app.services.terminology import terms_from_db
+
+    data = ar_aging_report(db, as_of_date or date.today())
+    return _pdf_response(
+        [aging_section(data, "ar", terms_from_db(db))],
+        db,
+        f"ar-aging_{data['as_of_date']}.pdf",
+    )
+
+
 def ar_aging_report(db: Session, as_of_date: date) -> dict:
     """The A/R Aging report's figures (see ar_aging). The analytics page's
     aging chart reads these too, so the two cannot disagree."""

@@ -58,6 +58,8 @@ TITLES = {
     "/api/reports/job-cost-by-vendor/print": "Job Cost by Vendor",
     "/api/reports/job-profitability/print": "Job Profitability",
     "/api/reports/job-budget-vs-actual/print": "Job Budget vs Actual",
+    "/api/reports/ar-aging/print": "Accounts Receivable Aging",
+    "/api/reports/ap-aging/print": "Accounts Payable Aging",
     RECON: "Reconciliation Summary",
 }
 
@@ -105,6 +107,9 @@ def urls(client, seed_accounts, seed_customer, completed):  # noqa: F811
             qs = "?as_of_date=2026-09-30"
         if path in AS_OF_ONLY:
             qs = "?as_of=2026-12-31"
+        if "-aging/" in url:
+            # the agings refuse a filter they do not read, by name
+            qs = "?as_of_date=2026-09-30"
         base = url[: -len("/print")]
         out[path] = (base + "/print" + qs, base + "/pdf" + qs)
     return out

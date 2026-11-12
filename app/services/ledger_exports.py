@@ -872,6 +872,59 @@ def aging_csv(data: dict, company: str, side: str) -> str:
     return out.getvalue()
 
 
+def aging_section(data: dict, side: str, t=None) -> dict:
+    """The A/R or A/P aging as a report PDF section (#808), the columns and
+    figures the screen shows: on A/R, Current before the customer's credits
+    and the credits in a column of their own, so the row still adds up to
+    Total and Total is account 1100; a sub-customer billed with its parent
+    (#638) indented under the parent's row, not added again. ``t`` is the
+    company's terms (a nonprofit's Donor and Pledges Receivable Aging)."""
+    t = t or (lambda words: words)
+    ar = side == "ar"
+    name_key = "customer_name" if ar else "vendor_name"
+    if ar:
+        columns = [t("Customer"), "Current", "1-30", "31-60", "61-90+"]
+        columns += ["Credits", "Total"]
+    else:
+        columns = ["Vendor", "Current", "1-30", "31-60", "61-90+", "Total"]
+
+    def cells(r: dict, name: str) -> list:
+        credit = Decimal(str(r.get("unapplied_credits") or 0)) if ar else Decimal(0)
+        out = [
+            name,
+            _pdf_money(Decimal(str(r.get("current") or 0)) + credit),
+            _pdf_money(r.get("over_30")),
+            _pdf_money(r.get("over_60")),
+            _pdf_money(r.get("over_90")),
+        ]
+        if ar:
+            out.append(_pdf_money(-credit) if credit else "")
+        out.append(_pdf_money(r.get("total")))
+        return out
+
+    rows = []
+    for i in data.get("items", []):
+        rows.append({"cells": cells(i, i.get(name_key) or "")})
+        for sub in i.get("subs") or []:
+            rows.append(
+                {
+                    "cells": cells(sub, sub.get(name_key) or ""),
+                    "style": "detail",
+                    "indent": 1,
+                }
+            )
+    rows.append(
+        {"cells": cells(data.get("totals") or {}, "Total"), "style": "grand-total"}
+    )
+    title = "Accounts Receivable Aging" if ar else "Accounts Payable Aging"
+    return {
+        "title": t(title),
+        "period": f"As of {data['as_of_date']}",
+        "columns": columns,
+        "rows": rows,
+    }
+
+
 # ── Sales by Item / Purchases by Item (#435) ────────────────────────────────
 # Flat one-row-per-item reports. The CSV follows the shared pattern (safe
 # writer for the formula guard, four-line preamble); the PDF reuses the

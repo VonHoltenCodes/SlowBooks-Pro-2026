@@ -598,6 +598,23 @@ def ap_aging_csv_route(
     )
 
 
+@router.get("/ap-aging/pdf", dependencies=[Depends(refuse_unknown_filters)])
+def ap_aging_pdf(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
+    """The A/P Aging in the report PDF theme (#808): the as-of date, the
+    buckets, a row per vendor and the totals, as the screen shows them.
+    Always the whole company, as the screen and Save CSV are."""
+    from app.routes.reports.financial import _pdf_response
+    from app.services.ledger_exports import aging_section
+    from app.services.terminology import terms_from_db
+
+    data = ap_aging_report(db, as_of_date or date.today())
+    return _pdf_response(
+        [aging_section(data, "ap", terms_from_db(db))],
+        db,
+        f"ap-aging_{data['as_of_date']}.pdf",
+    )
+
+
 @router.get("/1099-summary")
 def report_1099_summary(
     year: int = Query(default=None),
