@@ -1,4 +1,4 @@
-from datetime import date as dt_date, datetime
+from datetime import date as dt_date, datetime, timezone
 from decimal import Decimal
 from typing import Annotated, Optional
 
@@ -301,3 +301,14 @@ class InvoiceResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("last_emailed_at")
+    def _last_emailed_at(self, value):
+        # The log's stamps are naive UTC. Written with "+00:00", the way
+        # /api/email-log writes the same send's sent_at (#811), so a browser
+        # does not read it as local time.
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
