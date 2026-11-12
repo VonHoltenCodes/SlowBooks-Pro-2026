@@ -675,9 +675,17 @@ def made(client, db_session, seed_accounts, seed_customer):
     }
 
 
-def test_every_control_a_bookkeeper_is_offered_the_server_answers(client, made):
+def test_every_control_a_bookkeeper_is_offered_the_server_answers(
+    client, made, monkeypatch
+):
     """Each control the pages leave a bookkeeper, sent as it sends it with a
     bookkeeper's API token: none is refused, and each gets its answer."""
+    # the test slip (#798) answers with a PDF: the engine is stubbed so the
+    # sweep runs where WeasyPrint's native stack is absent (Windows CI) and
+    # stays about who is answered, not about rendering
+    from app.services import pdf_service
+
+    monkeypatch.setattr(pdf_service, "render_pdf", lambda html, **kw: html.encode())
     offered = set().union(*_pages(_probe(), "bookkeeper").values())
     unknown = sorted(
         offered - set(KEPT) - set(TAKEN) - set(SETTINGS_TAKEN_FROM_A_SIGN_IN)
