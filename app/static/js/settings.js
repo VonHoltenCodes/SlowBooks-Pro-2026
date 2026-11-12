@@ -628,7 +628,8 @@ const SettingsPage = {
                             <select name="pdf_paper_size" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
-                            </select></div>
+                            </select>
+                            <div class="form-hint" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Checks, mailing labels and the IRS forms print on Letter whatever this says: they are measured for that stock.</div></div>
                         <div class="form-group"><label>Report Basis</label>
                             <select name="report_basis" title="${escapeHtml(`The basis the ${T('Profit & Loss')}, ${T('Balance Sheet')}, Trial Balance, General Ledger and related reports run on unless the report says otherwise`)}">
                                 <option value="accrual" ${s.report_basis !== 'cash' ? 'selected' : ''}>Accrual (income when billed)</option>

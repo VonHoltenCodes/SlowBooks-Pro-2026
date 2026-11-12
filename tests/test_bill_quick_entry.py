@@ -17,7 +17,7 @@ def test_the_page_has_a_route_a_sidebar_link_and_a_top_bar_button():
         "'/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',"
         "   render: () => BillQuickEntry.render() }," in APP
     )
-    assert '<button class="tb-btn" data-nav="#/bill-entry">Bill Entry</button>' in INDEX
+    assert '<button class="tb-btn" data-nav="#/bill-entry">Bill Quick Entry</button>' in INDEX
     # a page that only enters things: the sidebar's link is a write control
     assert '<li data-write><a href="#/bill-entry"' in INDEX
     assert '#topbar .tb-btn[data-nav="#/bill-entry"]' in APP
