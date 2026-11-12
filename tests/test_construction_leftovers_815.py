@@ -17,6 +17,7 @@ tests; see the PR. These pin the two built here:
 """
 
 import re
+from html.parser import HTMLParser
 
 from app.models.invoices import Invoice
 from tests.test_pay_applications import (
@@ -50,10 +51,32 @@ def _second(client, job, **body):
     return r.json()["invoice_id"], a2["number"], a2["id"]
 
 
+class _Words(HTMLParser):
+    """The page's words: text outside script and style, entities decoded."""
+
+    def __init__(self):
+        super().__init__()
+        self.words = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.words.append(data)
+
+
 def _text(html):
     """The page's words, tags dropped and whitespace collapsed."""
-    body = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S)
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body))
+    parser = _Words()
+    parser.feed(html)
+    return re.sub(r"\s+", " ", " ".join(parser.words))
 
 
 def _print(client, inv_id):
