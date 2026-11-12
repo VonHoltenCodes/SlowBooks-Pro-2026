@@ -306,10 +306,15 @@ def test_a_batch_statement_failure_says_the_address_was_refused(
 
 
 def test_the_donor_acknowledgment_failure_says_the_address_was_refused(
-    client, seed_accounts, seed_customer, smtp
+    client, seed_accounts, seed_customer, smtp, monkeypatch
 ):
+    from app.services import pdf_service
     from tests.test_donor_documents import _nonprofit, _receipt
 
+    # The letter is rendered before it is sent; the render is stubbed so the
+    # send's sentence is what this checks on every box (see the giving
+    # statement test below).
+    monkeypatch.setattr(pdf_service, "render_pdf", lambda html, **kw: html.encode())
     _nonprofit(client)
     client.put(f"/api/customers/{seed_customer.id}", json={"email": "ap@probe.test"})
     inv = _receipt(client, seed_customer.id).json()["invoice"]
@@ -324,10 +329,17 @@ def test_the_donor_acknowledgment_failure_says_the_address_was_refused(
 
 
 def test_a_giving_statement_failure_says_the_address_was_refused(
-    client, seed_accounts, seed_customer, smtp
+    client, seed_accounts, seed_customer, smtp, monkeypatch
 ):
+    from app.services import pdf_service
     from tests.test_donor_documents import _giving_year
 
+    # The statement is rendered before it is sent; on a box without
+    # WeasyPrint's native stack the render is what fails, and the route's
+    # answer is about that, not the address. The sentence under test is
+    # the send's, so the render is stubbed as test_giving_statement_message
+    # does (the PDF's own tests render for real).
+    monkeypatch.setattr(pdf_service, "render_pdf", lambda html, **kw: html.encode())
     _giving_year(client, seed_accounts, seed_customer)
     smtp.refuse = True
     r = client.post("/api/donors/giving-statements/batch-email", json={"year": 2026})
