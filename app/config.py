@@ -19,13 +19,31 @@ APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("APP_PORT", "3001"))
 APP_DEBUG = os.getenv("APP_DEBUG", "false").lower() == "true"
 
+
+def server_edition_switch(env=None) -> bool:
+    """SLOWBOOKS_SERVER_EDITION=1: a Server Edition host serving plain HTTP on
+    its office network (#812). It lets the app start without HTTPS, and that
+    is all: debug stays off and every other production check still runs.
+    The launcher's --serve-lan writes it; APP_DEBUG=true used to stand in."""
+    env = env if env is not None else os.environ
+    return (env.get("SLOWBOOKS_SERVER_EDITION") or "").strip().lower() in (
+        "1",
+        "true",
+    )
+
+
+SERVER_EDITION = server_edition_switch()
+
 # ---- HTTPS / Transport Security ----
 # FORCE_HTTPS=true enables app-level HTTPS redirect + Strict-Transport-Security.
 # Defaults to True in production (APP_DEBUG=false). Set to False only when you
 # know a proxy in front already terminates TLS and you do NOT want the app to
-# 308-redirect plain HTTP (e.g. health-check probes from inside a VPC).
+# 308-redirect plain HTTP (e.g. health-check probes from inside a VPC). A
+# Server Edition host (SLOWBOOKS_SERVER_EDITION=1) serves plain HTTP on the
+# office network, so it defaults to False there too (#812).
 FORCE_HTTPS = (
-    os.getenv("FORCE_HTTPS", "false" if APP_DEBUG else "true").lower() == "true"
+    os.getenv("FORCE_HTTPS", "false" if APP_DEBUG or SERVER_EDITION else "true").lower()
+    == "true"
 )
 # Two years is the HSTS preload-list minimum (and the value most browsers cache).
 HSTS_MAX_AGE = int(os.getenv("HSTS_MAX_AGE", "63072000"))

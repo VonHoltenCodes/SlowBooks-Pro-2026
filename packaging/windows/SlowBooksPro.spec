@@ -28,6 +28,16 @@ APP_VERSION = _version_info.write(
     __import__("pathlib").Path(VERSION_FILE),
 )
 
+# Build identity (#816): the commit this bundle is built from, baked as
+# app/BUILD_SHA so About, the smoke test and Contact support's diagnostics
+# show <version>+<sha> the way the macOS bundle's CFBundleVersion does. CI
+# passes APP_BUILD_SHA; a local build reads the checkout.
+APP_BUILD_SHA = _version_info.build_sha(__import__("pathlib").Path(ROOT))
+BUILD_SHA_FILE = _version_info.write_build_sha(
+    APP_BUILD_SHA, __import__("pathlib").Path(SPECPATH, "build-identity")
+)
+print(f"SlowBooks Pro build {APP_VERSION}+{APP_BUILD_SHA or 'unknown'}")
+
 
 def _tree(src_rel, dest):
     """Recursively collect a repo directory as data files, skipping caches."""
@@ -66,6 +76,8 @@ datas += _tree("scripts/windows", "scripts/windows")
 # to have the file (#144). An error naming a path the reader cannot reach is
 # the same defect as "deactivate it instead" with no deactivate control.
 datas += [(os.path.join(ROOT, "scripts", "repair-schema.py"), "scripts")]
+# The build identity file app/build_info.py reads (#816).
+datas += [(str(BUILD_SHA_FILE), "app")]
 
 # The WeasyPrint DLL set staged by CI (empty when building without it, so a
 # local `pyinstaller SlowBooksPro.spec` still produces a testable bundle).

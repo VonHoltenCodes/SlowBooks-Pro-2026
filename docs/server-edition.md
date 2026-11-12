@@ -143,6 +143,21 @@ A setting for the server (`SLOWBOOKS_UPDATE_CHECK=0`,
 then stop and start the task; a per-user environment variable never reaches
 the SYSTEM task.
 
+**The server switch.** The server's `.env` carries
+`SLOWBOOKS_SERVER_EDITION=1` and `APP_DEBUG=false`, written by the server
+each time it starts (2.32.0). The switch lets the server start on plain
+HTTP, which the office network needs, and nothing else: debug stays off,
+and the checks on the encryption keys still run. Leave both lines as they
+are.
+
+**Upgrading a server set up before 2.32.0.** Its `.env` has `APP_DEBUG=true`
+instead, which was how the server got past the HTTPS check: it also turned
+off every other start-up check. Nothing needs doing: the first start after
+the update rewrites the line to `APP_DEBUG=false` and adds
+`SLOWBOOKS_SERVER_EDITION=1`. A server run some other way (from source, or
+with its own `.env`) that still has `APP_DEBUG=true` keeps starting, but use
+`SLOWBOOKS_SERVER_EDITION=1` instead and take `APP_DEBUG=true` out.
+
 ## Adding your team
 
 On a multi-user install the sign-in screen lists the usernames, so a person
@@ -200,7 +215,8 @@ What a token can do:
   estimate (`GET /api/estimates`, `GET /api/estimates/<id>`) without its cost
   side: the fields `unit_cost`, `markup_pct`, `cost` (under
   `totals.by_package`), `markup_base`, `budget_cost`, `cost_total`, `profit`
-  and `margin_pct` are left out of the answer; every other field is there. A bookkeeper token gets them (#824).
+  and `margin_pct` are left out of the answer; every other field is there.
+  A bookkeeper token gets them (#824).
 - With **Can make backups** ticked: make a backup (`POST /api/backups`), list
   this company's backups (`GET /api/backups`) and download one
   (`GET /api/backups/download/<file>`), on top of its role. A backup is the
@@ -335,6 +351,8 @@ whoever reaches it, and the session cookie travels unencrypted.
 
 - **Plain HTTP** — run this on a network you trust (an office LAN behind
   your router). TLS support is planned; until then see the section above.
+  `launcher.log` says so at every start ("SLOWBOOKS_SERVER_EDITION=1:
+  serving plain HTTP to the local network").
 - Comfortable for small teams (2–10 people). The database serializes
   writes; hundreds of concurrent users is not the design target.
 - The update badge appears in-app as usual: opening the app asks

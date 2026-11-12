@@ -1510,6 +1510,40 @@ const SettingsPage = {
             e.preventDefault();
             e.returnValue = '';
         });
+        window.addEventListener('slowbooks:settings-changed', e => {
+            SettingsPage._changedElsewhere(e && e.detail);
+        });
+    },
+
+    // The settings changed outside this window while the page is open (#828):
+    // the shell found it on focus (App.refreshSettings). A page with no
+    // unsaved edits draws again from the saved values, in place. Unsaved
+    // edits are not drawn over unasked: when a field the change reached is
+    // on the form, the page asks first, as leaving it does; Cancel keeps
+    // the edits (a Save then writes them over the other change). A change
+    // that reached no field on the form leaves the edits alone. A page
+    // opening reads the settings afresh anyway, so only focus counts here.
+    _changedElsewhere(detail) {
+        const d = detail || {};
+        if (d.reason !== 'focus') return false;
+        const form = document.getElementById('settings-form');
+        if (!form || !String(location.hash || '').startsWith('#/settings')) return false;
+        const before = d.previous || {};
+        const after = d.settings || {};
+        const changed = Object.keys(after).filter(k => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+        if (!changed.length) return false;
+        if (SettingsPage.isDirty()) {
+            const snap = SettingsPage._snapshot || {};
+            const named = k => Object.prototype.hasOwnProperty.call(snap, k)
+                || !!(form.elements && typeof form.elements.namedItem === 'function' && form.elements.namedItem(k));
+            if (!changed.some(named)) return false;
+            if (!confirm('These settings were changed somewhere else (another window, a script or an API token) '
+                + 'while you had unsaved changes here. Show the saved settings? Your unsaved changes on this page will be lost.'
+                + '\n\nCancel keeps your changes; saving them then replaces the other change.')) return false;
+        }
+        SettingsPage._snapshot = null;
+        App.navigate('#/settings');
+        return true;
     },
 
     // ------------------------------------------------------------------

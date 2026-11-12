@@ -158,7 +158,13 @@ jobs:
           else
             echo "No launcher.log was written."
           fi
-          exit "$status"
+          if [[ "$status" -ne 0 ]]; then
+            exit "$status"
+          fi
+          # Build identity (#816): the running bundle names the commit it was
+          # built from, the same <version>+<sha> as CFBundleVersion, About and
+          # Contact support's diagnostics.
+          grep -F "smoke: version ${APP_VERSION}+${GITHUB_SHA:0:12}" "$log"
 
       - name: Package unsigned transport artifacts and provenance
         run: |

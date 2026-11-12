@@ -50,6 +50,31 @@ def _brew_library(formula, filename):
     return path
 
 
+def _build_sha() -> str:
+    sha = os.environ.get("APP_BUILD_SHA", "").strip()
+    if not sha:
+        try:
+            import subprocess
+
+            sha = subprocess.run(
+                ["git", "-C", ROOT, "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+        except Exception:
+            sha = ""
+    return sha[:12] or "unknown"
+
+
+# Build identity (#816): the same commit CFBundleVersion carries, baked as
+# app/BUILD_SHA so About, the smoke test and Contact support's diagnostics
+# show <version>+<sha> (app/build_info.py reads it at runtime).
+_BUILD_SHA_DIR = os.path.join(SPECPATH, "build-identity")
+os.makedirs(_BUILD_SHA_DIR, exist_ok=True)
+_BUILD_SHA_FILE = os.path.join(_BUILD_SHA_DIR, "BUILD_SHA")
+with open(_BUILD_SHA_FILE, "w", encoding="utf-8") as _fh:
+    _sha = _build_sha()
+    _fh.write("" if _sha == "unknown" else _sha + "\n")
+
 datas = [
     (os.path.join(ROOT, "index.html"), "."),
     (os.path.join(ROOT, "alembic.ini"), "."),
@@ -64,6 +89,7 @@ datas += _tree("migrations", "migrations")
 # Named by app.main's startup refusal for a half-upgraded database (#132).
 # See #144: the message has to point somewhere the reader can actually go.
 datas += [(os.path.join(ROOT, "scripts", "repair-schema.py"), "scripts")]
+datas += [(_BUILD_SHA_FILE, "app")]
 
 # PyInstaller's WeasyPrint hook uses ctypes.util.find_library(), which does
 # not find Homebrew libraries on Apple Silicon. Seed the six libraries that
@@ -208,21 +234,6 @@ coll = COLLECT(
     a.datas,
     name="SlowBooksPro",
 )
-
-def _build_sha() -> str:
-    sha = os.environ.get("APP_BUILD_SHA", "").strip()
-    if not sha:
-        try:
-            import subprocess
-
-            sha = subprocess.run(
-                ["git", "-C", ROOT, "rev-parse", "HEAD"],
-                capture_output=True, text=True, check=True,
-            ).stdout.strip()
-        except Exception:
-            sha = ""
-    return sha[:12] or "unknown"
-
 
 def _bundle_version() -> str:
     return f"{os.environ.get('APP_VERSION', '0.0.0')}+{_build_sha()}"

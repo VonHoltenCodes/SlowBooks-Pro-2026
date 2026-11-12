@@ -56,6 +56,33 @@ def test_prepare_env_persists_settings_key_outside_bundle(tmp_path, monkeypatch)
         assert env_file.stat().st_mode & 0o777 == 0o600
 
 
+def test_prepare_env_keeps_an_env_file_already_named(tmp_path, monkeypatch):
+    """#812: prepare_env assigned SLOWBOOKS_ENV_FILE over a value already
+    set while main() used setdefault; both keep a named file now, and the
+    server child is handed the same one."""
+    import desktop_launcher
+
+    env_file = tmp_path / "SlowBooksPro" / ".env"
+    named = tmp_path / "rig.env"
+    monkeypatch.setattr(desktop_launcher, "env_file", lambda: env_file)
+    monkeypatch.setattr(desktop_launcher, "ENV_EXAMPLE", tmp_path / "missing.example")
+    monkeypatch.setattr(desktop_launcher, "get_data_dir", lambda: env_file.parent)
+    monkeypatch.setenv("SLOWBOOKS_ENV_FILE", str(named))
+
+    desktop_launcher.prepare_env()
+    assert os.environ["SLOWBOOKS_ENV_FILE"] == str(named)
+    assert desktop_launcher._name_env_file() == str(named)
+    child = desktop_launcher._server_env("sqlite:///x.db", 3001)
+    assert child["SLOWBOOKS_ENV_FILE"] == str(named)
+
+    # an empty value names nothing: the launcher's own .env is named
+    monkeypatch.setenv("SLOWBOOKS_ENV_FILE", "")
+    assert desktop_launcher._name_env_file() == str(env_file)
+    monkeypatch.delenv("SLOWBOOKS_ENV_FILE")
+    child = desktop_launcher._server_env("sqlite:///x.db", 3001)
+    assert child["SLOWBOOKS_ENV_FILE"] == str(env_file)
+
+
 def test_macos_frozen_runtime_uses_bundle_dylibs_and_writable_font_cache(
     tmp_path, monkeypatch
 ):
