@@ -788,6 +788,33 @@ const SettingsPage = {
                     ${SettingsPage._payrollAccountsHtml(payrollAccounts)}
                 </div>
 
+                <div class="settings-section" data-group="payroll" id="settings-leave-employer-share" role="group" aria-labelledby="settings-h-leave-employer-share">
+                    <h3 id="settings-h-leave-employer-share">Paid Leave Employer Share</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Washington PFML and Paid Leave Oregon charge the employer share only from a size of employer.
+                        A pay run counts the active employees when it is figured; the agency counts over its own period.
+                        The employee's share is withheld either way, and the stub says which applied and why.
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group full-width"><label for="settings-wa-pfml-employer-share">Washington PFML: Employer share applies (as the agency determined)</label>
+                            <select name="payroll_wa_pfml_employer_share" id="settings-wa-pfml-employer-share" aria-describedby="settings-wa-pfml-employer-share-help">
+                                <option value="headcount" ${!['yes', 'no'].includes(s.payroll_wa_pfml_employer_share) ? 'selected' : ''}>Follow the headcount at each pay run (50 or more employees working in Washington)</option>
+                                <option value="yes" ${s.payroll_wa_pfml_employer_share === 'yes' ? 'selected' : ''}>Yes: ESD determined the employer share applies</option>
+                                <option value="no" ${s.payroll_wa_pfml_employer_share === 'no' ? 'selected' : ''}>No: ESD determined it does not apply</option>
+                            </select>
+                            <div id="settings-wa-pfml-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">ESD tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
+                        </div>
+                        <div class="form-group full-width"><label for="settings-or-paid-leave-employer-share">Paid Leave Oregon: Employer share applies (as the agency determined)</label>
+                            <select name="payroll_or_paid_leave_employer_share" id="settings-or-paid-leave-employer-share" aria-describedby="settings-or-paid-leave-employer-share-help">
+                                <option value="headcount" ${!['yes', 'no'].includes(s.payroll_or_paid_leave_employer_share) ? 'selected' : ''}>Follow the headcount at each pay run (25 or more employees)</option>
+                                <option value="yes" ${s.payroll_or_paid_leave_employer_share === 'yes' ? 'selected' : ''}>Yes: OED determined the employer share applies</option>
+                                <option value="no" ${s.payroll_or_paid_leave_employer_share === 'no' ? 'selected' : ''}>No: OED determined it does not apply</option>
+                            </select>
+                            <div id="settings-or-paid-leave-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">OED tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="settings-section" data-group="connections" id="settings-deposits" role="group" aria-labelledby="settings-h-deposits">
                     <h3 id="settings-h-deposits">Deposits</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">

@@ -22,6 +22,11 @@ from app.models.settings import DEFAULT_SETTINGS
 from app.schemas.common import StrictModel
 from app.services import bank_check_details
 from app.services.nacha_export import validate_routing_number
+from app.services.state_tax.employer_share import (
+    SETTING_KEYS as EMPLOYER_SHARE_KEYS,
+    SHARE_VALUES,
+    refusal as employer_share_refusal,
+)
 from app.services.settings_service import (
     ENCRYPTED_SETTINGS_KEYS,
     SECRET_PLACEHOLDER,
@@ -99,6 +104,8 @@ ENUM_SETTINGS = {
     "auto_enter_on_open": frozenset({"true", "false"}),
     # A construction estimate's layout (#774).
     "estimate_style": frozenset({"line_markup", "commercial_bid"}),
+    # The paid-leave employer share as the agency determined it (#825).
+    **{key: SHARE_VALUES for key in EMPLOYER_SHARE_KEYS},
 }
 
 
@@ -492,6 +499,8 @@ def update_settings(
             continue
         allowed = ENUM_SETTINGS.get(key)
         if allowed is not None and value not in allowed:
+            if key in EMPLOYER_SHARE_KEYS:
+                raise HTTPException(status_code=422, detail=employer_share_refusal(key))
             raise HTTPException(
                 status_code=422,
                 detail=(

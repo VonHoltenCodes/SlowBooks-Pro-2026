@@ -230,6 +230,9 @@ class PayRunResponse(BaseModel):
     stubs: list[PayStubResponse] = []
     # Set on create only: time left unapproved in the period, not paid.
     warnings: list[str] = []
+    # The run's own sentences, once each: which paid-leave employer share
+    # applied by the company's setting, and why (#825).
+    notes: list[str] = []
     model_config = {"from_attributes": True}
 
 
