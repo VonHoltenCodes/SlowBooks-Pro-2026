@@ -290,6 +290,8 @@ FOUND_IN_DIALOGS = {
     "InvoicesPage.view({sent})": {"file"},
     "BillsPage.view({bill})": {"file"},
     "ExpensesPage.showDetail({expense})": {"file"},
+    # a card charge's Files (#796)
+    "CCChargesPage.showFiles({cc_charge})": {"file"},
     "ReportsPage.arAging()": {
         "Apply Late Fees",
         "Email All Overdue",
@@ -313,6 +315,7 @@ DIALOGS = [
     ("#/purchase-orders", "PurchaseOrdersPage.view({po})"),
     ("#/vendor-credits", "VendorCreditsPage.view({vendor_credit})"),
     ("#/expenses", "ExpensesPage.showDetail({expense})"),
+    ("#/cc-charges", "CCChargesPage.showFiles({cc_charge})"),
     ("#/journal", "JournalPage.view({journal})"),
     ("#/job-costs", "JobCostsPage.view({job_cost})"),
     ("#/customers", "CustomersPage.showDetails({customer})"),

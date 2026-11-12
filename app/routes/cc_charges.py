@@ -15,6 +15,7 @@ from app.services.accounting import create_journal_entry, get_cc_account_id
 from app.services.bank_posting import void_document
 from app.services.bank_register import voided_transaction_ids
 from app.services.closing_date import check_closing_date
+from app.services import pending_attachments
 from app.services.purchase_posting import refuse_control_account
 from app.models.transactions import Transaction
 
@@ -67,6 +68,9 @@ def list_cc_charges(db: Session = Depends(get_db)):
 @router.post("", status_code=201)
 def create_cc_charge(data: CCChargeCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
+    # files attached on the form before this save (#796): checked before
+    # anything is written, attached with the charge below
+    pending = pending_attachments.take(db, data.pending_attachments)
 
     cc_account_id = data.card_account_id or get_cc_account_id(db)
     if not cc_account_id:
@@ -123,6 +127,8 @@ def create_cc_charge(data: CCChargeCreate, db: Session = Depends(get_db)):
         class_id=data.class_id,
         job_id=data.job_id,
     )
+    db.flush()
+    pending_attachments.bind(db, pending, "cc_charge", txn.id)
 
     db.commit()
     return {"status": "ok", "transaction_id": txn.id, "amount": float(amount)}

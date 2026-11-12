@@ -18,6 +18,7 @@ from app.services.accounting import create_journal_entry, reversing_lines
 from app.services.job_costing import line_cost_type
 from app.services.bank_posting import assert_not_reconciled, release_statement_links
 from app.services.check_numbers import refuse_duplicate
+from app.services import pending_attachments
 from app.services.closing_date import check_closing_date
 from app.services.purchase_posting import _line_label, refuse_control_account
 
@@ -262,6 +263,9 @@ def create_expense(
     allow_duplicate_check_number: bool = Query(False),
 ):
     check_closing_date(db, data.date)
+    # files attached on the form before this save (#796): checked before
+    # anything is written, attached with the expense below
+    pending = pending_attachments.take(db, data.pending_attachments)
 
     specs = _line_specs(data)
     amount = sum((sp["amount"] for sp in specs), Decimal("0"))
@@ -356,6 +360,8 @@ def create_expense(
     # the memo on its own (#648): "" when none was typed, which tells it
     # from an expense saved before the column existed
     txn.memo = memo
+    db.flush()
+    pending_attachments.bind(db, pending, "expense", txn.id)
     db.commit()
     db.refresh(txn)
     return _serialize(txn, db)
