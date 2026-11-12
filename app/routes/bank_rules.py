@@ -16,6 +16,7 @@ from app.models.jobs import Job
 from app.models.banking import BankTransaction
 from app.schemas.bank_rules import BankRuleCreate, BankRuleUpdate, BankRuleResponse
 from app.services.account_label import account_label
+from app.services.dimensions import require_dimensions
 from app.services.settings_service import use_account_numbers
 
 router = APIRouter(prefix="/api/bank-rules", tags=["bank-rules"])
@@ -69,24 +70,9 @@ def _check_refs(db: Session, fields: dict) -> None:
         Account, fields["account_id"]
     ):
         raise HTTPException(status_code=404, detail="Account not found")
-    if fields.get("class_id") is not None:
-        cls = db.get(TxnClass, fields["class_id"])
-        if cls is None:
-            raise HTTPException(status_code=404, detail="Class not found")
-        if cls.is_archived:
-            raise HTTPException(
-                status_code=400,
-                detail=f"The class {cls.name} is archived; pick a live one.",
-            )
-    if fields.get("job_id") is not None:
-        job = db.get(Job, fields["job_id"])
-        if job is None:
-            raise HTTPException(status_code=404, detail="Job not found")
-        if job.is_active is False:
-            raise HTTPException(
-                status_code=400,
-                detail=f"The job {job.full_name} is inactive; pick an active one.",
-            )
+    # a rule's class and job are refused in the words the feed and the
+    # transfers use for the same class and job (#813)
+    require_dimensions(db, class_id=fields.get("class_id"), job_id=fields.get("job_id"))
 
 
 @router.get("", response_model=list[BankRuleResponse])

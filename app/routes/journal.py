@@ -723,6 +723,19 @@ def assert_voidable_kind(txn: Transaction) -> None:
         # ("invoice 1001"); any other reference is what was typed in Ref #,
         # a check number as often as not, so it is said as one (2.31.2 gate)
         ref = (txn.reference or "").strip()
+        # a bill's and a bill payment's postings carry no number: the
+        # document's own is said, so the refusal names which one (#813)
+        named = _document_named(txn)
+        if named:
+            # "bill V-5501's posting", as an invoice's is said; a payment
+            # by its check, "the posting of the bill payment by check 2201"
+            head = named.startswith("bill ") and f"{named}'s posting"
+            raise HTTPException(
+                status_code=400,
+                detail=f"This is {head or 'the posting of ' + named}, not a "
+                f"journal entry of its own. Void {named} itself; that reverses "
+                "this posting with it.",
+            )
         if ref and (txn.source_type or "") in ("invoice", "invoice_edit"):
             what = which = f"{label} {ref}"
             said = ""
@@ -735,6 +748,28 @@ def assert_voidable_kind(txn: Transaction) -> None:
             detail=f"This is {what}'s posting{said}, not a journal entry of its "
             f"own. Void {which} itself; that reverses this posting with it.",
         )
+
+
+def _document_named(txn: Transaction) -> str | None:
+    """ "bill V-5501" or "the bill payment by check 2201" for a bill's or a
+    bill payment's posting whose document has a number, else None."""
+    from sqlalchemy.orm import object_session
+
+    from app.models.bills import Bill, BillPayment
+
+    source = txn.source_type or ""
+    db = object_session(txn)
+    if db is None or not txn.source_id:
+        return None
+    if source in ("bill", "bill_edit"):
+        bill = db.get(Bill, txn.source_id)
+        number = (bill.bill_number or "").strip() if bill else ""
+        return f"bill {number}" if number else None
+    if source == "bill_payment":
+        bp = db.get(BillPayment, txn.source_id)
+        number = (bp.check_number or "").strip() if bp else ""
+        return f"the bill payment by check {number}" if number else None
+    return None
 
 
 def assert_not_voided(db: Session, txn: Transaction) -> None:

@@ -420,6 +420,24 @@ def unprinted_checks(
     }
 
 
+def _closed_period_refusal(db: Session, pid: int) -> str | None:
+    """The refusal for a live, unnumbered check left off the print list
+    because it is dated on or before the closing date, or None."""
+    from app.services.closing_date import get_closing_date
+
+    closing = get_closing_date(db)
+    bp = db.get(BillPayment, pid) if closing is not None else None
+    if bp is None or bp.is_voided or (bp.check_number or "").strip():
+        return None
+    if bp.date is None or bp.date > closing:
+        return None
+    return (
+        f"Bill payment {pid} is dated {bp.date}, on or before the closing "
+        f"date ({closing}), so it is not printed here: numbering it would "
+        "change a closed period."
+    )
+
+
 @router.post("/print-batch")
 def print_check_batch(
     data: PrintBatch,
@@ -454,6 +472,13 @@ def print_check_batch(
     for pid in ids:
         bp = waiting.get(pid)
         if bp is None:
+            # one dated in a closed period is left off the list: say that,
+            # with the closing date, not "paid another way" (#813). A 400
+            # like the rest: the closing-date password does not put it back
+            # on the list.
+            closed = _closed_period_refusal(db, pid)
+            if closed:
+                raise HTTPException(status_code=400, detail=closed)
             raise HTTPException(
                 status_code=400,
                 detail=(

@@ -315,6 +315,12 @@ def test_a_check_in_a_closed_period_is_left_off_the_list_and_refused(
     assert _ids(_list(client, _bank(seed_accounts))) == [a["id"], b["id"]]
     r = _batch(client, _bank(seed_accounts), [(old["id"], "1050")])
     assert r.status_code == 400, r.text
+    # the refusal names the closing date (#813)
+    assert r.json()["detail"] == (
+        f"Bill payment {old['id']} is dated 2026-09-10, on or before the closing "
+        "date (2026-09-30), so it is not printed here: numbering it would change "
+        "a closed period."
+    )
     assert printed == []
     r = _batch(client, _bank(seed_accounts), [(a["id"], "1050"), (b["id"], "1051")])
     assert r.status_code == 200, r.text
