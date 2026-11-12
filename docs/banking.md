@@ -404,6 +404,90 @@ so it can be lined up without printing a check a bank would take
 first four and `account_number` (an empty one clears it); an unknown field
 or a bad value is a 422.
 
+### Pre-printed deposit slips
+
+A deposit prints as SlowBooks' own slip on plain paper (the account, the
+date, each payment with who, number, method and amount, the subtotals and
+the total). A company whose bank gives it pre-printed deposit slips, with the
+bank's labels, boxes and MICR line already on them, can print the deposit
+onto those instead: Settings → Payroll and checks → Check Printing →
+**Deposit slips** → **Deposit slip stock** → *Pre-printed deposit slips from
+the bank*. A deposit's Print and Save PDF then lay only the figures, each in
+its box, and print no labels, no logo, no MICR line and no routing or account
+digits. *Plain paper* (the default) prints the slip exactly as before.
+
+**The layout.** Measure your slip with a ruler, from its top-left corner as
+it feeds into the printer, and type where each figure goes in the **Deposit
+slip layout** table:
+
+| Figure | Left is | Default left, top (in) |
+|---|---|---|
+| Date (MM/DD/YYYY) | where it starts | 1.00, 0.90 |
+| Account (the bank account's name in SlowBooks) | where it starts | 1.00, 0.55 |
+| Cash | where it ends | 7.90, 0.55 |
+| Check number (first line) | where it starts | 4.90, 0.85 |
+| Check amount (first line) | where it ends | 7.90, 0.85 |
+| Checks subtotal | where it ends | 7.90, 2.90 |
+| Total | where it ends | 7.90, 3.20 |
+
+Left and top are inches from the slip's top-left corner (0 to 11, 0.01
+steps); top is the top of the figure. Amounts are placed by where they end,
+so the cents of every line sit in one column, and print without a dollar
+sign (the slip's box carries its own). **Size** is in points (6 to 18; every
+figure prints at 10 by default) and clearing **Print** leaves a figure off,
+for a slip that already carries the account's name, say. **Check lines on
+the slip** (1 to 30, default 8) and **Line spacing** (0.1 to 1 inch, default
+0.25) say how many checks the slip lists and how far apart its lines are; the
+check number and amount rows place the first line and the rest follow below
+it. The defaults are a generic business slip at the top of the sheet: a
+starting point, not any one bank's.
+
+Every payment the deposit took that is not cash goes on a check line, with
+its check number (or its reference when it has none); the cash prints as one
+amount, the checks subtotal is the sum of the check lines, and the total is
+the deposit's amount. Checks past the slip's lines continue on another page
+at the same lines, with the date and account, for the back of the slip or a
+second slip; the subtotal (of every check) and the total print on the first
+page. A void deposit prints its date, its account and VOID in the total's
+box, and no figures.
+
+A **left/right** and an **up/down nudge** (−0.5 to +0.5 inch, 0.01 steps; a
+positive nudge moves right and down) shift every figure together, for a
+printer that feeds a little off. **Print a test slip** opens a sample deposit
+(two checks, 1001 for 1,234.56 and 1002 for 250.00, and 75.00 cash on
+"Sample Checking", dated today) laid out for pre-printed slips with the
+layout and nudges as they stand in the form, saved or not; print it on plain
+paper and hold it against a slip, or print it on a spare slip. **Reset deposit
+slip layout to defaults** puts every figure back. Save Settings saves the
+stock, the nudges and the layout, an administrator's change like the rest of
+the settings; anyone who prints deposits can print the test slip.
+
+**The format, for making your own.** Through the API the layout is the
+setting `deposit_slip_layout`: JSON keyed by figure (`date`, `account`,
+`cash`, `check_number`, `check_amount`, `checks_subtotal`, `total`), each
+holding only what differs from the defaults above — `x` and `y` (inches),
+`size` (points) and `show` (`false` leaves it off) — plus `check_lines` with
+`count` and `spacing`:
+
+```json
+{
+  "date": {"x": 1.25, "y": 0.9},
+  "account": {"show": false},
+  "total": {"x": 7.5, "size": 12},
+  "check_lines": {"count": 6, "spacing": 0.3}
+}
+```
+
+`""` (the default) is the defaults. `PUT /api/settings` with
+`deposit_slip_stock` (`plain` | `preprinted`), `deposit_slip_layout` (the
+object or its JSON text), `deposit_slip_nudge_x_in` and
+`deposit_slip_nudge_y_in` saves them; a value out of bounds is refused with a
+sentence naming the figure, and nothing is saved. `GET
+/api/deposits/test-slip?deposit_slip_layout=&deposit_slip_nudge_x_in=&deposit_slip_nudge_y_in=`
+(each optional) answers the test slip, and a deposit's own
+`GET /api/deposits/{id}/pdf` and `/print-preview` print by the layout when
+the stock is pre-printed.
+
 ## Transfers
 
 **Transfer** on the Banking page or a register: date, amount, from, to, and

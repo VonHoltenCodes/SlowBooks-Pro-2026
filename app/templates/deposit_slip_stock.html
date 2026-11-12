@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Deposit</title>
+<style>
+    /* The bank's pre-printed deposit slip (#798): the figures alone, each at
+       its place in inches from the sheet's top-left (the slip's), nothing
+       the slip already carries. */
+    @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; }
+    .slip-page { position: relative; width: 100%; height: {{ '11.6in' if paper_size == 'a4' else '10.9in' }}; overflow: hidden; page-break-after: always; }
+    .slip-page:last-child { page-break-after: auto; }
+    .slip-field { position: absolute; line-height: 1; white-space: nowrap; }
+    .slip-amount { width: {{ amount_width }}in; text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+{% for page in pages %}
+    <div class="slip-page">
+    {% for f in page %}
+        <div class="slip-field slip-{{ f.field }}{% if f.amount %} slip-amount{% endif %}" data-field="{{ f.field }}" style="left: {{ '%g' % f.left }}in; top: {{ '%g' % f.top }}in; font-size: {{ '%g' % f.size }}pt;">{{ f.text }}</div>
+    {% endfor %}
+    </div>
+{% endfor %}
+</body>
+</html>

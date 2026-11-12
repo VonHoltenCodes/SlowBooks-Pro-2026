@@ -232,6 +232,9 @@ _DATE_SETTINGS = {"closing_date": "Closing date"}
 _INCH_NUDGE_SETTINGS = {
     "check_nudge_x_in": "Horizontal nudge",
     "check_nudge_y_in": "Vertical nudge",
+    # the deposit slip on pre-printed stock (#798): the whole slip's shift
+    "deposit_slip_nudge_x_in": "Deposit slip left/right nudge",
+    "deposit_slip_nudge_y_in": "Deposit slip up/down nudge",
 }
 _NUDGE_LIMIT = Decimal("0.5")
 
@@ -253,6 +256,45 @@ CHECK_LAYOUT_FIELDS = {
 CHECK_LAYOUT_OFFSET_LIMIT = Decimal("1")
 CHECK_LAYOUT_SIZE_MIN = Decimal("6")
 CHECK_LAYOUT_SIZE_MAX = Decimal("18")
+
+# The deposit slip on pre-printed stock (#798): a bank's deposit slip
+# already carries its labels, its boxes and the MICR line, so SlowBooks
+# prints only the figures, each where the company's slip has its box. Kept
+# as one JSON object, deposit_slip_layout, keyed by field, each holding only
+# what differs from DEPOSIT_SLIP_DEFAULTS: "x" / "y" (inches from the slip's
+# top-left, 0 to 11, 0.01 steps; x is where a text field starts and where an
+# amount ends, so the cents line up), "size" (points, 6 to 18) and "show"
+# (false leaves the field off). check_lines holds how many checks the slip
+# lists ("count", 1 to 30) and how far apart its lines are ("spacing", 0.1 to
+# 1 inch); check_number and check_amount place the first line. {field: label}
+DEPOSIT_SLIP_FIELDS = {
+    "date": "Date",
+    "account": "Account",
+    "cash": "Cash",
+    "check_number": "Check number (first line)",
+    "check_amount": "Check amount (first line)",
+    "checks_subtotal": "Checks subtotal",
+    "total": "Total",
+}
+# the amounts, placed by where they end
+DEPOSIT_SLIP_AMOUNTS = frozenset({"cash", "check_amount", "checks_subtotal", "total"})
+DEPOSIT_SLIP_LINES_LABEL = "Check lines"
+# A generic business slip, three and a half inches tall at the top of the
+# sheet: a starting point to adjust, not any one bank's.
+DEPOSIT_SLIP_DEFAULTS = {
+    "date": {"x": 1.0, "y": 0.9, "size": 10, "show": True},
+    "account": {"x": 1.0, "y": 0.55, "size": 10, "show": True},
+    "cash": {"x": 7.9, "y": 0.55, "size": 10, "show": True},
+    "check_number": {"x": 4.9, "y": 0.85, "size": 10, "show": True},
+    "check_amount": {"x": 7.9, "y": 0.85, "size": 10, "show": True},
+    "checks_subtotal": {"x": 7.9, "y": 2.9, "size": 10, "show": True},
+    "total": {"x": 7.9, "y": 3.2, "size": 10, "show": True},
+    "check_lines": {"count": 8, "spacing": 0.25},
+}
+DEPOSIT_SLIP_POSITION_MAX = Decimal("11")
+DEPOSIT_SLIP_LINES_MAX = 30
+DEPOSIT_SLIP_SPACING_MIN = Decimal("0.1")
+DEPOSIT_SLIP_SPACING_MAX = Decimal("1")
 
 _DIGITS = re.compile(r"[0-9]+")
 # The two identifiers a bank prints on its ACH origination sheet: what the
@@ -446,6 +488,177 @@ def _clean_check_field_layout(value, text: str) -> str:
     return json.dumps(stored, sort_keys=True, separators=(",", ":")) if stored else ""
 
 
+def _deposit_slip_lines(attrs, problems: list) -> dict:
+    """check_lines of the deposit slip layout (#798): what differs from
+    the default count and spacing, problems named in ``problems``."""
+    label = DEPOSIT_SLIP_LINES_LABEL
+    default = DEPOSIT_SLIP_DEFAULTS["check_lines"]
+    if not isinstance(attrs, dict):
+        problems.append(f"{label}: the layout must be an object.")
+        return {}
+    unknown = sorted(set(attrs) - {"count", "spacing"})
+    if unknown:
+        problems.append(
+            f"{label}: {', '.join(map(str, unknown))} is not part of the check "
+            "lines (count, spacing)."
+        )
+        return {}
+    kept = {}
+    number = _layout_number(attrs.get("count"))
+    if number is not None:
+        if (
+            number is False
+            or number != number.to_integral_value()
+            or not 1 <= number <= DEPOSIT_SLIP_LINES_MAX
+        ):
+            problems.append(
+                f"{label}: the number of lines must be a whole number from 1 to "
+                f"{DEPOSIT_SLIP_LINES_MAX}."
+            )
+        elif int(number) != default["count"]:
+            kept["count"] = int(number)
+    number = _layout_number(attrs.get("spacing"))
+    if number is not None:
+        if (
+            number is False
+            or not DEPOSIT_SLIP_SPACING_MIN <= number <= DEPOSIT_SLIP_SPACING_MAX
+        ):
+            problems.append(
+                f"{label}: the spacing must be a number of inches from 0.1 to 1."
+            )
+        elif number != number.quantize(Decimal("0.01")):
+            problems.append(
+                f"{label}: the spacing can have up to two decimal places "
+                "(0.01in steps)."
+            )
+        elif number != Decimal(str(default["spacing"])):
+            kept["spacing"] = _json_number(number)
+    return kept
+
+
+def _clean_deposit_slip_layout(value, text: str) -> str:
+    """deposit_slip_layout (#798) as stored: compact JSON with each field's
+    attributes that differ from DEPOSIT_SLIP_DEFAULTS, or "" for none. The
+    API may send the object itself or its JSON text. Every field and
+    attribute is checked; the first problem of each field is named."""
+    import json
+
+    if isinstance(value, dict):
+        layout = value
+    elif text == "":
+        return ""
+    else:
+        try:
+            layout = json.loads(text)
+        except ValueError:
+            layout = None
+    if not isinstance(layout, dict):
+        raise SettingValueError(
+            "Deposit slip layout must be an object of fields, such as "
+            '{"date": {"x": 1.25, "y": 0.9}, "check_lines": {"count": 6}}.'
+        )
+    problems = []
+    stored = {}
+    for field in sorted(layout):
+        attrs = layout[field]
+        if attrs is None:
+            continue
+        if field == "check_lines":
+            kept = _deposit_slip_lines(attrs, problems)
+            if kept:
+                stored[field] = kept
+            continue
+        label = DEPOSIT_SLIP_FIELDS.get(field)
+        if label is None:
+            problems.append(
+                f"Deposit slip layout: {field!s} is not a field; the fields are "
+                + ", ".join([*DEPOSIT_SLIP_FIELDS, "check_lines"])
+                + "."
+            )
+            continue
+        if not isinstance(attrs, dict):
+            problems.append(f"{label}: the layout must be an object.")
+            continue
+        unknown = sorted(set(attrs) - {"x", "y", "size", "show"})
+        if unknown:
+            problems.append(
+                f"{label}: {', '.join(map(str, unknown))} is not part of a field's "
+                "layout (x, y, size, show)."
+            )
+            continue
+        default = DEPOSIT_SLIP_DEFAULTS[field]
+        kept = {}
+        for attr, what in (("x", "from the left"), ("y", "from the top")):
+            number = _layout_number(attrs.get(attr))
+            if number is None:
+                continue
+            if number is False or not 0 <= number <= DEPOSIT_SLIP_POSITION_MAX:
+                problems.append(
+                    f"{label} {what} must be a number of inches from 0 to 11."
+                )
+            elif number != number.quantize(Decimal("0.01")):
+                problems.append(
+                    f"{label} {what} can have up to two decimal places "
+                    "(0.01in steps)."
+                )
+            elif number != Decimal(str(default[attr])):
+                kept[attr] = _json_number(number)
+        number = _layout_number(attrs.get("size"))
+        if number is not None:
+            if (
+                number is False
+                or not CHECK_LAYOUT_SIZE_MIN <= number <= CHECK_LAYOUT_SIZE_MAX
+            ):
+                problems.append(
+                    f"{label} text size must be a number of points from 6 to 18, "
+                    "or empty for 10."
+                )
+            elif number != number.quantize(Decimal("0.1")):
+                problems.append(f"{label} text size can have one decimal place (10.5).")
+            elif number != default["size"]:
+                kept["size"] = _json_number(number)
+        show = attrs.get("show")
+        if show in ("true", "false"):
+            show = show == "true"
+        if isinstance(show, bool):
+            if not show:
+                kept["show"] = False
+        elif show not in (None, ""):
+            problems.append(f"{label} show must be true or false.")
+        if kept:
+            stored[field] = kept
+    if problems:
+        raise SettingValueError(" ".join(problems))
+    return json.dumps(stored, sort_keys=True, separators=(",", ":")) if stored else ""
+
+
+def deposit_slip_layout(text) -> dict:
+    """The deposit slip layout (#798) to print by: every field of
+    DEPOSIT_SLIP_DEFAULTS with the stored deposit_slip_layout laid over it.
+    A field whose stored value does not check out keeps its default, so a
+    damaged value prints the slip rather than failing the print."""
+    import copy
+    import json
+
+    out = copy.deepcopy(DEPOSIT_SLIP_DEFAULTS)
+    try:
+        raw = json.loads(text) if (text or "").strip() else {}
+    except (TypeError, ValueError):
+        return out
+    if not isinstance(raw, dict):
+        return out
+    for field, attrs in raw.items():
+        if field not in out:
+            continue
+        try:
+            one = _clean_deposit_slip_layout({field: attrs}, "")
+        except SettingValueError:
+            continue
+        if one:
+            out[field].update(json.loads(one)[field])
+    return out
+
+
 def check_field_layout(text) -> dict:
     """The stored check_field_layout (#749) as {field: {attr: value}}, with
     anything that does not check out left out, so a damaged value prints
@@ -482,6 +695,8 @@ def clean_setting_value(key: str, value) -> str:
         return _clean_deposit_account_ids(value, text)
     if key == "check_field_layout":
         return _clean_check_field_layout(value, text)
+    if key == "deposit_slip_layout":
+        return _clean_deposit_slip_layout(value, text)
     if key in _ADDRESS_LIST_SETTINGS:
         # stored as the clean comma-separated list, so what the send uses is
         # what the page shows; an entry that is not an address is refused
