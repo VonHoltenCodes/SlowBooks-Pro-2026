@@ -628,7 +628,8 @@ const SettingsPage = {
                             <select name="pdf_paper_size" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
-                            </select></div>
+                            </select>
+                            <div class="form-hint" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Checks, mailing labels and the IRS forms print on Letter whatever this says: they are measured for that stock.</div></div>
                         <div class="form-group"><label>Report Basis</label>
                             <select name="report_basis" title="${escapeHtml(`The basis the ${T('Profit & Loss')}, ${T('Balance Sheet')}, Trial Balance, General Ledger and related reports run on unless the report says otherwise`)}">
                                 <option value="accrual" ${s.report_basis !== 'cash' ? 'selected' : ''}>Accrual (income when billed)</option>
@@ -984,8 +985,8 @@ const SettingsPage = {
                     </div>
                     <h4 id="settings-h-reminder-rules" style="margin:12px 0 4px; font-size:12px;">Reminder rules</h4>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached.
-                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ company_name }}
+                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached. On or before the due date, "0 days overdue" is written as due today (or tomorrow, or in so many days).
+                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ due_status }} {{ company_name }}
                     </div>
                     <div id="reminder-rules-list"></div>
                 </div>
@@ -1174,6 +1175,13 @@ const SettingsPage = {
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
                                 value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
                         ${SettingsPage._checkFieldLayoutHtml(s.check_field_layout, s.check_position)}
+                        <div class="form-group full-width">
+                            <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
+                                <input type="checkbox" id="settings-check-amount-no-dollar-sign" name="check_amount_no_dollar_sign" value="true" data-bool aria-describedby="settings-check-amount-no-dollar-sign-help" style="width:auto; margin:0;" ${s.check_amount_no_dollar_sign === 'true' ? 'checked' : ''}>
+                                <label for="settings-check-amount-no-dollar-sign" style="font-weight:normal; margin:0;">Leave the dollar sign off the amount</label>
+                            </div>
+                            <div id="settings-check-amount-no-dollar-sign-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">For check stock that prints its own dollar sign beside the amount box: the amount prints as 1,234.56 instead of $1,234.56. The amount in words and the stubs are unchanged.</div>
+                        </div>
                         <div class="form-group full-width">
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
                                 <input type="checkbox" id="settings-check-blank-stock" name="check_blank_stock" value="true" data-bool aria-describedby="settings-check-blank-stock-help" style="width:auto; margin:0;" ${s.check_blank_stock === 'true' ? 'checked' : ''}>
@@ -3257,12 +3265,12 @@ const SettingsPage = {
     },
 
     // Opens a sample check PDF in a new tab (#440) with the stock, check
-    // position (#727), nudge and field layout (#749) as they stand in the form — saved or not — so a nudge can be tried
+    // position (#727), nudge, field layout (#749) and dollar sign (#799) as they stand in the form — saved or not — so a nudge can be tried
     // before it is saved.
     testPrintCheck() {
         const form = document.getElementById('settings-form');
         const params = new URLSearchParams();
-        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout']) {
+        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout', 'check_amount_no_dollar_sign']) {
             const el = form && form.querySelector(`[name="${name}"]`);
             if (el) params.set(name, el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value);
         }

@@ -96,6 +96,7 @@ ENUM_SETTINGS = {
     "check_position": frozenset({"bottom", "top"}),
     "check_blank_stock": frozenset({"true", "false"}),
     "check_micr_amount": frozenset({"true", "false"}),
+    "check_amount_no_dollar_sign": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),
@@ -107,6 +108,21 @@ ENUM_SETTINGS = {
     # The paid-leave employer share as the agency determined it (#825).
     **{key: SHARE_VALUES for key in EMPLOYER_SHARE_KEYS},
 }
+
+# The sentence a settings save answers with when the company type changed:
+# an open window keeps the old type's words and sidebar until it is
+# started again, and the app does not redraw them live (owner's call,
+# 2026-11-12: a note, not a live re-render).
+COMPANY_TYPE_WORDS = {
+    "business": "business",
+    "nonprofit": "nonprofit",
+    "construction": "construction",
+}
+COMPANY_TYPE_RESTART_NOTE = (
+    "The company is now a {kind} company. An open SlowBooks Pro window keeps "
+    "its old words and pages until it is started again; restart it to see "
+    "the {kind} ones."
+)
 
 
 class SettingsUpdate(BaseModel):
@@ -531,6 +547,10 @@ def update_settings(
         if effective_type != "llc":
             cleaned["llc_tax_election"] = ""
     clearing_warnings = _clearing_off_warnings(db, cleaned)
+    # The open window's words and sidebar follow the company type at the
+    # next start (the window that changes it reloads itself): a save from
+    # elsewhere, an agent or a script, is told so in a sentence (#828).
+    type_before = get_setting_raw(db, "company_type") or "business"
     for key, value in cleaned.items():
         set_setting(db, key, value)
     # The equity accounts follow a newly chosen entity type while the chart
@@ -552,6 +572,11 @@ def update_settings(
         result["entity_equity"] = equity
     if clearing_warnings:
         result["clearing_warnings"] = clearing_warnings
+    type_after = cleaned.get("company_type", type_before) or "business"
+    if type_after != type_before:
+        result["restart_note"] = COMPANY_TYPE_RESTART_NOTE.format(
+            kind=COMPANY_TYPE_WORDS.get(type_after, type_after)
+        )
     return result
 
 
