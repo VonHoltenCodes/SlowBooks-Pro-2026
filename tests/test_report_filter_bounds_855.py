@@ -78,7 +78,12 @@ def test_income_by_customer_takes_no_customer_filter(client):
     assert r.status_code == 200, r.text
 
 
-def test_in_range_ids_still_answer(client, db_session, seed_accounts):
+def test_in_range_ids_still_answer(client, db_session, seed_accounts, monkeypatch):
+    # the customer statement answers with a PDF: the engine is stubbed so this
+    # check runs where WeasyPrint's native stack is absent (Windows CI)
+    from app.services import pdf_service
+
+    monkeypatch.setattr(pdf_service, "render_pdf", lambda html, **kw: html.encode())
     cust = Customer(name="Filter Co", is_active=True)
     vend = Vendor(name="Supply Co", is_active=True)
     cls = TxnClass(name="East")
