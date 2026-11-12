@@ -286,6 +286,10 @@ const PayrollPage = {
         // to the first Stub PDF, with no name in sight (2.18.0 gate, macbase1
         // NEW-3).
         const who = (s) => s.employee_name || `Employee ${s.employee_id}`;
+        // the run's own sentences (which paid-leave employer share applied
+        // by the setting, #825) are said once above, not again per stub
+        const runNotes = new Set(run.notes || []);
+        const stubNotes = (r) => r.stubs.flatMap(s => (s.notes || []).filter(n => !runNotes.has(n)).map(n => [s, n]));
         let rows = run.stubs.map(s => `
             <tr>
                 <td>${escapeHtml(who(s))}</td>
@@ -322,7 +326,8 @@ const PayrollPage = {
             </div>
             ${PayrollPage._directDepositNote(run)}
             ${run.warnings && run.warnings.length ? `<div class="card note--caution" role="note" style="padding:10px 12px;margin:8px 0">${run.warnings.map(w => `<p style="margin:0">${escapeHtml(w)}</p>`).join('')}</div>` : ''}
-            ${run.stubs.some(s => s.notes && s.notes.length) ? `<div class="card" role="note" style="padding:10px 12px;margin:8px 0">${run.stubs.filter(s => s.notes && s.notes.length).map(s => s.notes.map(n => `<p style="margin:0">${escapeHtml(`${who(s)}: ${n}`)}</p>`).join('')).join('')}</div>` : ''}
+            ${(run.notes || []).length ? `<div class="card" role="note" style="padding:10px 12px;margin:8px 0">${run.notes.map(n => `<p style="margin:0">${escapeHtml(n)}</p>`).join('')}</div>` : ''}
+            ${stubNotes(run).length ? `<div class="card" role="note" style="padding:10px 12px;margin:8px 0">${stubNotes(run).map(([s, n]) => `<p style="margin:0">${escapeHtml(`${who(s)}: ${n}`)}</p>`).join('')}</div>` : ''}
             <div class="form-actions">
                 ${run.status === 'processed' && run.stubs.some(s => s.direct_deposit) ? `<button class="btn btn-primary" onclick="PayrollPage.downloadDirectDeposit(${run.id})" title="The ACH file to upload to the bank">Direct deposit file</button>` : ''}
                 ${run.status === 'processed' ? `<button class="btn btn-secondary" data-destructive onclick="PayrollPage.void(${run.id})">Void</button>` : ''}

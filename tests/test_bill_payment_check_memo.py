@@ -7,6 +7,10 @@ memo as edited before the check prints.
 
 The check route is called with the PDF renderer stubbed, so these run
 everywhere: what matters here is the data the check is built from.
+
+Since #800 the memo is a choice under Settings, Check Printing, Check memo,
+whose default is the bill's reference; these pin the bill's memo, the
+behaviour #602 built (tests/test_check_memo_choice_800.py has the rest).
 """
 
 import json
@@ -32,6 +36,12 @@ def printed(monkeypatch):
 
     monkeypatch.setattr(checks_route, "generate_check_pdf", fake)
     return seen
+
+
+@pytest.fixture(autouse=True)
+def bills_memo_choice(client):
+    r = client.put("/api/settings", json={"check_memo": "memo"})
+    assert r.status_code == 200, r.text
 
 
 @pytest.fixture

@@ -25,6 +25,7 @@ from app.services.check_numbers import (
 )
 from app.services.closing_date import check_closing_date
 from app.services import bank_check_details
+from app.services import check_memo as check_memo_service
 from app.services.pdf_service import (
     blank_stock,
     generate_check_pdf,
@@ -242,10 +243,12 @@ _SAMPLE_BANK = {
 def test_print_check(
     check_stock: str = Query(default=None),
     check_position: str = Query(default=None),
+    check_memo: str = Query(default=None),
     check_nudge_x_in: str = Query(default=None),
     check_nudge_y_in: str = Query(default=None),
     check_blank_stock: str = Query(default=None),
     check_micr_amount: str = Query(default=None),
+    check_amount_no_dollar_sign: str = Query(default=None),
     check_field_layout: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
@@ -261,7 +264,8 @@ def test_print_check(
     it prints sample bank details and a sample MICR line, never a saved
     account's, so a test print is never a check a bank would take. The
     per-field layout (#749, check_field_layout) is sent the same way, as
-    its JSON."""
+    its JSON, and so is the dollar sign on the amount (#799,
+    check_amount_no_dollar_sign)."""
     check_data = {
         "payee": "Sample Payee",
         "date": date.today(),
@@ -287,9 +291,17 @@ def test_print_check(
                 detail="check_position must be one of: bottom, top",
             )
         company["check_position"] = check_position
+    # The sample memo follows the Check memo choice (#800), the form's
+    # unsaved one when it is sent.
+    if check_memo is not None and check_memo not in check_memo_service.CHOICES:
+        raise HTTPException(status_code=422, detail=check_memo_service.REFUSAL)
+    check_data["memo"] = check_memo_service.SAMPLE[
+        check_memo or check_memo_service.choice(db)
+    ]
     for key, value in (
         ("check_blank_stock", check_blank_stock),
         ("check_micr_amount", check_micr_amount),
+        ("check_amount_no_dollar_sign", check_amount_no_dollar_sign),
     ):
         if value is not None:
             if value not in ENUM_SETTINGS[key]:

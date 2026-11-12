@@ -21,7 +21,13 @@ from app.database import get_db
 from app.models.settings import DEFAULT_SETTINGS
 from app.schemas.common import StrictModel
 from app.services import bank_check_details
+from app.services import check_memo as _check_memo
 from app.services.nacha_export import validate_routing_number
+from app.services.state_tax.employer_share import (
+    SETTING_KEYS as EMPLOYER_SHARE_KEYS,
+    SHARE_VALUES,
+    refusal as employer_share_refusal,
+)
 from app.services.settings_service import (
     ENCRYPTED_SETTINGS_KEYS,
     SECRET_PLACEHOLDER,
@@ -89,8 +95,12 @@ ENUM_SETTINGS = {
     # Where the check face prints (#727): bottom = stub / stub / check,
     # top = check / voucher / voucher (QuickBooks' standard voucher stock).
     "check_position": frozenset({"bottom", "top"}),
+    # What a bill payment's check memo carries (#800): the bill's
+    # reference, the bill's memo, or nothing (app/services/check_memo.py).
+    "check_memo": _check_memo.CHOICES,
     "check_blank_stock": frozenset({"true", "false"}),
     "check_micr_amount": frozenset({"true", "false"}),
+    "check_amount_no_dollar_sign": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),
@@ -99,7 +109,28 @@ ENUM_SETTINGS = {
     "auto_enter_on_open": frozenset({"true", "false"}),
     # A construction estimate's layout (#774).
     "estimate_style": frozenset({"line_markup", "commercial_bid"}),
+    # The paid-leave employer share as the agency determined it (#825).
+    **{key: SHARE_VALUES for key in EMPLOYER_SHARE_KEYS},
 }
+
+# The sentence a settings save answers with when the company type changed:
+# an open window keeps the old type's words and sidebar until it is
+# started again, and the app does not redraw them live (owner's call,
+# 2026-11-12: a note, not a live re-render).
+COMPANY_TYPE_WORDS = {
+    "business": "business",
+    "nonprofit": "nonprofit",
+    "construction": "construction",
+}
+COMPANY_TYPE_RESTART_NOTE = (
+    "The company is now a {kind} company. An open SlowBooks Pro window keeps "
+    "its old words and pages until it is started again; restart it to see "
+    "the {kind} ones."
+)
+
+
+# A refusal said in a bookkeeper's words where the bare list would not be.
+ENUM_REFUSALS = {"check_memo": _check_memo.REFUSAL}
 
 
 class SettingsUpdate(BaseModel):
@@ -492,9 +523,12 @@ def update_settings(
             continue
         allowed = ENUM_SETTINGS.get(key)
         if allowed is not None and value not in allowed:
+            if key in EMPLOYER_SHARE_KEYS:
+                raise HTTPException(status_code=422, detail=employer_share_refusal(key))
             raise HTTPException(
                 status_code=422,
-                detail=(
+                detail=ENUM_REFUSALS.get(key)
+                or (
                     f"{key} must be one of: "
                     + ", ".join(sorted(x for x in allowed if x))
                 ),
@@ -522,6 +556,10 @@ def update_settings(
         if effective_type != "llc":
             cleaned["llc_tax_election"] = ""
     clearing_warnings = _clearing_off_warnings(db, cleaned)
+    # The open window's words and sidebar follow the company type at the
+    # next start (the window that changes it reloads itself): a save from
+    # elsewhere, an agent or a script, is told so in a sentence (#828).
+    type_before = get_setting_raw(db, "company_type") or "business"
     for key, value in cleaned.items():
         set_setting(db, key, value)
     # The equity accounts follow a newly chosen entity type while the chart
@@ -543,6 +581,11 @@ def update_settings(
         result["entity_equity"] = equity
     if clearing_warnings:
         result["clearing_warnings"] = clearing_warnings
+    type_after = cleaned.get("company_type", type_before) or "business"
+    if type_after != type_before:
+        result["restart_note"] = COMPANY_TYPE_RESTART_NOTE.format(
+            kind=COMPANY_TYPE_WORDS.get(type_after, type_after)
+        )
     return result
 
 

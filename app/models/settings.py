@@ -161,6 +161,10 @@ DEFAULT_SETTINGS = {
     # vouchers below it, for QuickBooks Desktop's standard voucher stock.
     # The stock and the nudges apply to the face in either position.
     "check_position": "bottom",
+    # Check memo (#800): what a bill payment's check memo carries when
+    # none is typed on the payment: "reference" (the bill's invoice number,
+    # "Invoice 196132"), "memo" (the bill's whole memo, as before) or "none".
+    "check_memo": "reference",
     "check_nudge_x_in": "0",
     "check_nudge_y_in": "0",
     # Blank check stock (#739): "true" prints what pre-printed stock would
@@ -171,6 +175,11 @@ DEFAULT_SETTINGS = {
     # check_micr_amount is "true".
     "check_blank_stock": "false",
     "check_micr_amount": "false",
+    # The dollar sign on the amount in figures (#799): "true" prints the
+    # amount box as "1,234.56", for check stock that prints its own "$"
+    # beside the box. The amount in words, the stubs and the vouchers keep
+    # theirs; plain, pre-printed and blank stock and the test check alike.
+    "check_amount_no_dollar_sign": "false",
     # Per-field check layout (#749): each value on the check face (payee,
     # payee address, date, amount in figures, amount in words, memo) moved,
     # sized and bolded on its own, on top of the nudges, as JSON of what
@@ -293,6 +302,13 @@ DEFAULT_SETTINGS = {
     "payroll_futa_account_id": "",
     "payroll_suta_account_id": "",
     "payroll_other_deductions_account_id": "",
+    # The paid-leave employer share as the agency determined it (#825):
+    # "yes" (ESD / OED determined it applies), "no" (it does not), or
+    # "headcount", the pay run's own count (Washington PFML from 50
+    # employees working in Washington, Paid Leave Oregon from 25), the
+    # behaviour before the setting. services/state_tax/employer_share.py.
+    "payroll_wa_pfml_employer_share": "headcount",
+    "payroll_or_paid_leave_employer_share": "headcount",
     # Memorized transactions and recurring invoices (#605): "true" (the
     # default) enters every due auto-enter schedule when the app opens and
     # once a day while it runs, every missed occurrence in order

@@ -52,7 +52,8 @@ PFML_WAGE_CAP = Decimal("184500")  # the 2026 Social Security wage base
 # them each September from the previous four quarters, counting the
 # employees working in Washington). The pay run passes the company's active
 # Washington employees as state_employee_count; a caller that passes none
-# is charged the employer share (the 50+ employee case).
+# is charged the employer share (the 50+ employee case). The company's
+# setting (employer_share_applies, #825) outranks the count when it is set.
 PFML_EMPLOYER_MIN_EMPLOYEES = 50
 
 # --- WA Cares Fund (long-term care) -----------------------------------------
@@ -123,10 +124,13 @@ class WAEngine(StateEngine):
         pfml_total = pfml_wages * t["pfml_total_rate"]
         pfml_employee = _q(pfml_total * t["pfml_employee_share"])
         count = _extra.get("state_employee_count")
+        # the company's setting, as ESD determined it (#825), outranks the
+        # run's headcount; None follows the headcount
+        applies = _extra.get("employer_share_applies")
+        if applies is None:
+            applies = count is None or count >= PFML_EMPLOYER_MIN_EMPLOYEES
         pfml_employer = (
-            _q(pfml_total * t["pfml_employer_share"])
-            if count is None or count >= PFML_EMPLOYER_MIN_EMPLOYEES
-            else Decimal("0.00")
+            _q(pfml_total * t["pfml_employer_share"]) if applies else Decimal("0.00")
         )
 
         # WA Cares — employee-only long-term-care premium.

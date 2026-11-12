@@ -40,6 +40,12 @@ the pay run counts the company's active employees and charges the employer
 share only from those sizes, Oregon by every employee (25 or more), Washington
 by the employees working in Washington (50 or more); the employee's share is
 withheld either way.
+Settings → Payroll and checks → Paid Leave Employer Share outranks the count
+per state (#825, `payroll_wa_pfml_employer_share`,
+`payroll_or_paid_leave_employer_share`): yes or no as ESD or OED determined,
+or `headcount` (the default) to follow the run's count. Set to yes or no, the
+stub and the run say which applied and why, and the run warns, naming the
+setting, when its headcount disagrees (`app/services/state_tax/employer_share.py`).
 
 ## State withholding
 

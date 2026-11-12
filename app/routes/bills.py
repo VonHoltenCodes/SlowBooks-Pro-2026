@@ -4,7 +4,6 @@
 # ============================================================================
 
 from app.routes._print import print_html
-import re
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,6 +33,7 @@ from app.services.accounting import (
     get_ap_account_id,
     reversing_lines,
 )
+from app.services import pending_attachments
 from app.services.audit import audited_bulk_delete
 from app.services.compliance import vendor_compliance
 from app.services.early_pay_discounts import discounted_on
@@ -167,10 +167,10 @@ def bill_print_preview(bill_id: int, db: Session = Depends(get_db)):
 def _default_bill_number(db: Session, vendor: Vendor, date) -> str:
     """'20260902-GK' for Gin Kee on 2026-09-02; '-2', '-3' … when that
     vendor already has a bill under the same generated number."""
-    initials = "".join(
-        w[0] for w in re.findall(r"[A-Za-z0-9]+", vendor.name or "")
-    ).upper()[:4]
-    base = f"{date:%Y%m%d}-{initials or 'BILL'}"
+    # the same base the check memo reads as "no reference" (#800)
+    from app.services.check_memo import generated_bill_number_base
+
+    base = generated_bill_number_base(vendor.name, date)
     taken = {
         row[0]
         for row in db.query(Bill.bill_number)
@@ -497,6 +497,9 @@ def _resync_po_status(db: Session, po_ids) -> None:
 def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
     _reject_po_line_links(data.lines)
+    # files attached on the form before this save (#796): checked before
+    # anything is written, attached with the bill below
+    pending = pending_attachments.take(db, data.pending_attachments)
 
     vendor = db.query(Vendor).filter(Vendor.id == data.vendor_id).first()
     if not vendor:
@@ -608,6 +611,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         data.date,
         retainage_held=retainage_held,
     )
+    db.flush()
+    pending_attachments.bind(db, pending, "bill", bill.id)
 
     db.commit()
     db.refresh(bill)

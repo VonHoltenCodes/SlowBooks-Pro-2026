@@ -628,7 +628,8 @@ const SettingsPage = {
                             <select name="pdf_paper_size" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
-                            </select></div>
+                            </select>
+                            <div class="form-hint" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Checks, mailing labels and the IRS forms print on Letter whatever this says: they are measured for that stock.</div></div>
                         <div class="form-group"><label>Report Basis</label>
                             <select name="report_basis" title="${escapeHtml(`The basis the ${T('Profit & Loss')}, ${T('Balance Sheet')}, Trial Balance, General Ledger and related reports run on unless the report says otherwise`)}">
                                 <option value="accrual" ${s.report_basis !== 'cash' ? 'selected' : ''}>Accrual (income when billed)</option>
@@ -788,6 +789,33 @@ const SettingsPage = {
                     ${SettingsPage._payrollAccountsHtml(payrollAccounts)}
                 </div>
 
+                <div class="settings-section" data-group="payroll" id="settings-leave-employer-share" role="group" aria-labelledby="settings-h-leave-employer-share">
+                    <h3 id="settings-h-leave-employer-share">Paid Leave Employer Share</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Washington PFML and Paid Leave Oregon charge the employer share only from a size of employer.
+                        A pay run counts the active employees when it is figured; the agency counts over its own period.
+                        The employee's share is withheld either way, and the stub says which applied and why.
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group full-width"><label for="settings-wa-pfml-employer-share">Washington PFML: Employer share applies (as the agency determined)</label>
+                            <select name="payroll_wa_pfml_employer_share" id="settings-wa-pfml-employer-share" aria-describedby="settings-wa-pfml-employer-share-help">
+                                <option value="headcount" ${!['yes', 'no'].includes(s.payroll_wa_pfml_employer_share) ? 'selected' : ''}>Follow the headcount at each pay run (50 or more employees working in Washington)</option>
+                                <option value="yes" ${s.payroll_wa_pfml_employer_share === 'yes' ? 'selected' : ''}>Yes: ESD determined the employer share applies</option>
+                                <option value="no" ${s.payroll_wa_pfml_employer_share === 'no' ? 'selected' : ''}>No: ESD determined it does not apply</option>
+                            </select>
+                            <div id="settings-wa-pfml-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">ESD tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
+                        </div>
+                        <div class="form-group full-width"><label for="settings-or-paid-leave-employer-share">Paid Leave Oregon: Employer share applies (as the agency determined)</label>
+                            <select name="payroll_or_paid_leave_employer_share" id="settings-or-paid-leave-employer-share" aria-describedby="settings-or-paid-leave-employer-share-help">
+                                <option value="headcount" ${!['yes', 'no'].includes(s.payroll_or_paid_leave_employer_share) ? 'selected' : ''}>Follow the headcount at each pay run (25 or more employees)</option>
+                                <option value="yes" ${s.payroll_or_paid_leave_employer_share === 'yes' ? 'selected' : ''}>Yes: OED determined the employer share applies</option>
+                                <option value="no" ${s.payroll_or_paid_leave_employer_share === 'no' ? 'selected' : ''}>No: OED determined it does not apply</option>
+                            </select>
+                            <div id="settings-or-paid-leave-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">OED tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="settings-section" data-group="connections" id="settings-deposits" role="group" aria-labelledby="settings-h-deposits">
                     <h3 id="settings-h-deposits">Deposits</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -875,6 +903,36 @@ const SettingsPage = {
                     </div>
                 </div>
 
+                <!-- SlowBooks Switchboard (#829): words and links only. The
+                     program is its own public repository; nothing of it runs
+                     inside SlowBooks Pro, and this block has no setting. -->
+                <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
+                    <h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
+                        Model Context Protocol work this company's books. It is a free program of its own,
+                        <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
+                        with a <strong>bookkeeper API token</strong> you make under Users and security, API Tokens
+                        (read-only for an agent that only reports). It does only what that token's role allows,
+                        and every change it makes is in the audit log as <code>token:&lt;label&gt;</code>.
+                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        The token stays on this computer, and Switchboard sends nothing anywhere but this
+                        SlowBooks Pro. For Claude on the web it has a self-hosted door, <code>sbplive serve-http</code>,
+                        behind your own Cloudflare Tunnel; nothing of the books can be reached from outside this
+                        computer unless you set that door up. What Claude reads from the books goes to Claude,
+                        as with any agent.
+                    </div>
+                    <div style="font-size:11px;">
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md" target="_blank" rel="noopener">The guide</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md" target="_blank" rel="noopener">Claude on the web: the self-hosted door</a>
+                    </div>
+                </div>
+
                 <div class="settings-section" data-group="connections" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
                     <h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -957,8 +1015,8 @@ const SettingsPage = {
                     </div>
                     <h4 id="settings-h-reminder-rules" style="margin:12px 0 4px; font-size:12px;">Reminder rules</h4>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached.
-                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ company_name }}
+                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached. On or before the due date, "0 days overdue" is written as due today (or tomorrow, or in so many days).
+                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ due_status }} {{ company_name }}
                     </div>
                     <div id="reminder-rules-list"></div>
                 </div>
@@ -1138,6 +1196,14 @@ const SettingsPage = {
                             </select>
                             <div id="settings-check-position-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Where the check sits on the sheet. Check at the bottom prints two stubs and then the check. Check on top prints the check first and two vouchers below it, the way QuickBooks Desktop's standard voucher checks are laid out, so that stock can be used. The stock and the nudges apply to the check either way.</div>
                         </div>
+                        <div class="form-group full-width"><label for="settings-check-memo">Check memo</label>
+                            <select name="check_memo" id="settings-check-memo" aria-describedby="settings-check-memo-help">
+                                <option value="reference" ${!['memo', 'none'].includes(s.check_memo) ? 'selected' : ''}>The bill's number (196132)</option>
+                                <option value="memo" ${s.check_memo === 'memo' ? 'selected' : ''}>The bill's memo</option>
+                                <option value="none" ${s.check_memo === 'none' ? 'selected' : ''}>Nothing</option>
+                            </select>
+                            <div id="settings-check-memo-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">What Pay Bills puts on the memo line of the check: the number the bill was entered under (the vendor's own numbering), the bill's whole memo, or nothing. A check paying several bills lists their numbers (196132, 196140). A bill numbered by SlowBooks because its number was left blank has no reference, so its memo is used instead. The memo can still be changed on the payment before the check prints, and a memo typed there is kept.</div>
+                        </div>
                         <div class="form-group"><label>Horizontal nudge (in)</label>
                             <input name="check_nudge_x_in" type="number" min="-0.5" max="0.5" step="0.01"
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
@@ -1147,6 +1213,13 @@ const SettingsPage = {
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
                                 value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
                         ${SettingsPage._checkFieldLayoutHtml(s.check_field_layout, s.check_position)}
+                        <div class="form-group full-width">
+                            <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
+                                <input type="checkbox" id="settings-check-amount-no-dollar-sign" name="check_amount_no_dollar_sign" value="true" data-bool aria-describedby="settings-check-amount-no-dollar-sign-help" style="width:auto; margin:0;" ${s.check_amount_no_dollar_sign === 'true' ? 'checked' : ''}>
+                                <label for="settings-check-amount-no-dollar-sign" style="font-weight:normal; margin:0;">Leave the dollar sign off the amount</label>
+                            </div>
+                            <div id="settings-check-amount-no-dollar-sign-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">For check stock that prints its own dollar sign beside the amount box: the amount prints as 1,234.56 instead of $1,234.56. The amount in words and the stubs are unchanged.</div>
+                        </div>
                         <div class="form-group full-width">
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
                                 <input type="checkbox" id="settings-check-blank-stock" name="check_blank_stock" value="true" data-bool aria-describedby="settings-check-blank-stock-help" style="width:auto; margin:0;" ${s.check_blank_stock === 'true' ? 'checked' : ''}>
@@ -1256,7 +1329,10 @@ const SettingsPage = {
                         benefits, deductions, and employees added and edited, never
                         deleted, with no portal logins, bank accounts or documents)
                         or <em>import</em> (the migration imports). A revoked token
-                        stays revoked: make a new one instead.
+                        stays revoked: make a new one instead. A bookkeeper token is
+                        what <code>sbplive setup</code> asks for, to let Claude work
+                        the books through SlowBooks Switchboard (Connections, Claude
+                        and agents); make a read-only one for an agent that only reports.
                     </p>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
@@ -3230,15 +3306,18 @@ const SettingsPage = {
     },
 
     // Opens a sample check PDF in a new tab (#440) with the stock, check
-    // position (#727), nudge and field layout (#749) as they stand in the form — saved or not — so a nudge can be tried
+    // position (#727), nudge, field layout (#749) and dollar sign (#799) as they stand in the form — saved or not — so a nudge can be tried
     // before it is saved.
     testPrintCheck() {
         const form = document.getElementById('settings-form');
         const params = new URLSearchParams();
-        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout']) {
+        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout', 'check_amount_no_dollar_sign']) {
             const el = form && form.querySelector(`[name="${name}"]`);
             if (el) params.set(name, el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value);
         }
+        // the sample memo follows the Check memo choice (#800)
+        const memoChoice = form && form.querySelector('[name="check_memo"]');
+        if (memoChoice) params.set('check_memo', memoChoice.value);
         const qs = params.toString();
         window.open('/api/checks/test-print' + (qs ? `?${qs}` : ''), '_blank');
     },

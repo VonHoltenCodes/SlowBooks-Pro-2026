@@ -32,6 +32,10 @@ KIND_EMPLOYEE_DOCUMENT = "employee_document"
 # A scanned receipt the person has not saved a document for yet. It becomes
 # an attachment when they do, and is swept after a day when they don't.
 KIND_RECEIPT_SCAN = "receipt_scan"
+# A file dropped on a new bill, expense or card charge before its first save
+# (#796). It becomes that document's attachment when the form saves, and is
+# swept after a day when the form is abandoned.
+KIND_PENDING_ATTACHMENT = "pending_attachment"
 
 
 def _utcnow() -> datetime:

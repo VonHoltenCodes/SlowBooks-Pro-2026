@@ -182,9 +182,10 @@ const BillsPage = {
             </div>`);
     },
 
-    // The check's memo line, editable before the check prints (#602): a
-    // payment of one bill starts with that bill's memo, a payment of
-    // several starts blank. Only a payment that prints a check shows it.
+    // The check's memo line, editable before the check prints (#602): it
+    // starts as Settings, Check Printing, Check memo chooses (#800), the
+    // bills' invoice numbers, one bill's memo or nothing. Only a payment
+    // that prints a check shows it.
     _checkMemoHtml(p) {
         const byCheck = !p.method || p.method === 'check' || !!p.check_number;
         if (p.is_voided || !byCheck) return '';
@@ -466,6 +467,7 @@ const BillsPage = {
         BillsPage._formBillId = bill ? bill.id : null;
         const terms = bill && bill.terms ? bill.terms : 'Net 30';
         await PaymentTerms.load();
+        PendingFiles.reset();  // files attached before the first save (#796)
 
         openModal(bill ? `Edit Bill ${bill.bill_number}` : 'Enter Bill', `
             <div class="bill-with-summary"><div class="bill-with-summary__form">
@@ -499,12 +501,13 @@ const BillsPage = {
                 </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes">${bill ? escapeHtml(bill.notes || '') : ''}</textarea></div>
+                ${bill ? '' : PendingFiles.stripHtml()}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="ScanHelper.discard(); closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">${bill ? 'Save Changes' : 'Save Bill'}</button>
                 </div>
             </form></div>
-            <aside id="bill-vendor-summary" class="bill-vendor-summary" aria-label="Vendor summary" aria-live="polite" hidden></aside></div>`, { wide: true });
+            <aside id="bill-vendor-summary" class="bill-vendor-summary" aria-label="Vendor summary" aria-live="polite" hidden></aside></div>`, { wide: true, onClose: () => PendingFiles.discard() });
         BillsPage._summaryFor = null;
         typeof LineOrder !== 'undefined' && LineOrder.attach('#bill-lines', { add: () => BillsPage.addLine(), changed: () => BillsPage.recalc() });
         BillsPage.termsHint();
@@ -912,7 +915,8 @@ const BillsPage = {
                 // stock already sold that the edit took below zero (W-67): posted, and said
                 for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             } else {
-                const result = await API.post('/bills', body);
+                const result = await API.post('/bills', { ...body, pending_attachments: PendingFiles.ids() });
+                PendingFiles.saved();
                 await ScanHelper.attachAfterSave('bill', result.id);
                 toastPosted('Bill saved');
                 // use tax owed at a rate of 0: posted, and said
