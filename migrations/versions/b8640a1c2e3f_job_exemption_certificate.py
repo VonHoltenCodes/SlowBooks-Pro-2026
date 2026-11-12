@@ -5,7 +5,7 @@ The certificate lives on the job: its number, state (or jurisdiction), kind
 job starts with none, as every job is charged until it is marked exempt.
 
 Revision ID: b8640a1c2e3f
-Revises: a4c8e2f6b0d3
+Revises: b7d2e4f6a8c1
 Create Date: 2026-11-12
 """
 
@@ -15,7 +15,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "b8640a1c2e3f"
-down_revision: Union[str, None] = "a4c8e2f6b0d3"
+down_revision: Union[str, None] = "b7d2e4f6a8c1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

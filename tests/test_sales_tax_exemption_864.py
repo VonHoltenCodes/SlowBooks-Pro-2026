@@ -922,8 +922,8 @@ def test_the_job_certificate_migration(tmp_path):
     db = tmp_path / "cert.db"
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_revision("b8640a1c2e3f").down_revision == "a4c8e2f6b0d3"
-    command.upgrade(cfg, "a4c8e2f6b0d3")  # the step below it (#795)
+    assert script.get_revision("b8640a1c2e3f").down_revision == "b7d2e4f6a8c1"
+    command.upgrade(cfg, "b7d2e4f6a8c1")  # the step below it (#795)
     with sqlite3.connect(db) as conn:
         conn.execute("INSERT INTO customers (id, name, is_active) VALUES (1, 'C', 1)")
         conn.execute(
@@ -949,7 +949,7 @@ def test_the_job_certificate_migration(tmp_path):
     # the customer and the permit record are untouched
     assert _cols(db, "customers") == customers_before
     assert _cols(db, "reseller_permits") == permits_before
-    command.downgrade(cfg, "a4c8e2f6b0d3")
+    command.downgrade(cfg, "b7d2e4f6a8c1")
     assert not added & _cols(db, "jobs")
 
 
