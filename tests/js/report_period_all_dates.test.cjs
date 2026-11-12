@@ -51,3 +51,9 @@ test('With no books yet, All dates is the fiscal year to date', async () => {
         start: `${today.getFullYear()}-01-01`, end: iso(today),
     });
 });
+
+test('Prev and Next are disabled on All dates and live on every other period (#813)', () => {
+    const { R } = load(null);
+    assert.equal(R.periodSteps('all_dates'), false);
+    for (const p of ['this_month', 'this_fiscal_year', 'last_year', 'custom']) assert.equal(R.periodSteps(p), true, p);
+});

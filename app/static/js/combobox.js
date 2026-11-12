@@ -252,6 +252,9 @@ class ComboBox {
                 // keyboard user tabbing past the cell
                 explicit: opt.hasAttribute('data-explicit'),
                 blank: opt.value === '',        // "Select...": no choice
+                // ...unless its words are a choice: a report's "All" or
+                // "All classes" is the whole list, found by typing it (#813)
+                every: opt.value === '' && /^all\b/i.test(text),
             });
         }
         this._items = out;
@@ -271,7 +274,7 @@ class ComboBox {
         const words = q.split(' ');
         const hits = [];
         items.forEach((it, i) => {
-            if (it.action || it.blank) return;
+            if (it.action || (it.blank && !it.every)) return;
             if (!words.every(w => it.lower.includes(w))) return;
             const rank = it.lower.startsWith(q) ? 0
                 : words.every(w => it.words.some(x => x.startsWith(w))) ? 1 : 2;

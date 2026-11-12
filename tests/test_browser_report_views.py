@@ -1572,14 +1572,19 @@ def test_all_dates_runs_from_the_first_transaction_and_stays_in_the_address(
         q = _query(_hash(page))
         assert q["period"] == "all_dates"
         assert (q["start_date"], q["end_date"]) == (first, today)
+        # Prev / Next have nothing to step to on All dates: disabled (#813)
+        steps = "() => ['#report-period-prev', '#report-period-next'].map(s => document.querySelector(s).disabled)"
+        assert page.evaluate(steps) == [True, True]
         # the period is picked from the list like any other
         page.select_option("#report-period-select", "this_year_to_date")
         settle(page, handled)
         page.wait_for_function("() => /period=this_year_to_date/.test(location.hash)")
+        assert page.evaluate(steps) == [False, False]
         page.select_option("#report-period-select", "all_dates")
         settle(page, handled)
         page.wait_for_function("() => /period=all_dates/.test(location.hash)")
         assert _query(_hash(page))["start_date"] == first
+        assert page.evaluate(steps) == [True, True]
     finally:
         page.close()
     page = _open_at(browser, company, "#/reports/balance-sheet")[0]

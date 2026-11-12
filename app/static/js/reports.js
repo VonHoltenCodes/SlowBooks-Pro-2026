@@ -1195,6 +1195,13 @@ const ReportsPage = {
         return ReportsPage._isoDate(new Date(first.getFullYear(), first.getMonth(), day));
     },
 
+    // Whether Prev / Next has a period to step to: All dates is every
+    // date there is, so both are disabled on it rather than left looking
+    // live and doing nothing (#813).
+    periodSteps(period) {
+        return period !== "all_dates";
+    },
+
     // Previous / Next period on the open report (-1 / 1).
     stepPeriod(dir) {
         if (ReportsPage._live && ReportsPage._live.step) ReportsPage._live.step(dir);
@@ -1449,6 +1456,11 @@ const ReportsPage = {
             const stops = () => [...content.querySelectorAll('a[href], button, input, select, [tabindex]')];
             const focusAt = again && content.contains(document.activeElement) ? stops().indexOf(document.activeElement) : -1;
             ReportsPage.toggleCustomRange();
+            const steps = ReportsPage.periodSteps(select.value);
+            for (const id of ['report-period-prev', 'report-period-next']) {
+                const b = document.getElementById(id);
+                if (b) b.disabled = !steps;
+            }
             const custom = select.value === 'custom';
             if (!useAsOfOnly && custom) {
                 const keep = lastRange || ReportsPage.getDateRange(initialPeriod);
