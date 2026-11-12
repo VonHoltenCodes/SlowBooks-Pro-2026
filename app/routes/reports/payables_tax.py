@@ -147,8 +147,10 @@ def sales_tax_report(
 def _sales_tax_cash(db: Session, start_date, end_date):
     """The report on the cash basis (#483): the tax collected on money
     received in the dates, each payment's allocation to an invoice taking
-    that invoice's sales, taxable amount and tax in the proportion paid (the
-    proportion the payment's own 2200 cash lines were written in). Credit
+    that invoice's sales, taxable amount and tax by the running-total rule
+    its own 2200 cash lines were written by (#804): the rounded share of
+    all that has been settled less what the earlier settlements took, so a
+    fully paid invoice reads its whole tax, as 2200 does. Credit
     memos are accrual documents and never counted: no cash came for them.
     An early-payment discount is the exception (#664): it settles its share
     as a payment does, and its cash lines take that share of the tax."""
@@ -190,10 +192,15 @@ def _sales_tax_cash(db: Session, start_date, end_date):
         for pay in payments
         for alloc in pay.allocations
     ] + [(cm, cm.original_invoice, cm.total) for cm in discounts]
+    in_dates = {(type(pay).__name__, pay.id) for pay, _inv, _amount in settled}
+    invoices = {
+        inv.id: inv
+        for _pay, inv, _amount in settled
+        if inv is not None and inv.status != InvoiceStatus.VOID
+    }
+    settlements = _settlements_of(db, list(invoices))
     rows = []
-    for pay, inv, amount in settled:
-        if inv is None or inv.status == InvoiceStatus.VOID:
-            continue
+    for inv in invoices.values():
         fx = Decimal(str(inv.exchange_rate or 1))
         # The base the payment's own cash lines were prorated on: the
         # invoice's amount due when it was issued, net of the retainage
@@ -206,23 +213,33 @@ def _sales_tax_cash(db: Session, start_date, end_date):
             + Decimal(str(inv.retainage_released or 0)),
             fx,
         )
-        applied = to_home(amount, fx)
-        if due == 0 or applied == 0:
+        if due == 0:
             continue
-        ratio = applied / due
         tax_full = to_home(inv.tax_amount or 0, fx)
         taxable_full = (
             to_home(taxable_subtotal(inv.lines), fx) if tax_full > 0 else _q(0)
         )
-        rows.append(
-            (
-                pay,
-                inv,
-                _q(to_home(inv.subtotal or 0, fx) * ratio),
-                _q(taxable_full * ratio),
-                _q(tax_full * ratio),
-            )
-        )
+        subtotal_full = to_home(inv.subtotal or 0, fx)
+        # Each settlement takes the rounded running total less what the
+        # ones before it took (#804), as its cash lines do, so a fully
+        # settled invoice reads its whole tax here and on 2200. The ones
+        # before the dates count toward the running total, unlisted.
+        prior = Decimal("0")
+        for pay, applied in settlements[inv.id]:
+            applied = to_home(applied, fx)
+            if applied == 0:
+                continue
+            if (type(pay).__name__, pay.id) in in_dates:
+                rows.append(
+                    (
+                        pay,
+                        inv,
+                        cash_basis.running_share(subtotal_full, prior, applied, due),
+                        cash_basis.running_share(taxable_full, prior, applied, due),
+                        cash_basis.running_share(tax_full, prior, applied, due),
+                    )
+                )
+            prior += applied
     rows.sort(key=lambda r: (r[0].date, r[0].id, str(r[1].invoice_number)))
 
     items = [
@@ -258,6 +275,42 @@ def _sales_tax_cash(db: Session, start_date, end_date):
         "basis": "cash",
         "basis_note": cash_basis.receivable_note(db, end_date, "cash"),
     }
+
+
+def _settlements_of(db: Session, invoice_ids) -> dict:
+    """{invoice id: [(payment or discount credit memo, amount)]}: what
+    settles part of each invoice and stands, in the order it was entered
+    (date, then entry), which is the order its cash lines are settled in
+    (#804)."""
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.models.payments import Payment, PaymentAllocation
+
+    out: dict = {i: [] for i in invoice_ids}
+    if not out:
+        return out
+    for alloc, pay in (
+        db.query(PaymentAllocation, Payment)
+        .join(Payment, Payment.id == PaymentAllocation.payment_id)
+        .filter(
+            PaymentAllocation.invoice_id.in_(out),
+            Payment.is_voided.isnot(True),
+        )
+        .order_by(PaymentAllocation.id)
+    ):
+        out[alloc.invoice_id].append((pay, Decimal(str(alloc.amount or 0))))
+    for cm in (
+        db.query(CreditMemo)
+        .filter(
+            CreditMemo.original_invoice_id.in_(out),
+            CreditMemo.discount_payment_id.isnot(None),
+            CreditMemo.status != CreditMemoStatus.VOID,
+        )
+        .order_by(CreditMemo.id)
+    ):
+        out[cm.original_invoice_id].append((cm, Decimal(str(cm.total or 0))))
+    for settlements in out.values():
+        settlements.sort(key=lambda s: (s[0].date, s[0].transaction_id or 0))
+    return out
 
 
 def _sales_tax_ledger(

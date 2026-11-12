@@ -106,7 +106,9 @@ entry, dated the payment:
   debit, sales tax payable, a QuickBooks Online balancing line, plus any
   late fee posted on it — prorated by `applied / invoice total` in home
   currency, each share to the cent with the rounding cent on the largest
-  share, carrying the line's class, job, cost code, cost type and function
+  share, by the running-total rule (#804, "Partial payments" below): the
+  lines prorated to all that has been settled on the invoice, less what
+  the earlier settlements recognized, carrying the line's class, job, cost code, cost type and function
   (there is no item column on a ledger line; the item's income account is
   what the line carries). Same side as the original (income stays a
   credit, a discount stays a debit). One balancing Dr A/R (cash) for the
@@ -221,13 +223,31 @@ change in cash to the cent).
 ## The hard cases, and step 1's rule for each
 
 **Partial payments.** Prorated by amount over the document's recognition
-lines, every payment independently (`spread`'s rule: whole cents, the
-leftover cent on the share that lost most). Over three payments an
-income line can end a cent off its accrual figure while A/R nets to zero
-exactly; the final payment does not true it up (there is no column tying
-a cash line to its document, and the cent belongs to no period more than
-another). Accepted for v1; a `recognizes_invoice_id` column would let a
-later step true up.
+lines by a running total (#804; `settle` in `app/services/cash_basis.py`).
+A settlement — a payment's allocation, an early-payment discount, an
+unapplied remainder applied later — prorates the lines to the running
+total, what the document's standing settlements before it recognized plus
+what it applies, each line to the cent with the leftover cent on the
+largest share (`prorate`), and takes that less what those earlier
+settlements recognized, line by line, read from their cash lines through
+`recognizes_invoice_id` / `recognizes_bill_id`. Its lines add up to what it
+applied exactly; once the running total reaches the document's total every
+line is recognized whole, so the settlement that settles the document
+carries the rounding and the cash lines equal the accrual lines to the
+cent; a part paid never recognizes more tax than its rounded share of what
+has been paid. Example: 33.33 of income and 2.42 of tax paid in thirds
+(11.92, 11.92, 11.91) recognize tax 0.81, 0.80, 0.81 — rounded on its own,
+each third took 0.81, and the cash basis read 33.32 / 2.43 against
+33.33 / 2.42. "Before" is every standing settlement when a payment posts
+now, and those entered earlier (date, then entry) when the lines are
+rewritten; a voided payment or discount is not standing, though its lines
+stay in its entry beside their reversal. A payment posting, the backfill,
+an apply-later reclass, a discount and the recompute after an edit all go
+through `_recognition`, so they share the rule; the recompute rewrites a
+document's payments and discounts together, in the order they were
+entered, each after those before it. Lines written before the link existed
+name nothing and are not counted, so the next settlement after them rounds
+as it did before.
 
 **Credits applied, discounts, write-offs.** A credit memo is an accrual
 entry (Dr income / Cr A/R); applying it to an invoice posts nothing, and
@@ -453,6 +473,8 @@ the journal form's basis choice (see the step 3 PR).
    stands, still prorated per payment by the amount applied, except for
    payments on or before the closing date.
 8. **Independent proration per payment**; a cent may stay on a line.
+   Superseded by the running-total rule (#804, "Partial payments"): the
+   settling payment carries the rounding.
 9. **Payroll and journal entries are `both`** in step 1.
 10. **Review calls (Trent, #572):** 4950 / 6990 show up on any
     overpayment; a prepayment applied later writes its cash lines on the
@@ -479,8 +501,12 @@ the journal form's basis choice (see the step 3 PR).
     the invoices: each allocation in the dates takes the invoice's sales,
     taxable amount and tax by `applied / invoice total` (home currency).
     The ledger block (tax posted, paid, balance) reads 2200 on the basis, so
-    the two are checked against each other; a cent can differ from the
-    ledger (each payment's own lines are rounded to the largest share).
+    the two are checked against each other. Each settlement takes the
+    invoice's figures by the running-total rule (#804), counting the
+    settlements before the dates toward the running total, so a fully paid
+    invoice reads its whole tax on the report and on 2200; inside a part
+    paid invoice a cent can still differ in a period when the tax line is
+    the largest share (`prorate` puts the leftover cent on it).
 16. **Retainage releases are recognized on their payment** (v2.31.11): a paid release bill or release pay application
     recognizes the held documents' own lines, not 6990 / 4950, and an
     owner payment collects its tax whole with the net, so held owner
@@ -493,8 +519,10 @@ the journal form's basis choice (see the step 3 PR).
   Each payment prorates over the document's recognition lines as they
   stand that day; an edit now rewrites every payment's lines, but a late
   fee posted on the invoice is not an edit and shifts the split for the
-  later payment only. The totals stay exact. The link from a cash line to
-  its document could now true this up.
+  later payment only. The totals stay exact, and since #804 the running
+  total trues it up: the next payment takes the lines as they now stand
+  less what the earlier payments recognized, so the fee lands on it and
+  the invoice still ends equal on both bases.
 - **A payment that produces no cash lines, such as a $0 payment, is
   looked at again on every boot.** The backfill finds payments by "has no
   cash line", and nothing marks one that legitimately has none.
@@ -522,9 +550,10 @@ the journal form's basis choice (see the step 3 PR).
 
 - **A link from a cash line to its document** is built (step 2b:
   `recognizes_invoice_id` / `recognizes_bill_id`, nullable, no foreign key,
-  written by every new cash line; older lines stay NULL). Still open: using
-  it to true up the final payment's rounding and to give the cash-basis P&L
-  Detail a Name column.
+  written by every new cash line; older lines stay NULL). The true-up of
+  the final payment's rounding is done (#804, "Partial payments": the
+  running-total rule reads what earlier settlements recognized through it).
+  Still open: giving the cash-basis P&L Detail a Name column.
 - **The accountant's Trial Balance** (settled in step 2a): the package's
   Trial Balance and General Ledger follow the company basis with the
   statements; the agings stay as posted.
