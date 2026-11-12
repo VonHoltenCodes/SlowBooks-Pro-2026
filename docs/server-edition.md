@@ -205,6 +205,19 @@ charset=utf-8`), so a client that would otherwise guess the encoding, such
 as Windows PowerShell 5.1's `Invoke-RestMethod`, reads a dash or an accented
 name as stored. CSV downloads are UTF-8 with a byte-order mark.
 
+**An AI agent** (Claude Desktop, Claude Code or any other program that speaks
+the Model Context Protocol) works the books through **SlowBooks Switchboard**,
+a separate, free program, `sbplive`, run on the agent's computer
+([download](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases), [the guide](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md)). A **bookkeeper token** is what
+`sbplive setup` asks for (read-only for an agent that only reports); give
+setup this server's address, `https://` from the internet, or a plain
+`http://` address on the office network only. Switchboard does only what the
+token's role allows and sends nothing anywhere but this server; for Claude on
+the web, `sbplive serve-http` is a self-hosted door behind your own
+Cloudflare Tunnel ([the self-hosted door](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md)), and nothing is reachable
+from outside unless you set it up. Settings → Connections → Claude and agents
+has the same links.
+
 What a token can do:
 
 - Whatever its role allows: **bookkeeper** (daily books), **accountant**

@@ -35,7 +35,7 @@ download them, *Can run payroll* and *Can import* let a bookkeeper token run
 payroll (never deleting an employee or touching portal logins, bank accounts
 or documents) and the migration imports (the people an import would add to the Employees list, from a QuickBooks Online export's Employee Contact List or a QuickBooks Desktop time report, come in only by an explicit tick, `include_employees` / `add_employees`, and only for an administrator or a token that may run payroll; anyone else's import leaves them out and says so), the audit log names it `token:<label>`, a revoked token
 answers 401, and on a server with several companies it names its company in
-`X-SlowBooks-Company`. Sign-ins end after four hours idle and when a user is
+`X-SlowBooks-Company`. An AI agent works the books through **SlowBooks Switchboard** (`sbplive`, below) with a bookkeeper token. Sign-ins end after four hours idle and when a user is
 deactivated, re-roled or given a new password. **A read never writes**: a
 list or report shows a default (the Uncategorized class, the job-cost types,
 a nonprofit's net-asset accounts) without saving it; the default is saved at
@@ -438,6 +438,10 @@ curl -f -H "$H" http://localhost:3001/api/analytics/export.csv > snapshot.csv
 curl -f -H "$H" http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 ```
 (Without the header every `/api/` path answers 401, and `-o` would save that JSON as the file.)
+
+### Claude and agents: SlowBooks Switchboard (sbplive)
+
+**SlowBooks Switchboard** (v2.32.0, #829) is the way Claude Desktop, Claude Code and any other agent that speaks the Model Context Protocol works a company's books. It is a separate, free program (Apache 2.0, its own public repository; nothing of it lives in SlowBooks Pro), `sbplive`, that runs on the user's computer and reaches SlowBooks Pro through the REST API with an API token made under Settings → Users and security → API Tokens: a **bookkeeper token** is what `sbplive setup` asks for (read-only for an agent that only reports, accountant for an accountant's agent). It does what that token's role allows and nothing more, every change is in the audit log as `token:<label>`, and SlowBooks Pro decides every request as it does a person's. `sbplive setup` checks the token, keeps it for that user only and connects Claude Desktop and Claude Code; `sbplive status` and `sbplive disconnect` check and undo it, and revoking the token locks it out for good. The token never leaves the computer and Switchboard sends nothing anywhere but SlowBooks Pro; `sbplive serve-http` is the self-hosted door for Claude on the web, behind the user's own Cloudflare Tunnel with an administrator's sign-in, and nothing is reachable from outside unless the user sets that door up. What the agent reads from the books goes to its model's provider, as above. Settings → Connections → **Claude and agents** links it. [Download](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases) · [The guide](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md) · [The self-hosted door](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md)
 
 ## Online Payments
 - **Stripe, PayPal and Square** — Accept online payments on invoices through each provider's hosted checkout page, any combination enabled at once (one abstraction, `app/services/payments/`). Customers click "Pay Online" in an emailed invoice, pay on the provider's page, and the payment records with its journal entry (DR Undeposited Funds, CR A/R, or the clearing account below). Invoices in the home currency, USD

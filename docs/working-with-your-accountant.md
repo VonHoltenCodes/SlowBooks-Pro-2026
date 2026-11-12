@@ -53,7 +53,9 @@ made as an administrator before 2.29.0 is refused since 2.31.2 and flagged in
 the list; revoke it and make a new one). It wears the same limits as the
 role, every change it makes is attributed to `token:<label>` in the audit
 log, and on a server with several companies its requests name the company
-with `X-SlowBooks-Company`. Details in [server-edition.md](server-edition.md),
+with `X-SlowBooks-Company`. An agent such as Claude works the books through
+[SlowBooks Switchboard](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md) (`sbplive`, [download](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases)),
+whose `sbplive setup` takes the token. Details in [server-edition.md](server-edition.md),
 "API tokens". An accountant's sign-in or token reads your estimates without
 their cost side (each line's unit cost and markup, the packages' cost, the
 cost of work, the budget cost and the estimate's cost, profit and margin):
