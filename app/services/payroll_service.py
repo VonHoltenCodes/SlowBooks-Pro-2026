@@ -617,6 +617,7 @@ def calculate_withholdings(
     year: int | None = None,
     employee_count: int | None = None,
     state_employee_count: int | None = None,
+    employer_share_applies: bool | None = None,
 ) -> dict:
     """Compute a full set of payroll taxes for one employee for one pay period.
 
@@ -638,6 +639,11 @@ def calculate_withholdings(
     in pretax_deductions. ``pretax_state`` is the amount that reduces STATE
     income-tax wages (None = same as federal); the benefits engine tracks
     the three bases separately because a code can reduce any combination.
+
+    ``employer_share_applies`` is the work state's paid-leave employer
+    share as the agency determined it (Settings → Payroll, #825): True or
+    False outranks ``employee_count`` / ``state_employee_count``; None (the
+    default) follows them.
 
     Returns employee-side withholding, employer-side taxes, the per-state
     results, and an itemized ``detail`` map for pay-stub / form rendering.
@@ -738,6 +744,10 @@ def calculate_withholdings(
         # employees working in Washington (50+)
         employee_count=employee_count,
         state_employee_count=state_employee_count,
+        # the work state's leave-program employer share as the agency
+        # determined it (#825): True or False outranks the headcounts,
+        # None follows them
+        employer_share_applies=employer_share_applies,
     )
     engine = get_engine(work_state, year)
     state = engine.calculate(

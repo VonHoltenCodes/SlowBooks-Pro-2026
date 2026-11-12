@@ -302,6 +302,13 @@ DEFAULT_SETTINGS = {
     "payroll_futa_account_id": "",
     "payroll_suta_account_id": "",
     "payroll_other_deductions_account_id": "",
+    # The paid-leave employer share as the agency determined it (#825):
+    # "yes" (ESD / OED determined it applies), "no" (it does not), or
+    # "headcount", the pay run's own count (Washington PFML from 50
+    # employees working in Washington, Paid Leave Oregon from 25), the
+    # behaviour before the setting. services/state_tax/employer_share.py.
+    "payroll_wa_pfml_employer_share": "headcount",
+    "payroll_or_paid_leave_employer_share": "headcount",
     # Memorized transactions and recurring invoices (#605): "true" (the
     # default) enters every due auto-enter schedule when the app opens and
     # once a day while it runs, every missed occurrence in order
