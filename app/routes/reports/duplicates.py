@@ -9,7 +9,7 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Query, Request
+from fastapi import Depends, HTTPException, Path, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -21,7 +21,7 @@ from app.routes.reports.financial import (
     _pdf_response,
     _range_or_year,
 )
-from app.schemas.common import StrictModel
+from app.schemas.common import BIGINT_MAX, StrictModel
 from app.services import possible_duplicates as pd
 
 
@@ -41,7 +41,7 @@ def _filename(data, ext):
 
 @router.get("/possible-duplicates")
 def possible_duplicates_route(
-    account_id: Optional[int] = Query(default=None),
+    account_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     include_dismissed: bool = Query(default=False),
@@ -57,7 +57,7 @@ def possible_duplicates_route(
 @router.get("/possible-duplicates/csv")
 def possible_duplicates_csv_route(
     request: Request,
-    account_id: Optional[int] = Query(default=None),
+    account_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     include_dismissed: bool = Query(default=False),
@@ -71,7 +71,7 @@ def possible_duplicates_csv_route(
 
 @router.get("/possible-duplicates/pdf")
 def possible_duplicates_pdf_route(
-    account_id: Optional[int] = Query(default=None),
+    account_id: Optional[int] = Query(default=None, le=BIGINT_MAX),
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     include_dismissed: bool = Query(default=False),
@@ -105,7 +105,9 @@ def dismiss_possible_duplicate(data: DismissGroup, db: Session = Depends(get_db)
 
 
 @router.delete("/possible-duplicates/dismissals/{dismissal_id}")
-def restore_possible_duplicate(dismissal_id: int, db: Session = Depends(get_db)):
+def restore_possible_duplicate(
+    dismissal_id: int = Path(le=BIGINT_MAX), db: Session = Depends(get_db)
+):
     """Put a dismissed group back on the report."""
     row = db.get(DuplicateDismissal, dismissal_id)
     if row is None:

@@ -17,6 +17,7 @@ from app.database import get_db
 from app.routes._helpers import refuse_unknown_filters
 from app.routes.reports._router import router
 from app.routes.reports.construction import _csv_cell, _pdf_cell
+from app.schemas.common import BIGINT_MAX
 from app.routes.reports.financial import _company_name, _csv_download, _pdf_response
 from app.services.csv_export import _SafeWriter
 from app.services.estimate_closing_report import estimate_closing_report
@@ -26,7 +27,7 @@ from app.services.terminology import terms_from_db
 # bounded so an id past a 64-bit integer is a 422, not a database overflow
 _CUST_Q = Annotated[
     Optional[int],
-    Query(description="Only this customer's estimates", le=9223372036854775807),
+    Query(description="Only this customer's estimates", le=BIGINT_MAX),
 ]
 _TYPE_Q = Annotated[
     Optional[str],

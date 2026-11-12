@@ -4,9 +4,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Query, Request
+from fastapi import Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response
-from app.schemas.common import StrictModel
+from app.schemas.common import BIGINT_MAX, StrictModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -646,7 +646,7 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
 
 @router.get("/customer-statement/{customer_id}/pdf")
 def customer_statement_pdf(
-    customer_id: int,
+    customer_id: int = Path(le=BIGINT_MAX),
     as_of_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
