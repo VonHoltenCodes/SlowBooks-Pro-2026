@@ -229,7 +229,10 @@ const TaxFormsPage = {
         try {
             const data = await API.get(`/tax-forms/1099?year=${year}`);
             if (!data.vendors.length) {
-                return '<option value="">No 1099-NEC vendors: mark vendors "1099 Vendor: Yes" on the Vendors page</option>';
+                // a 1099 vendor paid nothing in the year is not listed (#813)
+                return data.unpaid
+                    ? `<option value="">No 1099-NEC vendor was paid in ${escapeHtml(String(data.year))}</option>`
+                    : '<option value="">No 1099-NEC vendors: mark vendors "1099 Vendor: Yes" on the Vendors page</option>';
             }
             for (const v of data.vendors) {
                 html += `<option value="${v.vendor_id}">${escapeHtml(v.name)} — ${formatCurrency(v.total_paid)}${v.reportable ? '' : ` (under ${formatCurrency(data.threshold)})`}</option>`;

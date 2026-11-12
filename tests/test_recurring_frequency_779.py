@@ -135,9 +135,12 @@ def test_the_api_schema_lists_the_allowed_frequencies(client):
 
 def test_every_frequency_the_form_offers_is_one_the_api_accepts():
     js = RECURRING_JS.read_text(encoding="utf-8")
-    m = re.search(r"<select name=\"frequency\">\s*\$\{\[([^\]]*)\]", js)
-    assert m, "the recurring form's frequency select was not found"
-    offered = re.findall(r"'([^']+)'", m.group(1))
+    # the select draws RecurringPage.FREQUENCIES, [value, words] pairs (#813)
+    assert '<select name="frequency">' in js
+    assert "RecurringPage.FREQUENCIES.map(" in js
+    m = re.search(r"FREQUENCIES: \[(.*?)\n    \],", js, re.S)
+    assert m, "the recurring form's frequencies were not found"
+    offered = re.findall(r"\['(\w+)', '[^']+'\]", m.group(1))
     assert offered, "the frequency select offers nothing"
     assert set(offered) <= set(FREQUENCIES)
     assert "monthly" in offered

@@ -500,7 +500,7 @@ const JournalPage = {
         const form = document.querySelector('#modal-body form');
         if (!form) return;
         form.dataset.entryId = entry.id;
-        form.date.value = entry.date;
+        form.date.defaultValue = form.date.value = entry.date;  // the saved date (TxnWarn.ok, #813)
         if (form.reference) form.reference.value = entry.reference || '';
         form.description.value = entry.description || '';
         if (form.is_adjusting) form.is_adjusting.checked = !!entry.is_adjusting;

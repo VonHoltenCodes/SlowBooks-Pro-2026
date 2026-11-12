@@ -2,8 +2,8 @@ from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Annotated, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
-from app.schemas.common import MAX_PERCENT, StrictModel, choice_error
+from pydantic import BaseModel, BeforeValidator, Field, field_validator
+from app.schemas.common import MAX_PERCENT, StrictModel, choice_error, whole_cents
 
 from app.models.jobs import (
     CONTRACT_TYPES,
@@ -219,7 +219,13 @@ class SovLineIn(StrictModel):
     kind: str = "work"
     # A scheduled value may be negative — a deduct alternate carried onto the
     # schedule reduces the contract sum (#551 allows a deduct alternate).
-    scheduled_value: SignedMoney = Decimal("0")
+    # It is in whole cents: 33.335 and 66.665 were rounded to 33.34 and
+    # 66.67, and a 100.00 contract came to 100.01 with a -0.01 balance
+    # (2.30.0 gate, #813); refused in a sentence, as a line's figures are
+    # since #782.
+    scheduled_value: Annotated[
+        SignedMoney, BeforeValidator(whole_cents("A scheduled value"))
+    ] = Decimal("0")
 
     @field_validator("kind")
     @classmethod

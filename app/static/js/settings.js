@@ -176,7 +176,9 @@ const SettingsPage = {
         const ticked = new Set(chosen);
         h += '<fieldset class="form-group full-width" aria-describedby="settings-deposit-accounts-help" style="border:0; padding:0; margin:0;">';
         h += '<legend style="font-weight:700; font-size:11px; padding:0;">Deposit into these accounts</legend>';
-        const box = (id, words) => '<label style="display:block; font-weight:normal;">'
+        // each box's own words, as typed: the form's labels are upper-case
+        // by CSS, and VoiceOver read "1000 - CHECKING" (#813)
+        const box = (id, words) => '<label style="display:block; font-weight:normal; text-transform:none; letter-spacing:0;">'
             + '<input type="checkbox" name="deposit-account:' + escapeHtml(id) + '" data-deposit-account="' + escapeHtml(id) + '"'
             + (ticked.has(id) ? ' checked' : '') + ' style="width:auto; vertical-align:middle; margin-right:6px;">'
             + escapeHtml(words) + '</label>';

@@ -279,10 +279,24 @@ def company_noun(db: Session, noun: str) -> str:
     return terms_from_db(db)(noun)
 
 
+def _shown(text: str) -> str:
+    """Terms as a note quotes them: each run of whitespace one space, so a
+    tab or a no-break space typed into them is not printed raw ("net⇥45",
+    #813)."""
+    return " ".join((text or "").split())
+
+
+def _listed_name(db: Session, text: str) -> str:
+    """The list's own name for terms it has an entry for ("Net 45" for
+    "net\t45"), else the terms as shown."""
+    term = find_term(db, text)
+    return term.name if term is not None else _shown(text)
+
+
 def unrecognised_note(text: str, noun: str = "invoice") -> str:
     """The note for terms a new document is about to be saved with."""
     return (
-        f'"{text.strip()}" isn\'t on the terms list, so the due date is '
+        f'"{_shown(text)}" isn\'t on the terms list, so the due date is '
         f"{FALLBACK_DAYS} days from the {noun} date. {ADD_IT}"
     )
 
@@ -301,14 +315,15 @@ def stored_note(db: Session, doc, noun: str, listed=None) -> str:
     if listed:
         # true of a document saved before the term and of a copy of one (a
         # duplicate, a schedule's next document), which keeps its source's
-        # reading (#665)
+        # reading (#665); the term is named as the list names it (#813)
         head = (
-            f'This {noun}\'s terms were first saved before "{text}" was on the '
+            f"This {noun}'s terms were first saved before "
+            f'"{_listed_name(db, text)}" was on the '
             "terms list, so it keeps their old reading, not that term's rule"
         )
         tail = ""
     else:
-        head = f'"{text}" isn\'t on the terms list'
+        head = f'"{_shown(text)}" isn\'t on the terms list'
         tail = f" {ADD_IT}"
     due, on = doc.due_date, doc.date
     if due is None:
@@ -735,7 +750,8 @@ def document_terms_dates(db: Session, doc, on: date, noun: str) -> TermsDates:
     if rule is None:
         text = doc.terms.strip()
         note = (
-            f'This {noun}\'s terms were first saved before "{text}" was on the '
+            f"This {noun}'s terms were first saved before "
+            f'"{_listed_name(db, text)}" was on the '
             "terms list, so it keeps their old reading: the due date is "
             f"{FALLBACK_DAYS} days from the {noun} date."
             if find_term(db, text) is not None

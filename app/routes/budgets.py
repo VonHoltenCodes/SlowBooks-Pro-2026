@@ -120,6 +120,7 @@ def budget_variance(
         .all()
     )
 
+    paths = _account_paths(db)
     actual_map = {}
     for acct_id, month, amount in actuals:
         actual_map.setdefault(acct_id, {})[int(month)] = float(amount)
@@ -147,6 +148,7 @@ def budget_variance(
             {
                 "account_id": acct_id,
                 "account_name": info.get("name", ""),
+                "account_path": paths.get(acct_id) or info.get("name", ""),
                 "account_number": info.get("number", ""),
                 "account_type": info.get("type", ""),
                 "months": months,
@@ -168,6 +170,16 @@ def budget_variance(
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 # the accounts the Budgets page has a row for (budgets.js)
 BUDGET_TYPES = ("expense", "income", "cogs")
+
+
+def _account_paths(db: Session) -> dict:
+    """{id: "Payroll Expenses: Taxes"}: each account by its path from the
+    top parent down, as the reports name it. A QuickBooks import names a
+    sub-account by its leaf, and "Taxes" alone does not say whose (#813)."""
+    from app.services.statement_layout import account_chart, account_path
+
+    chart = account_chart(db)
+    return {aid: account_path(chart, aid) for aid in chart}
 
 
 def _account_words(db: Session, name: str, number, sep: str) -> str:
@@ -208,12 +220,15 @@ def print_budgets(
     amounts: dict = {}
     for b in list_budgets(year=year, account_id=account_id, db=db):
         amounts.setdefault(b.account_id, {})[b.month] = b.amount
+    paths = _account_paths(db)
     rows = []
     for a in accounts:
         mine = amounts.get(a.id, {})
         rows.append(
             {
-                "cells": [_account_words(db, a.name, a.account_number, " ")]
+                "cells": [
+                    _account_words(db, paths.get(a.id) or a.name, a.account_number, " ")
+                ]
                 + [_money(mine[m]) if mine.get(m) else "" for m in range(1, 13)]
             }
         )
@@ -246,7 +261,7 @@ def print_budget_variance(
             {
                 "cells": [
                     _account_words(
-                        db, acct["account_name"], acct["account_number"], " — "
+                        db, acct["account_path"], acct["account_number"], " — "
                     )
                 ]
                 + [""] * 13,

@@ -36,9 +36,10 @@ def test_in_a_browser_it_prints_at_load(browser):
         page.click("#sb-print-again")
         assert page.evaluate("window.__prints") == 2
         page.emulate_media(media="print")
+        # the strip that holds it is not printed (#813)
         assert (
             page.evaluate(
-                "getComputedStyle(document.getElementById('sb-print-again')).display"
+                "getComputedStyle(document.getElementById('sb-print-bar')).display"
             )
             == "none"
         )
@@ -79,10 +80,12 @@ def test_in_the_shell_with_no_ready_event_it_prints_a_moment_after_load(browser)
 
 
 def test_the_sheets_last_figures_clear_its_print_button(browser):
-    """W-124 (2.31.7 gate): the button is fixed at the bottom right, and
-    with no room under the sheet it sat on the last row's figures even
-    when the window was scrolled to the end. On screen the sheet has room
-    below it; in print the padding and the button are both gone."""
+    """W-124 (2.31.7 gate): fixed at the bottom right, the button sat on the
+    last row's figures with the window scrolled to the end, and, with room
+    made under the sheet, still over the bottom-right figures at the top of
+    a long one (Budgets' November and December, #813). It is in a strip
+    above the sheet now, in the page's flow: no figure is under it at the
+    top or at the end, and the strip is not printed."""
     rows = "".join(f"<tr><td>Account {i}</td><td>{i}.00</td></tr>" for i in range(60))
     sheet = (
         "<html><head><title>t</title></head><body>"
@@ -96,14 +99,24 @@ def test_the_sheets_last_figures_clear_its_print_button(browser):
             lambda r: r.fulfill(content_type="text/html", body=print_html(sheet)),
         )
         page.goto("http://print.test/long")
-        page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-        got = page.evaluate("""() => {
-                const last = document.querySelector('tr:last-child').getBoundingClientRect();
+        under = """() => {
                 const btn = document.getElementById('sb-print-again').getBoundingClientRect();
-                return { lastBottom: last.bottom, btnTop: btn.top };
-            }""")
-        assert got["lastBottom"] <= got["btnTop"], got
+                return [...document.querySelectorAll('td')].filter(td => {
+                    const r = td.getBoundingClientRect();
+                    return r.left < btn.right && r.right > btn.left
+                        && r.top < btn.bottom && r.bottom > btn.top;
+                }).length; }"""
+        for at in ("0", "document.documentElement.scrollHeight"):
+            page.evaluate(f"window.scrollTo(0, {at})")
+            assert page.evaluate(under) == 0, at
+        # the strip is the body's first child, above the sheet
+        assert page.evaluate("document.body.firstElementChild.id") == "sb-print-bar"
         page.emulate_media(media="print")
-        assert page.evaluate("getComputedStyle(document.body).paddingBottom") == "0px"
+        assert (
+            page.evaluate(
+                "getComputedStyle(document.getElementById('sb-print-bar')).display"
+            )
+            == "none"
+        )
     finally:
         page.close()

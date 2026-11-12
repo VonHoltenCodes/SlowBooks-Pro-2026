@@ -102,7 +102,7 @@ def parse_ofx(content: str) -> list[dict]:
 
     transactions = []
     try:
-        ofx = OfxParser.parse(BytesIO(content.encode("utf-8")))
+        ofx = OfxParser.parse(BytesIO(_drop_empty_text_tags(content).encode("utf-8")))
         if not ofx.accounts:
             raise _unreadable(None, "no account in the file")
         for account in ofx.accounts:
@@ -132,6 +132,17 @@ def parse_ofx(content: str) -> list[dict]:
         # this only fires when nothing was read.
         raise _unreadable(None, "no transactions and no closing </OFX>")
     return transactions
+
+
+# A transaction's optional words given empty, <NAME></NAME>: ofxparse
+# refuses the whole file on one ("That file isn't a bank statement…"),
+# where the same file without the tag previews and imports with no payee
+# (2.29.1 gate, #813). The tag says nothing, so it is taken out first.
+_EMPTY_TEXT_TAG = re.compile(r"<(NAME|MEMO)>\s*</\1>", re.IGNORECASE)
+
+
+def _drop_empty_text_tags(content: str) -> str:
+    return _EMPTY_TEXT_TAG.sub("", content)
 
 
 def _parse_ofx_fallback(content: str) -> list[dict]:

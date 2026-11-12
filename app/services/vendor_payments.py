@@ -40,8 +40,17 @@ def _bill_payment_rows(db: Session, vendor_id: int, start, end) -> list[dict]:
         q = q.filter(BillPayment.date >= start)
     if end:
         q = q.filter(BillPayment.date <= end)
+    from app.models.accounts import Account
+    from app.services.check_numbers import _paying_account_id
+
     out = []
     for p in q.order_by(BillPayment.date, BillPayment.id).all():
+        # Pay From left blank is paid from Checking, as the server posted
+        # it, and says so here rather than a blank (#813)
+        paid_from = p.pay_from_account
+        if paid_from is None:
+            default = _paying_account_id(db, p)
+            paid_from = db.get(Account, default) if default else None
         out.append(
             {
                 "kind": "bill_payment",
@@ -49,7 +58,7 @@ def _bill_payment_rows(db: Session, vendor_id: int, start, end) -> list[dict]:
                 "date": p.date.isoformat(),
                 "method": p.method or "",
                 "reference": p.check_number or "",
-                "paid_from": p.pay_from_account.name if p.pay_from_account else "",
+                "paid_from": paid_from.name if paid_from else "",
                 "memo": (p.notes or "").replace("\n", " "),
                 "amount": str(_money(p.amount)),
                 "is_voided": bool(p.is_voided),

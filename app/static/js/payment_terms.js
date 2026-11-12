@@ -172,6 +172,56 @@ const PaymentTerms = {
             `<option value="${a.id}" ${pick && pick.id === a.id ? 'selected' : ''}>${escapeHtml((a.account_number ? a.account_number + ' ' : '') + a.name)}</option>`).join('');
     },
 
+    // Whether the chart has a discount account for this side, as
+    // discountAccountOptions picks one by its name.
+    hasDiscountAccount(accounts, side) {
+        const other = side === 'sales' ? /purchase|taken|earned|vendor/i : /sales|given|allowed|customer/i;
+        return (accounts || []).some(a => ['income', 'expense', 'cogs'].includes(a.account_type)
+            && a.is_active !== false && /discount/i.test(a.name) && !other.test(a.name));
+    },
+
+    // A company with no discount account for the customers' side (the
+    // seeded chart has none) is offered to make Discounts Given from the
+    // discount picker, rather than stop the first discount at "Pick the
+    // account" (#813). Sales side only; nothing for a sign-in that can't
+    // write.
+    DISCOUNTS_GIVEN: { name: 'Discounts Given', account_number: '4750', account_type: 'income' },
+
+    createDiscountAccountHtml(accounts, side, selectId) {
+        if (side !== 'sales' || PaymentTerms.hasDiscountAccount(accounts, side)) return '';
+        return `<button type="button" class="btn btn-sm btn-secondary" data-write id="${selectId}-create"
+            onclick="PaymentTerms.createDiscountAccount('${selectId}')">Create a Discounts Given account</button>`;
+    },
+
+    async createDiscountAccount(selectId, accounts = null) {
+        const want = PaymentTerms.DISCOUNTS_GIVEN;
+        const list = accounts || (typeof PaymentsPage !== 'undefined' && PaymentsPage._accounts) || [];
+        const numbered = typeof accountNumbersOn !== 'function' || accountNumbersOn();
+        const taken = list.some(a => a.account_number === want.account_number);
+        let made;
+        try {
+            made = await API.post('/accounts', {
+                name: want.name, account_type: want.account_type,
+                account_number: numbered && !taken ? want.account_number : null,
+            });
+        } catch (err) { toast(err.message, 'error'); return null; }
+        list.push(made);
+        const sel = document.getElementById(selectId);
+        if (sel) {
+            const opt = document.createElement('option');
+            opt.value = String(made.id);
+            opt.textContent = (made.account_number ? made.account_number + ' ' : '') + made.name;
+            sel.appendChild(opt);
+            sel.value = String(made.id);
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const button = document.getElementById(`${selectId}-create`);
+        if (button) button.remove();
+        PaymentTerms.rememberDiscountAccount('sales', made.id);
+        toast(`${made.name} added to the chart`);
+        return made;
+    },
+
     rememberDiscountAccount(side, id) {
         try { if (id) localStorage.setItem(`slowbooks-discount-account-${side}`, String(id)); } catch (e) { /* this form only */ }
     },

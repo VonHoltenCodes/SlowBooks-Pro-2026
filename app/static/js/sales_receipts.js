@@ -181,7 +181,7 @@ const SalesReceiptsPage = {
                         <input name="reference"></div>
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
-                            <option value="">${blankDeposit}</option>${bankOpts}</select></div>
+                            <option value=""${undeposited ? ' data-choice' : ''}>${blankDeposit}</option>${bankOpts}</select></div>
                     ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml(null, null)}
                     <div class="form-group"><label>Tax Rate (%)</label>

@@ -184,8 +184,9 @@ def test_a_browser_at_the_apps_address_is_not_offered_the_reset(browser):  # noq
     page, logins = _sign_in_page(browser, forgot, bridge=False)
     try:
         page.click("#auth-forgot")
-        # the page waits once for a bridge that can arrive late on a Mac
-        page.wait_for_selector("#auth-forgot-text", timeout=10000)
+        # the sentence is there at once: no wait for a bridge a browser
+        # never gets (it was up to five seconds, #813)
+        page.wait_for_selector("#auth-forgot-text", timeout=1000)
         assert page.inner_text("#auth-forgot-text") == ELSEWHERE
         assert page.query_selector("#auth-reset-here") is None
         assert page.query_selector("#auth-reset-password") is None
@@ -201,12 +202,54 @@ def test_a_browser_at_the_apps_address_is_not_offered_the_reset(browser):  # noq
         page.close()
 
 
+def test_a_bridge_that_arrives_late_still_offers_the_reset(browser):  # noqa: F811
+    """The Mac app's bridge comes after the page (#813): the browser's
+    sentence shows at once, and the reset takes its place when the bridge
+    arrives while the panel is open."""
+    forgot = {"kind": "reset_here", "message": HERE, "elsewhere": ELSEWHERE}
+    page, _ = _sign_in_page(browser, forgot, bridge=False)
+    try:
+        page.click("#auth-forgot")
+        page.wait_for_selector("#auth-forgot-text", timeout=1000)
+        assert page.inner_text("#auth-forgot-text") == ELSEWHERE
+        page.evaluate(f"({BRIDGE})(['admin'])")
+        page.evaluate("() => window.dispatchEvent(new Event('pywebviewready'))")
+        page.wait_for_selector("#auth-reset-here", timeout=2000)
+        assert page.inner_text("#auth-forgot-text") == HERE
+    finally:
+        page.close()
+
+
+def test_the_open_panel_fits_the_window_at_150_percent(browser):  # noqa: F811
+    """At 150% Text size the sign-in form with Forgot your password? open
+    ran past the bottom of an 800-pixel window (#813): the overlay's and
+    the form's margins shrink with the size, so it fits."""
+    forgot = {"kind": "reset_here", "message": HERE, "elsewhere": ELSEWHERE}
+    page, _ = _sign_in_page(browser, forgot, bridge=True)
+    try:
+        page.evaluate("() => localStorage.setItem('slowbooks.textsize', '150')")
+        page.reload()
+        page.wait_for_selector("#auth-overlay #auth-forgot")
+        page.click("#auth-forgot")
+        page.wait_for_selector("#auth-reset-here")
+        box = page.evaluate(
+            """() => { const o = document.getElementById('auth-overlay');
+                const f = o.querySelector('form');
+                return [f.offsetTop + f.offsetHeight, o.clientHeight,
+                        document.documentElement.getAttribute('data-text-size')]; }"""
+        )
+        assert box[2] == "150"
+        assert box[0] <= box[1], box
+    finally:
+        page.close()
+
+
 def test_a_browser_sees_no_recovery_notice(browser):  # noqa: F811
     forgot = {"kind": "recovery_reset", "message": OPENED, "elsewhere": ELSEWHERE}
     page, _ = _sign_in_page(browser, forgot, bridge=False, multi_user=True)
     try:
         page.click("#auth-forgot")
-        page.wait_for_selector("#auth-forgot-text", timeout=10000)
+        page.wait_for_selector("#auth-forgot-text", timeout=1000)
         assert page.inner_text("#auth-forgot-text") == ELSEWHERE
         assert page.is_hidden("#auth-recovery-notice")
         assert page.query_selector("#auth-reset-open") is None
