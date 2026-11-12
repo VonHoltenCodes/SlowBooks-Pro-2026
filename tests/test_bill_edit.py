@@ -644,10 +644,11 @@ def test_the_edit_is_in_the_audit_log(client, books):
 
 def test_a_bill_line_too_large_for_the_column_is_a_422(client, seed_accounts):
     vendor_id = _vendor(client)["id"]
-    """1e15 x 1e15 used to be a 500 (decimal.InvalidOperation) and
+    """1e15 x 1e15 used to be a 500 (decimal.InvalidOperation; a figure past
+    its own column now gets its own sentence first, #782) and
     99,999,999,999 x 99,999,999,999 a 201 Postgres would reject; both are a
     422 sentence."""
-    for qty, rate in ((1e15, 1e15), (99_999_999_999, 99_999_999_999)):
+    for qty, rate in ((99_999_999, 999_999), (9_999_999, 9_999_999)):
         r = client.post(
             "/api/bills",
             json={

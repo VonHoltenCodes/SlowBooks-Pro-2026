@@ -476,7 +476,7 @@ def _forget_the_pass(db):
 
 
 def test_an_import_runs_the_pass_on_a_file_that_has_not_had_it(
-    client, db_session, seed_accounts, seed_customer
+    client, db_session, seed_accounts, seed_customer, capsys
 ):
     _job_, inv_id, _rel = _small_book(client, seed_accounts, seed_customer.id)
     _payment(client, seed_customer.id, "2026-08-20", "35309.57", [(inv_id, "35309.57")])
@@ -487,10 +487,14 @@ def test_an_import_runs_the_pass_on_a_file_that_has_not_had_it(
     cash_basis.backfill_after_import(db_session)
     assert _cash_lines(db_session) == fresh
     assert _done_flag(db_session)
+    # the sentence is printed, so it reaches launcher.log (W-144)
+    out = capsys.readouterr().out
+    assert "Cash basis and retainage: rewrote the cash lines of" in out
+    assert "to the 2.31.11 rule" in out and "(after an import)" in out
 
 
 def test_restored_books_are_caught_up_without_a_restart(
-    client, db_session, seed_accounts, seed_customer
+    client, db_session, seed_accounts, seed_customer, capsys
 ):
     """A backup from before the pass comes back with old-rule lines and no
     done row; the restore's catch-up gives it the 2.31.11 lines."""
@@ -506,6 +510,11 @@ def test_restored_books_are_caught_up_without_a_restart(
     assert _done_flag(db_session)
     year = _pl(client, "2026-01-01", "2026-12-31", "cash")
     assert D(str(year["total_income"])) == D("35309.57")
+    # the sentence is printed, so it reaches launcher.log after a restore in
+    # the desktop app, whose server logs WARNING and up (W-144)
+    out = capsys.readouterr().out
+    assert "Cash basis and retainage: rewrote the cash lines of" in out
+    assert "to the 2.31.11 rule" in out and "(after a restore)" in out
 
 
 @pytest.mark.usefixtures("books")

@@ -435,3 +435,12 @@ def WholeCents(label: str, kind=Decimal):
     """A money field of `kind` (Decimal, or float where a route still does
     float arithmetic) that refuses anything finer than a cent (#747)."""
     return Annotated[kind, BeforeValidator(whole_cents(label))]
+
+
+def check_quarter(v: int) -> int:
+    """A calendar quarter, 1 to 4: quarter 5 was a 400 where year 10000 is a
+    422 (#810), so a tax form's quarter is refused the way its year is, in
+    the 422 shape with this sentence as its message."""
+    if v not in (1, 2, 3, 4):
+        raise ValueError("Quarter must be 1, 2, 3 or 4.")
+    return v

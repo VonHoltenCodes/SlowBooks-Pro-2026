@@ -203,16 +203,11 @@ def email_invoice(
         # the send fails; reporting "sent" regardless would be a lie.
         if not sent:
             from app.routes._roles import is_admin
-            from app.services.email_errors import where_to_see_why
+            from app.services.email_errors import send_failed_detail
 
-            admin = is_admin(request)
-            detail = "Email could not be sent. " + (
-                "Check the SMTP settings under Settings → Email (SMTP). "
-                if admin
-                else ""
-            )
             raise HTTPException(
-                status_code=502, detail=detail + where_to_see_why(admin)
+                status_code=502,
+                detail=send_failed_detail(db, "invoice", inv.id, is_admin(request)),
             )
         return {"status": "sent"}
     except HTTPException:

@@ -85,6 +85,11 @@ def list_sales_receipts(
 
 @router.post("", response_model=SalesReceiptResponse, status_code=201)
 def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)):
+    """Enter a sales receipt: the invoice and its full payment in one step.
+    Answers `{invoice, payment, customer_name, warnings}`: the invoice as
+    GET /api/invoices/{id} answers it, the payment, the customer's name as
+    the list answers it, and a sentence for each stock item the sale took
+    past what was on hand."""
     # Validate up front so nothing is written on inputs the payment step
     # would reject after the invoice already exists: a $0 payment is
     # refused by the payments route, and a bad deposit account would only
@@ -178,8 +183,10 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
         raise
 
     # the invoice step's stock warnings (#642) ride on the receipt's answer
+    invoice_out = get_invoice(inv_resp.id, db)
     return SalesReceiptResponse(
-        invoice=get_invoice(inv_resp.id, db),
+        invoice=invoice_out,
         payment=pay_resp,
+        customer_name=invoice_out.customer_name,
         warnings=inv_resp.warnings,
     )

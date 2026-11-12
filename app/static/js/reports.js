@@ -2042,7 +2042,7 @@ const ReportsPage = {
                         ${Math.abs(ledger.purchase_tax_to_date || 0) >= 0.005 ? `<div style="margin-top:6px;">
                             Sales tax paid to suppliers on bills entered before SlowBooks Pro 2.18 was posted to ${escapeHtml(ledger.account_name)}, lowering that balance by <strong>${formatCurrency(ledger.purchase_tax)}</strong> this period; since 2.18 that tax is part of what the purchase cost. To correct it, post one journal entry: debit the expense or cost-of-goods account those purchases used, and credit ${accountLabel(ledger, ledger.account_name, ' ')} <strong>${formatCurrency(ledger.purchase_tax_to_date)}</strong> (the total to ${formatDate(data.end_date)}).</div>` : ''}
                     </div>` : '';
-            return `
+            return `${ReportsPage._exportButtons('sales-tax', `start_date=${range.start}&end_date=${range.end}${ReportsPage._basisQs(params)}`)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}</p>${ReportsPage._basisNote(data)}
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')} / Credit Memo</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Taxable</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
@@ -2519,8 +2519,9 @@ const ReportsPage = {
     async arAging(prefill) {
         await ReportsPage.openPeriodModal(T("Accounts Receivable Aging"), ReportsPage.defaultPeriod(), async (_period, params) => {
             const data = await API.get(`/reports/ar-aging?as_of_date=${params.as_of_date}`);
-            // Save CSV writes the file the Accountant's Package carries (#393):
-            // the whole company, as the screen shows it.
+            // Save CSV writes the file the Accountant's Package carries (#393),
+            // Print and Save PDF the same sheet (#808): the whole company, as
+            // the screen shows it.
             const csvQs = `as_of_date=${params.as_of_date}`;
             // The API nets a customer's credits (unapplied payments and
             // credit memos) into Current; show Current gross and the
@@ -2547,7 +2548,7 @@ const ReportsPage = {
             let rows = data.items.map(i => agingRow(i, name(i)) + (i.subs || []).map(subRow).join("")).join("");
             const t = data.totals;
             rows += agingRow(t, 'TOTAL', 'font-weight:700; background:var(--gray-50);');
-            return `${ReportsPage._exportButtons('ar-aging', csvQs, ['csv'])}
+            return `${ReportsPage._exportButtons('ar-aging', csvQs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div style="margin-bottom:12px; display:flex; gap:8px;" data-write>
                     <button class="btn btn-sm btn-secondary" onclick="ReportsPage.applyLateFees()">Apply Late Fees</button>
@@ -2598,7 +2599,7 @@ const ReportsPage = {
                 <td class="amount">${formatCurrency(t.over_90)}</td>
                 <td class="amount">${formatCurrency(t.total)}</td>
             </tr>`;
-            return `${ReportsPage._exportButtons('ap-aging', csvQs, ['csv'])}
+            return `${ReportsPage._exportButtons('ap-aging', csvQs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div class="table-container"><table>
                     <thead><tr>
@@ -2652,7 +2653,7 @@ const ReportsPage = {
                     <thead><tr>${numbers ? '<th scope="col">Number</th>' : ''}<th scope="col">Account</th><th scope="col">Type</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th><th scope="col" class="amount">Net</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>`;
-        }, "Dates", false, { view: 'trial-balance', prefill, ...tbOpts });
+        }, "Dates", false, { reportType: 'trial_balance', view: 'trial-balance', prefill, ...tbOpts });
     },
 
     // The accountant's adjusting entries for a period (#341): each with its
@@ -3808,7 +3809,7 @@ ReportsPage.financialStatementsPdf = async function (prefill) {
             <div style="font-size:12px;">The statements pack has opened as a PDF —
             ${T('P&L')} and Trial Balance for ${escapeHtml(range.start)} — ${escapeHtml(range.end)},
             ${T('Balance Sheet')} as of ${escapeHtml(range.end)}. Paper size follows
-            Settings → Report PDF Paper Size.</div>`;
+            Settings → PDF Paper Size.</div>`;
     }, "Dates", false, { view: 'financial-statements', prefill, fileOnly: true });
 };
 
@@ -4466,7 +4467,7 @@ ReportsPage.restoreDuplicate = async function (id) {
 };
 
 // Save PDF and Save CSV for a report with both routes; a report with only
-// a CSV (the agings, #393) passes kinds = ['csv']. Print sits beside Save
+// a CSV passes kinds = ['csv'] (the agings did until they printed, #808). Print sits beside Save
 // PDF (#683): the page the PDF is drawn from, opening the print dialog.
 ReportsPage._exportButtons = function (path, qs, kinds = ['pdf', 'csv']) {
     const pdf = kinds.includes('pdf') ? `<button class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/${path}/print?${qs}','_blank')">Print</button>

@@ -147,6 +147,17 @@ SlowBooks-Pro-2026/
   thirty minutes (#770). The chain as a whole, every migration walking
   back over the earlier ones and forward again, is proven once per run
   by `tests/test_migration_chain_770.py`.
+- **The migration floor** (#769) — `MIGRATION_FLOOR` in
+  `app/services/migration_floor.py` is 2.29.0's head, `c4e5d6f7a8b9`.
+  A company file below it is not migrated: `migrations/env.py` refuses
+  it before the first step runs, with the sentence that sends it to
+  2.31.14. The migrations before the floor stay in the repo, and a
+  fresh database (no `alembic_version`) is still built through them, but
+  the suite no longer walks them: the chain test walks down to the floor
+  and up again, an own-step walk starts at the floor or later, and the
+  walk cache never starts a walk from a kept file below it. A test that
+  needs a file from before the floor stamps one (see
+  `tests/test_migration_floor_769.py`); it does not walk one up.
 - **New Pydantic shape** — `app/schemas/<domain>.py`. **Beware the
   `date: date` field-shadows-type collision** — see
   [CONTRIBUTING.md → Schema conventions](../CONTRIBUTING.md#-the-date-date-field-name-shadows-the-type-collision).

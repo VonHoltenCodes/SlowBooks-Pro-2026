@@ -493,52 +493,70 @@ def document_discount_taken(db: Session, doc) -> Optional[dict]:
     non-void credit memo (an invoice) or vendor credit (a bill) tied to the
     payment that took it, as {"amount", "number"}, or None. Shown in place
     of the offer once the discount is spent."""
+    return discounts_taken(db, [doc]).get(doc.id)
+
+
+def discounts_taken(db: Session, docs) -> dict:
+    """document_discount_taken for a page of documents of one kind at once:
+    {document id: {"amount", "number"}} for those with a discount taken,
+    read in one query (the credit memos for invoices, the vendor credits
+    for bills). The lists read this once a page, not once a row."""
     from app.models.bills import Bill
 
-    if isinstance(doc, Bill):
+    docs = list(docs)
+    bill_ids = [d.id for d in docs if isinstance(d, Bill)]
+    invoice_ids = [d.id for d in docs if not isinstance(d, Bill)]
+    rows: list = []
+    if bill_ids:
         from app.models.vendor_credits import (
             VendorCredit,
             VendorCreditApplication,
             VendorCreditStatus,
         )
 
-        rows = (
-            db.query(VendorCredit)
+        rows += (
+            db.query(VendorCreditApplication.bill_id, VendorCredit)
             .join(
-                VendorCreditApplication,
+                VendorCredit,
                 VendorCreditApplication.vendor_credit_id == VendorCredit.id,
             )
             .filter(
-                VendorCreditApplication.bill_id == doc.id,
+                VendorCreditApplication.bill_id.in_(bill_ids),
                 VendorCredit.discount_bill_payment_id.isnot(None),
                 VendorCredit.status != VendorCreditStatus.VOID,
             )
+            .order_by(VendorCredit.id)
             .all()
         )
-    else:
+    if invoice_ids:
         from app.models.credit_memos import (
             CreditApplication,
             CreditMemo,
             CreditMemoStatus,
         )
 
-        rows = (
-            db.query(CreditMemo)
-            .join(CreditApplication, CreditApplication.credit_memo_id == CreditMemo.id)
+        rows += (
+            db.query(CreditApplication.invoice_id, CreditMemo)
+            .join(CreditMemo, CreditApplication.credit_memo_id == CreditMemo.id)
             .filter(
-                CreditApplication.invoice_id == doc.id,
+                CreditApplication.invoice_id.in_(invoice_ids),
                 CreditMemo.discount_payment_id.isnot(None),
                 CreditMemo.status != CreditMemoStatus.VOID,
             )
+            .order_by(CreditMemo.id)
             .all()
         )
-    if not rows:
-        return None
-    amount = sum((Decimal(str(r.total or 0)) for r in rows), Decimal("0"))
-    number = getattr(rows[0], "credit_number", None) or getattr(
-        rows[0], "memo_number", None
-    )
-    return {"amount": amount, "number": number}
+    credits: dict = {}
+    for doc_id, credit in rows:
+        credits.setdefault(doc_id, []).append(credit)
+    taken: dict = {}
+    for doc_id, found in credits.items():
+        amount = sum((Decimal(str(r.total or 0)) for r in found), Decimal("0"))
+        number = getattr(found[0], "credit_number", None) or getattr(
+            found[0], "memo_number", None
+        )
+        taken[doc_id] = {"amount": amount, "number": number}
+    return taken
 
 
 def _foreign(db: Session, doc) -> bool:
@@ -560,6 +578,15 @@ class DocumentTerms:
         self.noun = company_noun(db, noun)
         self._terms: dict = {}
         self._listed: dict = {}
+        # the discounts taken on a page's documents, read once by prefetch()
+        self._taken: Optional[dict] = None
+
+    def prefetch(self, docs) -> "DocumentTerms":
+        """Reads the discounts taken on ``docs`` in one query, so fill()
+        runs none of its own for them: a page of a list is one query, not
+        one a row."""
+        self._taken = discounts_taken(self.db, docs)
+        return self
 
     def _rule(self, doc):
         if doc.payment_term_id is not None:
@@ -581,7 +608,10 @@ class DocumentTerms:
             return
         from app.schemas.invoices import DiscountTaken
 
-        taken = document_discount_taken(self.db, doc)
+        if self._taken is not None:
+            taken = self._taken.get(doc.id)
+        else:
+            taken = document_discount_taken(self.db, doc)
         if taken is not None:
             resp.discount_taken = DiscountTaken(**taken)
         rule = self._rule(doc)

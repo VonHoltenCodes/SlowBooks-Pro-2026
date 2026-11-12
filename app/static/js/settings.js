@@ -622,8 +622,8 @@ const SettingsPage = {
                             <textarea name="invoice_notes">${escapeHtml(s.invoice_notes || '')}</textarea></div>
                         <div class="form-group full-width"><label>${`${T('Invoice')} Footer`}</label>
                             <input name="invoice_footer" value="${escapeHtml(s.invoice_footer || '')}"></div>
-                        <div class="form-group"><label>Report PDF Paper Size</label>
-                            <select name="pdf_paper_size">
+                        <div class="form-group"><label>PDF Paper Size</label>
+                            <select name="pdf_paper_size" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
                             </select></div>
@@ -2585,13 +2585,12 @@ const SettingsPage = {
         }
         const pending = state.pending_companies || [];
         const count = `${state.files} ${state.files === 1 ? 'file' : 'files'} (${formatFileSize(state.bytes)})`;
-        let wait = '';
-        if (pending.length === 1) {
-            wait = `${pending[0]} hasn't been opened since SlowBooks Pro was updated, and still needs to copy its files`
-                + ' from this folder. Open it once, then come back here to remove them.';
-        } else if (pending.length) {
-            wait = `${SettingsPage._andList(pending)} haven't been opened since SlowBooks Pro was updated, and still need`
-                + ' to copy their files from this folder. Open each of them once, then come back here to remove them.';
+        // The server says what to do about each one (#769: books from before
+        // 2.18.0 are opened once with 2.31.14, which this version cannot do).
+        let wait = state.pending_message || '';
+        if (!wait && pending.length) {
+            wait = `${SettingsPage._andList(pending)} still ${pending.length === 1 ? 'needs' : 'need'} to copy`
+                + ' files from this folder; remove them once that is done.';
         }
         section.innerHTML = `
             <h3>Files from earlier versions</h3>

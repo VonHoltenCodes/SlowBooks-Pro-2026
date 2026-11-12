@@ -163,10 +163,17 @@ def _cached_upgrade(config, revision, sql=False, tag=None, **kw):
     # before its own, a different one per file, and from an empty file each
     # of those was a walk of up to a hundred steps; from the kept file of
     # the nearest earlier revision it is the few steps between.
+    # Never from a kept file below the migration floor (#769): the
+    # migrations refuse to walk up from one. A walk to a target below the
+    # floor comes from nothing, the way a fresh file is built.
+    from app.services.migration_floor import is_below_floor
+
     nearest = None
     for ancestor in script.walk_revisions(base="base", head=targets[0].revision):
         if ancestor.revision == targets[0].revision:
             continue
+        if is_below_floor(ancestor.revision):
+            break
         kept_ancestor = _MIGRATION_CACHE.get((key[0], ancestor.revision))
         if kept_ancestor is not None and kept_ancestor.exists():
             nearest = kept_ancestor
@@ -243,13 +250,41 @@ def _is_missing_native_stack(exc: BaseException) -> bool:
     return False
 
 
+# Since 2.32.0 (#807) a route that renders does not raise when the stack is
+# missing: pdf_service makes a PdfEngineMissing and the app answers 503 with
+# its sentence, so the ImportError never reaches the test and the assertion
+# on the status is what fails. The service still makes the PdfEngineMissing
+# on the way, so every one made is counted here, and a test that failed
+# while one was made is the same skip. A test that expects the 503 passes
+# and is left alone.
+_ENGINE_MISSING_SEEN = 0
+
+try:
+    from app.services import pdf_service as _pdf_service
+except Exception:  # pragma: no cover - the suite cannot run without the app
+    _pdf_service = None
+
+if _pdf_service is not None:
+    _pdf_engine_missing_init = _pdf_service.PdfEngineMissing.__init__
+
+    def _counting_engine_missing_init(self, *args, **kwargs):
+        global _ENGINE_MISSING_SEEN
+        _ENGINE_MISSING_SEEN += 1
+        _pdf_engine_missing_init(self, *args, **kwargs)
+
+    _pdf_service.PdfEngineMissing.__init__ = _counting_engine_missing_init
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item):
+    seen_before = _ENGINE_MISSING_SEEN
     outcome = yield
     if WEASYPRINT_AVAILABLE:
         return
     exc = outcome.excinfo[1] if getattr(outcome, "excinfo", None) else None
-    if exc is not None and _is_missing_native_stack(exc):
+    if exc is None:
+        return
+    if _is_missing_native_stack(exc) or _ENGINE_MISSING_SEEN > seen_before:
         outcome.force_exception(
             pytest.skip.Exception(
                 "needs WeasyPrint's native stack (pango/cairo/gobject), which "

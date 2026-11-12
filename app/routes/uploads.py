@@ -122,7 +122,8 @@ def logo_image(file_id: int, db: Session = Depends(get_db)):
 def legacy_folder(request: Request, db: Session = Depends(get_db)):
     """What the folder releases before 2.18.0 kept every company's uploads
     in still holds, and which companies still have to copy their files
-    from it: {"files", "bytes", "pending_companies", "can_remove"}."""
+    from it: {"files", "bytes", "pending_companies", "pending_message",
+    "can_remove"}."""
     require_admin(request)
     return legacy_uploads.folder_state(db)
 

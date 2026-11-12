@@ -24,6 +24,17 @@
 #     https://esd.wa.gov/employer-requirements/unemployment-taxes/how-we-determine-tax-rates/taxable-wage-base
 #   * WA L&I, "2026 Hourly Rates by Risk Classification Code and Fund" —
 #     see app/seed/wa_lni_rates.py.
+#   2025 (a run dated 2025, #818): Paid Leave, "2025 Premium Rates Employer
+#   Mailer" — 0.92% of gross wages up to the 2025 Social Security cap
+#   ($176,100), employees 71.52% / employers 28.48%
+#   (https://paidleave.wa.gov/app/uploads/2024/10/2025-Premium-Rates-Employer-Mailer.pdf); WA Cares
+#   0.58% (unchanged); ESD taxable wage base 2025 $72,800; L&I "2025 Hourly
+#   Rates by Risk Classification Code and Fund".
+#
+# L&I for a salaried employee with no hours on the run (#826): L&I's
+# reporting rule for salaried workers whose hours are not tracked is 160
+# hours a month, prorated to the pay period (salaried_lni_hours); the pay
+# run passes those hours and the stub says so. Hours entered win.
 # ============================================================================
 
 from decimal import Decimal
@@ -47,11 +58,47 @@ PFML_EMPLOYER_MIN_EMPLOYEES = 50
 # --- WA Cares Fund (long-term care) -----------------------------------------
 WA_CARES_RATE = Decimal("0.0058")  # employee-only, fraction of gross, no cap
 
+# Each year's figures (#818). The module constants above are 2026's.
+WA_YEARS = {
+    2025: {
+        "pfml_total_rate": Decimal("0.0092"),
+        "pfml_employee_share": Decimal("0.7152"),
+        "pfml_employer_share": Decimal("0.2848"),
+        "pfml_wage_cap": Decimal("176100"),
+        "wa_cares_rate": Decimal("0.0058"),
+        "suta_wage_base": Decimal("72800"),
+    },
+    2026: {
+        "pfml_total_rate": PFML_TOTAL_RATE,
+        "pfml_employee_share": PFML_EMPLOYEE_SHARE,
+        "pfml_employer_share": PFML_EMPLOYER_SHARE,
+        "pfml_wage_cap": PFML_WAGE_CAP,
+        "wa_cares_rate": WA_CARES_RATE,
+        "suta_wage_base": Decimal("78200"),
+    },
+}
+
+# --- L&I reporting basis for salaried workers (#826) ------------------------
+# 160 hours a month: 1,920 a year, divided by the pay periods.
+SALARIED_LNI_HOURS_PER_MONTH = Decimal("160")
+
+
+def salaried_lni_hours(pay_periods: int) -> Decimal:
+    """The L&I hours a salaried pay period reports when no hours were
+    entered: 160 a month prorated to the period (80 semimonthly, 73.85
+    biweekly, 36.92 weekly), to the hundredth."""
+    return _q(SALARIED_LNI_HOURS_PER_MONTH * 12 / Decimal(pay_periods))
+
 
 class WAEngine(StateEngine):
     state_code: str = "WA"
     # ESD taxable wage base, 2026: $78,200.
     suta_wage_base: Decimal = Decimal("78200")
+
+    def __init__(self, year: int = 2026) -> None:
+        self.year = year
+        self.t = WA_YEARS[year]
+        self.suta_wage_base = self.t["suta_wage_base"]
 
     def calculate(
         self,
@@ -70,22 +117,23 @@ class WAEngine(StateEngine):
 
         # PFML — total premium on gross up to the Social Security cap, split
         # between employee and employer.
+        t = self.t
         ytd = Decimal(str(ytd_gross))
-        pfml_wages = max(Decimal("0"), min(gross, PFML_WAGE_CAP - ytd))
-        pfml_total = pfml_wages * PFML_TOTAL_RATE
-        pfml_employee = _q(pfml_total * PFML_EMPLOYEE_SHARE)
+        pfml_wages = max(Decimal("0"), min(gross, t["pfml_wage_cap"] - ytd))
+        pfml_total = pfml_wages * t["pfml_total_rate"]
+        pfml_employee = _q(pfml_total * t["pfml_employee_share"])
         count = _extra.get("state_employee_count")
         pfml_employer = (
-            _q(pfml_total * PFML_EMPLOYER_SHARE)
+            _q(pfml_total * t["pfml_employer_share"])
             if count is None or count >= PFML_EMPLOYER_MIN_EMPLOYEES
             else Decimal("0.00")
         )
 
         # WA Cares — employee-only long-term-care premium.
-        wa_cares = _q(gross * WA_CARES_RATE)
+        wa_cares = _q(gross * t["wa_cares_rate"])
 
         # L&I workers' comp — per-hour rates by risk classification.
-        rate = get_lni_rate(wc_class_code)
+        rate = get_lni_rate(wc_class_code, self.year)
         lni_employee = _q(hours * rate["employee"])
         lni_employer = _q(hours * (rate["total"] - rate["employee"]))
 

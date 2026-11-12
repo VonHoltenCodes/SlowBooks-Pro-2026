@@ -15,7 +15,7 @@ import json
 from decimal import Decimal
 
 from app.services.accounting import _q
-from app.services.pdf_service import _jinja_env, render_pdf
+from app.services.pdf_service import _jinja_env, paper_size_of, render_pdf
 
 # detail_json keys that are deductions (withheld from the employee). Anything
 # else in the blob is an employer-side or informational line we skip on the
@@ -118,7 +118,7 @@ def _deduction_items(stub) -> list[tuple[str, str, Decimal]]:
         for key, amount in parsed.items():
             if _is_employer_key(key) or key in _ADDITION_KEYS:
                 continue
-            if key.endswith(":note"):
+            if key.endswith(":note") or key.startswith(("note:", "meta:")):
                 continue
             if has_codes and key in ("pretax_deductions", "posttax_deductions"):
                 continue
@@ -201,6 +201,13 @@ def _addition_lines(stub) -> list[dict]:
     return lines
 
 
+def _stub_notes(stub) -> list[str]:
+    """The stub's sentences about how it was figured (detail ``note:``
+    entries): "work state missing", the L&I hours of a salaried stub."""
+    parsed = _parsed_detail(stub) or {}
+    return [str(v) for k, v in parsed.items() if str(k).startswith("note:")]
+
+
 def generate_paystub_pdf(
     stub, employee, pay_run, company: dict, ytd: dict, ytd_stubs=None
 ) -> bytes:
@@ -248,7 +255,9 @@ def generate_paystub_pdf(
         "overtime_hours": _q(stub.overtime_hours),
         "doubletime_hours": _q(stub.doubletime_hours),
         "total_hours": _q(stub.hours),
+        "notes": _stub_notes(stub),
     }
+    ctx["paper_size"] = paper_size_of(company or {})  # Letter or A4 (#807)
     template = _jinja_env.get_template("paystub_pdf.html")
     html_str = template.render(**ctx)
     return render_pdf(html_str)

@@ -22,6 +22,7 @@ from app.schemas.journal import (
     JournalEntryCreate,
     JournalEntryResponse,
     JournalEntryUpdate,
+    JournalListResponse,
 )
 from app.services.accounting import (
     _q,
@@ -278,7 +279,13 @@ def _role(request: Optional[Request]) -> str:
     return current_role(request) if request is not None else "admin"
 
 
-@router.get("", response_model=list[JournalEntryResponse])
+# A page of the list (#817): 100 entries unless asked, never more than 500,
+# so a book of hundreds of thousands of lines opens in a moment.
+LIST_PAGE = 100
+LIST_PAGE_MAX = 500
+
+
+@router.get("", response_model=JournalListResponse)
 def list_journal_entries(
     source_type: str = None,
     adjusting: Optional[bool] = Query(
@@ -297,9 +304,25 @@ def list_journal_entries(
         description="date: by entry date, newest first; entered: by the "
         "time the entry was entered, newest first (#687)",
     ),
+    skip: int = Query(default=0, ge=0, description="entries before the page (#817)"),
+    limit: int = Query(
+        default=LIST_PAGE,
+        ge=1,
+        le=LIST_PAGE_MAX,
+        description="entries on the page, at most 500 (#817)",
+    ),
     db: Session = Depends(get_db),
     request: Request = None,
 ):
+    """A page of the journal, newest first, with how many entries the filter
+    holds in all (#817). With neither `start_date` nor `end_date` the list is
+    the current fiscal year's, as the page opens; naming either end widens it
+    (one end alone is open on the other side, as before)."""
+    default_range = start_date is None and end_date is None
+    if default_range:
+        from app.services.fiscal_year import fiscal_year_bounds
+
+        start_date, end_date = fiscal_year_bounds(db, date_type.today())
     q = db.query(Transaction)
     if start_date is not None:
         q = q.filter(Transaction.date >= start_date)
@@ -336,15 +359,19 @@ def list_journal_entries(
         # newest entered first; the id breaks a tie inside one second
         q = q.order_by(Transaction.created_at.desc(), Transaction.id.desc())
     else:
-        q = q.order_by(Transaction.date.desc())
-    entries = q.all()
+        # the id keeps entries of one day in one order from page to page
+        q = q.order_by(Transaction.date.desc(), Transaction.id.desc())
+    total = q.order_by(None).count()
+    entries = q.offset(skip).limit(limit).all()
     accounts = {a.id: a for a in db.query(Account).all()}
     from app.services.qbo_documents import REVERSALS
 
+    # the reversals that stand against this page's entries, not the book's
     voided = {
         source_id
         for (source_id,) in db.query(Transaction.source_id).filter(
-            Transaction.source_type.in_(REVERSALS), Transaction.source_id.isnot(None)
+            Transaction.source_type.in_(REVERSALS),
+            Transaction.source_id.in_([txn.id for txn in entries]),
         )
     }
     jobs = _job_names(db)
@@ -376,7 +403,15 @@ def list_journal_entries(
                 editable=_je_editable(txn, txn.id in voided, role),
             )
         )
-    return results
+    return JournalListResponse(
+        entries=results,
+        total=total,
+        skip=skip,
+        limit=limit,
+        start_date=start_date,
+        end_date=end_date,
+        default_range=default_range,
+    )
 
 
 @router.get("/{entry_id}", response_model=JournalEntryResponse)

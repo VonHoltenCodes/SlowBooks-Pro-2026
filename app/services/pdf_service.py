@@ -35,9 +35,28 @@ def _company_logo_data_uri(company_settings: dict) -> str:
 _FETCHER = None
 
 
+# An install without WeasyPrint (a bare Windows server install, #807)
+# answered every PDF route with a plain-text 500. The import failing now
+# raises this, and app.main answers it 503 with the sentence; the print
+# previews never reach the import, so they keep working.
+WEASYPRINT_MISSING = (
+    "This install cannot make PDFs because WeasyPrint or its Pango libraries"
+    " are missing: install them as the install guide (INSTALL.md) says under"
+    ' "PDFs need WeasyPrint", or use Print, which works without them.'
+)
+
+
+class PdfEngineMissing(RuntimeError):
+    """WeasyPrint, or the native libraries it loads, is not installed."""
+
+
 def _weasyprint():
     """(HTML, URLFetcher) — imported on first use, not at import time."""
-    from weasyprint import HTML, URLFetcher
+    try:
+        from weasyprint import HTML, URLFetcher
+    except (ImportError, OSError) as exc:
+        # OSError: the package is there and its pango/gobject DLLs are not
+        raise PdfEngineMissing(WEASYPRINT_MISSING) from exc
 
     return HTML, URLFetcher
 
@@ -251,6 +270,14 @@ _jinja_env.globals["spread_markup_prices"] = _spread_markup_prices
 _jinja_env.globals["presentation_style"] = _presentation_style
 
 
+def paper_size_of(company_settings: dict) -> str:
+    """'letter' or 'a4', from the pdf_paper_size setting (#807): every
+    document's @page reads it, as the report PDFs always have. Checks,
+    labels and the tax forms keep Letter, the stock they print on."""
+    size = str((company_settings or {}).get("pdf_paper_size") or "letter").lower()
+    return "a4" if size == "a4" else "letter"
+
+
 def _render(template_name: str, company_settings: dict, **context) -> str:
     """Render a template with the company settings and its vocabulary
     (``terms('Invoice')`` in a template reads Pledge for a nonprofit)."""
@@ -261,6 +288,8 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
     # #108: only the analytics PDF and the new-hire report ever received it).
     if "company_logo_data_uri" not in context:
         context["company_logo_data_uri"] = _company_logo_data_uri(company_settings)
+    # Letter or A4, from the setting (#807)
+    context.setdefault("paper_size", paper_size_of(company_settings))
     return template.render(
         company=company_settings, terms=terms_for(company_settings), **context
     )
@@ -429,7 +458,8 @@ def generate_statement_pdf(
     customer, activity: dict, company_settings: dict, as_of_date=None
 ) -> bytes:
     """`activity` is routes/reports/receivables.statement_activity(): the
-    dated lines with a running balance, and the totals."""
+    dated lines with a running balance, and the totals. The collection
+    statements are this one too."""
     html_str = _render(
         "statement_pdf.html",
         company_settings,
@@ -453,6 +483,7 @@ def generate_analytics_pdf(
         company=company_settings,
         terms=terms_for(company_settings),
         company_logo_data_uri=_company_logo_data_uri(company_settings),
+        paper_size=paper_size_of(company_settings),
     )
     return render_pdf(html_str)
 
@@ -780,7 +811,7 @@ def render_report_html(
         "report_pdf.html",
         company_settings,
         sections=sections,
-        paper_size=(company_settings.get("pdf_paper_size") or "letter").lower(),
+        paper_size=paper_size_of(company_settings),
         landscape=landscape,
         generated_on=date.today().isoformat(),
     )

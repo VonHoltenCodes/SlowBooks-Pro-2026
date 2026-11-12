@@ -34,7 +34,7 @@ function page({ jobs = JOBS, entries = [], entry = null, accountant = false, row
             get: async url => {
                 if (url === '/jobs') return jobs;
                 if (url === '/accounts') return [{ id: 1, name: 'Cash' }];
-                if (url.startsWith('/journal?') || url === '/journal') return entries;
+                if (url.startsWith('/journal?') || url === '/journal') return { entries, total: entries.length, skip: 0, limit: 100, default_range: true };
                 return entry;
             },
             put: put || (async (url, body) => { calls.put.push({ url, body }); return {}; }),

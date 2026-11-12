@@ -10,7 +10,8 @@
 # W-9s), including the old copy of anything deleted since.
 #
 # It can't be cleared automatically: a company not yet opened on 2.18 still
-# has to copy its files from it, and nothing records which company a file
+# has to copy its files from it (since #769 such books are below the
+# migration floor, and the page sends them to 2.31.14 to be opened), and nothing records which company a file
 # belongs to. So an administrator clears it from Settings, once no company
 # on the install still needs it. The removal takes only regular files inside
 # the folder and the folders they leave empty: never the folder itself (on
@@ -65,9 +66,15 @@ _FD_WALK = (
 class StillNeeded(Exception):
     """Companies on this install have not copied their files in yet."""
 
-    def __init__(self, companies: list[str]):
-        self.companies = companies
-        super().__init__(still_needed_message(companies))
+    def __init__(self, companies: list[str], unread: list[str] | tuple = ()):
+        self.companies = list(companies) + list(unread)
+        super().__init__(still_needed_message(companies, unread))
+
+
+# A company whose books could not be read just now (another program is
+# writing them, a server that does not answer): nothing says it has copied
+# its files in, so it keeps the folder, but it is not known to be old.
+UNREAD = "unread"
 
 
 def _names(names: list[str]) -> str:
@@ -76,19 +83,45 @@ def _names(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def still_needed_message(companies: list[str]) -> str:
-    """The sentence a person reads when the folder can't be cleared yet."""
-    if len(companies) == 1:
-        return (
-            f"{companies[0]} hasn't been opened since SlowBooks Pro was updated, "
-            "and still needs to copy its files from the shared folder. Open it "
-            "once, then remove the files."
-        )
-    return (
-        f"{_names(companies)} haven't been opened since SlowBooks Pro was "
-        "updated, and still need to copy their files from the shared folder. "
-        "Open each of them once, then remove the files."
+def still_needed_message(companies: list[str], unread: list[str] | tuple = ()) -> str:
+    """The sentences a person reads when the folder can't be cleared yet.
+
+    ``companies`` are books from before 2.18.0, whose upgrade copies their
+    files in. They are below the migration floor (#769): this version never
+    opens them, so "open it once" here would be a dead end. 2.31.14 opens
+    them, and the sentence says so. ``unread`` are books that could not be
+    read just now."""
+    from app.services.migration_floor import (
+        BELOW_FLOOR_MESSAGE,
+        FLOOR_RELEASE,
+        FLOOR_RELEASE_URL,
     )
+
+    parts = []
+    if len(companies) == 1:
+        parts.append(
+            f"{companies[0]} still needs to copy its files from the shared "
+            f"folder; remove them once it has. {BELOW_FLOOR_MESSAGE}"
+        )
+    elif companies:
+        parts.append(
+            f"{_names(list(companies))} still need to copy their files from the "
+            "shared folder; remove them once they have. Their company files are "
+            "from before SlowBooks Pro 2.29.0. Open each of them once with "
+            f"{FLOOR_RELEASE}, then upgrade: {FLOOR_RELEASE_URL}"
+        )
+    if len(unread) == 1:
+        parts.append(
+            f"{unread[0]} could not be read just now, so nothing says it has "
+            "copied its files from the shared folder. Try again in a moment."
+        )
+    elif unread:
+        parts.append(
+            f"{_names(list(unread))} could not be read just now, so nothing says "
+            "they have copied their files from the shared folder. Try again in "
+            "a moment."
+        )
+    return " ".join(parts)
 
 
 # --- What the folder holds -------------------------------------------------
@@ -248,7 +281,7 @@ def _needs_folder(tables: set[str], revisions: list[str]) -> bool:
     if revisions:
         history = _history()
         if history is None:
-            return True  # nothing says the copy has run, so keep the folder
+            return UNREAD  # nothing says the copy has run, so keep the folder
         before, after = history
         if any(r in after for r in revisions):
             return False
@@ -331,7 +364,7 @@ def _company_file_needs_folder(path: Path) -> bool:
         logger.warning(
             "Could not read company file %s; keeping the shared folder", path
         )
-        return True
+        return UNREAD
     except (sqlite3.DatabaseError, sqlite_module().DatabaseError):
         return False  # not a database, or damaged beyond opening
     return _needs_folder(tables, revisions)
@@ -343,25 +376,31 @@ def _served_name(db: Session) -> str:
     return (get_setting_raw(db, "company_name") or "").strip() or "This company"
 
 
-def _sqlite_pending(db: Session) -> list[str]:
+def _sort(found: list[tuple[str, object]]) -> tuple[list[str], list[str]]:
+    """(books from before 2.18.0, books that could not be read just now)."""
+    old = [name for name, needs in found if needs and needs != UNREAD]
+    unread = [name for name, needs in found if needs == UNREAD]
+    return old, unread
+
+
+def _sqlite_pending(db: Session) -> tuple[list[str], list[str]]:
     """The companies in the desktop manifest (the company picker's list),
     and the books this server has open, checked through its own session."""
-    pending = []
+    found = []
     served_listed = False
     for entry in company_service.manifest_list_companies():
         name = (entry.get("name") or "").strip() or entry.get("file") or "A company"
         if entry.get("is_current"):
             served_listed = True
-            if _connection_needs_folder(db.connection()):
-                pending.append(name)
+            found.append((name, _connection_needs_folder(db.connection())))
             continue
         path = company_service.company_db_path(entry.get("file") or "")
         # A name the picker can't open is a company that can't copy anything.
-        if path is not None and _company_file_needs_folder(path):
-            pending.append(name)
-    if not served_listed and _connection_needs_folder(db.connection()):
-        pending.insert(0, _served_name(db))
-    return pending
+        if path is not None:
+            found.append((name, _company_file_needs_folder(path)))
+    if not served_listed:
+        found.insert(0, (_served_name(db), _connection_needs_folder(db.connection())))
+    return _sort(found)
 
 
 def _server_databases(db: Session) -> set[str]:
@@ -375,16 +414,14 @@ def _company_database_url(database: str):
     return make_url(company_service.DATABASE_URL).set(database=database)
 
 
-def _postgres_pending(db: Session) -> list[str]:
+def _postgres_pending(db: Session) -> tuple[list[str], list[str]]:
     """The database this server is connected to, and every other one the
     companies table lists on the same server. A listed database the server
     no longer has can't copy anything; one it has but that can't be read
     from here may still need the folder."""
     from app.models.companies import Company
 
-    pending = []
-    if _connection_needs_folder(db.connection()):
-        pending.append(_served_name(db))
+    found = [(_served_name(db), _connection_needs_folder(db.connection()))]
     served = make_url(company_service.DATABASE_URL).database
     others = [
         ((c.name or "").strip() or c.database_name, c.database_name)
@@ -392,7 +429,7 @@ def _postgres_pending(db: Session) -> list[str]:
         if c.database_name and c.database_name != served
     ]
     if not others:
-        return pending
+        return _sort(found)
     existing = _server_databases(db)
     for name, database in others:
         if database not in existing:
@@ -413,20 +450,26 @@ def _postgres_pending(db: Session) -> list[str]:
                 needs = _connection_needs_folder(conn)
         except SQLAlchemyError:
             logger.warning("Could not read company database %s", database)
-            needs = True
+            needs = UNREAD
         finally:
             engine.dispose()
-        if needs:
-            pending.append(name)
-    return pending
+        found.append((name, needs))
+    return _sort(found)
 
 
-def pending_companies(db: Session) -> list[str]:
-    """The companies on this install that still have to copy their files
-    in from the folder: the ones not yet opened since the update."""
+def pending_state(db: Session) -> tuple[list[str], list[str]]:
+    """(the companies on this install from before 2.18.0, which still have
+    to copy their files in from the folder; the ones that could not be read
+    just now, which may still have to)."""
     if company_service._is_sqlite():
         return _sqlite_pending(db)
     return _postgres_pending(db)
+
+
+def pending_companies(db: Session) -> list[str]:
+    """Every company that keeps the folder: both lists of pending_state."""
+    old, unread = pending_state(db)
+    return old + unread
 
 
 # --- The routes' two answers -----------------------------------------------
@@ -437,11 +480,15 @@ def folder_state(db: Session) -> dict:
     empty folder has nothing for any company to copy, so nothing is
     pending and no company file is opened to find out."""
     files, size = _walk(remove=False)
-    pending = pending_companies(db) if files else []
+    old, unread = pending_state(db) if files else ([], [])
+    pending = old + unread
     return {
         "files": files,
         "bytes": size,
         "pending_companies": pending,
+        # what the page says about them (#769: books from before 2.18.0 are
+        # opened with 2.31.14, which this version sends them to)
+        "pending_message": still_needed_message(old, unread) if pending else "",
         "can_remove": files > 0 and not pending,
     }
 
@@ -451,8 +498,8 @@ def remove_files(db: Session) -> dict:
     keeping the folder itself. Raises StillNeeded, having removed nothing,
     while a company still has to copy its files from it."""
     files, _size = _walk(remove=False)
-    pending = pending_companies(db) if files else []
-    if pending:
-        raise StillNeeded(pending)
+    old, unread = pending_state(db) if files else ([], [])
+    if old or unread:
+        raise StillNeeded(old, unread)
     removed, size = _walk(remove=True)
     return {"removed": removed, "bytes": size}

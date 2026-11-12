@@ -872,6 +872,59 @@ def aging_csv(data: dict, company: str, side: str) -> str:
     return out.getvalue()
 
 
+def aging_section(data: dict, side: str, t=None) -> dict:
+    """The A/R or A/P aging as a report PDF section (#808), the columns and
+    figures the screen shows: on A/R, Current before the customer's credits
+    and the credits in a column of their own, so the row still adds up to
+    Total and Total is account 1100; a sub-customer billed with its parent
+    (#638) indented under the parent's row, not added again. ``t`` is the
+    company's terms (a nonprofit's Donor and Pledges Receivable Aging)."""
+    t = t or (lambda words: words)
+    ar = side == "ar"
+    name_key = "customer_name" if ar else "vendor_name"
+    if ar:
+        columns = [t("Customer"), "Current", "1-30", "31-60", "61-90+"]
+        columns += ["Credits", "Total"]
+    else:
+        columns = ["Vendor", "Current", "1-30", "31-60", "61-90+", "Total"]
+
+    def cells(r: dict, name: str) -> list:
+        credit = Decimal(str(r.get("unapplied_credits") or 0)) if ar else Decimal(0)
+        out = [
+            name,
+            _pdf_money(Decimal(str(r.get("current") or 0)) + credit),
+            _pdf_money(r.get("over_30")),
+            _pdf_money(r.get("over_60")),
+            _pdf_money(r.get("over_90")),
+        ]
+        if ar:
+            out.append(_pdf_money(-credit) if credit else "")
+        out.append(_pdf_money(r.get("total")))
+        return out
+
+    rows = []
+    for i in data.get("items", []):
+        rows.append({"cells": cells(i, i.get(name_key) or "")})
+        for sub in i.get("subs") or []:
+            rows.append(
+                {
+                    "cells": cells(sub, sub.get(name_key) or ""),
+                    "style": "detail",
+                    "indent": 1,
+                }
+            )
+    rows.append(
+        {"cells": cells(data.get("totals") or {}, "Total"), "style": "grand-total"}
+    )
+    title = "Accounts Receivable Aging" if ar else "Accounts Payable Aging"
+    return {
+        "title": t(title),
+        "period": f"As of {data['as_of_date']}",
+        "columns": columns,
+        "rows": rows,
+    }
+
+
 # ── Sales by Item / Purchases by Item (#435) ────────────────────────────────
 # Flat one-row-per-item reports. The CSV follows the shared pattern (safe
 # writer for the formula guard, four-line preamble); the PDF reuses the
@@ -1072,3 +1125,93 @@ def purchases_by_item_sections(data: dict) -> list[dict]:
             "rows": rows,
         }
     ]
+
+
+def sales_tax_csv(data: dict, company: str) -> str:
+    """The Sales Tax report (#806): Date | Type | Number | Customer | Sales |
+    Taxable | Rate | Tax, one row per invoice or credit memo as the screen
+    lists them (a credit memo's figures negative), then the screen's totals,
+    the check against Sales Tax Payable, and the Use tax section when the
+    report has one. Rate is the percent (8.25 for 8.25%)."""
+    out = io.StringIO()
+    w = _SafeWriter(out)
+    period = f"{data['start_date']} to {data['end_date']}"
+    if data.get("basis") == "cash":
+        period += " (cash basis)"
+    _preamble(w, company, "Sales Tax Report", period)
+    w.writerow(
+        ["Date", "Type", "Number", "Customer", "Sales", "Taxable", "Rate", "Tax"]
+    )
+
+    def rate(v):
+        # two places at least, up to the four a rate keeps (8.875), as the
+        # screen and the PDF print it
+        if v is None:
+            return ""
+        pct = (Decimal(str(v)) * 100).quantize(
+            Decimal("0.0001"), rounding=ROUND_HALF_UP
+        )
+        two = pct.quantize(Decimal("0.01"))
+        return two if two == pct else pct.normalize()
+
+    for i in data["items"]:
+        w.writerow(
+            [
+                i["date"],
+                "Credit memo" if i["type"] == "credit_memo" else "Invoice",
+                i["number"],
+                i["customer_name"],
+                _money(i["subtotal"]),
+                _money(i["taxable"]),
+                rate(i["tax_rate"]),
+                _money(i["tax_amount"]),
+            ]
+        )
+
+    def total(label, amount, sales="", taxable=""):
+        w.writerow(["", "", "", label, sales, taxable, "", _money(amount)])
+
+    total(
+        "Total",
+        data["total_tax"],
+        _money(data["total_sales"]),
+        _money(data["total_taxable"]),
+    )
+    w.writerow(
+        ["", "", "", "Non-taxable sales", _money(data["total_non_taxable"]), "", "", ""]
+    )
+    total("Tax on sales", data["tax_on_sales"])
+    total("Less tax on credit memos", data["tax_credited"])
+    total("Tax collected", data["total_tax"])
+    ledger = data.get("ledger")
+    if ledger:
+        name = " ".join(
+            p for p in (ledger["account_number"], ledger["account_name"]) if p
+        )
+        total(f"{name}: tax posted", ledger["tax_posted"])
+        total("Difference from this report", ledger["difference"])
+        total("Paid this period", ledger["payments"])
+        total(f"Owed at {data['end_date']}", ledger["balance"])
+    use = data.get("use_tax")
+    if use:
+        w.writerow([])
+        w.writerow(["Date", "Bill", "Vendor", "Job", "Line", "Rate", "Use tax"])
+        for i in use["items"]:
+            w.writerow(
+                [
+                    i["date"],
+                    (i["bill_number"] or "")
+                    + (" (void)" if i["type"] == "bill_void" else ""),
+                    i["vendor_name"],
+                    i["job_name"],
+                    i["description"],
+                    rate(i["rate"]),
+                    _money(i["amount"]),
+                ]
+            )
+        for label, key in (("Accrued", "accrued"), ("Paid", "paid")):
+            w.writerow(["", "", "", "", label, "", _money(use[key])])
+        w.writerow(
+            ["", "", "", "", f"Owed at {data['end_date']}", "", _money(use["balance"])]
+        )
+    return out.getvalue()

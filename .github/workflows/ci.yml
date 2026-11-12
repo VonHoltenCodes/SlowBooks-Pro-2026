@@ -293,11 +293,18 @@ jobs:
           # test_browser_check_field_layout.py, a browser module that skips as
           # one where playwright is absent. 301 with the bottom layout's date
           # test (test_the_bottom_layouts_date_box_never_wraps, one render).
-          # 302 with the markup-per-line estimate form's browser test (#774,
+          # 338 in v2.32.0: 34 WeasyPrint renders with the paper-size and
+          # VOID-mark tests (#807, test_pdf_807.py) and five with the aging
+          # PDFs (#808, test_aging_pdfs_808.py); conftest now counts a render
+          # the app answered 503 for (PdfEngineMissing) as the same skip.
+          # 339: the Sales Tax PDF's render (#806, test_reports_806.py)
+          # landed in the same batch and was counted nowhere; main at 0885b09f
+          # skips 339 on Windows.
+          # 340 with the markup-per-line estimate form's browser test (#774,
           # test_browser_estimate_line_markup.py, a browser module that skips
           # as one where playwright is absent; its PDF tests read the print
           # preview, so nothing new needs WeasyPrint).
-          MAX_SKIPS: "302"
+          MAX_SKIPS: "340"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

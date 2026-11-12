@@ -1,4 +1,15 @@
 {
+  "2.31.14": {
+    "title": "Cash basis after the retainage change, and sentences where there were errors",
+    "items": [
+      "Cash basis and retainage: a payment recorded before 2.31.11 on a pay application or a retainage-release bill is rewritten once at the upgrade so it reads as a fresh posting does; payments on or before the closing date are left as they were, and the start-up log says how many of each. The accrual books do not move.",
+      "A bill, expense or card charge line on Accounts Receivable, Accounts Payable, Undeposited Funds or Inventory is refused with a sentence, from the window or the API; a line already saved there keeps its account until it is moved.",
+      "A quantity, rate or unit cost too large for its column is refused with a sentence instead of an error, on every document with lines.",
+      "The estimate, sales and purchase forms round the way the server does, so a form's total matches the saved document and its PDF to the cent.",
+      "Recurring invoices take only daily, weekly, semimonthly, monthly, quarterly or yearly; anything else is refused with a sentence.",
+      "An invoice shows when and to whom it was last emailed, and a bookkeeper, accountant or read-only sign-in or token can read the email send log, each row naming its document."
+    ]
+  },
   "2.31.13": {
     "title": "QuickBooks Online account numbers, and bills that pay a loan",
     "items": [

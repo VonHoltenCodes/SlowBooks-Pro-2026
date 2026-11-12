@@ -6,7 +6,6 @@ and an item now keep $0.045; each line amount is still rounded to the
 cent. The same migration gives a due date to the bills a PO made before
 2.18, which were saved with terms and none."""
 
-import sqlite3
 from decimal import Decimal
 from pathlib import Path
 
@@ -94,61 +93,3 @@ def test_the_purchase_forms_take_four_places():
     items = (js / "items.js").read_text(encoding="utf-8")
     assert '<input name="rate" type="number" step="0.0001"' in items
     assert '<input name="cost" type="number" step="0.0001"' in items
-
-
-def test_the_migration_widens_prices_and_gives_old_bills_a_due_date(tmp_path):
-    from alembic import command
-    from alembic.config import Config
-
-    db = tmp_path / "old.db"
-    cfg = Config(str(ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(ROOT / "migrations"))
-    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
-    command.upgrade(cfg, "697f63b2975e")
-
-    con = sqlite3.connect(db)
-    con.execute("INSERT INTO vendors (name) VALUES ('Cascade Flour Mill')")
-    rows = [
-        ("BILL-PO-0001", "2026-08-01", "Net 15", None),
-        ("BILL-PO-0002", "2026-08-01", "Due on Receipt", None),
-        ("BILL-PO-0003", "2026-08-01", "whenever", None),
-        ("BILL-4", "2026-08-01", "Net 30", "2026-08-20"),  # has one: untouched
-    ]
-    for number, day, terms, due in rows:
-        con.execute(
-            "INSERT INTO bills (bill_number, vendor_id, date, terms, due_date) "
-            "VALUES (?, 1, ?, ?, ?)",
-            (number, day, terms, due),
-        )
-    con.execute(
-        "INSERT INTO bill_lines (bill_id, quantity, rate, amount, line_order) "
-        "VALUES (1, 1000, 0.05, 50.00, 0)"
-    )
-    con.commit()
-    con.close()
-
-    command.upgrade(cfg, "4c7e2a9d1b05")
-    con = sqlite3.connect(db)
-    got = dict(con.execute("SELECT bill_number, due_date FROM bills").fetchall())
-    types = {
-        (t, c): next(
-            col[2] for col in con.execute(f"PRAGMA table_info({t})") if col[1] == c
-        )
-        for t, c in (
-            ("bill_lines", "rate"),
-            ("purchase_order_lines", "rate"),
-            ("vendor_credit_lines", "rate"),
-            ("items", "rate"),
-            ("items", "cost"),
-        )
-    }
-    assert con.execute("SELECT rate FROM bill_lines").fetchone() == (0.05,)
-    con.close()
-    assert got == {
-        "BILL-PO-0001": "2026-08-16",
-        "BILL-PO-0002": "2026-08-01",
-        "BILL-PO-0003": "2026-08-31",
-        "BILL-4": "2026-08-20",
-    }
-    assert set(types.values()) == {"NUMERIC(17, 4)"}
-    command.downgrade(cfg, "697f63b2975e")

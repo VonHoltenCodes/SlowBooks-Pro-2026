@@ -20,6 +20,11 @@ const TaxFormsPage = {
         let history = [];
         try { history = await API.get('/document-audits?limit=100'); } catch (_) { history = null; }
 
+        // Paychecks figured with no work state (#818): on no state's SUI
+        // report and in no W-2 state box, so the page names the employees.
+        let missingState = [];
+        try { missingState = (await API.get(`/tax-forms/work-state-missing?year=${currentYear}`)).warnings || []; } catch (_) { missingState = []; }
+
         // Fetch employee list for the W-2 dropdown
         let empOptions = '<option value="">— Select Employee —</option>';
         try {
@@ -35,6 +40,7 @@ const TaxFormsPage = {
             <div class="page-header">
                 <h2>Tax Forms</h2>
             </div>
+            ${missingState.length ? `<div class="card note--caution" role="note" style="padding:10px 12px;margin-bottom:16px">${missingState.map(w => `<p style="margin:0">${escapeHtml(w)}</p>`).join('')}</div>` : ''}
 
             <div class="card" style="margin-bottom:16px;padding:16px">
                 <h3 id="taxforms-h-w-2-w-3">W-2 / W-3</h3>

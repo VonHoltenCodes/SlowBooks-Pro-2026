@@ -152,7 +152,19 @@ def get_dashboard(
         "start": s.isoformat(),
         "end": e.isoformat(),
     }
+    note = _revenue_trend_note(db)
+    if note:
+        payload["revenue_trend_note"] = note
     return payload
+
+
+def _revenue_trend_note(db: Session) -> Optional[str]:
+    """The trend's caption in construction mode, where a WIP schedule can be
+    posted: the same words as the dashboard's Monthly Revenue card (#805)."""
+    from app.services.dashboard_widgets import MONTHLY_REVENUE_WIP_NOTE
+    from app.services.terminology import terms_from_db
+
+    return MONTHLY_REVENUE_WIP_NOTE if terms_from_db(db).is_construction else None
 
 
 @router.get("/revenue")
@@ -165,11 +177,15 @@ def get_revenue(
     """Revenue by customer (windowed) + 12-month trend."""
     s, e, label = _resolve_period(period, start_date, end_date, db)
     engine = AnalyticsEngine(db)
-    return {
+    out = {
         "period": {"name": label, "start": s.isoformat(), "end": e.isoformat()},
         "by_customer": engine.revenue_by_customer(s, e),
         "trend": engine.revenue_trend(),
     }
+    note = _revenue_trend_note(db)
+    if note:
+        out["trend_note"] = note
+    return out
 
 
 @router.get("/expenses")

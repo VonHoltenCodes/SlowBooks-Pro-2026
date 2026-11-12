@@ -45,12 +45,20 @@ def test_every_migration_sources_journals_list(client, db_session, seed_accounts
     invoice_posting = _journal(db_session, "invoice", "an invoice's posting").id
     db_session.commit()
 
-    listed = {e["id"]: e["source_type"] for e in client.get("/api/journal").json()}
+    listed = {
+        e["id"]: e["source_type"]
+        for e in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+    }
     for source_type, txn_id in posted.items():
         assert listed.get(txn_id) == source_type, source_type
     assert invoice_posting not in listed
     assert "qbo_export_import" in posted  # the route this came from
 
     # the filtered list is as it was
-    only = client.get("/api/journal", params={"source_type": "wave_import"}).json()
+    only = client.get(
+        "/api/journal",
+        params={"source_type": "wave_import", "start_date": "1900-01-01"},
+    ).json()["entries"]
     assert [e["id"] for e in only] == [posted["wave_import"]]
