@@ -127,3 +127,22 @@ class RecurringResponse(BaseModel):
     invoices_created: int = 0
     lines: list[RecurringLineResponse] = []
     model_config = {"from_attributes": True}
+
+
+class GenerateRequest(StrictModel):
+    """The optional body of `POST /api/recurring/{id}/generate`, as Enter
+    now's on a memorized schedule: the installment the page showed and the
+    date to give the invoice. Each may come in the query instead; sent both
+    ways, the two must be the same date (#810)."""
+
+    occurrence: Optional[date] = Field(
+        None,
+        description=(
+            "The installment to enter, its scheduled date (the schedule's "
+            "next due date when left out)."
+        ),
+    )
+    dated: Optional[date] = Field(
+        None,
+        description="The date the invoice carries (its scheduled date when left out).",
+    )

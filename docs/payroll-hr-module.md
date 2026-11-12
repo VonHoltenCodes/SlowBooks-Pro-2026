@@ -147,9 +147,9 @@ the header and a tamper-evident audit hash in the footer. The SPA's
 | `GET, POST /api/payroll/forms/w2/{emp_id}/pdf?year=YYYY` | W-2 PDF + `document_audits` row |
 | `POST /api/payroll/forms/w3/{year}` | W-3 aggregate across all active employees (JSON) |
 | `GET, POST /api/payroll/forms/w3/{year}/pdf` | W-3 PDF |
-| `POST /api/payroll/forms/940/{year}` | Form 940 FUTA — first $7,000 per employee at 0.6% (6.0% less the full state credit). When the company's state is a credit-reduction state for the year (Schedule A: California 1.2% and the U.S. Virgin Islands 4.5% for 2025), the form adds line 11 and line 12 for it (2.31.3); every employee's wages are treated as paid in the company's state. Schedule A for 2026 is published in November and added then (JSON) |
+| `POST /api/payroll/forms/940/{year}` | Form 940 FUTA — first $7,000 per employee at 0.6% (6.0% less the full state credit). When the company's state is a credit-reduction state for the year (Schedule A: California 1.2% and the U.S. Virgin Islands 4.5% for 2025), the form adds line 11 and line 12 for it (2.31.3); every employee's wages are treated as paid in the company's state. Schedule A for 2026 is published in November and added then (JSON); `credit_reduction` (line 11), `credit_reduction_state` and `credit_reduction_rate` are the same as `GET /api/tax-forms/940`'s, and read `0.00`, null and `0` for a state with no reduction that year (#810) |
 | `GET, POST /api/payroll/forms/940/{year}/pdf` | Form 940 PDF |
-| `POST /api/payroll/forms/941/{year}/{quarter}` | Quarterly Form 941 figures: lines 1-3, 5a-5e, 6, 7 and 12 (JSON). Deposits and balance due (lines 11-13), Schedule B and Form 941-X are not produced |
+| `POST /api/payroll/forms/941/{year}/{quarter}` | Quarterly Form 941 figures: lines 1-3, 5a-5e, 6, 7 and 12 (JSON); a quarter other than 1 to 4 is a 422, "Quarter must be 1, 2, 3 or 4.", as a year outside 1900 to 9999 is (#810; it was a 400), here and on `/api/tax-forms` (941, SUI, liability). Deposits and balance due (lines 11-13), Schedule B and Form 941-X are not produced |
 | `GET, POST /api/payroll/forms/941/{year}/{quarter}/pdf` | Form 941 PDF |
 | `GET /api/document-audits` | List audit rows (newest first), filterable by `doc_type` + `doc_key` |
 | `GET /api/document-audits/{id}` | One audit row — for verifying a PDF by its footer ID |

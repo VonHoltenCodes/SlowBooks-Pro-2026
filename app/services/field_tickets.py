@@ -70,7 +70,8 @@ def _q_read(v) -> Decimal:
 
 def require_construction(db: Session) -> None:
     """Field tickets are construction mode's: a Business or Nonprofit company
-    writes none (it reads an empty list)."""
+    has none, so the list, the purchase orders a ticket can name and every
+    write answer this 409 (#810)."""
     if not terms_from_db(db).is_construction:
         raise HTTPException(
             status_code=409,

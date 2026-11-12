@@ -4,11 +4,13 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Path, Query
 from fastapi.responses import Response, JSONResponse
+from pydantic import AfterValidator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.routes.payroll._router import router
 from app.models.payroll import Employee
+from app.schemas.common import check_quarter
 from app.services.document_audit import (
     audit_footer_context,
     form_content_hash,
@@ -33,6 +35,8 @@ from app.services.tax_forms.w2_w3 import (
 # 99999 reached date() and answered a 500 here too (2.31.12 gate, W-137).
 TaxYearQuery = Annotated[int, Query(ge=1900, le=9999)]
 TaxYearPath = Annotated[int, Path(ge=1900, le=9999)]
+# A quarter, 1 to 4, refused as the year is: a 422 naming the four (#810).
+QuarterPath = Annotated[int, Path(), AfterValidator(check_quarter)]
 
 
 @router.post("/forms/w2/{emp_id}", response_class=Response)
@@ -128,10 +132,14 @@ def generate_form_940(
     year: TaxYearPath,
     db: Session = Depends(get_db),
 ):
-    """Generate Form 940 (FUTA) for the given year.
+    """Form 940 (FUTA) for the given year, as JSON.
 
-    Returns a PDF file with federal unemployment tax information.
-    """
+    The figures are GET /api/tax-forms/940's, from the same computation and
+    the same Schedule A table: `credit_reduction` is line 11, the FUTA
+    taxable wages times the company's state's credit reduction rate for the
+    year, with `credit_reduction_state` and `credit_reduction_rate` beside
+    it (null, "0.00" and "0" when the state has none that year, #810), and
+    `total_futa_tax_after_adjustments` is line 12."""
     # Thin wrapper over compute_940 — the same service the /pdf endpoint uses.
     # It applies the $7,000 per-employee FUTA wage base across the year's pay
     # stubs in a single pass and reports the actual withheld FUTA tax.
@@ -142,8 +150,12 @@ def generate_form_940(
         "box_2": str(data["total_futa_tax"]),  # FUTA tax for the year
         "total_payments": str(data["total_payments"]),
         "exempt_payments": str(data["exempt_payments"]),
-        # Line 11 / 12 — present only for a credit-reduction state employer
-        "credit_reduction": str(data.get("credit_reduction", Decimal("0"))),
+        # Line 11 / 12, as GET /api/tax-forms/940 carries them for a
+        # credit-reduction state employer; always here, at zero otherwise
+        # (#810: it read "0" with no state or rate beside it).
+        "credit_reduction_state": data.get("credit_reduction_state"),
+        "credit_reduction_rate": str(data.get("credit_reduction_rate", Decimal("0"))),
+        "credit_reduction": str(data.get("credit_reduction", Decimal("0.00"))),
         "total_futa_tax_after_adjustments": str(
             data.get("total_futa_tax_after_adjustments", data["total_futa_tax"])
         ),
@@ -159,15 +171,13 @@ def generate_form_940(
 @router.post("/forms/941/{year}/{quarter}", response_class=Response)
 def generate_form_941(
     year: TaxYearPath,
-    quarter: int,
+    quarter: QuarterPath,
     db: Session = Depends(get_db),
 ):
     """Generate Form 941 (quarterly FICA) for the given year and quarter.
 
     Returns a PDF file with quarterly federal payroll tax information.
     """
-    if quarter not in (1, 2, 3, 4):
-        raise HTTPException(status_code=400, detail="quarter must be 1-4")
 
     # Thin wrapper over compute_941 — the same service the /pdf endpoint uses.
     # It aggregates the quarter's PROCESSED pay stubs (single pass) into wage,
@@ -279,11 +289,9 @@ def generate_form_940_pdf(year: TaxYearPath, db: Session = Depends(get_db)):
 @router.get("/forms/941/{year}/{quarter}/pdf", response_class=Response)
 @router.post("/forms/941/{year}/{quarter}/pdf", response_class=Response)
 def generate_form_941_pdf(
-    year: TaxYearPath, quarter: int, db: Session = Depends(get_db)
+    year: TaxYearPath, quarter: QuarterPath, db: Session = Depends(get_db)
 ):
     """Form 941 (quarterly FICA) PDF for year + quarter."""
-    if quarter not in (1, 2, 3, 4):
-        raise HTTPException(status_code=400, detail="quarter must be 1-4")
     company = _company_for_pdf(db)
     audit = _hash_and_audit(
         db,
