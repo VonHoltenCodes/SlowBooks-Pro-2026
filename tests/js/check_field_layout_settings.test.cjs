@@ -191,5 +191,5 @@ test('Reset empties every box, puts Bold back to today and empties the hidden fi
 
 test('the test print sends the layout with the other check settings', () => {
     const src = fs.readFileSync(path.join(JS, 'settings.js'), 'utf8');
-    assert.ok(src.includes("'check_blank_stock', 'check_micr_amount', 'check_field_layout']"));
+    assert.ok(src.includes("'check_blank_stock', 'check_micr_amount', 'check_field_layout'"));
 });

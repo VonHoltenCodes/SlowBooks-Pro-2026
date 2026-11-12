@@ -34,7 +34,10 @@ to your SimpleFIN bridge over HTTPS.
    sits under the list when your account is not in it, which is the usual
    case for a checking account added to the chart as a plain asset. A
    sign-in other than the administrator's sees where each feed imports as
-   text. Tick **Reverse signs** on a feed
+   text. Each feed imports into an account of its own: two feeds into one
+   account would bring its lines in twice, so the save says "Map each
+   SimpleFIN account to a separate bank account" (since 2.32.0). Tick
+   **Reverse signs** on a feed
    whose bridge reports money out as positive. Then click **Sync Now**
    whenever you want fresh transactions.
 

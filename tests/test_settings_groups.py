@@ -40,6 +40,8 @@ EXPECTED = {
     "payroll": [
         "settings-h-direct-deposit",
         "settings-h-payroll-accounts",
+        # the paid-leave employer share as the agency determined it (#825)
+        "settings-h-leave-employer-share",
         "settings-h-check-printing",
     ],
     "lists": [
