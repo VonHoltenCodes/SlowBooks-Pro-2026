@@ -120,7 +120,9 @@ class AccountResponse(BaseModel):
         the posting code and the route guard actually read (issue #122)."""
         from app.services import control_accounts
 
-        if control_accounts.is_control(self.account_number, self.account_type):
+        if control_accounts.is_control(
+            self.account_number, self.account_type, self.name
+        ):
             self.is_control = True
             if self.control_purpose is None:
                 # The route may already have said it in the company's

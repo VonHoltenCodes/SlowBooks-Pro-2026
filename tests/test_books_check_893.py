@@ -200,6 +200,8 @@ def test_every_pair_agrees_on_the_bakery_books(client, agreeing, db_session):
         "inventory",
         "payroll_liabilities",
         "sales_tax",
+        # 2010 Accrued Job Costs is seeded in the chart (#897), so its row is there
+        "accrued_job_costs",
         "journal_balanced",
         "journal_accounts",
         "journal_voids",

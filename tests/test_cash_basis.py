@@ -811,19 +811,29 @@ def test_a_job_with_only_cash_lines_is_in_use(client, db_session, seed_accounts)
 
 
 def _ar_journal(client, accounts, day, amount):
-    """History that came in as a journal entry: A/R against income."""
-    r = client.post(
-        "/api/journal",
-        json={
-            "date": day,
-            "description": "Opening A/R",
-            "lines": [
-                {"account_id": accounts["1100"].id, "debit": amount, "credit": "0"},
-                {"account_id": accounts["4000"].id, "debit": "0", "credit": amount},
-            ],
-        },
+    """History that came in as a journal entry: A/R against income. Written
+    as such an entry was saved before 2.32 (or as an import brings one): the
+    journal form refuses a line on A/R since #897."""
+    from datetime import date as _date
+    from decimal import Decimal as _D
+
+    from sqlalchemy.orm import object_session
+
+    from app.services.accounting import create_journal_entry
+
+    db = object_session(accounts["1100"])
+    amount = _D(str(amount))
+    create_journal_entry(
+        db,
+        _date.fromisoformat(day),
+        "Opening A/R",
+        [
+            {"account_id": accounts["1100"].id, "debit": amount, "credit": _D("0")},
+            {"account_id": accounts["4000"].id, "debit": _D("0"), "credit": amount},
+        ],
+        source_type="manual",
     )
-    assert r.status_code == 201, r.text
+    db.commit()
 
 
 def test_the_cash_report_says_when_receivables_are_not_zero(

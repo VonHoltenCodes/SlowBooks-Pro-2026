@@ -97,6 +97,12 @@ CONTROL_ACCOUNTS: dict[str, tuple[str, str, str]] = {
         "liability",
         "what you owe vendors — every bill and bill payment",
     ),
+    "2010": (
+        "Accrued Job Costs",
+        "liability",
+        "job costs accrued before the vendor's bill arrives; each accrual "
+        "reverses itself on its Reverses on date",
+    ),
     "2100": ("Credit Card", "liability", "credit-card charges and the card's balance"),
     "2200": (
         "Sales Tax Payable",
@@ -136,6 +142,19 @@ CONTROL_ACCOUNTS: dict[str, tuple[str, str, str]] = {
 }
 
 
+# The registry numbers the journal-style checks name (#897): what a job cost
+# or journal entry may not post to, and the accrual account it may credit.
+RECEIVABLE = "1100"
+PAYABLE = "2000"
+ACCRUED_JOB_COSTS = "2010"
+
+# Seeded in a new chart but created on first use in an older one, so the boot
+# check (`missing`) does not report its absence: a company that never accrues
+# a job cost never needs it (#897). 4800 and 5900 are on demand by not being
+# seeded at all.
+ON_DEMAND = frozenset({ACCRUED_JOB_COSTS})
+
+
 def _type_value(account_type) -> str | None:
     """The string value of an AccountType enum, a plain string, or None."""
     if account_type is None:
@@ -155,9 +174,15 @@ def is_control_number(number: str | None) -> bool:
     return bool(number) and str(number) in CONTROL_ACCOUNTS
 
 
-def is_control(number: str | None, account_type) -> bool:
+def is_control(number: str | None, account_type, name: str | None = None) -> bool:
     """True when `number` is a control number AND `account_type` is the type
     the posting code expects for it.
+
+    An on-demand number (ON_DEMAND: 2010 Accrued Job Costs) also needs its
+    registry `name`: an older chart may already hold an account of its own on
+    2010 (a loan, a payroll liability), and that one stays an ordinary
+    account, free to renumber and to pick for payroll. A caller that does not
+    pass the name reads such a number as ordinary.
 
     The registry is keyed on number, but the posting code finds, e.g.,
     Opening Balance Equity by an EQUITY 3900. An account numbered 3900 that
@@ -166,6 +191,10 @@ def is_control(number: str | None, account_type) -> bool:
     """
     entry = CONTROL_ACCOUNTS.get(str(number)) if number else None
     if entry is None:
+        return False
+    if str(number) in ON_DEMAND and (
+        name is None or name.strip().casefold() != entry[0].casefold()
+    ):
         return False
     return _type_value(account_type) == entry[1]
 
@@ -264,6 +293,53 @@ def seeded_numbers() -> set[str]:
     return {n for n in CONTROL_ACCOUNTS if n in seeded}
 
 
+def ensure(db: Session, number: str) -> int:
+    """The id of an on-demand control account (ON_DEMAND), created with its
+    registry name and type when the chart has none (#897: a chart from before
+    2.32 gets 2010 Accrued Job Costs on its first accrual).
+
+    A different account already on the number is never taken over: it is
+    refused, naming it, so an accrual cannot land on someone's loan. Raises
+    MissingControlAccount (409) for that, as `resolve` does."""
+    from app.models.accounts import AccountType
+
+    name, want_type, purpose = CONTROL_ACCOUNTS[str(number)]
+    acct = db.query(Account).filter(Account.account_number == str(number)).first()
+    if acct is None:
+        acct = Account(
+            name=name,
+            account_number=str(number),
+            account_type=AccountType(want_type),
+            is_system=True,
+        )
+        db.add(acct)
+        db.flush()
+        return acct.id
+    if is_control(acct.account_number, acct.account_type, acct.name):
+        return acct.id
+    err = MissingControlAccount(str(number), name, purpose)
+    detail = (
+        f"Account number {number} is {acct.name} in this chart, so {number} "
+        f"{name} can't be made for {purpose}. Renumber {acct.name} (Chart of "
+        "Accounts, Edit), then try again. Nothing was posted."
+    )
+    err.args = (detail,)
+    err.user_text = detail
+    raise err
+
+
+def is_receivable_or_payable(account) -> str | None:
+    """RECEIVABLE or PAYABLE when `account` is the chart's Accounts
+    Receivable or Accounts Payable control account (number and type), else
+    None: the accounts a job cost or journal entry may not post to (#897)."""
+    if account is None:
+        return None
+    number = str(account.account_number or "")
+    if number in (RECEIVABLE, PAYABLE) and is_control(number, account.account_type):
+        return number
+    return None
+
+
 def missing(db: Session) -> list[tuple[str, str]]:
     """[(number, name)] for every SEEDED control account absent from this
     chart — what a company file should have and does not.
@@ -272,7 +348,9 @@ def missing(db: Session) -> list[tuple[str, str]]:
     document to fail, and it is what catches a chart that was never seeded
     at all (issue #119, reporter's note 1).
     """
-    expected = seeded_numbers()
+    # 2010 Accrued Job Costs is seeded but optional (ON_DEMAND): an older
+    # chart that never accrued a cost is not missing anything
+    expected = seeded_numbers() - ON_DEMAND
     present = {
         n
         for (n,) in db.query(Account.account_number)

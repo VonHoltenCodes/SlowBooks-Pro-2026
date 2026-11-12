@@ -13,9 +13,11 @@ currency, the way account 1100 / 2000 carries it:
     customer = open invoices' balance due
                − credit memos not yet applied
                − payments (or parts of payments) not yet applied
+               + journal lines on A/R naming the customer (#897)
     vendor   = open bills' balance due
                − vendor credits not yet applied
                − bill payments (or parts) not yet applied
+               + journal entries on A/P naming the vendor (#897)
 
 A foreign-currency document counts at the rate it was booked at (amount ×
 exchange_rate), as its journal entry did; an unapplied payment at the rate
@@ -148,6 +150,8 @@ def customer_balances(
 ) -> dict[int, Decimal]:
     """Home-currency balance per customer id; ids with no open documents
     are absent (read them as zero)."""
+    if customer_ids is not None:
+        customer_ids = list(customer_ids)  # read twice below
     ids = _ids(customer_ids)
     out: dict[int, Decimal] = defaultdict(lambda: ZERO)
 
@@ -172,6 +176,15 @@ def customer_balances(
     for p in unapplied_payments(db, customer_ids=ids):
         out[p.customer_id] -= p.unapplied_home
 
+    # a journal line on A/R that names the customer, as QuickBooks keeps one
+    # and an import carries it (#897)
+    from app.services.control_journal_lines import by_party, receivable_lines
+
+    for cid, amount in by_party(
+        receivable_lines(db, named_only=True), customer_ids
+    ).items():
+        out[cid] += amount
+
     return dict(out)
 
 
@@ -183,6 +196,8 @@ def vendor_balances(
     db: Session, vendor_ids: Optional[Iterable[int]] = None
 ) -> dict[int, Decimal]:
     """Home-currency amount owed per vendor id (absent = zero)."""
+    if vendor_ids is not None:
+        vendor_ids = list(vendor_ids)  # read twice below
     ids = _ids(vendor_ids)
     out: dict[int, Decimal] = defaultdict(lambda: ZERO)
 
@@ -229,6 +244,12 @@ def vendor_balances(
         left = _q(Decimal(str(amount or 0)) - Decimal(str(applied_amt or 0)))
         if left > 0:
             out[vid] -= home_amount(left, rate)
+
+    # a journal entry on A/P that names the vendor (#897)
+    from app.services.control_journal_lines import by_party, payable_lines
+
+    for vid, amount in by_party(payable_lines(db, named_only=True), vendor_ids).items():
+        out[vid] += amount
 
     return dict(out)
 

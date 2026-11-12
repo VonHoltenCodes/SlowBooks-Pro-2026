@@ -317,9 +317,10 @@ def test_unnamed_cash_lines_of_a_payment_on_two_documents_are_left_alone(
 def _journal(client, accounts, basis=None, day="2026-02-01", amount="500.00"):
     body = {
         "date": day,
-        "description": "Opening A/R",
+        "description": "Opening prepaid",
         "lines": [
-            {"account_id": accounts["1100"].id, "debit": amount, "credit": "0"},
+            # not A/R: a journal entry may not post there since #897
+            {"account_id": accounts["1400"].id, "debit": amount, "credit": "0"},
             {"account_id": accounts["4000"].id, "debit": "0", "credit": amount},
         ],
     }
@@ -356,8 +357,8 @@ def test_a_journal_entry_counts_on_the_basis_it_chooses(
         c = _pl(client, "2026-02-01", "2026-02-28", "cash")
         assert _amount(a, "4000") == D(accrual), basis
         assert _amount(c, "4000") == D(cash), basis
-        assert _bs_amount(_bs(client, "2026-02-28", "accrual"), "1100") == D(accrual)
-        assert _bs_amount(_bs(client, "2026-02-28", "cash"), "1100") == D(cash)
+        assert _bs_amount(_bs(client, "2026-02-28", "accrual"), "1400") == D(accrual)
+        assert _bs_amount(_bs(client, "2026-02-28", "cash"), "1400") == D(cash)
         # the Trial Balance reads accrual until it takes a basis
         tb = _tb_total(client, "2026-02-28")
         assert D(str(tb["total_debit"])) == D(accrual), basis
@@ -384,9 +385,9 @@ def test_editing_and_voiding_a_journal_entry_carry_its_basis(
 
     body = {
         "date": "2026-02-01",
-        "description": "Opening A/R, corrected",
+        "description": "Opening prepaid, corrected",
         "lines": [
-            {"account_id": seed_accounts["1100"].id, "debit": "700.00", "credit": "0"},
+            {"account_id": seed_accounts["1400"].id, "debit": "700.00", "credit": "0"},
             {"account_id": seed_accounts["4000"].id, "debit": "0", "credit": "700.00"},
         ],
     }

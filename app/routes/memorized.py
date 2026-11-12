@@ -123,7 +123,11 @@ def _check_with_books(
             description=data.description,
             lines=[ln.as_journal_line() for ln in data.lines],
         )
-        _journal_lines(db, entry, basis=data.basis or BASIS_BOTH)
+        # a line on A/R or A/P is refused as on the journal form (#897),
+        # unless an edit leaves it on the account it was saved on
+        _journal_lines(
+            db, entry, basis=data.basis or BASIS_BOTH, kept_accounts=kept_accounts
+        )
 
 
 def _write_lines(db: Session, mem: MemorizedTransaction, lines) -> None:

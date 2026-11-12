@@ -404,7 +404,7 @@ def _update_detail_type(db: Session, account: Account, fields: dict) -> list[dic
         "parent_id" in fields
         and _shares_parent(parent)
         and not control_accounts.is_control(
-            account.account_number, account.account_type
+            account.account_number, account.account_type, account.name
         )
     ):
         # a control account never takes a parent's: the sub-account check
@@ -418,7 +418,9 @@ def _update_detail_type(db: Session, account: Account, fields: dict) -> list[dic
     if (
         detail != current
         and asked
-        and control_accounts.is_control(account.account_number, account.account_type)
+        and control_accounts.is_control(
+            account.account_number, account.account_type, account.name
+        )
     ):
         name, purpose = control_accounts.describe(account.account_number)
         raise HTTPException(
@@ -524,7 +526,7 @@ def _seeded_unused(db: Session) -> tuple[list[dict], list[dict]]:
     }
     for a in seeded:
         row = {"id": a.id, "account_number": a.account_number or "", "name": a.name}
-        if control_accounts.is_control(a.account_number, a.account_type):
+        if control_accounts.is_control(a.account_number, a.account_type, a.name):
             kept.append({**row, "reason": "a control account"})
         elif a.account_number in _FOUND_BY_NUMBER:
             kept.append({**row, "reason": _FOUND_BY_NUMBER[a.account_number]})
@@ -670,7 +672,9 @@ def create_account(data: AccountCreate, db: Session = Depends(get_db)):
     # creates it — otherwise the same account differs from a fresh company's.
     # 4800 and 5900 are not seeded, so they restore is_system=False, unchanged.
     if (
-        control_accounts.is_control(account.account_number, account.account_type)
+        control_accounts.is_control(
+            account.account_number, account.account_type, account.name
+        )
         and account.account_number in control_accounts.seeded_numbers()
     ):
         account.is_system = True
@@ -703,7 +707,9 @@ def update_account(account_id: int, data: AccountUpdate, db: Session = Depends(g
     # and stays allowed; only the number and the type are load-bearing.
     # (Not gated on is_system: every seeded account carries that flag, and
     # renumbering an ordinary expense account is a reasonable request.)
-    if control_accounts.is_control(account.account_number, account.account_type):
+    if control_accounts.is_control(
+        account.account_number, account.account_type, account.name
+    ):
         name, purpose = control_accounts.describe(account.account_number)
         for field, what in (("account_number", "number"), ("account_type", "type")):
             if field in fields and fields[field] != getattr(account, field):
@@ -858,7 +864,9 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
     # renamed, not removed. The other forty-two are ordinary accounts. Gated
     # on number AND type: an imported 3900 expense is not Opening Balance
     # Equity, so it deletes like any ordinary account.
-    if control_accounts.is_control(account.account_number, account.account_type):
+    if control_accounts.is_control(
+        account.account_number, account.account_type, account.name
+    ):
         name, purpose = control_accounts.describe(account.account_number)
         raise HTTPException(
             status_code=400,

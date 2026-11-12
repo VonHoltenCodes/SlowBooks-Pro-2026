@@ -126,6 +126,15 @@ class JobCost(Base):
     status = Column(String(10), nullable=False, default="posted")
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
     total = Column(Numeric(15, 2), nullable=False, default=0)
+    # An accrual (#897): an entry crediting 2010 Accrued Job Costs reverses
+    # itself on this date (the start-up pass posts the reversal); NULL keeps
+    # it open until someone reverses it by hand.
+    reverses_on = Column(Date, nullable=True)
+    # The reversal once posted: what keeps the start-up pass from posting it
+    # twice, and what its void undoes along with the accrual.
+    reversal_transaction_id = Column(
+        Integer, ForeignKey("transactions.id"), nullable=True
+    )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
@@ -134,6 +143,9 @@ class JobCost(Base):
 
     job = relationship("Job")
     transaction = relationship("Transaction", foreign_keys=[transaction_id])
+    reversal_transaction = relationship(
+        "Transaction", foreign_keys=[reversal_transaction_id]
+    )
     lines = relationship(
         "JobCostLine",
         back_populates="job_cost",

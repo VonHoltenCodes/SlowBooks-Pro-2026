@@ -466,6 +466,11 @@ def void_job_cost(db: Session, jc: JobCost) -> None:
             source_id=jc.id,
             reference=jc.number,
         )
+    if jc.reversal_transaction_id:
+        # an accrual that already reversed (#897): its reversal goes too
+        from app.services.accrued_job_costs import void_reversal
+
+        void_reversal(db, jc)
     jc.status = "void"
     for te in db.query(TimeEntry).filter(TimeEntry.job_cost_id == jc.id).all():
         te.job_cost_id = None
@@ -807,6 +812,7 @@ def allocate_cost(
     start_date: Optional[date],
     end_date: Optional[date],
     explicit: Optional[dict[int, Decimal]] = None,
+    refuse_controls: bool = False,
 ) -> JobCost:
     amount = _q(amount)
     if amount <= 0:
@@ -822,6 +828,14 @@ def allocate_cost(
     debit, credit = resolve_line_accounts(
         db, types, code, cost_type, debit_account_id, credit_account_id
     )
+    if refuse_controls:
+        # a person's allocation, as a person's entry (#897)
+        from app.services.journal_controls import JOB_COST, refuse_control_line
+
+        for acct_id in (debit, credit):
+            refuse_control_line(
+                db, db.get(Account, acct_id), 1, JOB_COST, label="The allocation"
+            )
     jc = JobCost(
         number=next_job_cost_number(db),
         date=txn_date,

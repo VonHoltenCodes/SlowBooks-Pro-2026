@@ -148,7 +148,9 @@ def account_problem(acct: Account | None, piece: PostingPiece, db=None) -> str:
     kind = kind_of(acct)
     if kind not in piece.kinds:
         return f"The {piece.label} account must be {wanted(piece)}."
-    if kind == "liability" and is_control(acct.account_number, acct.account_type):
+    if kind == "liability" and is_control(
+        acct.account_number, acct.account_type, acct.name
+    ):
         return (
             f"The {piece.label} account cannot be {label_for(acct, db)}: that "
             "account's balance is kept by its own documents. Choose another "
@@ -190,7 +192,8 @@ def eligible_accounts(db: Session, kind: str) -> list[Account]:
         for acct in rows
         if kind_of(acct) == kind
         and not (
-            kind == "liability" and is_control(acct.account_number, acct.account_type)
+            kind == "liability"
+            and is_control(acct.account_number, acct.account_type, acct.name)
         )
     ]
 

@@ -31,7 +31,7 @@ def _jobs(db):
 def _post(client, accounts, header_job=None, line_jobs=(None, None), **over):
     lines = []
     for (acct, debit, credit), job in zip(
-        ((accounts["6900"].id, 100, 0), (accounts["2000"].id, 0, 100)), line_jobs
+        ((accounts["6900"].id, 100, 0), (accounts["2500"].id, 0, 100)), line_jobs
     ):
         line = {"account_id": acct, "debit": debit, "credit": credit}
         if job is not None:
@@ -54,7 +54,7 @@ def test_a_line_job_survives_create_and_read(client, db_session, seed_accounts):
     posted = _post(client, seed_accounts, header_job=kitchen, line_jobs=(bath, None))
     e = client.get(f"/api/journal/{posted['id']}").json()
     by_acct = {ln["account_id"]: ln for ln in e["lines"]}
-    line, rest = by_acct[seed_accounts["6900"].id], by_acct[seed_accounts["2000"].id]
+    line, rest = by_acct[seed_accounts["6900"].id], by_acct[seed_accounts["2500"].id]
     assert line["job_id"] == bath and line["job_name"] == "Acme Diner: Bath"
     # a line naming no job takes the header's
     assert rest["job_id"] == kitchen and rest["job_name"] == "Acme Diner: Kitchen"

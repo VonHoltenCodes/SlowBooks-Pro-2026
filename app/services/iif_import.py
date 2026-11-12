@@ -1538,18 +1538,27 @@ def _import_ledger_block(
     name = trns.get("NAME", "").strip()
     description = memo or name or trns_type.title()
     lines = []
+    payees: list = []
     for i, (row, acct, amount) in enumerate(resolved):
         if amount == 0:
             continue
-        lines.append(
-            {
-                "account_id": acct.id,
-                "debit": _q(amount) if amount > 0 else Decimal("0"),
-                "credit": _q(-amount) if amount < 0 else Decimal("0"),
-                "description": row.get("MEMO", "").strip() or description,
-                "class_id": block_class_id if i == 0 else line_classes[i - 1],
-            }
-        )
+        line = {
+            "account_id": acct.id,
+            "debit": _q(amount) if amount > 0 else Decimal("0"),
+            "credit": _q(-amount) if amount < 0 else Decimal("0"),
+            "description": row.get("MEMO", "").strip() or description,
+            "class_id": block_class_id if i == 0 else line_classes[i - 1],
+        }
+        # A line on A/R or A/P names its customer or vendor in QuickBooks
+        # (#897): kept, so the aging and the balance read it as theirs.
+        named = _control_line_party(db, acct, row.get("NAME", "").strip() or name)
+        if named is not None:
+            kind, party = named
+            if kind == "customer":
+                line["customer_id"] = party.id
+            else:
+                payees.append(party)
+        lines.append(line)
     if len(lines) < 2:
         raise DataProblem(f"{label}: an entry needs two lines or more")
     key = _block_key(entry_date, lines, doc_num)
@@ -1580,8 +1589,41 @@ def _import_ledger_block(
         is_adjusting=adjusting and trns_type == "GENERAL JOURNAL",
         posted_by=posted_by,
     )
+    vendors = {v.id: v for v in payees}
+    if len(vendors) == 1:
+        txn.vendor_id = next(iter(vendors))
+    elif len(vendors) > 1 and warnings is not None:
+        warnings.append(
+            f"{label}: its Accounts Payable lines name {len(vendors)} vendors; "
+            "an entry here keeps one, so they were left unnamed. Books Check "
+            "lists them; move each to a bill."
+        )
     db.flush()
     return txn
+
+
+def _control_line_party(db: Session, acct, name: str):
+    """("customer", Customer) for a line on Accounts Receivable whose NAME
+    is a customer here, ("vendor", Vendor) for one on Accounts Payable whose
+    NAME is a vendor; None otherwise (#897)."""
+    from app.services.control_accounts import (
+        PAYABLE,
+        RECEIVABLE,
+        is_receivable_or_payable,
+    )
+
+    which = is_receivable_or_payable(acct)
+    if which is None or not name:
+        return None
+    if which == RECEIVABLE:
+        customer = _named(db, Customer, name)
+        if customer is None and ":" in name:
+            customer, _job = resolve_customer_and_job(db, name, create=False)
+        return ("customer", customer) if customer is not None else None
+    if which == PAYABLE:
+        vendor = _named(db, Vendor, name)
+        return ("vendor", vendor) if vendor is not None else None
+    return None
 
 
 def _import_deposit(

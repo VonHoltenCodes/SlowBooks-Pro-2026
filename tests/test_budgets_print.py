@@ -71,7 +71,7 @@ def _seed(client, accounts, year=2026):
             "date": f"{year}-03-15",
             "description": "March sales",
             "lines": [
-                {"account_id": accounts["1100"].id, "debit": "750.00", "credit": "0"},
+                {"account_id": accounts["1000"].id, "debit": "750.00", "credit": "0"},
                 {"account_id": accounts["4000"].id, "debit": "0", "credit": "750.00"},
             ],
         },

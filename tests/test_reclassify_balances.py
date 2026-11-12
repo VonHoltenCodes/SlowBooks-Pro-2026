@@ -192,7 +192,7 @@ def test_a_journal_line_moves_its_balance_in_each_accounts_own_direction(
                         "credit": "0",
                     },
                     {
-                        "account_id": accounts["2000"].id,
+                        "account_id": accounts["2500"].id,
                         "debit": "0",
                         "credit": "40.00",
                     },
@@ -207,7 +207,7 @@ def test_a_journal_line_moves_its_balance_in_each_accounts_own_direction(
     after = _balances(client)
     assert after[accounts["6900"].id] == Decimal("0")
     assert after[accounts["4000"].id] == before[accounts["4000"].id] - Decimal("40.00")
-    assert after[accounts["2000"].id] == before[accounts["2000"].id]
+    assert after[accounts["2500"].id] == before[accounts["2500"].id]
     pl = _ok(client.get("/api/reports/profit-loss", params=YEAR))
     income = {i["account_id"]: Decimal(str(i["amount"])) for i in pl["income"]}
     assert income.get(accounts["4000"].id) == Decimal("-40.00")

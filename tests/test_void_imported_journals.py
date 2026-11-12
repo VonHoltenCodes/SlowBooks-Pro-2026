@@ -77,7 +77,7 @@ def test_hand_typed_and_opening_balances_page_entries_say_so_too(client, seed_ac
                     "credit": "0",
                 },
                 {
-                    "account_id": seed_accounts["2000"].id,
+                    "account_id": seed_accounts["2500"].id,
                     "debit": "0",
                     "credit": "10.00",
                 },

@@ -20,6 +20,37 @@ def _ok(r, code=(200, 201)):
 
 
 def _journal(client, accounts, debit_no, credit_no, amount, text, day="2026-03-10"):
+    if {debit_no, credit_no} & {"1100", "2000"}:
+        # the journal form refuses a line on A/R or A/P since #897; an entry
+        # saved before then (or imported) still has one, written as it was
+        from datetime import date
+        from decimal import Decimal
+
+        from sqlalchemy.orm import object_session
+
+        from app.services.accounting import create_journal_entry
+
+        db = object_session(accounts[debit_no])
+        txn = create_journal_entry(
+            db,
+            date.fromisoformat(day),
+            text,
+            [
+                {
+                    "account_id": accounts[debit_no].id,
+                    "debit": Decimal(amount),
+                    "credit": Decimal("0"),
+                },
+                {
+                    "account_id": accounts[credit_no].id,
+                    "debit": Decimal("0"),
+                    "credit": Decimal(amount),
+                },
+            ],
+            source_type="manual",
+        )
+        db.commit()
+        return {"id": txn.id}
     return _ok(
         client.post(
             "/api/journal",
@@ -768,7 +799,7 @@ def test_a_line_whose_entry_is_on_the_job_is_not_taken_off_it(
                 "job_id": kitchen["id"],
                 "lines": [
                     {"account_id": accounts["6900"].id, "debit": "50", "credit": "0"},
-                    {"account_id": accounts["2000"].id, "debit": "0", "credit": "50"},
+                    {"account_id": accounts["2500"].id, "debit": "0", "credit": "50"},
                 ],
             },
         )
@@ -853,7 +884,7 @@ def test_a_line_whose_entry_is_on_the_class_is_not_taken_off_it(
                 "class_id": cls["id"],
                 "lines": [
                     {"account_id": accounts["6900"].id, "debit": "50", "credit": "0"},
-                    {"account_id": accounts["2000"].id, "debit": "0", "credit": "50"},
+                    {"account_id": accounts["2500"].id, "debit": "0", "credit": "50"},
                 ],
             },
         )
