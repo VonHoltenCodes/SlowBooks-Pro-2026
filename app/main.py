@@ -166,6 +166,7 @@ from app.services.closing_date import (
 from app.services.api_token_service import ADMIN_TOKEN_REFUSAL
 from app.services.api_token_service import resolve as _resolve_api_token
 from app.services.served_companies import CompanyUnavailable, sentence_of
+from app.services.pdf_service import PdfEngineMissing
 
 # An API token's request names the company it works in with this header
 # (#358); a signed-in person's session carries its company instead.
@@ -814,6 +815,16 @@ async def _company_unavailable_handler(request: Request, exc: Exception):
 
 
 app.add_exception_handler(CompanyUnavailable, _company_unavailable_handler)
+
+
+# ---- No WeasyPrint on this install (#807) ----
+# Every PDF route answered a plain-text 500 on an install without it. 503
+# with the sentence naming what to install; Print pages need no WeasyPrint.
+async def _pdf_engine_missing_handler(request: Request, exc: Exception):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+app.add_exception_handler(PdfEngineMissing, _pdf_engine_missing_handler)
 
 
 # ---- A value the database refuses (422, not 500) ----

@@ -12,6 +12,7 @@
     .doc-title { text-align: right; }
     .doc-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
     .doc-number { font-size: 12pt; color: #666; margin-top: 4px; }
+    .doc-title .void { color: #b00020; }
     .meta-table { width: 100%; margin-bottom: 16px; }
     .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; white-space: nowrap; }
     .meta-label { font-weight: 700; color: #4a4a6a; width: 80px; }
@@ -50,7 +51,7 @@
             </div>
         </div>
         <div class="doc-title">
-            <h1>BILL</h1>
+            <h1>BILL{% if bill.status == 'void' %} <span class="void">VOID</span>{% endif %}</h1>
             <div class="doc-number">#{{ bill.bill_number }}</div>
         </div>
     </div>

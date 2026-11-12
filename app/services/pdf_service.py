@@ -35,9 +35,28 @@ def _company_logo_data_uri(company_settings: dict) -> str:
 _FETCHER = None
 
 
+# An install without WeasyPrint (a bare Windows server install, #807)
+# answered every PDF route with a plain-text 500. The import failing now
+# raises this, and app.main answers it 503 with the sentence; the print
+# previews never reach the import, so they keep working.
+WEASYPRINT_MISSING = (
+    "This install cannot make PDFs because WeasyPrint or its Pango libraries"
+    " are missing: install them as the install guide (INSTALL.md) says under"
+    ' "PDFs need WeasyPrint", or use Print, which works without them.'
+)
+
+
+class PdfEngineMissing(RuntimeError):
+    """WeasyPrint, or the native libraries it loads, is not installed."""
+
+
 def _weasyprint():
     """(HTML, URLFetcher) — imported on first use, not at import time."""
-    from weasyprint import HTML, URLFetcher
+    try:
+        from weasyprint import HTML, URLFetcher
+    except (ImportError, OSError) as exc:
+        # OSError: the package is there and its pango/gobject DLLs are not
+        raise PdfEngineMissing(WEASYPRINT_MISSING) from exc
 
     return HTML, URLFetcher
 
@@ -424,13 +443,16 @@ def generate_statement_pdf(
     customer, activity: dict, company_settings: dict, as_of_date=None
 ) -> bytes:
     """`activity` is routes/reports/receivables.statement_activity(): the
-    dated lines with a running balance, and the totals."""
+    dated lines with a running balance, and the totals. The collection
+    statements are this one too."""
     html_str = _render(
         "statement_pdf.html",
         company_settings,
         customer=customer,
         activity=activity,
         as_of_date=as_of_date,
+        # Letter or A4 from the pdf_paper_size setting, as the reports (#807)
+        paper_size=(company_settings.get("pdf_paper_size") or "letter").lower(),
     )
     return render_pdf(html_str)
 

@@ -307,7 +307,20 @@ docker compose cp slowbooks:/app/backups ./my-backups
 
 - Python 3.13 (CI gates against 3.13; 3.12 is verified working)
 - PostgreSQL 17 (Docker image ships 17-alpine; older 16 still works for native installs)
-- System libraries for WeasyPrint
+- System libraries for WeasyPrint (see below)
+
+### PDFs need WeasyPrint
+
+Every Save PDF (invoices, statements, reports, checks, tax forms) is drawn
+by WeasyPrint, which loads the Pango and Cairo libraries. The Windows
+installer, the macOS app and the Docker image carry all of it. A source
+install needs the `weasyprint` package (it is in `requirements.txt`) and
+Pango on the system: the `apt install` line below on Linux,
+`brew install pango` on macOS, and on a Windows server run from source the
+Pango libraries that WeasyPrint's own installation guide names for Windows.
+Without them the app still runs, Print still works (it is the browser's
+own print of the same page), and each PDF route answers 503 with one
+sentence pointing here instead of failing.
 
 ### Steps
 
