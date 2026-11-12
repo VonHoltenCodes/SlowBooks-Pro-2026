@@ -679,6 +679,22 @@ def committed_unbilled(db: Session) -> dict:
     return {"total": data["totals"]["remaining"], "jobs": jobs, "as_of": data["as_of"]}
 
 
+def books_check(db: Session) -> dict:
+    """Books Check as of today (#893): how many subledgers differ from their
+    control accounts and the sentence the card says, with the report's
+    address beside it."""
+    from app.services.books_check import books_check as run
+
+    data = run(db)
+    return {
+        "as_of": data["as_of"],
+        "differences": data["differences"],
+        "checked": data["checked"],
+        "summary": data["summary"],
+        "failing": [r["name"] for r in data["rows"] if r["status"] == "difference"],
+    }
+
+
 # ── registry ─────────────────────────────────────────────────────────────
 
 # id → (title, size, description, builder). Size is a layout hint the page
@@ -806,6 +822,12 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
         "What open subcontracts and purchase orders still have to bill",
         committed_unbilled,
     ),
+    "books_check": (
+        "Books Check",
+        "half",
+        "Whether every subledger agrees with its control account today",
+        books_check,
+    ),
 }
 
 # Cards only a construction company is offered.
@@ -825,7 +847,7 @@ CONSTRUCTION_TITLES = {
 }
 
 # The order and set a company gets before anyone customises anything —
-# the pre-2.8 overview, exactly.
+# the pre-2.8 overview, then the Books Check card (#893).
 DEFAULT_LAYOUT = [
     "receivables",
     "overdue_invoices",
@@ -836,6 +858,7 @@ DEFAULT_LAYOUT = [
     "monthly_revenue",
     "recent_invoices",
     "recent_payments",
+    "books_check",
 ]
 
 
@@ -851,6 +874,7 @@ NONPROFIT_DEFAULT_LAYOUT = [
     "pnl_month",
     "cash_position",
     "job_budget_vs_actual",
+    "books_check",
 ]
 
 
@@ -871,6 +895,7 @@ CONSTRUCTION_DEFAULT_LAYOUT = [
     "monthly_revenue",
     "recent_invoices",
     "recent_payments",
+    "books_check",
 ]
 
 

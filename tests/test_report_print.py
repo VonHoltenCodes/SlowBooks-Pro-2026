@@ -59,6 +59,7 @@ TITLES = {
     "/api/reports/job-profitability/print": "Job Profitability",
     "/api/reports/job-budget-vs-actual/print": "Job Budget vs Actual",
     "/api/reports/sales-tax/print": "Sales Tax Report",
+    "/api/reports/books-check/print": "Books Check",
     "/api/reports/ar-aging/print": "Accounts Receivable Aging",
     "/api/reports/ap-aging/print": "Accounts Payable Aging",
     "/api/reports/estimate-closing-rate/print": "Estimate Closing Rate: by customer",
@@ -69,6 +70,7 @@ TITLES = {
 # The construction reports that read only an as-of date, and answer 409 to a
 # company that is not in construction mode.
 AS_OF_ONLY = {
+    "/api/reports/books-check/print",
     "/api/reports/wip-schedule/print",
     "/api/reports/cost-to-complete/print",
     "/api/reports/cost-to-complete-forecast/print",
