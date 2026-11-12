@@ -157,6 +157,7 @@ const AnalyticsPage = {
             <div class="analytics-section-title">Revenue Trend &mdash; Last 12 Months</div>
             <div class="analytics-card">
                 <div class="chart-wrap"><canvas id="chart-revenue-trend"></canvas></div>
+                ${data.revenue_trend_note ? `<div class="analytics-meta">${escapeHtml(data.revenue_trend_note)}</div>` : ''}
                 ${this._trendTable(data.revenue_trend)}
             </div>
 

@@ -719,7 +719,7 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "monthly_revenue": (
         "Monthly Revenue",
         "half",
-        "Income from the ledger, last 12 months",
+        "Billed revenue by month, last 12 months",
         monthly_revenue,
     ),
     "recent_invoices": (

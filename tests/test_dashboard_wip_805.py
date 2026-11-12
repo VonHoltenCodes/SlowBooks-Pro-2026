@@ -195,3 +195,42 @@ def test_a_book_with_no_wip_gives_the_card_its_ledger_income_by_month(
     assert sum(Decimal(str(v)) for v in amounts.values()) == Decimal("2023.66")
     # a business book's card carries no WIP caption
     assert "note" not in card
+
+
+def _trend_key(d: date) -> str:
+    return d.strftime("%Y-%m")
+
+
+def test_the_analytics_revenue_trend_leaves_the_wip_entry_out_as_the_card_does(
+    client, db_session, seed_accounts
+):
+    _construction_book(client, db_session)
+    before = client.get("/api/analytics/dashboard").json()["revenue_trend"]
+    assert (
+        client.post(f"/api/reports/wip-schedule/post?as_of={AS_OF}").status_code == 200
+    )
+
+    snap = client.get("/api/analytics/dashboard").json()
+    trend = snap["revenue_trend"]
+    assert trend == before
+    assert trend[_trend_key(AS_OF)] == 60000.0
+    assert trend[_trend_key(NEXT_DAY)] == 0.0
+    assert snap["revenue_trend_note"] == MONTHLY_REVENUE_WIP_NOTE
+
+    revenue = client.get("/api/analytics/revenue").json()
+    assert revenue["trend"] == trend
+    assert revenue["trend_note"] == MONTHLY_REVENUE_WIP_NOTE
+
+    # the chart and the card never disagree
+    card = _amounts(_card(client))
+    for key, amount in trend.items():
+        when = date.fromisoformat(f"{key}-01")
+        assert card[_key(when)] == amount
+
+
+def test_a_business_books_analytics_trend_has_no_wip_caption(
+    client, db_session, seed_accounts
+):
+    snap = client.get("/api/analytics/dashboard").json()
+    assert "revenue_trend_note" not in snap
+    assert "trend_note" not in client.get("/api/analytics/revenue").json()
