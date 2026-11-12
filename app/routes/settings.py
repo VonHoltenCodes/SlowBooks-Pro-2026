@@ -95,6 +95,7 @@ ENUM_SETTINGS = {
     # preprinted lays the figures onto the bank's slip by
     # deposit_slip_layout.
     "deposit_slip_stock": frozenset({"plain", "preprinted"}),
+    "check_amount_no_dollar_sign": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),

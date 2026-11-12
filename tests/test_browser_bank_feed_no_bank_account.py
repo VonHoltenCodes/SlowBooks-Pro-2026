@@ -7,7 +7,8 @@ looked broken, and an administrator spent a week unable to map it: the
 checking account was in the chart as a plain asset, which is never offered.
 The row now says why and offers + New bank account and Use an account I
 already have…; the pick becomes a Bank account and the feed is mapped to it
-in one step. A sign-in that may not change the mapping reads it as text."""
+in one step. A sign-in that may not change the mapping reads it as text.
+Two feeds into one account are refused on the page (#819)."""
 
 import json
 from urllib.parse import urlsplit
@@ -227,6 +228,17 @@ def test_a_list_with_accounts_still_offers_one_already_in_the_chart(client, db_s
             "Old Card will become a credit-card account and get a register. "
             "Demo Savings will import into it."
         ]
+        # two feeds into one account would bring its register's lines in
+        # twice (#819): Sync Now refuses with Mercury's sentence, and the
+        # saved mapping stays as it was
+        page.get_by_role("combobox", name="Import Demo Checking into").select_option(
+            label="Operating"
+        )
+        mapping.select_option(label="Operating")
+        page.get_by_role("button", name="Sync Now", exact=True).click()
+        page.get_by_text(
+            "Map each SimpleFIN account to a separate bank account", exact=True
+        ).wait_for()
 
     _browse(client, test)
     db_session.refresh(card)

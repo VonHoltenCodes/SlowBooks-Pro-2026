@@ -179,7 +179,7 @@
                 <span class="pay-to-label">PAY TO THE ORDER OF</span>
                 <span class="pay-to-line">{{ field('payee', check.payee) }}</span>
             </div>
-            <div class="amount-box">{{ field('amount', check.amount | currency) }}</div>
+            <div class="amount-box">{{ field('amount', check.amount | check_amount(no_dollar_sign)) }}</div>
             <div class="amount-words">{{ field('amount_words', check.amount_words ~ ' ******') }}</div>
 {%- if check.payee_address %}
             {{ payee_address(check) }}
@@ -293,7 +293,7 @@
                 <span class="pay-to-label">PAY TO THE ORDER OF</span><br>
                 <span class="pay-to-line">{{ field('payee', check.payee) }}</span>
             </div>
-            <div class="amount-box">{{ field('amount', check.amount | currency) }}</div>
+            <div class="amount-box">{{ field('amount', check.amount | check_amount(no_dollar_sign)) }}</div>
             <div class="amount-words">{{ field('amount_words', check.amount_words ~ ' ******') }}</div>
 {%- if check.payee_address %}
             {{ payee_address(check) }}
