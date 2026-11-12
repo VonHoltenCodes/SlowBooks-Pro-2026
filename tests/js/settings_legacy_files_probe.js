@@ -7,7 +7,13 @@ const fs = require('fs'), vm = require('vm');
 const settings = { company_name: 'Harbor Light Bakery' };
 const states = {
   ready: { files: 3, bytes: 5120, pending_companies: [], can_remove: true },
-  waiting: { files: 1, bytes: 12, pending_companies: ['Beta & Sons <b>', 'Harbor Light'], can_remove: false },
+  // the server's own sentence for books from before 2.18.0 (#769)
+  waiting: {
+    files: 1, bytes: 12, pending_companies: ['Beta & Sons <b>', 'Harbor Light'], can_remove: false,
+    pending_message: 'Beta & Sons <b> and Harbor Light still need to copy their files from the shared folder; '
+      + 'remove them once they have. Their company files are from before SlowBooks Pro 2.29.0. Open each of '
+      + 'them once with 2.31.14, then upgrade: https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/tag/v2.31.14',
+  },
   empty: { files: 0, bytes: 0, pending_companies: [], can_remove: false },
 };
 let state = states.ready;

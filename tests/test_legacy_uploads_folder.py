@@ -63,10 +63,22 @@ def _cfg(url: str) -> Config:
 
 @pytest.fixture(scope="module")
 def books_before(tmp_path_factory):
-    """Empty books at the release before 2.18.0, migrated once for the
-    module; each company copies the file."""
+    """Empty books stamped at the release before 2.18.0, migrated once for
+    the module; each company copies the file. Books that old are below the
+    migration floor (#769) and this build never walks them up, so they are
+    books at the floor (the copy step's stored_files table is there to run
+    it on) stamped back to that release: the folder reads only where a
+    company's migrations stand."""
     path = tmp_path_factory.mktemp("before") / "before.db"
-    command.upgrade(_cfg(_url(path)), BEFORE)
+    command.upgrade(_cfg(_url(path)), MIGRATION_FLOOR)
+    engine = sa.create_engine(_url(path))
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text("UPDATE alembic_version SET version_num = :r"), {"r": BEFORE}
+            )
+    finally:
+        engine.dispose()
     return path
 
 
@@ -121,19 +133,44 @@ def _old_books(template: Path, path: Path) -> None:
 
 def _opened_with_2_31_14(path: Path) -> None:
     """Books from before 2.18.0 are below the migration floor (#769): this
-    build does not migrate them, and 2.31.14 is the release that does (the
-    copy step its upgrade runs takes the company's files in). The folder
-    reads only where a company's migrations stand, so a company opened that
-    way is books stamped past the copy step."""
+    build does not migrate them, and 2.31.14 is the release that does. What
+    its upgrade does to them is the copy step (the migration's own
+    ``copy_shared_folder_files``, run here on its own), which takes the
+    company's files in, and a revision past it."""
+    from alembic.script import ScriptDirectory
+
+    module = (
+        ScriptDirectory.from_config(_cfg(_url(path)))
+        .get_revision(legacy_uploads.COPY_REVISION)
+        .module
+    )
     engine = sa.create_engine(_url(path))
     try:
         with engine.begin() as conn:
+            stored_files = sa.Table("stored_files", sa.MetaData(), autoload_with=conn)
+            module.copy_shared_folder_files(conn, stored_files)
             conn.execute(
                 sa.text("UPDATE alembic_version SET version_num = :r"),
                 {"r": MIGRATION_FLOOR},
             )
     finally:
         engine.dispose()
+
+
+def _stored_copy(path: Path, filename: str) -> bytes | None:
+    engine = sa.create_engine(_url(path))
+    try:
+        with engine.connect() as conn:
+            data = conn.execute(
+                sa.text(
+                    "SELECT s.data FROM attachments a JOIN stored_files s "
+                    "ON s.id = a.stored_file_id WHERE a.filename = :f"
+                ),
+                {"f": filename},
+            ).scalar()
+    finally:
+        engine.dispose()
+    return bytes(data) if data is not None else None
 
 
 def _manifest(data: Path, *companies: tuple[str, str]) -> None:
@@ -198,6 +235,14 @@ def _shared_files_left(uploads: Path) -> dict:
     }
 
 
+BETA_WAITS = (
+    "Beta Bakery still needs to copy its files from the shared folder; remove "
+    "them once it has. This company file is from before SlowBooks Pro 2.29.0. "
+    "Open it once with 2.31.14, then upgrade: "
+    "https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/tag/v2.31.14"
+)
+
+
 def test_the_folder_waits_for_every_company_then_an_administrator_clears_it(
     client, db_session, data_folder, books_before, tmp_path
 ):
@@ -218,23 +263,28 @@ def test_the_folder_waits_for_every_company_then_an_administrator_clears_it(
         "files": 3,
         "bytes": SHARED_BYTES,
         "pending_companies": ["Beta Bakery"],
+        # Beta is from before 2.18.0, so below the migration floor (#769):
+        # this version never opens it, and the page says which one does
+        "pending_message": BETA_WAITS,
         "can_remove": False,
     }
 
     # Beta still has to copy its files from the folder: nothing is removed.
     r = client.delete("/api/uploads/legacy")
     assert r.status_code == 409, r.text
-    assert "Beta Bakery" in r.json()["detail"]
+    assert r.json()["detail"] == BETA_WAITS
     assert "Acme" not in r.json()["detail"]
     assert _shared_files_left(uploads) == SHARED
 
     _opened_with_2_31_14(beta)
+    assert _stored_copy(beta, "W-4.pdf") == W4
 
     r = client.get("/api/uploads/legacy")
     assert r.json() == {
         "files": 3,
         "bytes": SHARED_BYTES,
         "pending_companies": [],
+        "pending_message": "",
         "can_remove": True,
     }
 
@@ -252,12 +302,16 @@ def test_the_folder_waits_for_every_company_then_an_administrator_clears_it(
     )
     assert (outside / "keep.pdf").read_bytes() == OUTSIDE
     assert os.listdir(outside) == ["keep.pdf"]
+    # Each company still has its own copy, in its company file.
+    assert _stored_copy(beta, "W-4.pdf") == W4
+    assert _stored_copy(acme, "receipt.pdf") == RECEIPT
 
     r = client.get("/api/uploads/legacy")
     assert r.json() == {
         "files": 0,
         "bytes": 0,
         "pending_companies": [],
+        "pending_message": "",
         "can_remove": False,
     }
 
@@ -372,6 +426,11 @@ def test_a_company_file_another_program_is_writing_keeps_the_folder(
         r = client.get("/api/uploads/legacy")
         writer.execute("ROLLBACK")
     assert r.json()["pending_companies"] == ["Busy Books"]
+    # not known to be old: it could not be read, so it is not sent to 2.31.14
+    assert r.json()["pending_message"] == (
+        "Busy Books could not be read just now, so nothing says it has copied "
+        "its files from the shared folder. Try again in a moment."
+    )
     assert client.get("/api/uploads/legacy").json()["pending_companies"] == []
 
 
@@ -418,6 +477,8 @@ def test_a_server_checks_every_database_its_companies_table_lists(
     r = client.get("/api/uploads/legacy")
     assert r.status_code == 200, r.text
     assert r.json()["pending_companies"] == ["Beta Bakery", "Broken Books"]
+    message = r.json()["pending_message"]
+    assert message.startswith(BETA_WAITS + " Broken Books could not be read")
     assert client.delete("/api/uploads/legacy").status_code == 409
 
     # Beta is opened, and the broken database is dropped from the server.
@@ -484,6 +545,7 @@ def test_no_folder_holds_nothing(client, tmp_path, monkeypatch):
         "files": 0,
         "bytes": 0,
         "pending_companies": [],
+        "pending_message": "",
         "can_remove": False,
     }
     assert client.delete("/api/uploads/legacy").json() == {"removed": 0, "bytes": 0}
@@ -521,7 +583,10 @@ def test_settings_offers_the_folder_to_an_administrator_while_it_holds_files():
     assert waiting["shown"] and waiting["button"] and waiting["disabled"], waiting
     assert "1 file " in waiting["text"]
     assert "Beta &amp; Sons &lt;b&gt; and Harbor Light" in waiting["html"]
-    assert "Open each of them once" in waiting["text"]
+    # the server's sentence, escaped: books from before 2.18.0 are opened
+    # with 2.31.14 first (#769), never a dead end
+    assert "Open each of them once with 2.31.14, then upgrade: " in waiting["text"]
+    assert "releases/tag/v2.31.14" in waiting["text"]
 
     # an empty folder: nothing shown
     empty = shown[("empty", "admin")]
@@ -587,3 +652,22 @@ def test_an_encrypted_company_file_is_left_alone(tmp_path):
     assert company_file.is_encrypted_file(path)
     assert legacy_uploads._company_file_needs_folder(path) is False
     assert sorted(p.name for p in tmp_path.iterdir()) == ["Encrypted Co.db"]
+
+
+def test_books_from_before_2_18_are_sent_to_2_31_14_and_unread_ones_to_try_again():
+    """#769: every company still to copy its files is from before 2.18.0,
+    so below the migration floor, and this version never opens it. The
+    sentence says which release does instead of "open it once"."""
+    from app.services.migration_floor import BELOW_FLOOR_MESSAGE
+
+    one = legacy_uploads.still_needed_message(["Acme"])
+    assert one.endswith(BELOW_FLOOR_MESSAGE)
+    assert "SlowBooks Pro was updated" not in one
+    two = legacy_uploads.still_needed_message(["Acme", "Beta", "Cole"], ["Dune"])
+    assert two.startswith("Acme, Beta and Cole still need to copy their files")
+    assert "Open each of them once with 2.31.14, then upgrade: " in two
+    assert "releases/tag/v2.31.14 Dune could not be read just now" in two
+    assert legacy_uploads.StillNeeded(["Acme"], ["Dune"]).companies == [
+        "Acme",
+        "Dune",
+    ]
