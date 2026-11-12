@@ -684,7 +684,8 @@ def update_journal_entry(
 def assert_voidable_kind(txn: Transaction) -> None:
     """Refuse, with the journal's Void's own answer, an entry that is not
     the journal's to reverse by what it is: a reversal, a pay run's payroll
-    entry, an item's opening stock and, last, a document's posting
+    entry, an item's opening stock, an inventory adjustment's entry (one
+    item or several) and, last, a document's posting
     (_DOCUMENTS_WITH_A_VOID, #661), in the order the route always asked."""
     if txn.source_type and txn.source_type.endswith("_void"):
         raise HTTPException(status_code=400, detail="Cannot void a reversal entry")
@@ -724,6 +725,19 @@ def assert_voidable_kind(txn: Transaction) -> None:
             "can't be voided here, since the counts it moved would stay; "
             "correct them with another inventory adjustment.",
         )
+    if txn.source_type == "adjustment":
+        # A one-item adjustment's entry (POST /api/items/{id}/adjust, and its
+        # residue entry, both under the item's id): a reversal here would
+        # leave the item's count and movement where they are, so count and
+        # ledger would disagree (#880), as with the multi-item one above.
+        raise HTTPException(
+            status_code=400,
+            detail=f"This is {_adjusted_item_named(txn)}'s inventory adjustment "
+            "entry. It can't be voided here, since the count it moved would "
+            "stay; post a reversing adjustment on the Items page instead "
+            "(Adjust Inventory: Remove or Add the same quantity), which keeps "
+            "the count, the movement and the ledger together.",
+        )
     if (txn.source_type or "") in _DOCUMENTS_WITH_A_VOID:
         # A document's posting is voided with the document, whose own void
         # does the whole job. Most write the reversal under the document's
@@ -762,6 +776,19 @@ def assert_voidable_kind(txn: Transaction) -> None:
             detail=f"This is {what}'s posting{said}, not a journal entry of its "
             f"own. Void {which} itself; that reverses this posting with it.",
         )
+
+
+def _adjusted_item_named(txn: Transaction) -> str:
+    """ "the item Widget" for a one-item adjustment's entry (its source_id is
+    the item's), else "an item" when the item is not found."""
+    from sqlalchemy.orm import object_session
+
+    from app.models.items import Item
+
+    db = object_session(txn)
+    item = db.get(Item, txn.source_id) if db is not None and txn.source_id else None
+    name = (item.name or "").strip() if item else ""
+    return f"the item {name}" if name else "an item"
 
 
 def _document_named(txn: Transaction) -> str | None:
