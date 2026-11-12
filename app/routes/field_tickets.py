@@ -155,8 +155,12 @@ def list_field_tickets(
 def job_purchase_orders(job_id: int = Query(...), db: Session = Depends(get_db)):
     """The job's purchase orders and subcontracts a ticket can point at (not
     drafts), each with its lines: ordered, received and billed to date. The
-    delivery form picks an open one; a sub's T&M ticket names a commitment."""
+    delivery form picks an open one; a sub's T&M ticket names a commitment.
+    Construction mode's, as the tickets are: a Business or Nonprofit company
+    is answered 409, as GET /api/field-tickets answers it (#810)."""
     from app.models.purchase_orders import POStatus
+
+    svc.require_construction(db)
 
     pos = (
         db.query(PurchaseOrder)

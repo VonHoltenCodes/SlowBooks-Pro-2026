@@ -296,6 +296,17 @@ class InvoiceResponse(BaseModel):
     # shown in place of the offer, which is then cleared.
     discount_taken: Optional[DiscountTaken] = None
     terms_note: Optional[str] = None
+    # The terms-list entry the invoice is tied to (#664), the one its due
+    # date and discount are read from; null when it is tied to none (free
+    # text, an import, or one saved before the list), #810.
+    payment_term_id: Optional[int] = Field(
+        None,
+        description=(
+            "The payment term (GET /api/payment-terms/{id}) the invoice is "
+            "tied to, which its due date and discount follow; null when it "
+            "is tied to none."
+        ),
+    )
     customer_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
