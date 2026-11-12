@@ -478,6 +478,236 @@ def _empty_use_tax(db: Session, use_tax_rate):
     }
 
 
+# ── Sales Tax: Print, Save PDF and Save CSV (#806) ───────────────────────
+
+
+def _sales_tax_period(data: dict) -> str:
+    period = f"{data['start_date']} — {data['end_date']}"
+    if data.get("basis") == "cash":
+        period += " (cash basis)"
+    return period
+
+
+def _sales_tax_sections(data: dict, t) -> list[dict]:
+    """The Sales Tax report on the report PDF theme: the screen's rows (an
+    invoice or credit memo each, a credit memo's figures negative), its
+    totals and the check against Sales Tax Payable; then the Use tax
+    section when the screen shows one."""
+    from app.routes.reports.financial import _money
+    from app.services.pdf_service import _format_tax_percent
+
+    rows = []
+    for i in data["items"]:
+        number = i["number"] or ""
+        if i["type"] == "credit_memo":
+            number = f"{number} (credit memo)"
+        rows.append(
+            {
+                "cells": [
+                    i["date"],
+                    number,
+                    i["customer_name"],
+                    _money(i["subtotal"]),
+                    _money(i["taxable"]),
+                    (
+                        ""
+                        if i["tax_rate"] is None
+                        else f"{_format_tax_percent(i['tax_rate'])}%"
+                    ),
+                    _money(i["tax_amount"]),
+                ]
+            }
+        )
+    rows.append(
+        {
+            "cells": [
+                "Total",
+                "",
+                "",
+                _money(data["total_sales"]),
+                _money(data["total_taxable"]),
+                "",
+                _money(data["total_tax"]),
+            ],
+            "style": "grand-total",
+        }
+    )
+    blank = ["", "", "", "", "", ""]
+    rows.append(
+        {
+            "cells": [
+                "Non-taxable sales",
+                "",
+                "",
+                _money(data["total_non_taxable"]),
+                "",
+                "",
+                "",
+            ]
+        }
+    )
+    rows.append({"cells": ["Tax on sales", *blank[:5], _money(data["tax_on_sales"])]})
+    rows.append(
+        {
+            "cells": [
+                "Less tax on credit memos",
+                *blank[:5],
+                _money(data["tax_credited"]),
+            ]
+        }
+    )
+    rows.append(
+        {
+            "cells": ["Tax collected", *blank[:5], _money(data["total_tax"])],
+            "style": "subtotal",
+        }
+    )
+    ledger = data.get("ledger")
+    notes = [data.get("basis_note")] if data.get("basis_note") else []
+    if ledger:
+        name = " ".join(
+            p for p in (ledger["account_number"], ledger["account_name"]) if p
+        )
+        rows.append(
+            {"cells": [f"{name}: tax posted", *blank[:5], _money(ledger["tax_posted"])]}
+        )
+        rows.append(
+            {
+                "cells": [
+                    "Difference from this report",
+                    *blank[:5],
+                    _money(ledger["difference"]),
+                ]
+            }
+        )
+        rows.append(
+            {"cells": ["Paid this period", *blank[:5], _money(ledger["payments"])]}
+        )
+        rows.append(
+            {
+                "cells": [
+                    f"Owed at {data['end_date']}",
+                    *blank[:5],
+                    _money(ledger["balance"]),
+                ],
+                "style": "subtotal",
+            }
+        )
+        if abs(Decimal(str(ledger["difference"]))) >= Decimal("0.005"):
+            notes.append(
+                f"{name} differs from this report by {_money(ledger['difference'])}. "
+                "Something other than a sale or credit memo posted to the account "
+                "in these dates (tax on a bill, a journal entry, a void of an "
+                "earlier sale)."
+            )
+    sections = [
+        {
+            "title": "Sales Tax Report",
+            "period": _sales_tax_period(data),
+            "columns": [
+                "Date",
+                f"{t('Invoice')} / Credit Memo",
+                t("Customer"),
+                "Sales",
+                "Taxable",
+                "Rate",
+                "Tax",
+            ],
+            "text_columns": 3,
+            "rows": rows,
+            "note": " ".join(notes) or None,
+        }
+    ]
+    use = data.get("use_tax")
+    if use:
+        use_rows = [
+            {
+                "cells": [
+                    i["date"],
+                    (i["bill_number"] or "")
+                    + (" (void)" if i["type"] == "bill_void" else ""),
+                    i["vendor_name"],
+                    i["job_name"],
+                    i["description"],
+                    "" if i["rate"] is None else f"{_format_tax_percent(i['rate'])}%",
+                    _money(i["amount"]),
+                ]
+            }
+            for i in use["items"]
+        ]
+        use_rows.append({"cells": ["Accrued", *blank[:5], _money(use["accrued"])]})
+        use_rows.append({"cells": ["Paid", *blank[:5], _money(use["paid"])]})
+        use_rows.append(
+            {
+                "cells": [
+                    f"Owed at {data['end_date']}",
+                    *blank[:5],
+                    _money(use["balance"]),
+                ],
+                "style": "grand-total",
+            }
+        )
+        sections.append(
+            {
+                "title": "Use Tax",
+                "period": _sales_tax_period(data),
+                "columns": [
+                    "Date",
+                    "Bill",
+                    "Vendor",
+                    t("Job"),
+                    "Line",
+                    "Rate",
+                    "Use tax",
+                ],
+                "text_columns": 5,
+                "rows": use_rows,
+            }
+        )
+    return sections
+
+
+@router.get("/sales-tax/pdf")
+def sales_tax_pdf(
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    basis: str = _BASIS_QUERY,
+    db: Session = Depends(get_db),
+):
+    """The Sales Tax report as a PDF (#806): the period, the basis, the
+    screen's rows and totals, and the check against Sales Tax Payable."""
+    from app.routes.reports.financial import _pdf_response
+    from app.services.terminology import terms_from_db
+
+    data = sales_tax_report(start_date, end_date, basis, db)
+    return _pdf_response(
+        _sales_tax_sections(data, terms_from_db(db)),
+        db,
+        f"sales-tax_{data['start_date']}_{data['end_date']}.pdf",
+    )
+
+
+@router.get("/sales-tax/csv")
+def sales_tax_csv_route(
+    request: Request,
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    basis: str = _BASIS_QUERY,
+    db: Session = Depends(get_db),
+):
+    """The Sales Tax report as a spreadsheet (#806): one row per invoice or
+    credit memo, then the totals and the check against Sales Tax Payable."""
+    from app.routes.reports.financial import _company_name, _csv_download
+    from app.services.ledger_exports import sales_tax_csv
+
+    data = sales_tax_report(start_date, end_date, basis, db)
+    return _csv_download(
+        sales_tax_csv(data, _company_name(db)),
+        f"sales-tax_{data['start_date']}_{data['end_date']}.csv",
+        request,
+    )
+
+
 @router.post("/sales-tax/pay")
 def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     """Record a sales tax payment — DR Sales Tax Payable, CR Bank Account"""
