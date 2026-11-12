@@ -161,6 +161,10 @@ DEFAULT_SETTINGS = {
     # vouchers below it, for QuickBooks Desktop's standard voucher stock.
     # The stock and the nudges apply to the face in either position.
     "check_position": "bottom",
+    # Check memo (#800): what a bill payment's check memo carries when
+    # none is typed on the payment: "reference" (the bill's invoice number,
+    # "Invoice 196132"), "memo" (the bill's whole memo, as before) or "none".
+    "check_memo": "reference",
     "check_nudge_x_in": "0",
     "check_nudge_y_in": "0",
     # Blank check stock (#739): "true" prints what pre-printed stock would
