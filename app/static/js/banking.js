@@ -1453,6 +1453,7 @@ const BankingPage = {
     async showVoidedFiles(id) {
         openModal('Attachments (voided entry)', `
             <div id="entry-attachments-list" style="margin-bottom:8px; font-size:11px;">Loading...</div>
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('bank_entry', id)}
             <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
         await BankingPage.loadAttachments(id, { keep: true });
     },
@@ -2131,7 +2132,7 @@ const BankingPage = {
                     <button type="submit" class="btn btn-primary">Post Entry</button>
                 </div>
             </form>
-            ${entry ? BankingPage._attachmentsHtml(entry.id) : ''}`, { onClose: () => PendingFiles.discard() });
+            ${entry ? BankingPage._attachmentsHtml(entry.id) + (typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('bank_entry', entry.id)) : ''}`, { onClose: () => PendingFiles.discard() });
         BankingPage._splitCats = catOpts;
         if (entry) BankingPage._fillEntryForm(entry);
         if (entry) BankingPage.loadAttachments(entry.id);

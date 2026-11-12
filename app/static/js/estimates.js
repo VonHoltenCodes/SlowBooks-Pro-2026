@@ -91,6 +91,7 @@ const EstimatesPage = {
             ${construction && est.terms ? `<p style="margin-top:12px;white-space:pre-wrap;"><strong>Terms, inclusions and exclusions</strong>\n${escapeHtml(est.terms)}</p>` : ''}
             ${est.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(est.notes)}</p>` : ''}
             ${InvoicesPage.attachmentsPanelHtml('estimate', est.id)}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('estimate', est.id)}
             <div class="form-actions">
                 ${EstimatesPage.acceptButtonHtml(est)}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Save PDF</button>

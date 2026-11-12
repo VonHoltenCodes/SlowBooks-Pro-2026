@@ -249,6 +249,18 @@ def get_db(request: HTTPConnection = None):
     sessions created outside the request cycle)."""
     db = SessionLocal()
     try:
+        if request is not None:
+            # an import's writes say which import made them (#894)
+            from app.services.request_context import import_source
+
+            source = import_source(
+                request.scope.get("method") or "", request.scope.get("path") or ""
+            )
+            if source:
+                db.info["audit_source"] = source
+    except Exception:
+        pass  # attribution must never break a request
+    try:
         session = getattr(request, "session", None) if request is not None else None
         if isinstance(session, dict) and session.get("authenticated") is True:
             db.info["acting_username"] = session.get("username") or "operator"

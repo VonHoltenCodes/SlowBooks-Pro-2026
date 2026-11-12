@@ -26,3 +26,7 @@ class EmailLog(Base):
     status = Column(String(20), nullable=False)  # sent, failed
     error_message = Column(Text, nullable=True)
     sent_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Who sent it (#894): the acting name the audit log writes, stamped on
+    # every new row by the audit hooks' before_flush (app.services.audit).
+    # NULL on rows from before 2.32.0.
+    username = Column(String(100), nullable=True)

@@ -983,7 +983,7 @@ def test_the_document_tax_exempt_migration(tmp_path):
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("b8640c3e4a5b").down_revision == "b8640b2d3f4a"
-    assert script.get_heads() == ["b8640c3e4a5b"]
+    assert script.get_revision("c894a1e7d2b3").down_revision == "b8640c3e4a5b"
     command.upgrade(cfg, "b8640b2d3f4a")  # the step below it
     with sqlite3.connect(db) as conn:
         conn.execute(

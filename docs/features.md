@@ -518,6 +518,20 @@ Canonical list of security measures lives in [SECURITY.md](../SECURITY.md); engi
 - **Budgets** — Create and track budgets by account and period with actual-vs-budget comparison. The account column stays in place and the month headers at the top while the grid scrolls, in Budget vs Actual too; **Print** on the page and in Budget vs Actual opens the sheet (every account, twelve months, landscape, the month row on each page) with the print dialog (v2.31.7, #702)
 - **Email Templates** — Customizable templates for the invoice email, the payment receipt, the past-due reminder, the collection letter and a nonprofit's donor acknowledgment
 
+## Activity on every document
+
+Every document's view has an **Activity** panel under its Attachments (#894): invoices, sales receipts, estimates, credit memos, bills, vendor credits, bill payments, expenses, credit card charges, register entries (checks and deposits typed into a register), deposits, journal entries, payments received, purchase orders, pay applications and change orders, and the page of each job, customer and vendor. It opens closed as "Activity (N)" and reads its rows when opened. Newest first, each event is a sentence with who and when, on the company's clock:
+
+- made, and by whom: a sign-in by its name, an API token as "an API token (its name)", the machine as "the system", and an import's rows as "the system, in the IIF import" (or the Xero, CSV, QuickBooks Online export ... import), with who ran it;
+- edited, one line per field changed, in words, old → new ("Due date 2026-11-30 → 2026-12-15"), a long note as "Notes changed", a line added or removed by its description and amount, a line changed field by field;
+- voided (a register entry's, an expense's, a deposit's or a journal entry's void with the reversing entry's memo when it has one), status changes ("Marked sent"), replaced by a corrected copy;
+- emailed, to whom and by whom, from the email log, and a send that failed says so with the reason in a sentence;
+- printed to PDF where the document check (document audit) recorded it;
+- a file attached or removed, by name;
+- a payment applied to an invoice or taken off it, a credit memo or vendor credit applied, a bill payment applied, a deposit taking a payment (and the payment saying which deposit took it), each as the related record's own event where it touches this document.
+
+The words are the company's own (a nonprofit reads Pledge and Donor). It is a read for every role, read-only and accountant sign-ins and API tokens included; nothing writes through it. The administrator's Audit Log page is as it was. It reads the audit log, which writes a row for every insert, edit and delete on every table with who made it, the email log (which keeps who sent each email from 2.32.0; a send from before says "someone (not recorded)"), the document checks and the attachments.
+
 ## UI
 - **Sidebar you can trim** (v2.23.5) — Settings → Sidebar hides the sections and links a company doesn't use; a hidden page still opens by its address
 - Authentic QB2003 "Default Blue" skin with navy/gold color palette (+ dark mode)
@@ -901,6 +915,7 @@ Shared parameters on the statements: `basis=accrual|cash` (#483), `hide_zero=tru
 | `/api/uploads/logo/{id}` | GET | The logo image, from the company's database |
 | `/api/attachments/{type}/{id}` · `/api/attachments/{id}` · `/api/attachments/download/{id}` | GET, POST / DELETE / GET | List and add a document's attachments; remove one; download one |
 | `/api/attachments/pending` · `/api/attachments/pending/{pending_id}` | POST / DELETE | Hold a file for a document not yet saved (#796, #881: a bill, expense, card charge, invoice, estimate, sales receipt, purchase order, vendor credit, journal entry or register entry): answers `{id, filename, mime_type, file_size, expires_at}`; the create call's `pending_attachments` names the ids and attaches them. DELETE takes one off the form (idempotent). Held 24 hours, for the sign-in that uploaded it; the same file refusals as an attachment |
+| `/api/activity?type={type}&id={id}` | GET | A document's Activity (#894), newest first: `{type, id, count, events: [{when, when_local, who, kind, text, details}]}`. `type` is `invoice`, `sales_receipt`, `estimate`, `credit_memo`, `bill`, `vendor_credit`, `bill_payment`, `expense`, `cc_charge`, `check`, `bank_entry`, `deposit`, `journal_entry`, `payment`, `purchase_order`, `pay_application`, `change_order`, `job`, `customer` or `vendor`; `tz_offset` (minutes, as JavaScript's getTimezoneOffset) sets the clock `when_local` reads, `count_only=true` answers the count alone. Every role reads it; an unknown type or record is a 404 with a sentence |
 | `/api/budgets` (+`/bulk`, `/variance`) | GET, POST | Budgets by account and period, set in bulk, with the actual-vs-budget variance; each variance row carries `account_path` ("Payroll Expenses: Taxes"), which the Budgets grid, Budget vs Actual and both print pages name a sub-account by (#813) |
 | `/api/budgets/print`, `/api/budgets/variance/print` | GET | The budget sheet (`year`, `account_id`) and Budget vs Actual (`year`, required) as a page that opens the print dialog on load, from the report PDFs' template (#702) |
 | `/api/print-tokens` | POST | A one-time address for a print sheet (#823): `{path, query}` names a GET under `/api/` ending in `/print` or `/print-preview` (anything else is refused with a sentence, as is a route that answers no page); the sheet is drawn now under the caller's sign-in or token and role (a read-only or accountant caller prints what it can read; a refusal or 404 is the sheet route's own); answers `{token, url, expires_in: 60}`. Every role may call it |

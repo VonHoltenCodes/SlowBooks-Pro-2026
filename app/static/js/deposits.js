@@ -357,6 +357,7 @@ const DepositsPage = {
             </div>
             ${payments}
             ${otherHtml}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('deposit', d.id)}
             <div class="form-actions">
                 ${canVoid ? `<button data-destructive type="button" class="btn btn-danger" onclick="DepositsPage.voidDeposit(${d.id})">Void</button>` : ''}
                 ${d.voided ? '' : `<button type="button" class="btn btn-secondary" onclick="window.open('/api/deposits/${d.id}/pdf','_blank')">Save PDF</button>

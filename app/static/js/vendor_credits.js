@@ -51,6 +51,7 @@ const VendorCreditsPage = {
             <p style="margin-top:8px;">Total ${formatCurrency(c.total)} &middot; applied ${formatCurrency(c.amount_applied)} &middot; remaining <strong>${formatCurrency(c.balance_remaining)}</strong></p>
             ${typeof Replace === 'undefined' ? '' : Replace.links(c, 'vendor_credit', n => `#/vendor-credits/${n}`)}
             ${InvoicesPage.attachmentsPanelHtml('vendor_credit', c.id)}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('vendor_credit', c.id)}
             <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
         InvoicesPage.loadAttachments('vendor_credit', c.id);
         // the document's own address, so Back returns to the list and the Open group lists it (NEW-164)

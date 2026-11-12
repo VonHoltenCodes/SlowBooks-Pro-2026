@@ -97,6 +97,7 @@ const BillsPage = {
                 <input type="file" id="bill-attach-file" aria-label="File to attach" style="font-size:11px;">
                 <button class="btn btn-sm btn-secondary" onclick="BillsPage.uploadAttachment(${bill.id})" style="margin-left:4px;">Upload</button>
             </div>
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('bill', bill.id)}
             <div class="form-actions">
                 ${bill.status !== 'void' ? `<button class="btn btn-primary" data-write onclick="BillsPage.showForm(${bill.id})">Edit</button>` : ''}
                 ${bill.status !== 'void' ? `<button class="btn btn-secondary" data-write title="Keep this bill as a memorized transaction, to enter again on a schedule" onclick="MemorizedPage.memorizeBill(${bill.id})">Memorize</button>` : ''}
@@ -176,6 +177,7 @@ const BillsPage = {
             ${p.discount_override_note ? `<div class="terms-note" style="margin:8px 0; padding:6px 10px; border-radius:4px; background:#fff4d6; color:#7a5500;">${escapeHtml(p.discount_override_note)}</div>` : ''}
             ${BillsPage._checkMemoHtml(p)}
             ${!p.is_voided && ahead > 0 ? `<p style="font-size:11px; color:var(--text-muted);">${formatCurrency(ahead)} paid ahead, not applied to a bill.</p>` : ''}
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('bill_payment', p.id)}
             <div class="form-actions">
                 ${p.is_voided ? '' : `${BillsPage._printCheckButton(p, true)}<button data-destructive type="button" class="btn btn-danger" onclick="BillsPage.voidBillPayment(${p.id}, ${firstBill})">Void</button>`}
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
