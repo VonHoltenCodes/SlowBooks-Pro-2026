@@ -281,6 +281,8 @@ FOUND_ON_PAGES = {
         "Test",
     },
     "#/batch-payments": {"Select All", "Apply Batch Payment"},
+    # the other deposits' rows on the slip (#792)
+    "#/deposits": {"Add line", "Make Deposit"},
     "#/quick-entry": {"Save & Next (Ctrl+Enter)"},
     "#/bill-entry": {"Save & Next (Ctrl+Enter)"},
     "#/csv": {"Import"},

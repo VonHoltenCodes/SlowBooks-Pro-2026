@@ -60,11 +60,12 @@
             <div><div class="label">Deposited to</div><div class="value">{{ deposit.account_name }}</div></div>
             <div><div class="label">Date</div><div class="value">{{ deposit.date | fdate }}</div></div>
             {% if deposit.reference %}<div><div class="label">Slip #</div><div class="value">{{ deposit.reference }}</div></div>{% endif %}
-            <div><div class="label">Items</div><div class="value">{{ deposit.payments | length }}</div></div>
+            <div><div class="label">Items</div><div class="value">{{ (deposit.payments | length) + (deposit.other_lines | default([]) | length) }}</div></div>
         </div>
     </div>
 
-    {% if deposit.payments %}
+    {% set others = deposit.other_lines | default([]) %}
+    {% if deposit.payments or others %}
     <table class="items">
         <thead><tr>
             <th>Date</th><th>Received from</th><th>Description</th><th>Check # / Ref</th><th>Method</th><th class="r">Amount</th>
@@ -80,6 +81,17 @@
                 <td class="r">{{ p.amount | currency }}</td>
             </tr>
         {% endfor %}
+        {# money that was never invoiced (#792), with the checks: the account it goes to and the memo #}
+        {% for o in others %}
+            <tr>
+                <td class="nw">{{ deposit.date | fdate }}</td>
+                <td class="nw">{{ o.received_from }}</td>
+                <td class="desc">{{ o.account_name }}{% if o.memo %} ({{ o.memo }}){% endif %}</td>
+                <td class="nw">{{ o.check_number }}</td>
+                <td class="nw">{{ o.method }}</td>
+                <td class="r">{{ o.amount | currency }}</td>
+            </tr>
+        {% endfor %}
         </tbody>
     </table>
     {% else %}
@@ -88,10 +100,13 @@
 
     <div class="summary">
         <table>
-            {% set checks = deposit.payments | selectattr('method', 'equalto', 'Check') | list %}
+            {% set slip = deposit.payments + others %}
+            {% set checks = slip | selectattr('method', 'equalto', 'Check') | list %}
             {% if checks %}<tr><td class="label">{{ checks | length }} check{{ '' if checks | length == 1 else 's' }}</td><td class="r">{{ checks | sum(attribute='amount') | currency }}</td></tr>{% endif %}
-            {% set cash = deposit.payments | selectattr('method', 'equalto', 'Cash') | list %}
+            {% set cash = slip | selectattr('method', 'equalto', 'Cash') | list %}
             {% if cash %}<tr><td class="label">Cash</td><td class="r">{{ cash | sum(attribute='amount') | currency }}</td></tr>{% endif %}
+            {% if others and deposit.payments %}<tr><td class="label">Payments</td><td class="r">{{ deposit.payments_total | currency }}</td></tr>
+            <tr><td class="label">Other deposits</td><td class="r">{{ deposit.other_total | currency }}</td></tr>{% endif %}
             <tr><td class="label grand">Total deposit</td><td class="r grand">{{ deposit.amount | currency }}</td></tr>
         </table>
     </div>
