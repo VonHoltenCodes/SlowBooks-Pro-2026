@@ -41,12 +41,23 @@ function app(startHash) {
     return { App: ctx.App, calls, ctx };
 }
 
-const settle = () => new Promise(r => setTimeout(r, 5));
+// The app's work after a navigation is a chain of awaits and timers; on a
+// loaded machine (the CI runner, a box running several suites) five
+// milliseconds was not always enough for it to reach the page's view
+// call, and the test read its calls too early. settle() waits a little
+// longer for the negative checks ("no list drawn"), and until() waits for
+// the call a positive check expects, up to two seconds, so a slow machine
+// passes and a wrong app still fails.
+const settle = () => new Promise(r => setTimeout(r, 25));
+const until = async pred => {
+    for (let i = 0; i < 200 && !pred(); i++) await new Promise(r => setTimeout(r, 10));
+};
 
 test('a journal posting opens over the register without drawing Journal Entries', async () => {
     const a = app('#/banking/3');
     const followed = a.App.openOver({ button: 0 }, '/#/journal/42');
     await settle();
+    await until(() => a.calls.some(c => c[0] === 'JournalPage.view' && c[1] === '42'));
     assert.equal(followed, false, 'the link is cancelled');
     assert.deepEqual(a.calls.filter(c => c[0].endsWith('.render')), [], 'no list drawn');
     assert.ok(a.calls.some(c => c[0] === 'JournalPage.view' && c[1] === '42'));
@@ -60,6 +71,7 @@ test('a document with its own page (an invoice) opens over the register too', as
     const a = app('#/banking/3');
     assert.equal(a.App.openOver({ button: 0 }, '/#/invoices/9'), false);
     await settle();
+    await until(() => a.calls.some(c => c[0] === 'InvoicesPage.view' && c[1] === '9'));
     assert.deepEqual(a.calls.filter(c => c[0] === 'InvoicesPage.render'), []);
     assert.ok(a.calls.some(c => c[0] === 'InvoicesPage.view' && c[1] === '9'));
     a.App.dialogClosed();
@@ -79,6 +91,7 @@ test('opening a document by its address still draws its list behind it', async (
     const a = app('#/journal/42');
     await a.App.navigate('#/journal/42');
     await settle();
+    await until(() => a.calls.some(c => c[0] === 'JournalPage.view' && c[1] === '42'));
     assert.ok(a.calls.some(c => c[0] === 'JournalPage.render'));
     assert.ok(a.calls.some(c => c[0] === 'JournalPage.view' && c[1] === '42'));
 });
@@ -91,6 +104,7 @@ test('a save or void inside it redraws the register, with the document back over
     a.calls.length = 0;
     a.App.refresh();
     await settle();
+    await until(() => a.calls.some(c => c[0] === 'PaymentsPage.view' && c[1] === '9'));
     const names = a.calls.map(c => c[0]);
     assert.ok(names.includes('BankingPage.renderRegister'), names.join(','));
     assert.ok(!names.includes('PaymentsPage.render'), 'the payments list is not drawn');
@@ -106,6 +120,7 @@ test('a save on a document opened at its own address still redraws its list', as
     a.calls.length = 0;
     a.App.refresh();
     await settle();
+    await until(() => a.calls.some(c => c[0] === 'PaymentsPage.render'));
     assert.ok(a.calls.some(c => c[0] === 'PaymentsPage.render'));
     assert.equal(a.ctx.location.hash, '#/payments/9');
 });

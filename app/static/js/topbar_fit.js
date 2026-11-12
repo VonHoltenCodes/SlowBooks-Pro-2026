@@ -14,7 +14,7 @@
  * The bar starts whole and, while it is wider than the window, folds one
  * step at a time (the tb-fold-N classes, style.css "TOP BAR — folding"):
  *   1. the clock and the brand's year go, the spacing tightens;
- *   2. Quick Entry and Bill Entry go (both on the sidebar);
+ *   2. Quick Entry and Bill Quick Entry go (both on the sidebar);
  *   3. New Customer, Create Invoice and Receive Payment go (Alt+N, Alt+P,
  *      and on the sidebar's pages);
  *   4. the sign-in name, About and Contact support move into More;

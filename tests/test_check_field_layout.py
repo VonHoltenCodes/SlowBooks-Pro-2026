@@ -506,7 +506,7 @@ def _js():
 
 def test_the_settings_page_has_the_layout_table_and_the_test_print_sends_it():
     js = _js()
-    assert "'check_blank_stock', 'check_micr_amount', 'check_field_layout']" in js
+    assert "'check_blank_stock', 'check_micr_amount', 'check_field_layout'" in js
     assert '<input type="hidden" name="check_field_layout"' in js
     assert '<h4 id="settings-check-fields-h"' in js and ">Field layout</h4>" in js
     for key, label in (

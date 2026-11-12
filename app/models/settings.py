@@ -175,6 +175,11 @@ DEFAULT_SETTINGS = {
     # check_micr_amount is "true".
     "check_blank_stock": "false",
     "check_micr_amount": "false",
+    # The dollar sign on the amount in figures (#799): "true" prints the
+    # amount box as "1,234.56", for check stock that prints its own "$"
+    # beside the box. The amount in words, the stubs and the vouchers keep
+    # theirs; plain, pre-printed and blank stock and the test check alike.
+    "check_amount_no_dollar_sign": "false",
     # Per-field check layout (#749): each value on the check face (payee,
     # payee address, date, amount in figures, amount in words, memo) moved,
     # sized and bolded on its own, on top of the nudges, as JSON of what

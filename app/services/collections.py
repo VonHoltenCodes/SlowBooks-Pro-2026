@@ -13,6 +13,10 @@ The rules, in one place:
   for an invoice 20 days late sends one email, not four.
 * A rule is spent for an invoice once a 'sent' audit row exists; a 'failed'
   row does not spend it, so the next run tries again.
+* An invoice's days from due are today minus its due date, one count for
+  the list, the rules and the email. A firmer rule sent on or before the
+  due date (Remind now pressed again) says the invoice is due today, due
+  tomorrow or due in N days, never "0 days overdue" (#827).
 * Every send is dated today. The Collections page's As of date is a way of
   looking at the list, never a date to send from: looking ahead a month
   must not send the final reminder early (review of #654).
@@ -78,7 +82,7 @@ TAKEN = object()
 
 # Wording gets firmer at each step. Placeholders: customer_name,
 # invoice_number, invoice_label, balance_due, due_date, days_overdue,
-# company_name. Migration c8e1a4d7f305 seeds these four, once; a company
+# due_status ("due today", "7 days overdue"; #827), company_name. Migration c8e1a4d7f305 seeds these four, once; a company
 # that deletes them keeps an empty list.
 DEFAULT_RULES = [
     (
@@ -131,6 +135,7 @@ _SAMPLE_CONTEXT = {
     "balance_due": "$1,250.00",
     "due_date": "Jan 15, 2026",
     "days_overdue": 7,
+    "due_status": "7 days overdue",
     "company_name": "Sample Company",
 }
 
@@ -433,10 +438,25 @@ def plan_reminders(db: Session, today: date, invoice_ids=None, settings=None):
 
 
 def preview_reminders(db: Session, invoice_ids=None) -> dict:
-    """Exactly what run_reminders would send today, without sending."""
+    """Exactly what run_reminders would send today, without sending: each
+    email's subject as the customer will read it (#827)."""
     _release_stale(db, InvoiceReminder)
     today = date.today()
-    sends, skipped = plan_reminders(db, today, invoice_ids)
+    settings = get_all_settings(db)
+    sends, skipped = plan_reminders(db, today, invoice_ids, settings)
+    words = terms_from_db(db)
+    from app.services.currency import home_currency
+
+    home = home_currency(db)
+
+    def subject(s):
+        try:
+            ctx = _context(s["invoice"], s["to"], s["days"], settings, words, home)
+            return render_reminder(s["rule"], ctx, s["days"])[0]
+        except Exception:  # a rule that cannot render shows no subject here
+            logger.exception("Reminder preview for invoice %s", s["invoice"].id)
+            return None
+
     return {
         "as_of_date": today.isoformat(),
         "items": [
@@ -450,6 +470,8 @@ def preview_reminders(db: Session, invoice_ids=None) -> dict:
                 "rule_id": s["rule"].id,
                 "label": rule_label(s["rule"].days_from_due),
                 "days_from_due": s["days"],
+                "due_status": due_status(s["days"]),
+                "subject": subject(s),
                 "balance_due": float(s["invoice"].balance_due),
             }
             for s in sends
@@ -481,6 +503,61 @@ def _money(amount, invoice, home: str) -> str:
     return f"{code} {text}" if code and code != home else f"${text}"
 
 
+def due_status(days: int) -> str:
+    """Where an invoice `days` from its due date stands, in the words an
+    email uses: 'due in 2 days', 'due tomorrow', 'due today', '1 day
+    overdue', '7 days overdue' (#827)."""
+    if days > 0:
+        return f"{days} day{'' if days == 1 else 's'} overdue"
+    if days == 0:
+        return "due today"
+    if days == -1:
+        return "due tomorrow"
+    return f"due in {-days} days"
+
+
+# A rule's text says "{{ days_overdue }} days overdue", which renders "0 days
+# overdue" when a firmer rule goes on or before the due date and "1 days
+# overdue" the day after. The starter rules, and the copies migration
+# c8e1a4d7f305 wrote into every company file, are phrased this way, so the
+# rendered sentence is put right rather than the stored text (#827).
+_WAS_DUE_AND_IS = re.compile(
+    r"\bwas due on (?P<date>.+?) and is (?:now )?(?P<n>\d+) days overdue"
+)
+_N_DAYS_OVERDUE = re.compile(r"\b(?:now )?(?P<n>\d+) days overdue")
+
+
+def _due_wording(text: str, days: int, due_date: str) -> str:
+    """The rendered text with "0 days overdue" said as due today (or
+    tomorrow, or in N days) and "1 days overdue" as "1 day overdue"; other
+    counts are left as written."""
+    if days > 1:
+        return text
+    if days == 1:
+        return re.sub(r"\b1 days overdue", "1 day overdue", text)
+    status = due_status(days)
+
+    def was_due(m):
+        if m.group("date") != due_date or m.group("n") != "0":
+            return m.group(0)
+        return f"is {status}, {due_date}"
+
+    text = _WAS_DUE_AND_IS.sub(was_due, text)
+    return _N_DAYS_OVERDUE.sub(
+        lambda m: status if m.group("n") == "0" else m.group(0), text
+    )
+
+
+def render_reminder(rule, ctx: dict, days: int) -> tuple[str, str]:
+    """(subject, body) of a rule's email for the invoice in `ctx`."""
+    subject = " ".join(_render(rule.subject, ctx).split())
+    body = _render(rule.body, ctx)
+    return (
+        _due_wording(subject, days, ctx["due_date"]),
+        _due_wording(body, days, ctx["due_date"]),
+    )
+
+
 def _context(inv: Invoice, to, days: int, settings: dict, words, home: str) -> dict:
     return {
         "customer_name": to[0].name,
@@ -489,6 +566,7 @@ def _context(inv: Invoice, to, days: int, settings: dict, words, home: str) -> d
         "balance_due": _money(inv.balance_due, inv, home),
         "due_date": inv.due_date.strftime("%b %d, %Y"),
         "days_overdue": max(0, days),
+        "due_status": due_status(days),
         "company_name": settings.get("company_name", "") or "",
     }
 
@@ -548,8 +626,7 @@ def _send_one(db, plan, settings, words, home, trigger):
     log_id = None
     try:
         ctx = _context(inv, to, days, settings, words, home)
-        subject = " ".join(_render(rule.subject, ctx).split())
-        body = _render(rule.body, ctx)
+        subject, body = render_reminder(rule, ctx, days)
         pdf = generate_invoice_pdf(inv, settings)
         ok = send_email(
             db=db,
