@@ -107,6 +107,7 @@ from app.routes import journal, deposits, cc_charges, checks, expenses, transfer
 # Phase 10: Quick Wins + Medium Effort Features
 from app.routes import bank_rules, budgets, attachments, email_templates
 from app.routes import invoice_messages as invoice_messages_routes
+from app.routes import print_tokens as print_tokens_routes
 from app.routes import payment_terms as payment_terms_routes
 
 # Phase 9: Analytics (real-time business intelligence)
@@ -1091,6 +1092,9 @@ _AUTH_EXEMPT_PREFIXES = (
     "/api/auth/",
     "/pay/",  # public Stripe customer-facing pay page
     "/portal/",  # employee self-service portal — token-based auth, no session
+    # a print sheet made by POST /api/print-tokens under a sign-in (#823):
+    # the one-time, minute-long token is the permission
+    "/print/",
 )
 _AUTH_EXEMPT_EXACT = {
     "/",
@@ -1179,6 +1183,7 @@ _ADMIN_ONLY_EMPLOYEE_RE = _re.compile(
     r"^/api/employees/[^/]+/(portal-token|portal-access|everify|bank-accounts|documents|ytd|opening-ytd)(/|$)"
 )
 _READ_METHODS = ("GET", "HEAD", "OPTIONS")
+_PRINT_TOKENS_PATH = "/api/print-tokens"
 # An outside accountant's sign-in (#340) writes journal entries only: it
 # posts them, voids its own (the journal router checks whose), and attaches
 # the support behind one. Everything else it reads, the audit log included:
@@ -1214,6 +1219,11 @@ def _is_hr_sensitive(path: str) -> bool:
 
 def _role_allows(role: str, method: str, path: str) -> bool:
     if role == "admin":
+        return True
+    # Making a print page's one-time address (#823) is a read whatever the
+    # method: the sheet is drawn under the caller's own role, so a read-only
+    # or accountant sign-in prints what it can read and nothing more.
+    if method == "POST" and path == _PRINT_TOKENS_PATH:
         return True
     if _is_hr_sensitive(path):
         return False
@@ -1763,6 +1773,9 @@ app.include_router(payroll.opening_employee_router)  # opening YTD (#433)
 app.include_router(provider_payments.router)
 app.include_router(provider_payments.legacy_stripe_router)
 app.include_router(public.router)
+# Print pages at a real address for the desktop's document windows (#823)
+app.include_router(print_tokens_routes.router)
+app.include_router(print_tokens_routes.page_router)
 # Phase 8: QuickBooks Online
 # Phase 9: Analytics (real-time business intelligence)
 app.include_router(analytics.router)
@@ -1943,7 +1956,7 @@ async def serve_analytics_redirect():
 # stays truthful in both directions.
 # ---------------------------------------------------------------------------
 _PUBLIC_FOR_SPEC = {"/", "/health", "/openapi.json", "/analytics", "/favicon.ico"}
-_PUBLIC_PREFIXES_FOR_SPEC = ("/api/auth/", "/pay/", "/portal/", "/static/")
+_PUBLIC_PREFIXES_FOR_SPEC = ("/api/auth/", "/pay/", "/portal/", "/print/", "/static/")
 
 
 def _custom_openapi():

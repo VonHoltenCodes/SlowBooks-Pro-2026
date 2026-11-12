@@ -22,7 +22,9 @@ from fastapi.responses import HTMLResponse
 # onload opened no dialog there, ever (NEW-208, 2.31.7 gate). There the
 # page prints once, at pywebviewready or a moment after load, whichever
 # comes first. A Print button on the sheet (bottom right, clear of the
-# header; not printed) starts it again.
+# header; not printed) starts it again. A document window opened at the
+# sheet's one-time address (/print/<token>, #823) is the shell too, though its
+# protocol is http: and window.pywebview is not there yet at load.
 PRINT_SCRIPT = (
     "<style>.sb-print-again{position:fixed;bottom:10px;right:10px;z-index:9;"
     "font:13px sans-serif;padding:4px 14px;cursor:pointer}"
@@ -33,7 +35,8 @@ PRINT_SCRIPT = (
     '<button type="button" class="sb-print-again" id="sb-print-again">Print</button>'
     "<script>(function(){var done=false;"
     "function go(){if(done)return;done=true;window.print();}"
-    "var shell=!/^https?:$/.test(location.protocol)||!!window.pywebview;"
+    "var shell=!/^https?:$/.test(location.protocol)||!!window.pywebview"
+    "||/^\\/print\\//.test(location.pathname);"
     "if(shell){window.addEventListener('pywebviewready',go);"
     "window.addEventListener('load',function(){setTimeout(go,1500);});}"
     "else{window.addEventListener('load',go);}"

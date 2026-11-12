@@ -1341,6 +1341,11 @@ class PickerApi:
         """Show already-fetched, already-authenticated HTML (an invoice/
         estimate print-preview page) in a new native window.
 
+        Since #823 a print sheet opens at a one-time address instead
+        (open_document_url); this is the page's fallback when that address
+        cannot be made. A window given html= has no address, so its print
+        footer carries a data: string.
+
         Why the caller fetches the content itself rather than handing over
         a URL for a fresh window to load: a fresh pywebview window is a
         SEPARATE top-level browsing context, and field testing showed it
@@ -1364,6 +1369,35 @@ class PickerApi:
             webview.create_window(
                 title or "SlowBooks Pro 2026", html=html, zoomable=True
             )
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True}
+
+    def open_document_url(self, title: str, url: str) -> dict:
+        """Open a print sheet at its one-time address (#823) in a new native
+        window: http://127.0.0.1:<this port>/print/<token>, which the page
+        got from POST /api/print-tokens under its own sign-in.
+
+        open_document_html's window has no address, so the print dialog's
+        footer printed the window's data: URL, a long base64 string, along
+        the bottom of every page (2.31.7 gate, W-123). This window has a
+        real one, short and on localhost, and needs no cookie: the token is
+        the permission, for a minute and one open. Relative links and
+        assets in the sheet resolve against the server as in a browser.
+        Only this server's /print/ addresses are opened here."""
+        prefix = f"http://127.0.0.1:{self._port}/print/"
+        token = str(url or "")[len(prefix) :]
+        if not str(url or "").startswith(prefix) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{16,128}", token
+        ):
+            return {
+                "success": False,
+                "error": "Only a print page of this SlowBooks Pro can be opened here",
+            }
+        try:
+            import webview
+
+            webview.create_window(title or "SlowBooks Pro 2026", url, zoomable=True)
         except Exception as exc:
             return {"success": False, "error": str(exc)}
         return {"success": True}

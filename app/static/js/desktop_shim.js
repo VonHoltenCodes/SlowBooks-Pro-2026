@@ -44,9 +44,19 @@
  *     "inline" wouldn't help) is read straight off disk by Python and
  *     copied to the user's Downloads folder, since the desktop app and
  *     the file are already on the same machine.
- *   - An HTML response (print-preview pages) is handed to
- *     open_document_html(), which opens it in a new native window via
- *     pywebview's html= parameter.
+ *   - A print or print-preview sheet (a GET under /api/ ending in /print
+ *     or /print-preview) opens at a real address (#823): this page asks
+ *     the server for a one-time token (POST /api/print-tokens, under this
+ *     page's own sign-in, which the sheet inherits), and
+ *     open_document_url() opens http://127.0.0.1:<port>/print/<token> in a
+ *     new native window. The token is the permission, so the window needs
+ *     no cookie (the failure of attempt 2 above); it serves once, within a
+ *     minute. The print dialog's footer then prints that short address and
+ *     the sheet's title, not the data: string an html= window has, and
+ *     relative links and assets in the sheet resolve as in a browser.
+ *   - Any other HTML response, or a sheet whose address cannot be made, is
+ *     handed to open_document_html(), which opens it in a new native
+ *     window via pywebview's html= parameter.
  *   - A PDF response is base64-encoded and handed to open_document_pdf(),
  *     which saves it under Documents/SlowBooks Pro and opens it from there
  *     (file:// needs no auth at all) in a window of its own, under a
@@ -155,8 +165,8 @@
     // My Preferences sets too, so there are not two zooms that multiply.
     // The size is kept per computer and applied from <head> on every page,
     // in a browser too; only the keys and the wheel are the desktop's.
-    // A document window (print preview, PDF) is its own page with no origin
-    // and no shim, so only pywebview's own wheel zoom reaches it.
+    // A document window (print preview, PDF) is its own page with no shim,
+    // so only pywebview's own wheel zoom reaches it.
     function textSize() {
         return window.SlowbooksTextSize || null;
     }
@@ -215,6 +225,9 @@
 
     window.SlowbooksDesktop = {
         saveFile: saveFile,
+        // the print sheet a URL names, as POST /api/print-tokens takes it,
+        // or null (#823)
+        printSheet: printSheet,
         // whether this page is in the desktop window: there Ctrl+F (⌘F)
         // finds with the app's search, there being no browser find bar
         // to fall through to (#695)
@@ -238,7 +251,53 @@
         return m ? decodeURIComponent(m[1]) : null;
     }
 
+    // A print sheet of this app: the server makes one-time addresses for
+    // these and nothing else (app/routes/print_tokens.py). A check prints
+    // as a PDF on the stock, so /api/checks/print takes the PDF path.
+    const PRINT_SHEET_RE = /^\/api(\/[A-Za-z0-9_-]+)+\/(print|print-preview)$/;
+    function printSheet(url) {
+        try {
+            const u = new URL(url, window.location.href);
+            if (!PRINT_SHEET_RE.test(u.pathname) || /^\/api\/checks\//.test(u.pathname)) return null;
+            return { path: u.pathname, query: u.search.replace(/^\?/, '') };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Open a print sheet at its one-time address (#823). True when the
+    // window opened; false sends the caller down the fetch path, which
+    // opens the sheet as before or says what refused it.
+    async function openPrintAddress(url) {
+        const api = window.pywebview && window.pywebview.api;
+        const sheet = printSheet(url);
+        if (!sheet || !api || !api.open_document_url) return false;
+        let data;
+        try {
+            const res = await fetch('/api/print-tokens', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-Slowbooks-Desktop': '1' },
+                body: JSON.stringify(sheet),
+            });
+            if (!res.ok) return false;
+            data = await res.json();
+        } catch (e) {
+            return false;
+        }
+        if (!data || !data.token) return false;
+        const address = window.location.origin + '/print/' + encodeURIComponent(data.token);
+        let result;
+        try {
+            result = await api.open_document_url('SlowBooks Pro 2026', address);
+        } catch (e) {
+            return false;
+        }
+        return !!(result && result.success);
+    }
+
     async function openSameOriginUrl(url) {
+        if (await openPrintAddress(url)) return;
         let response;
         try {
             response = await fetch(url, {
@@ -313,7 +372,8 @@
             return;
         }
 
-        // Anything else (print-preview HTML, etc.)
+        // Anything else: an HTML page with no one-time address (see
+        // openPrintAddress), shown from the HTML in hand
         const html = await response.text();
         if (window.pywebview && window.pywebview.api && window.pywebview.api.open_document_html) {
             await window.pywebview.api.open_document_html('SlowBooks Pro 2026', html);

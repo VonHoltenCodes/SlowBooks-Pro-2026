@@ -142,6 +142,10 @@ def copy_gate(method: str, path: str) -> bool:
         return True
     if path.startswith("/api/attachments/journal_entry/"):
         return True
+    # a print page's one-time address (#823) is a read: the sheet is drawn
+    # through this gate again, as a GET
+    if path == "/api/print-tokens":
+        return True
     return path.startswith("/api/auth/")
 
 
