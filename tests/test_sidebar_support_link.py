@@ -1,8 +1,9 @@
-"""The sidebar's bottom link asks for support on Ko-fi, not for artists.
+"""The sidebar's bottom link asks for a donation on Ko-fi, not for artists.
 
 The link under the left menu used to open the artists' call in GitHub
 Discussions (#636). The art is in hand; the one outside link on the sidebar
-now opens the Ko-fi page the README already carries. It is an external URL,
+now opens the Ko-fi page the README already carries, and says Donate, not
+Support: the header's Support link is the support mailbox. It is an external URL,
 so it keeps target=_blank and rel=noopener: the desktop shim only
 intercepts same-origin _blank links, and this one opens in the system
 browser.
@@ -28,7 +29,8 @@ def test_the_sidebar_footer_link_opens_the_kofi_page_in_the_system_browser():
     link = _footer_link()
     assert f'href="{KOFI}"' in link
     assert 'target="_blank"' in link and 'rel="noopener"' in link
-    assert "Support SlowBooks Pro" in link
+    assert ">Donate &rarr;</a>" in link
+    assert "Support" not in link  # the header's Support link is the mailbox
     assert "discussions" not in link and "turtle" not in link
 
 
