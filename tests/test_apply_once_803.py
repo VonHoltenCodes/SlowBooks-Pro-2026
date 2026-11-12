@@ -250,17 +250,20 @@ def test_receive_payments_apply_credit_stops_at_a_refusal_and_says_what_was_appl
         "invoice #1021 was applied before it; the dialog shows what remains now.",
         "error",
     ]
-    # the dialog opened again on the memo and invoices as they are now
+    # the dialog opened again on the credit left ($10 less the $3 applied):
+    # invoice 1021, just paid from it, is not offered again to be refilled,
+    # and the refused row and the one after it keep the amounts typed
     assert got["open"] is True
     assert got["memoLeft"] == 7 and got["balances"] == [27, 30, 30]
-    assert [row[:2] for row in got["reopenedWith"]] == [
-        ["1021", "27"],
-        ["1022", "30"],
-        ["1023", "30"],
+    assert got["available"] == "$7.00"
+    assert got["reopenedWith"] == [
+        ["1022", "30", "3.00"],
+        ["1023", "30", "4.00"],
     ]
 
 
 def test_receive_payments_apply_credit_sent_again_applies_only_what_is_left(probe):
+    """Apply pressed again on the reopened dialog, nothing retyped."""
     got = probe["receiveRetry"]
     assert got["sent"] == [
         ["/credit-memos/1/apply", 22, 3],

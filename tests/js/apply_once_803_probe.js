@@ -117,13 +117,13 @@ function reset() { posts = []; toasts = []; modal = null; inputs = []; refuseNex
   out.receiveRefused = {
     sent: sent(), toast: toasts[toasts.length - 1], open: !!modal,
     reopenedWith: inputs.map((i) => [i.dataset.number, i.dataset.max, i.value]),
+    available: (modal && (modal.html.match(/<strong>([^<]*)<\/strong> available/) || [])[1]) || null,
     memoLeft: state.memos[0].available,
     balances: state.invoices.map((i) => i.balance_due),
   };
-  //    a second Apply, on the dialog as it opened again: only what is left
+  //    a second Apply, on the dialog as it opened again, nothing retyped:
+  //    only what is left
   posts = []; toasts = [];
-  inputs[1].value = '3.00'; inputs[2].value = '4.00';
-  if (inputs[0]) inputs[0].value = '';
   await PaymentsPage.saveApplyCredit(ev, 'credit_memo', 1, 7, false);
   out.receiveRetry = {
     sent: sent(), toast: toasts[toasts.length - 1],
