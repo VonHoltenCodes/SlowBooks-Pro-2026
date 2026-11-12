@@ -44,11 +44,28 @@ def test_the_flag_defaults_off_for_the_owner_and_is_kept(client, seed_accounts):
     assert adj["is_adjusting"] is True
     assert client.get(f"/api/journal/{adj['id']}").json()["is_adjusting"] is True
     # the list filters on it
-    ids = {e["id"] for e in client.get("/api/journal?adjusting=true").json()}
+    ids = {
+        e["id"]
+        for e in client.get("/api/journal?adjusting=true&start_date=1900-01-01").json()[
+            "entries"
+        ]
+    }
     assert ids == {adj["id"]}
-    ids = {e["id"] for e in client.get("/api/journal?adjusting=false").json()}
+    ids = {
+        e["id"]
+        for e in client.get(
+            "/api/journal?adjusting=false&start_date=1900-01-01"
+        ).json()["entries"]
+    }
     assert plain["id"] in ids and adj["id"] not in ids
-    assert len(client.get("/api/journal").json()) == 2
+    assert (
+        len(
+            client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+                "entries"
+            ]
+        )
+        == 2
+    )
 
 
 def test_the_report_lists_the_flagged_ones_and_the_statements_can_leave_them_out(

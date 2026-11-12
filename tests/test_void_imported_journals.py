@@ -38,7 +38,12 @@ def test_the_lists_imports_opening_balances_can_be_voided_from_the_page(
     assert opening.source_type == "iif_import"
     assert _tb(client)["total_debit"] == 2500.0
 
-    listed = {e["id"]: e for e in client.get("/api/journal").json()}
+    listed = {
+        e["id"]: e
+        for e in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+    }
     assert opening.id in listed
     assert (
         listed[opening.id]["voidable"] is True and listed[opening.id]["voided"] is False
@@ -93,7 +98,9 @@ def test_hand_typed_and_opening_balances_page_entries_say_so_too(client, seed_ac
         },
     )
     assert r.status_code in (200, 201), r.text
-    entries = client.get("/api/journal").json()
+    entries = client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+        "entries"
+    ]
     ob = next(e for e in entries if e["source_type"] == "opening_balance")
     assert ob["voidable"] is True
     assert Decimal(str(ob["total_debit"])) == Decimal("100.00")

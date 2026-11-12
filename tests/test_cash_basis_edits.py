@@ -373,7 +373,13 @@ def test_editing_and_voiding_a_journal_entry_carry_its_basis(
     client, db_session, seed_accounts, seed_customer
 ):
     entry = _journal(client, seed_accounts, "cash").json()
-    listed = [e for e in client.get("/api/journal").json() if e["id"] == entry["id"]]
+    listed = [
+        e
+        for e in client.get("/api/journal", params={"start_date": "1900-01-01"}).json()[
+            "entries"
+        ]
+        if e["id"] == entry["id"]
+    ]
     assert listed[0]["basis"] == "cash" and len(listed[0]["lines"]) == 2
 
     body = {

@@ -88,7 +88,9 @@ def test_other_entries_name_no_register(client, seed_accounts):
     assert entry["register_account_id"] is None
     assert entry["register_account_name"] == ""
     # the list keeps its shape, the new fields at their defaults
-    listed = _ok(client.get("/api/journal"))
+    listed = _ok(client.get("/api/journal", params={"start_date": "1900-01-01"}))[
+        "entries"
+    ]
     assert all(
         e["register_account_id"] is None and e["register_account_name"] == ""
         for e in listed
