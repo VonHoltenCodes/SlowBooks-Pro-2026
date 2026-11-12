@@ -60,6 +60,9 @@ def _pdf_cell(value, kind: str) -> str:
     if kind == "num":
         # a count that can be fractional (a bill split across jobs): trim zeros
         return f"{float(value):g}"
+    if kind == "num1":
+        # an average read beside its total: always one decimal (15.0, 11.7)
+        return f"{float(value):.1f}"
     return str(value)
 
 
@@ -72,7 +75,7 @@ def _csv_cell(value, kind: str):
         return _Percent(float(value))
     if kind == "int":
         return int(value)
-    if kind == "num":
+    if kind in ("num", "num1"):
         return float(value)
     return value
 

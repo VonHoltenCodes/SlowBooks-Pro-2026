@@ -471,8 +471,8 @@ def test_books_from_before_2_9_get_the_default_asset_type_at_the_upgrade(tmp_pat
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("407d52f22d78").down_revision == "d7b3f9a1c5e2"
     assert script.get_heads() == [
-        "a4c8e2f6b0d3"
-    ]  # estimate decided_at (#795) is the head above it
+        "b6e1d4a8c2f5"
+    ]  # #795's lost dates on the local calendar is the head above it
     command.upgrade(cfg, "407d52f22d78")
     types, accounts = _after_upgrade(db)
     expense = accounts["Depreciation Expense"]
