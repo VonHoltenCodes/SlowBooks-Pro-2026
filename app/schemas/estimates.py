@@ -1,6 +1,6 @@
 from datetime import date as dt_date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import (
     BaseModel,
@@ -48,12 +48,24 @@ _LINE_KIND_LABELS = dict(
 
 
 # The contractor's own side of an estimate (#824): each line's unit cost, a
-# package's cost, the cost of work the markups build on and the cost budget
-# accepting locks. An estimate read by a read-only or accountant sign-in or
-# token leaves every field named here out, wherever it sits (a line, the
-# totals, a package); the owner's PDF and the print preview print none of
-# them. A later cost figure joins this one set.
-ESTIMATE_COST_FIELDS = frozenset({"unit_cost", "cost", "markup_base", "budget_cost"})
+# package's cost, the cost of work the markups build on, the cost budget
+# accepting locks, a line's markup (#774) and the totals' cost, profit and
+# margin. An estimate read by a read-only or accountant sign-in or token
+# leaves every field named here out, wherever it sits (a line, the totals, a
+# package); the owner's PDF and the print preview print none of them. A later
+# cost figure joins this one set.
+ESTIMATE_COST_FIELDS = frozenset(
+    {
+        "unit_cost",
+        "cost",
+        "markup_base",
+        "budget_cost",
+        "markup_pct",
+        "cost_total",
+        "profit",
+        "margin_pct",
+    }
+)
 
 
 def without_cost_side(data):
@@ -81,7 +93,15 @@ class EstimateLineCreate(StrictModel):
     unit_cost: Optional[Decimal] = None
     # A construction line's markup on its unit cost, a percent (#774); the
     # server prices the line from it. None is a line at cost.
-    markup_pct: Optional[Decimal] = None
+    markup_pct: Optional[Decimal] = Field(
+        None,
+        description="A construction line's markup on its unit cost, a percent "
+        "(25 means 25%); none prices the line at cost.",
+        json_schema_extra={
+            "minimum": int(MIN_LINE_MARKUP),
+            "maximum": int(MAX_LINE_MARKUP),
+        },
+    )
     is_taxable: Optional[bool] = None
     class_name: Optional[str] = None
     job_id: Optional[int] = None
@@ -354,7 +374,7 @@ class EstimateResponse(BaseModel):
     totals: Optional[EstimateTotals] = None
     # A construction estimate's layout, "line_markup" or "commercial_bid"
     # (estimating.presentation_style, #774); None outside construction.
-    style: Optional[str] = None
+    style: Optional[Literal["line_markup", "commercial_bid"]] = None
     # True when the estimate's job bills by pay application (a contract type, a
     # schedule of values or a pay application), so Convert is refused.
     bills_by_pay_app: bool = False

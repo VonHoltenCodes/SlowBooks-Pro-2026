@@ -109,6 +109,17 @@ def test_out_of_range_figures_are_refused_with_a_sentence(client, seed_customer,
     assert _post(client, seed_customer.id, line).status_code == 422
 
 
+def test_the_markup_is_named_and_bounded_in_the_schema(client, seed_customer):
+    _construction(client)
+    r = _post(client, seed_customer.id, {**FENCE, "markup_pct": "abc"})
+    assert r.json()["detail"][0]["message"] == "Line 1: Markup must be a number."
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    markup = schemas["EstimateLineCreate"]["properties"]["markup_pct"]
+    assert (markup["minimum"], markup["maximum"]) == (-100, 10000)
+    style = schemas["EstimateResponse"]["properties"]["style"]["anyOf"][0]
+    assert style["enum"] == ["line_markup", "commercial_bid"]
+
+
 @pytest.mark.parametrize(
     "company,kind", [("construction", "allowance"), ("business", "base")]
 )
@@ -165,6 +176,10 @@ def test_the_layout_follows_the_estimate_then_the_setting(
     assert tools["style"] == "commercial_bid"
     orm = db_session.get(Estimate, tools["id"])
     assert presentation_style(orm, "line_markup") == "commercial_bid"
+    plain = db_session.get(
+        Estimate, _estimate(client, seed_customer.id, [at_cost])["id"]
+    )
+    assert presentation_style(plain, "simple") == "commercial_bid"  # a bad stored style
     _construction(client, estimate_style="line_markup")
     assert _estimate(client, seed_customer.id, [at_cost])["style"] == "line_markup"
 

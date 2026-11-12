@@ -214,7 +214,8 @@ PDF are exactly as they were.
   of each new line; change it on any line. A line with no cost takes a typed
   price and no markup. The totals show Subtotal, Tax when it is charged and
   Total, and under them, for you only, the estimate's cost, profit and margin
-  and how many priced lines have no cost. The owner's PDF prints each line's
+  and how many priced lines have no cost (a read-only or accountant sign-in
+  sees neither the Cost and Markup % columns nor this line, #824). The owner's PDF prints each line's
   description, quantity and amount: no cost, no markup, no unit rate, no cost
   code.
 - **Commercial bid** (`commercial_bid`, the default) is the general
