@@ -1701,9 +1701,30 @@ def import_ledger_report(
     from app.services.accounting import get_ap_account_id, get_ar_account_id
 
     try:
-        control = {get_ar_account_id(db), get_ap_account_id(db)}
+        ar_id, ap_id = get_ar_account_id(db), get_ap_account_id(db)
     except Exception:
-        control = set()
+        ar_id = ap_id = None
+    control = {i for i in (ar_id, ap_id) if i}
+    from app.models.contacts import Customer, Vendor
+    from app.services.jobs_service import resolve_customer_and_job
+
+    def party(account_id, name):
+        """The customer an A/R line names, the vendor an A/P line names
+        (#897): QuickBooks' Name on the row, if it is one here."""
+        if not name or account_id not in control:
+            return None
+        if account_id == ar_id:
+            found, _job = resolve_customer_and_job(db, name, create=False)
+            return found
+        from sqlalchemy import func as sqlfunc
+
+        return (
+            db.query(Vendor).filter(Vendor.name == name).first()
+            or db.query(Vendor)
+            .filter(sqlfunc.lower(Vendor.name) == name.lower())
+            .order_by(Vendor.id)
+            .first()
+        )
 
     def post(t) -> None:
         """One journal, as a register entry reads (#663): QuickBooks' Name
@@ -1738,7 +1759,24 @@ def import_ledger_report(
                     "description": DIFFERENCE_MEMO,
                 }
             )
-        if any(ln["account_id"] in control for ln in lines_out):
+        # an A/R or A/P line that names its customer or vendor keeps the
+        # name, so the aging and the balance read it as theirs (#897); one
+        # that names nobody is what the warning below is about
+        payees = set()
+        nameless = False
+        for out, ln in zip(lines_out, journal):
+            if out["account_id"] not in control:
+                continue
+            who = party(out["account_id"], ln["name"])
+            if who is None:
+                nameless = True
+            elif out["account_id"] == ar_id and isinstance(who, Customer):
+                out["customer_id"] = who.id
+            else:
+                payees.add(who.id)
+        if len(payees) > 1:
+            nameless = True
+        if nameless:
             posting["control"] += 1
         txn = create_journal_entry(
             db,
@@ -1752,6 +1790,8 @@ def import_ledger_report(
             source_ref=t["key"],
             source_kind=first["type"][:50],
         )
+        if len(payees) == 1:
+            txn.vendor_id = next(iter(payees))
         if off:
             # a partial entry: a later file that has more of it replaces it
             txn.source_difference = off
@@ -1814,8 +1854,10 @@ def import_ledger_report(
     if posting["control"]:
         result["warnings"].append(
             f"{posting['control']} of the journals post to Accounts Receivable or "
-            "Accounts Payable. The A/R and A/P aging read invoices and bills, so "
-            "enter the ones still open as documents after the import."
+            "Accounts Payable without naming one customer or vendor. The A/R "
+            "and A/P aging read invoices, bills and the journal lines that name "
+            "their customer or vendor, so enter the ones still open as documents "
+            "after the import (Books Check lists them)."
         )
     if posting["classed"]:
         result["class_lines"] = posting["classed"]

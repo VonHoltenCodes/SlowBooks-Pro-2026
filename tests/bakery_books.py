@@ -16,6 +16,49 @@ def _ok(r):
     return r.json()
 
 
+def _job_cost_on_payables(seed_accounts, S):
+    """The job cost entry that credits Accounts Payable with no vendor: saved
+    before 2.32, when the entry took any offset account. The window and the
+    API refuse one now (#897), so it is written as it was then, through the
+    posting service, and Books Check still finds the $300 it leaves off the
+    A/P Aging until the books' fixture voids it."""
+    from decimal import Decimal
+
+    from sqlalchemy.orm import object_session
+
+    from app.models.job_costing import JobCost, JobCostLine
+    from app.services.job_costing import next_job_cost_number, post_job_cost
+
+    db = object_session(seed_accounts["1000"])
+    jc = JobCost(
+        number=next_job_cost_number(db),
+        date=date(2026, 9, 12),
+        job_id=S["job"],
+        memo="Rental chairs",
+        source="manual",
+    )
+    db.add(jc)
+    db.flush()
+    jc.lines.append(
+        JobCostLine(
+            job_cost_id=jc.id,
+            cost_code_id=S["cost_code"],
+            cost_type="labor",  # the cost code's, as the entry form took it
+            description="Chair rental",
+            quantity=Decimal("120"),
+            rate=Decimal("2.5"),
+            amount=Decimal("300.00"),
+            debit_account_id=seed_accounts["5000"].id,
+            credit_account_id=seed_accounts["2000"].id,
+            line_order=0,
+        )
+    )
+    db.flush()
+    post_job_cost(db, jc)
+    db.commit()
+    return jc.id
+
+
 def seed_books(client, seed_accounts):
     """The ids of what it made, by name."""
     a = {number: account.id for number, account in seed_accounts.items()}
@@ -361,24 +404,7 @@ def seed_books(client, seed_accounts):
             "notes": "Tent setup the day before.",
         },
     )["id"]
-    S["job_cost"] = post(
-        "/api/job-costs",
-        {
-            "date": "2026-09-12",
-            "job_id": S["job"],
-            "memo": "Rental chairs",
-            "lines": [
-                {
-                    "description": "Chair rental",
-                    "quantity": 120,
-                    "rate": 2.5,
-                    "cost_code_id": S["cost_code"],
-                    "debit_account_id": a["5000"],
-                    "credit_account_id": a["2000"],
-                }
-            ],
-        },
-    )["id"]
+    S["job_cost"] = _job_cost_on_payables(seed_accounts, S)
 
     # people
     staff = {

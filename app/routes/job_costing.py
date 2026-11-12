@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, object_session
 
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
@@ -27,7 +27,10 @@ from app.schemas.job_costing import (
     JobCostCreate,
     JobCostLineResponse,
     JobCostResponse,
+    JobCostReversesOn,
 )
+from app.services import accrued_job_costs
+from app.services.journal_controls import JOB_COST, refuse_control_line
 from app.services.closing_date import check_closing_date
 from app.services.job_costing import (
     allocate_cost,
@@ -291,6 +294,13 @@ def _jc_response(jc: JobCost) -> JobCostResponse:
         lr.debit_account_name = ln.debit_account.name if ln.debit_account else None
         lr.credit_account_name = ln.credit_account.name if ln.credit_account else None
         data.lines.append(lr)
+    # an accrual (#897): what it put on 2010 and when it reverses
+    db = object_session(jc)
+    if db is not None:
+        data.accrued = accrued_job_costs.accrued_amount(
+            jc, accrued_job_costs.account_id(db)
+        )
+    data.reversed_on = accrued_job_costs.reversal_date(jc)
     return data
 
 
@@ -374,6 +384,10 @@ def create_job_cost(data: JobCostCreate, db: Session = Depends(get_db)):
             raise HTTPException(
                 status_code=422, detail=f"Line {i + 1}: unknown cost type '{ctype}'"
             )
+        credit_account_id = ln.credit_account_id
+        if ln.accrue:
+            # the offset is 2010 Accrued Job Costs, made on first use (#897)
+            credit_account_id = accrued_job_costs.ensure_account(db)
         try:
             debit, credit = resolve_line_accounts(
                 db,
@@ -381,12 +395,15 @@ def create_job_cost(data: JobCostCreate, db: Session = Depends(get_db)):
                 code,
                 ctype,
                 ln.debit_account_id,
-                ln.credit_account_id,
+                credit_account_id,
                 is_burden=ln.is_burden,
                 equipment=equipment,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Line {i + 1}: {exc}")
+        # A/P holds bills, A/R invoices: neither takes a job cost line (#897)
+        for acct_id in (debit, credit):
+            refuse_control_line(db, db.get(Account, acct_id), i + 1, JOB_COST)
         rate = ln.rate
         if equipment and (rate is None or rate == 0):
             rate = Decimal(str(equipment.hourly_rate))
@@ -421,6 +438,9 @@ def create_job_cost(data: JobCostCreate, db: Session = Depends(get_db)):
     db.flush()
     try:
         post_job_cost(db, jc)
+        accrued_job_costs.settle_reverses_on(
+            db, jc, "reverses_on" in data.model_fields_set, data.reverses_on
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     db.commit()
@@ -438,6 +458,9 @@ def allocate(data: AllocationCreate, db: Session = Depends(get_db)):
     explicit = (
         {t.job_id: t.weight for t in data.targets} if data.method == "percent" else None
     )
+    credit_account_id = data.credit_account_id
+    if data.accrue:
+        credit_account_id = accrued_job_costs.ensure_account(db)
     try:
         jc = allocate_cost(
             db,
@@ -448,14 +471,51 @@ def allocate(data: AllocationCreate, db: Session = Depends(get_db)):
             cost_code_id=data.cost_code_id,
             cost_type=data.cost_type,
             debit_account_id=data.debit_account_id,
-            credit_account_id=data.credit_account_id,
+            credit_account_id=credit_account_id,
             memo=data.memo,
             start_date=data.start_date,
             end_date=data.end_date,
             explicit=explicit,
+            refuse_controls=True,
+        )
+        accrued_job_costs.settle_reverses_on(
+            db, jc, "reverses_on" in data.model_fields_set, data.reverses_on
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    return _jc_response(_jc_get(db, jc.id))
+
+
+@job_costs_router.put("/{jc_id}/reverses-on", response_model=JobCostResponse)
+def set_reverses_on(jc_id: int, data: JobCostReversesOn, db: Session = Depends(get_db)):
+    """Move or clear an accrual's Reverses on date (#897) before it reverses.
+    Null leaves the accrual open until a date is set again."""
+    jc = _jc_get(db, jc_id)
+    if jc.status == "void":
+        raise HTTPException(
+            status_code=409, detail=f"{jc.number} is void; it does not reverse."
+        )
+    if not accrued_job_costs.is_accrual(db, jc):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{jc.number} credits nothing to 2010 Accrued Job Costs, so "
+            "it has no reversal date.",
+        )
+    if jc.reversal_transaction_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{jc.number} already reversed on "
+            f"{accrued_job_costs.reversal_date(jc).isoformat()}. Void the entry "
+            "and enter it again to change it.",
+        )
+    if data.reverses_on is not None:
+        check_closing_date(db, data.reverses_on)
+    try:
+        accrued_job_costs.check_reverses_on(jc, data.reverses_on)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    jc.reverses_on = data.reverses_on
     db.commit()
     return _jc_response(_jc_get(db, jc.id))
 

@@ -377,7 +377,7 @@ def _journal(client, accounts, debit=100, description="Accrue materials"):
         "description": description,
         "lines": [
             {"account_id": accounts["6900"].id, "debit": debit, "credit": 0},
-            {"account_id": accounts["2000"].id, "debit": 0, "credit": debit},
+            {"account_id": accounts["2500"].id, "debit": 0, "credit": debit},
         ],
     }
     return body
@@ -558,7 +558,7 @@ def test_the_email_log_sender_migration(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("c894a1e7d2b3").down_revision == "b8640c3e4a5b"
-    assert script.get_heads() == ["c894a1e7d2b3"]
+    assert script.get_heads() == ["d897a2c4e6f1"]  # #897 is the head above it
     command.upgrade(cfg, "b8640c3e4a5b")  # the step below it
     with sqlite3.connect(db) as conn:
         conn.execute(

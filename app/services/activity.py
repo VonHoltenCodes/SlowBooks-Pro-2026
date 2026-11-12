@@ -199,6 +199,14 @@ DOC_TYPES: dict[str, DocType] = {
         attachment_types=("journal_entry",),
         number_fields=_TXN_NUMBER,
     ),
+    # a job cost entry (#897): its lines, its Reverses on date, and the
+    # reversal of an accrual the start-up pass posts
+    "job_cost": DocType(
+        "Job Cost Entry",
+        "job_costs",
+        (("job_cost_lines", "job_cost_id"),),
+        number_fields=("number",),
+    ),
     "job": DocType(
         "Job",
         "jobs",
@@ -244,6 +252,7 @@ _QUIET_FIELDS = {
     "received_qty",
     "last_emailed_at",
     "last_emailed_to",
+    "reversal_transaction_id",
 }
 # Shown as "<field> changed", never with the values: tax ids and bank numbers
 # a read-only sign-in may not see in their history
@@ -313,6 +322,9 @@ _FIELD_WORDS = {
     "deposit_to_account_id": "Deposit to",
     "is_voided": "Void",
     "is_active": "Active",
+    "reverses_on": "Reverses on",
+    "debit_account_id": "Cost account",
+    "credit_account_id": "Offset account",
 }
 # The vocabulary keys among those words (terms.text swaps them in prose too)
 _VOCAB_FIELDS = {"customer_id": "Customer", "job_id": "Job", "class_id": "Class"}
@@ -329,6 +341,8 @@ _NAMED_TABLES = {
     "item_id": ("items", ("name",)),
     "cost_code_id": ("cost_codes", ("code", "name")),
     "payment_term_id": ("payment_terms", ("name",)),
+    "debit_account_id": ("accounts", ("account_number", "name")),
+    "credit_account_id": ("accounts", ("account_number", "name")),
 }
 _LINE_LABEL_FIELDS = ("description", "memo", "item_no")
 _VOID_STATUSES = {"void", "voided"}
@@ -820,6 +834,20 @@ def _audit_events(
                             heads.append(("status", f"Marked {after} by {who}"))
                     if "is_voided" in changed and new.get("is_voided") is True:
                         heads.append(("voided", f"Voided by {who}"))
+                    if "reversal_transaction_id" in changed and new.get(
+                        "reversal_transaction_id"
+                    ):
+                        # an accrued job cost's reversal (#897)
+                        on = new.get("reversed_on")
+                        heads.append(
+                            (
+                                "reversed",
+                                "Accrual reversed"
+                                + (f" on {on}" if on else "")
+                                + f" by {who} (journal entry "
+                                f"{new['reversal_transaction_id']})",
+                            )
+                        )
                     if "replaced_by_id" in changed and new.get("replaced_by_id"):
                         heads.append(
                             ("replaced", f"Replaced by a corrected copy by {who}")

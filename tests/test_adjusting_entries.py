@@ -39,7 +39,7 @@ def test_the_flag_defaults_off_for_the_owner_and_is_kept(client, seed_accounts):
     plain = _post(client, seed_accounts, "6300", "1000", "40.00", "Insurance paid")
     assert plain["is_adjusting"] is False and plain["posted_by"] == "admin"
     adj = _post(
-        client, seed_accounts, "6300", "2000", "100.00", "Accrual", is_adjusting=True
+        client, seed_accounts, "6300", "2500", "100.00", "Accrual", is_adjusting=True
     )
     assert adj["is_adjusting"] is True
     assert client.get(f"/api/journal/{adj['id']}").json()["is_adjusting"] is True
@@ -76,7 +76,7 @@ def test_the_report_lists_the_flagged_ones_and_the_statements_can_leave_them_out
         client,
         seed_accounts,
         "6300",
-        "2000",
+        "2500",
         "100.00",
         "Accrue insurance",
         is_adjusting=True,
@@ -85,7 +85,7 @@ def test_the_report_lists_the_flagged_ones_and_the_statements_can_leave_them_out
         client,
         seed_accounts,
         "6000",
-        "2000",
+        "2500",
         "250.00",
         "Accrue advertising",
         is_adjusting=True,
@@ -100,7 +100,7 @@ def test_the_report_lists_the_flagged_ones_and_the_statements_can_leave_them_out
     assert rep["entries"][0]["posted_by"] == "admin"
     assert [ln["account_number"] for ln in rep["entries"][0]["lines"]] == [
         "6300",
-        "2000",
+        "2500",
     ]
 
     # the Trial Balance with and without them differs by exactly their amounts
@@ -109,8 +109,8 @@ def test_the_report_lists_the_flagged_ones_and_the_statements_can_leave_them_out
     by_no = lambda tb: {i["account_number"]: i for i in tb["items"]}  # noqa: E731
     assert by_no(with_)["6300"]["total_debit"] == 140.0
     assert by_no(without)["6300"]["total_debit"] == 40.0
-    assert by_no(with_)["2000"]["total_credit"] == 350.0
-    assert "2000" not in by_no(without)  # nothing but adjustments touched it
+    assert by_no(with_)["2500"]["total_credit"] == 350.0
+    assert "2500" not in by_no(without)  # nothing but adjustments touched it
     assert with_["total_debit"] - without["total_debit"] == 350.0
 
     # and the P&L
@@ -143,7 +143,7 @@ def test_the_report_lists_the_flagged_ones_and_the_statements_can_leave_them_out
 
 
 def test_the_report_saves_as_pdf_and_as_a_saved_report(client, seed_accounts):
-    _post(client, seed_accounts, "6300", "2000", "100.00", "Accrual", is_adjusting=True)
+    _post(client, seed_accounts, "6300", "2500", "100.00", "Accrual", is_adjusting=True)
     if WEASYPRINT_AVAILABLE:
         r = client.get(
             "/api/reports/adjusting-entries/pdf?start_date=2026-01-01&end_date=2026-12-31"
@@ -164,7 +164,7 @@ def test_a_voided_adjustment_and_its_reversal_both_list_as_adjusting(
     client, seed_accounts
 ):
     a = _post(
-        client, seed_accounts, "6300", "2000", "100.00", "Accrual", is_adjusting=True
+        client, seed_accounts, "6300", "2500", "100.00", "Accrual", is_adjusting=True
     )
     r = client.post(f"/api/journal/{a['id']}/void")
     assert r.status_code == 200, r.text

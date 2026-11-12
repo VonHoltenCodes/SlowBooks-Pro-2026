@@ -702,6 +702,25 @@ async def lifespan(app: FastAPI):
             if misplaced:
                 print(misplaced)
                 logging.getLogger(__name__).info("%s", misplaced)
+            # #897: an accrued job cost whose Reverses on date has come gets
+            # its reversing entry, once (the reversal is claimed on the entry,
+            # so the next start posts nothing); printed for launcher.log.
+            from app.services.accrued_job_costs import (
+                reversal_sentence,
+                reverse_due_accruals,
+            )
+
+            try:
+                reversed_now = reversal_sentence(reverse_due_accruals(_db))
+            except Exception:
+                _db.rollback()
+                reversed_now = None
+                logging.getLogger(__name__).warning(
+                    "could not reverse the accrued job costs due", exc_info=True
+                )
+            if reversed_now:
+                print(reversed_now)
+                logging.getLogger(__name__).info("%s", reversed_now)
         finally:
             _db.close()
             startup_progress.clear()

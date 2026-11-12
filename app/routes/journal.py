@@ -211,12 +211,20 @@ def _line_dims_offered(db: Session) -> dict:
 
 
 def _journal_lines(
-    db: Session, data, edit: bool = False, basis: str = BASIS_BOTH
+    db: Session,
+    data,
+    edit: bool = False,
+    basis: str = BASIS_BOTH,
+    kept_accounts: frozenset = frozenset(),
 ) -> list[dict]:
     """The posted lines from the form's fields, the same for a new entry
     and an edit: a zero line dropped, an account checked to exist, each
     line's own description, job, class, cost code, billable flag and
-    (nonprofit) function carried through."""
+    (nonprofit) function carried through. A line on Accounts Receivable or
+    Accounts Payable is refused (#897) unless its account is one of
+    `kept_accounts`, those an edited entry's lines were already saved on."""
+    from app.services.journal_controls import refuse_control_line
+
     # On an edit, a null class or cost code for a dimension the form has no
     # picker for is not a choice the client made: the line keeps what it
     # has (replace_journal_lines' carry-over), so a business company's memo
@@ -227,7 +235,7 @@ def _journal_lines(
         else set()
     )
     lines = []
-    for line in data.lines:
+    for line_no, line in enumerate(data.lines, 1):
         if line.debit == 0 and line.credit == 0:
             continue
         acct = db.query(Account).filter(Account.id == line.account_id).first()
@@ -235,6 +243,7 @@ def _journal_lines(
             raise HTTPException(
                 status_code=404, detail=f"Account {line.account_id} not found"
             )
+        refuse_control_line(db, acct, line_no, kept=kept_accounts)
         row = {
             "account_id": line.account_id,
             "debit": Decimal(str(line.debit)),
@@ -596,8 +605,13 @@ def update_journal_entry(
     # before the route (#340). Its GET and the register say editable is
     # false for the accountant, so no Edit is offered in the first place.
     old_lines = all_lines(db, txn.id)
+    # a line already saved on A/R or A/P keeps it through the edit (#897)
     lines = _journal_lines(
-        db, data, edit=True, basis=data.basis or _basis_of(old_lines)
+        db,
+        data,
+        edit=True,
+        basis=data.basis or _basis_of(old_lines),
+        kept_accounts=frozenset(ln.account_id for ln in old_lines),
     )
     if len(lines) < 2:
         raise HTTPException(status_code=400, detail="At least 2 lines required")

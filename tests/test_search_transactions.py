@@ -50,7 +50,7 @@ def books(client, db_session, seed_accounts, seed_customer):
             "description": "Accrue quarterly insurance",
             "lines": [
                 {"account_id": acct["6300"].id, "debit": "333.33", "credit": "0"},
-                {"account_id": acct["2000"].id, "debit": "0", "credit": "333.33"},
+                {"account_id": acct["2500"].id, "debit": "0", "credit": "333.33"},
             ],
         },
     )
@@ -97,7 +97,7 @@ def books(client, db_session, seed_accounts, seed_customer):
             "description": "Wrong insurance accrual",
             "lines": [
                 {"account_id": acct["6300"].id, "debit": "12.00", "credit": "0"},
-                {"account_id": acct["2000"].id, "debit": "0", "credit": "12.00"},
+                {"account_id": acct["2500"].id, "debit": "0", "credit": "12.00"},
             ],
         },
     )
@@ -211,7 +211,7 @@ def test_newest_first_five_at_most(client, books, seed_accounts):
                         "credit": "0",
                     },
                     {
-                        "account_id": seed_accounts["2000"].id,
+                        "account_id": seed_accounts["2500"].id,
                         "debit": "0",
                         "credit": "1.00",
                     },

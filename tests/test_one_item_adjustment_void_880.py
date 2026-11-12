@@ -115,7 +115,7 @@ def test_an_ordinary_journal_entry_still_voids(client, db_session, seed_accounts
             "description": "Accrue materials",
             "lines": [
                 {"account_id": seed_accounts["6900"].id, "debit": 100, "credit": 0},
-                {"account_id": seed_accounts["2000"].id, "debit": 0, "credit": 100},
+                {"account_id": seed_accounts["2500"].id, "debit": 0, "credit": 100},
             ],
         },
     )

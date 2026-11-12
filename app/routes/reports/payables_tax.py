@@ -909,6 +909,19 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
     for bp, left in unapplied_bill_payments_as_of(db, as_of_date):
         credit(bp.vendor_id, home_amount(left, bp.exchange_rate))
 
+    # A journal entry on A/P that names the vendor (#897): QuickBooks keeps it
+    # as the vendor's payable and an import carries it; it ages by its date,
+    # and one that lowers what is owed is a credit, as a vendor credit is.
+    from app.services.control_journal_lines import aging_bucket, payable_lines
+
+    for named in payable_lines(db, as_of_date, named_only=True):
+        if named.amount > 0:
+            r = row(named.party_id)
+            r[aging_bucket(as_of_date, named.date)] += named.amount
+            r["total"] += named.amount
+        else:
+            credit(named.party_id, -named.amount)
+
     _COLS = ("current", "over_30", "over_60", "over_90", "total", "unapplied_credits")
     items = sorted(aging.values(), key=lambda i: (i["vendor_name"] or "").lower())
     totals = {"vendor_name": "TOTAL", "vendor_id": 0}

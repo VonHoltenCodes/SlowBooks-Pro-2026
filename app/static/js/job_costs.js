@@ -57,6 +57,65 @@ const JobCostsPage = {
         return `<option value="">${blank}</option>` + list.map(x => `<option value="${x[valueKey]}" ${String(selected ?? '') === String(x[valueKey]) ? 'selected' : ''}>${escapeHtml(labelFn(x))}</option>`).join('');
     },
 
+    // ---- Accruals (#897) ------------------------------------------------------
+    // A cost booked before the vendor's bill arrives credits 2010 Accrued Job
+    // Costs (never Accounts Payable, which the server refuses) and reverses
+    // itself on its Reverses on date: the first day of the next month unless
+    // the person picks another or clears it.
+    _accruedAccount() {
+        return (JobCostsPage._accounts || []).find(a => String(a.account_number) === '2010'
+            && String(a.account_type || '').toLowerCase() === 'liability') || null;
+    },
+
+    // The offset choices: the chart, and 2010 when the chart has none yet
+    // (the server makes it on the first accrual).
+    offsetOptions() {
+        const opts = JobCostsPage._opt(JobCostsPage._accounts, 'id', a => accountWords(a, null, ' '), null, 'default');
+        return JobCostsPage._accruedAccount() ? opts
+            : opts + `<option value="accrue">${escapeHtml(Terms.text('2010 Accrued Job Costs'))} (bill not in yet)</option>`;
+    },
+
+    isAccrualOffset(value) {
+        if (!value) return false;
+        if (value === 'accrue') return true;
+        const acct = JobCostsPage._accruedAccount();
+        return !!acct && String(acct.id) === String(value);
+    },
+
+    firstOfNextMonth(iso) {
+        const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(iso || '');
+        if (!m) return '';
+        let y = parseInt(m[1], 10), mo = parseInt(m[2], 10) + 1;
+        if (mo > 12) { mo = 1; y += 1; }
+        return `${y}-${String(mo).padStart(2, '0')}-01`;
+    },
+
+    // Show the Reverses on date while a line's offset is 2010, hidden
+    // otherwise; its default follows the entry's date until it is edited.
+    accrualChanged() {
+        const wrap = $('#jc-reverses-wrap');
+        if (!wrap) return;
+        const accrues = $$('#jc-lines .jc-credit').some(sel => JobCostsPage.isAccrualOffset(sel.value));
+        wrap.hidden = !accrues;
+        const input = wrap.querySelector('input[name="reverses_on"]');
+        if (accrues && input && !input.dataset.touched) {
+            const date = wrap.closest('form')?.querySelector('input[name="date"]')?.value;
+            input.value = JobCostsPage.firstOfNextMonth(date);
+        }
+    },
+
+    reversesTouched(input) { input.dataset.touched = '1'; },
+
+    // The request body the form posts: an accrual line says accrue (or names
+    // 2010's id); reverses_on is sent only for an accrual, null when cleared.
+    payload(form, lines) {
+        const body = { date: form.date.value, job_id: parseInt(form.job_id.value), memo: form.memo.value || null, lines };
+        if (lines.some(l => l.accrue || JobCostsPage.isAccrualOffset(l.credit_account_id))) {
+            body.reverses_on = form.reverses_on?.value || null;
+        }
+        return body;
+    },
+
     // ---- New entry --------------------------------------------------------------
     async showForm(id = null, jobId = null) {
         await JobCostsPage._loadRefs();
@@ -69,13 +128,16 @@ const JobCostsPage = {
                     <div class="form-group"><label>${T('Job')} *</label>
                         <select name="job_id" required>${jobOpts}</select></div>
                     <div class="form-group"><label>Date *</label>
-                        <input name="date" type="date" required value="${todayISO()}"></div>
+                        <input name="date" type="date" required value="${todayISO()}" onchange="JobCostsPage.accrualChanged()"></div>
                     <div class="form-group full-width"><label>Memo</label>
                         <input name="memo" placeholder="What this cost is"></div>
+                    <div class="form-group" id="jc-reverses-wrap" hidden><label for="jc-reverses-on">Reverses on</label>
+                        <input id="jc-reverses-on" name="reverses_on" type="date" oninput="JobCostsPage.reversesTouched(this)">
+                        <div style="font-size:11px;color:var(--gray-500)">The accrual books itself out on this date; enter the bill the normal way when it comes. Clear it to keep the accrual open.</div></div>
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Cost lines</h3>
                 <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">
-                    Pick equipment to charge its hourly rate; pick an employee for internal labor (enter the hours and loaded rate). Leave the accounts blank to use the cost code's / cost type's defaults.
+                    Pick equipment to charge its hourly rate; pick an employee for internal labor (enter the hours and loaded rate). Leave the accounts blank to use the cost code's / cost type's defaults. The bill not in yet? Pick ${Terms.text('2010 Accrued Job Costs')} as the offset, never Accounts Payable.
                 </div>
                 <div class="table-container table-container--scroll"><table class="line-items-table line-items-table--wide">
                     <thead><tr><th scope="col">Cost code</th><th scope="col">Type</th><th scope="col">Description</th><th scope="col">Employee / Equipment</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col">Cost acct</th><th scope="col">Offset acct</th><th scope="col" title="Billable">Bill?</th><th scope="col"></th></tr></thead>
@@ -98,6 +160,7 @@ const JobCostsPage = {
             + (JobCostsPage._employees.length ? `<optgroup label="Employees">${JobCostsPage._employees.map(e => `<option value="emp:${e.id}">${escapeHtml(e.first_name + ' ' + e.last_name)}</option>`).join('')}</optgroup>` : '')
             + (JobCostsPage._equipment.length ? `<optgroup label="Equipment">${JobCostsPage._equipment.map(q => `<option value="eq:${q.id}" data-rate="${q.hourly_rate}">${escapeHtml(q.name)} (${formatCurrency(q.hourly_rate)}/hr)</option>`).join('')}</optgroup>` : '');
         const acctOpts = JobCostsPage._opt(JobCostsPage._accounts, 'id', a => accountWords(a, null, ' '), null, 'default');
+        const offsetOpts = JobCostsPage.offsetOptions();
         return `<tr data-jcline="${idx}">
             <td><select class="jc-code" style="min-width:150px;max-width:190px">${codeOpts}</select></td>
             <td><select class="jc-type">${typeOpts}</select></td>
@@ -107,9 +170,9 @@ const JobCostsPage = {
             <td><input class="jc-rate" type="number" step="0.0001" value="0" oninput="JobCostsPage.recalc()"></td>
             <td class="col-amount jc-amount">$0.00</td>
             <td><select class="jc-debit" style="min-width:140px;max-width:170px">${acctOpts}</select></td>
-            <td><select class="jc-credit" style="min-width:140px;max-width:170px">${acctOpts}</select></td>
+            <td><select class="jc-credit" style="min-width:140px;max-width:170px" onchange="JobCostsPage.accrualChanged()">${offsetOpts}</select></td>
             <td style="text-align:center"><input type="checkbox" class="jc-billable"></td>
-            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JobCostsPage.recalc()">X</button></td>
+            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JobCostsPage.recalc();JobCostsPage.accrualChanged()">X</button></td>
         </tr>`;
     },
 
@@ -155,13 +218,15 @@ const JobCostsPage = {
             const rate = parseFloat(row.querySelector('.jc-rate')?.value) || 0;
             if (!qty || !rate) return;
             const v = sel => { const x = row.querySelector(sel)?.value; return x ? (isNaN(parseInt(x)) ? x : parseInt(x)) : null; };
+            const accrue = row.querySelector('.jc-credit')?.value === 'accrue';
             lines.push({
                 cost_code_id: v('.jc-code'),
                 cost_type: row.querySelector('.jc-type')?.value || null,
                 description: row.querySelector('.jc-desc')?.value || null,
                 quantity: qty, rate,
                 debit_account_id: v('.jc-debit'),
-                credit_account_id: v('.jc-credit'),
+                credit_account_id: accrue ? null : v('.jc-credit'),
+                accrue,
                 employee_id: who.startsWith('emp:') ? parseInt(who.slice(4)) : null,
                 equipment_id: who.startsWith('eq:') ? parseInt(who.slice(3)) : null,
                 is_billable: !!row.querySelector('.jc-billable')?.checked,
@@ -170,8 +235,8 @@ const JobCostsPage = {
         if (!lines.length) { toast('Add at least one line with a quantity and rate', 'error'); return; }
         if (!(await TxnWarn.ok(form))) return;
         try {
-            const jc = await API.post('/job-costs', { date: form.date.value, job_id: parseInt(form.job_id.value), memo: form.memo.value || null, lines });
-            toastPosted(`${jc.number} posted: ${formatCurrency(jc.total)}`);
+            const jc = await API.post('/job-costs', JobCostsPage.payload(form, lines));
+            toastPosted(`${jc.number} posted: ${formatCurrency(jc.total)}${jc.reverses_on ? `, reverses on ${jc.reverses_on}` : ''}`);
             closeModal();
             JobCostsPage._afterChange();
         } catch (err) { toast(err.message, 'error'); }
@@ -264,10 +329,39 @@ const JobCostsPage = {
                     <div>${jc.status === 'void' ? '<span style="color:var(--text-danger);font-weight:600">VOID</span>' : `<button data-destructive class="btn btn-sm btn-secondary" onclick="JobCostsPage.voidEntry(${jc.id})">Void</button>`}</div>
                 </div>
             </div>
+            ${JobCostsPage.accrualHtml(jc)}
             <div class="table-container"><table class="data-table" style="font-size:12px">
                 <thead><tr><th scope="col">${T('Job')}</th><th scope="col">Cost code</th><th scope="col">Type</th><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th><th scope="col">Cost / offset</th></tr></thead>
                 <tbody>${rows}</tbody>
-            </table></div>`);
+            </table></div>
+            ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('job_cost', jc.id)}`);
+    },
+
+    // An accrual's line on the entry's view: when it reversed, or its date,
+    // editable (and clearable) until it does.
+    accrualHtml(jc) {
+        if (!(parseFloat(jc.accrued) > 0)) return '';
+        if (jc.reversed_on) {
+            return `<div class="jc-accrual" style="font-size:12px;margin-bottom:8px">Accrued ${formatCurrency(jc.accrued)} to ${escapeHtml(Terms.text('2010 Accrued Job Costs'))}; reversed on ${escapeHtml(jc.reversed_on)}.</div>`;
+        }
+        if (jc.status === 'void') return '';
+        return `<form class="jc-accrual" style="font-size:12px;margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap" onsubmit="JobCostsPage.saveReversesOn(event, ${jc.id})">
+            <span>Accrued ${formatCurrency(jc.accrued)} to ${escapeHtml(Terms.text('2010 Accrued Job Costs'))}.</span>
+            <label for="jc-view-reverses-on">Reverses on</label>
+            <input id="jc-view-reverses-on" name="reverses_on" type="date" value="${escapeHtml(jc.reverses_on || '')}">
+            <button type="submit" class="btn btn-sm btn-secondary">Save date</button>
+            ${jc.reverses_on ? '' : '<span style="color:var(--text-muted)">No date: the accrual stays open.</span>'}
+        </form>`;
+    },
+
+    async saveReversesOn(e, id) {
+        e.preventDefault();
+        try {
+            const jc = await API.put(`/job-costs/${id}/reverses-on`, { reverses_on: e.target.reverses_on.value || null });
+            toast(jc.reverses_on ? `${jc.number} reverses on ${jc.reverses_on}` : `${jc.number} stays open until a date is set`);
+            closeModal();
+            JobCostsPage.view(id);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async voidEntry(id) {

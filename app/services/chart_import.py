@@ -718,7 +718,7 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
                 changes.append(f"rename '{target.name}' → '{r.name}'")
             if r.type and r.type != target.account_type.value:
                 if control_accounts.is_control(
-                    target.account_number, target.account_type
+                    target.account_number, target.account_type, target.name
                 ):
                     entry["note"] = (
                         f"type stays {target.account_type.value}: control account "
@@ -846,7 +846,7 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
         for a in existing:
             if a.id in matched or not a.is_active:
                 continue
-            if control_accounts.is_control(a.account_number, a.account_type):
+            if control_accounts.is_control(a.account_number, a.account_type, a.name):
                 plan.rows.append(
                     {
                         "row": None,

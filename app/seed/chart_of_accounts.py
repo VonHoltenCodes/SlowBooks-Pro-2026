@@ -52,6 +52,14 @@ CHART_OF_ACCOUNTS = [
     },
     # Liabilities (2000s)
     {"account_number": "2000", "name": "Accounts Payable", "account_type": "liability"},
+    # A job cost accrued before the vendor's bill arrives (#897): a job cost
+    # entry credits it and reverses itself on its Reverses on date. An older
+    # chart gets it on its first accrual (control_accounts.ensure).
+    {
+        "account_number": "2010",
+        "name": "Accrued Job Costs",
+        "account_type": "liability",
+    },
     {
         "account_number": "2100",
         "name": "Credit Card",

@@ -1372,7 +1372,8 @@ carries the cost code.
 | **Sub retainage released** (Release retainage on the commitment) | 2050 Retainage Payable (job) | 2000 Accounts Payable | A bill with no expense line, paid through Pay Bills. |
 | **Bill payment** | 2000 Accounts Payable | the bank (1000 Checking unless another is chosen) | |
 | **Customer payment** | the deposit-to account (Undeposited Funds unless a bank is chosen) | 1100 Accounts Receivable | Retainage still held stays on 1150 until a release bills it. |
-| **Job Cost Entry** | the line's cost account (the line's, else the code's, else the cost type's default) (job, section, cost type) | the line's offset account, else the equipment's recovery account, else the cost type's offset account | |
+| **Job Cost Entry** | the line's cost account (the line's, else the code's, else the cost type's default) (job, section, cost type) | the line's offset account, else the equipment's recovery account, else the cost type's offset account | Never Accounts Payable or Accounts Receivable: a line on either is refused (#897). |
+| **Accrued job cost** (a Job Cost Entry crediting 2010) | the line's cost account (job, section, cost type) | 2010 Accrued Job Costs | Reverses itself on its Reverses on date: DR 2010 / CR the cost account (job, section, cost type). See *Accruing a cost before the bill*. |
 | **Sales tax paid** | 2200 Sales Tax Payable | the bank | |
 | **Material slip posted** (field ticket) | the line's cost account (material type; job, section) at the item's average cost | the item's inventory asset account | A Job Cost Entry; a return slip is the reverse, and a void reverses at the booked cost. T&M and delivery tickets post nothing. |
 | **Use tax paid** (a check or bill to the tax agency) | 2220 Use Tax Payable | the bank (or A/P) | The Sales Tax report's Use tax section shows it as paid. |
@@ -1396,6 +1397,32 @@ before markup), scaled so the sections take exactly what was billed. A
 section billed in full then reads its budgeted revenue, markups and all. Because each
 cost type has a default account, the P&L's cost lines (5100–5500) and the job
 reports' cost types agree for a costed line that names no account of its own.
+
+### Accruing a cost before the bill
+
+Month-end on a job: the subcontractor did the work, the bill has not come,
+and the cost belongs in this month's WIP. Enter it as a **Job Cost Entry**
+and pick **2010 Accrued Job Costs** as the line's offset (the account is in
+a new chart; an older one gets it the first time an entry asks for it). Not
+Accounts Payable: A/P holds bills, so an entry crediting it would sit in the
+ledger with no vendor behind it, missing from the A/P Aging, the vendor's
+balance and Pay Bills. The entry refuses it and says to enter a bill.
+
+With 2010 as the offset the form shows **Reverses on**, the first day of the
+next month. Change it if the bill is expected later, or clear it to keep the
+accrual open; the entry's view keeps the date editable until it reverses. On
+that date the app posts the reversing entry when it starts (DR 2010, CR the
+cost account, on the same job, section and cost type), once only: a second
+start posts nothing, the launcher log names the entry, and its Activity says
+"Accrual reversed on …". The cost is in the WIP schedule and Cost to Complete
+from the accrual's date to the reversal's; enter the bill the normal way,
+coded to the job, and the cost is back, this time on the vendor.
+
+Books Check sets the open accruals beside 2010: every entry crediting it
+whose reversal has not posted by the date, each named with its Reverses on
+date. Anything else on 2010 (a hand journal entry, a bill line coded to it)
+is named as the difference, since no accrual reverses it. Voiding an accrual
+that already reversed voids its reversal too.
 
 ## Field tickets
 

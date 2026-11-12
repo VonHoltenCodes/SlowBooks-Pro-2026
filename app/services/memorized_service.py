@@ -381,7 +381,14 @@ def _enter_journal(db: Session, mem: MemorizedTransaction, on: date):
         basis=mem.basis,
         lines=[journal_line_of(ln) for ln in mem.lines],
     )
-    lines = _journal_lines(db, data, basis=data.basis or BASIS_BOTH)
+    # A template can no longer be saved with a line on A/R or A/P (#897); one
+    # saved before keeps entering as it was memorized, as an edit keeps it.
+    lines = _journal_lines(
+        db,
+        data,
+        basis=data.basis or BASIS_BOTH,
+        kept_accounts=frozenset(ln.account_id for ln in mem.lines if ln.account_id),
+    )
     if len(lines) < 2:
         raise HTTPException(
             status_code=400,

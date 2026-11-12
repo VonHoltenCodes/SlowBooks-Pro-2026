@@ -61,6 +61,8 @@ TRANSACTION_KEYED_VOIDS = frozenset(
         # the WIP adjusting entry and its reversal (wip_posting)
         "wip_adjustment_void",
         "wip_reversal_void",
+        # an accrued job cost's reversal, voided with its accrual (#897)
+        "job_cost_reversal_void",
     }
 )
 

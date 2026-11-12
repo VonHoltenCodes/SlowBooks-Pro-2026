@@ -9,6 +9,7 @@ fresh company gives the same Trial Balance."""
 
 import io
 from decimal import Decimal
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
@@ -118,24 +119,30 @@ def _books(client, accounts):
             },
         )
     )
-    _ok(
-        client.post(
-            "/api/journal",
-            json={
-                "date": "2026-03-31",
-                "description": "Accrue insurance",
-                "reference": "AJE-1",
-                "lines": [
-                    {"account_id": ins, "debit": "120.00", "credit": "0"},
-                    {
-                        "account_id": accounts["2000"].id,
-                        "debit": "0",
-                        "credit": "120.00",
-                    },
-                ],
+    # A journal entry on Accounts Payable, saved before 2.32 refused one on
+    # the journal form (#897): an old company file still has them, and the
+    # export carries it like any other entry.
+    from sqlalchemy.orm import object_session
+
+    from app.services.accounting import create_journal_entry
+
+    db = object_session(accounts["2000"])
+    create_journal_entry(
+        db,
+        date(2026, 3, 31),
+        "Accrue insurance",
+        [
+            {"account_id": ins, "debit": Decimal("120.00"), "credit": Decimal("0")},
+            {
+                "account_id": accounts["2000"].id,
+                "debit": Decimal("0"),
+                "credit": Decimal("120.00"),
             },
-        )
+        ],
+        source_type="manual",
+        reference="AJE-1",
     )
+    db.commit()
 
 
 def _blocks(text):

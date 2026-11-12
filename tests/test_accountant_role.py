@@ -47,7 +47,7 @@ def _entry(client, accounts, amount="120.00", text="Accrue insurance", **extra):
             "description": text,
             "lines": [
                 {"account_id": accounts["6300"].id, "debit": amount, "credit": "0"},
-                {"account_id": accounts["2000"].id, "debit": "0", "credit": amount},
+                {"account_id": accounts["2500"].id, "debit": "0", "credit": amount},
             ],
             **extra,
         },
@@ -228,7 +228,7 @@ def test_an_api_token_can_wear_the_role(client, db_session, seed_accounts):
                         "credit": "0",
                     },
                     {
-                        "account_id": seed_accounts["2000"].id,
+                        "account_id": seed_accounts["2500"].id,
                         "debit": "0",
                         "credit": "5.00",
                     },

@@ -301,14 +301,15 @@ def test_registry_is_matched_on_number_and_type():
     assert control_accounts.is_control("1100", "expense") is False
     # the type the posting code expects for each registered number
     for number, (
-        _name,
+        name,
         want_type,
         _purpose,
     ) in control_accounts.CONTROL_ACCOUNTS.items():
         assert control_accounts.expected_type(number) == want_type
-        assert control_accounts.is_control(number, want_type) is True
+        # an on-demand number (2010, #897) is matched on its name as well
+        assert control_accounts.is_control(number, want_type, name) is True
         wrong = "income" if want_type != "income" else "expense"
-        assert control_accounts.is_control(number, wrong) is False
+        assert control_accounts.is_control(number, wrong, name) is False
     # number-only membership is unchanged for the paths that still use it
     assert control_accounts.is_control_number("3900") is True
     assert control_accounts.is_control_number("9999") is False
@@ -400,10 +401,14 @@ def test_missing_lists_what_a_blank_chart_lacks(db_session):
     fail-open from a different direction."""
     gaps = control_accounts.missing(db_session)
     # every SEEDED control account, and only those — 4800 and 5900 are
-    # created on demand, so their absence is not a fault to report
-    assert len(gaps) == len(control_accounts.seeded_numbers())
+    # created on demand, so their absence is not a fault to report; 2010
+    # Accrued Job Costs is seeded but made on first use in an older chart
+    # (#897), so it is not one either
+    expected = control_accounts.seeded_numbers() - control_accounts.ON_DEMAND
+    assert len(gaps) == len(expected)
     assert ("1100", "Accounts Receivable") in gaps
     assert "4800" not in {n for n, _ in gaps}
+    assert "2010" not in {n for n, _ in gaps}
 
 
 def test_missing_is_empty_on_a_seeded_chart(db_session, seed_accounts):

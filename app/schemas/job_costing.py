@@ -129,6 +129,10 @@ class JobCostLineCreate(StrictModel):
     equipment_id: Optional[int] = None
     is_burden: bool = False
     is_billable: bool = False
+    # Accrue the cost (#897): the line's offset is 2010 Accrued Job Costs,
+    # created on first use in a chart without it. Sending the 2010 account's
+    # id as credit_account_id does the same.
+    accrue: bool = False
 
     @model_validator(mode="after")
     def _amount(self):
@@ -146,6 +150,10 @@ class JobCostCreate(StrictModel):
     job_id: Optional[int] = None
     memo: Optional[str] = None
     lines: list[JobCostLineCreate]
+    # An accrual's reversal date (#897), when a line credits 2010 Accrued Job
+    # Costs: left out, the first day of the month after the entry's date;
+    # sent as null, no reversal (the accrual stays open until one is set).
+    reverses_on: Optional[dt_date] = None
 
     @field_validator("lines")
     @classmethod
@@ -193,8 +201,21 @@ class JobCostResponse(BaseModel):
     total: Decimal
     lines: list[JobCostLineResponse] = []
     created_at: Optional[datetime] = None
+    # An accrual (#897): what it credited to 2010 Accrued Job Costs, the date
+    # it reverses on, and the reversal once posted
+    accrued: Decimal = Decimal("0")
+    reverses_on: Optional[dt_date] = None
+    reversal_transaction_id: Optional[int] = None
+    reversed_on: Optional[dt_date] = None
 
     model_config = {"from_attributes": True}
+
+
+class JobCostReversesOn(StrictModel):
+    """PUT /api/job-costs/{id}/reverses-on: move or clear an accrual's
+    reversal date before it reverses (#897)."""
+
+    reverses_on: Optional[dt_date] = None
 
 
 class AllocationTarget(StrictModel):
@@ -214,6 +235,10 @@ class AllocationCreate(StrictModel):
     start_date: Optional[dt_date] = None
     end_date: Optional[dt_date] = None
     targets: list[AllocationTarget] = []  # empty = every active job
+    # as on an entry (#897): the offset is 2010 Accrued Job Costs, and the
+    # allocation reverses itself on reverses_on (default the next month's 1st)
+    accrue: bool = False
+    reverses_on: Optional[dt_date] = None
 
     @field_validator("method")
     @classmethod

@@ -156,6 +156,7 @@ def _txn_doc(txn: Transaction, amount, why: str) -> dict:
         "vendor_credit": "vendor_credit",
         "payroll": "pay_run",
         "job_cost": "job_cost",
+        "job_cost_reversal": "job_cost",
     }
     by_txn = {"deposit": "deposit", "expense": "expense", "cc_charge": "cc_charge"}
     if st in by_source and txn.source_id:
@@ -163,39 +164,6 @@ def _txn_doc(txn: Transaction, amount, why: str) -> dict:
     if st in by_txn:
         return _doc(by_txn[st], txn.id, txn.reference or "", amount, why)
     return _doc("journal", txn.id, txn.reference or f"entry {txn.id}", amount, why)
-
-
-def _strays_on(
-    db: Session, account_id: int, as_of: date, documents: tuple[str, ...]
-) -> list[tuple[Transaction, Decimal]]:
-    """(transaction, its debit less credit on the account) for every live
-    transaction to `as_of` on a control account that is not one of the
-    documents its subledger is made of (`documents` are source-type
-    prefixes: "invoice" covers invoice, invoice_edit and invoice_void). A
-    void and the entry it reversed are left out together."""
-    from app.services.voids import voided_transaction_ids
-
-    rows = (
-        db.query(
-            Transaction,
-            func.coalesce(func.sum(TransactionLine.debit), 0)
-            - func.coalesce(func.sum(TransactionLine.credit), 0),
-        )
-        .join(TransactionLine, TransactionLine.transaction_id == Transaction.id)
-        .filter(TransactionLine.account_id == account_id, Transaction.date <= as_of)
-        .group_by(Transaction.id)
-        .order_by(Transaction.date, Transaction.id)
-        .all()
-    )
-    rows = [
-        (t, _q(_d(net)))
-        for t, net in rows
-        if not (t.source_type or "").startswith(documents)
-        and not (t.source_type or "").endswith("_void")
-        and _q(_d(net)) != ZERO
-    ]
-    voided = voided_transaction_ids(db, [t.id for t, _ in rows])
-    return [(t, net) for t, net in rows if t.id not in voided]
 
 
 def _row(
@@ -356,22 +324,36 @@ def _bill_drift(db: Session, as_of: date) -> list[dict]:
     return out
 
 
-_AR_DOCUMENTS = ("invoice", "payment", "credit_memo", "late_fee")
-_AP_DOCUMENTS = ("bill", "vendor_credit")  # "bill" covers bill_payment
-
-
-def _strays(db: Session, account_id: int, as_of: date, words: str, documents):
+def _strays(db: Session, account_id: int, as_of: date, words: str, receivable: bool):
     """The entries on a control account that no document of its subledger
-    made: a hand journal entry, a job cost entry, an import's journal."""
+    made and that name no customer (A/R) or vendor (A/P): a hand journal
+    entry, a job cost entry, an import's nameless journal line. One that
+    names its customer or vendor is that party's item, read by the aging and
+    the balances (services/control_journal_lines.py, #897). Amounts are the
+    debit less the credit."""
+    from app.services.control_journal_lines import payable_lines, receivable_lines
+
+    if receivable:
+        lines, party = receivable_lines(db, as_of), "customer"
+        fix = "move it to an invoice or a credit memo"
+    else:
+        lines, party = payable_lines(db, as_of), "vendor"
+        fix = (
+            f"move it to a bill or to {control_accounts.ACCRUED_JOB_COSTS} "
+            "Accrued Job Costs"
+        )
     out = []
-    for txn, net in _strays_on(db, account_id, as_of, documents):
+    for c in lines:
+        if c.party_id is not None:
+            continue
+        txn = c.transaction
         kind = (txn.source_type or "journal entry").replace("_", " ")
         out.append(
             _txn_doc(
                 txn,
-                net,
-                f"Posted straight to {words} by a {kind}, which no "
-                "document's balance carries.",
+                c.amount if receivable else -c.amount,
+                f"Posted straight to {words} by a {kind} that names no {party}, "
+                f"so no {party}'s balance carries it; {fix}.",
             )
         )
     return out
@@ -412,11 +394,11 @@ def check_ar_aging(db: Session, as_of: date, t) -> Check:
         + words
         + " is {ctl}, {diff} apart. Look at the documents below: an invoice "
         "whose balance due drifted from what was paid and credited on it, or "
-        "an entry posted straight to the account (a journal entry, a job cost entry), which no customer's balance carries. "
+        "an entry posted straight to the account (a journal entry, a job cost entry) "
+        "that names no customer, which no customer's balance carries. "
         "The Journal checks further down name a voided document still posting "
         "and a posted invoice with no journal entry.",
-        lambda: _invoice_drift(db, as_of)
-        + _strays(db, ar_id, as_of, words, _AR_DOCUMENTS),
+        lambda: _invoice_drift(db, as_of) + _strays(db, ar_id, as_of, words, True),
         t,
     )
 
@@ -486,11 +468,7 @@ def check_customer_balances(db: Session, as_of: date, today: date, t) -> Check:
                         f"Aging row is {_money(aged.get(cid, ZERO))}.",
                     )
                 )
-        return (
-            out
-            + _invoice_drift(db, as_of)
-            + _strays(db, ar_id, as_of, words, _AR_DOCUMENTS)
-        )
+        return out + _invoice_drift(db, as_of) + _strays(db, ar_id, as_of, words, True)
 
     return _row(
         "customer_balances",
@@ -555,11 +533,12 @@ def check_ap_aging(db: Session, as_of: date, t) -> Check:
         + words
         + " is {ctl}, {diff} apart. Look at the documents below: a bill whose "
         "balance due drifted from what was paid and credited on it, or a "
-        "entry posted straight to the account (a journal entry, a job cost entry), which no vendor's balance carries. The "
+        "entry posted straight to the account (a journal entry, a job cost entry) "
+        "that names no vendor, which no vendor's balance carries. The "
         "Journal checks further down name a voided document still posting and "
         "a posted bill with no journal entry.",
         lambda: _bill_drift(db, as_of)
-        + _credit_side(_strays(db, ap_id, as_of, words, _AP_DOCUMENTS)),
+        + _credit_side(_strays(db, ap_id, as_of, words, False)),
         t,
     )
 
@@ -620,7 +599,7 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
         return (
             out
             + _bill_drift(db, as_of)
-            + _credit_side(_strays(db, ap_id, as_of, words, _AP_DOCUMENTS))
+            + _credit_side(_strays(db, ap_id, as_of, words, False))
         )
 
     return _row(
@@ -635,6 +614,106 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
         "{diff} apart. Look at the documents below: a vendor whose balance is "
         "not their A/P Aging row, a bill whose balance due drifted, or an "
         "entry posted straight to the account.",
+        documents,
+        t,
+    )
+
+
+# ── accrued job costs ────────────────────────────────────────────────────
+
+_ACCRUAL_SOURCES = (
+    "job_cost",
+    "job_cost_void",
+    "job_cost_reversal",
+    "job_cost_reversal_void",
+)
+
+
+def _accrual_strays(db: Session, acct_id: int, as_of: date) -> list[dict]:
+    """Entries on 2010 that no job cost entry made (a hand journal entry, a
+    bill line coded to it), credit-positive: what the open accruals cannot
+    explain."""
+    from app.services.voids import voided_transaction_ids
+
+    rows = (
+        db.query(
+            Transaction,
+            func.coalesce(func.sum(TransactionLine.credit), 0)
+            - func.coalesce(func.sum(TransactionLine.debit), 0),
+        )
+        .join(TransactionLine, TransactionLine.transaction_id == Transaction.id)
+        .filter(TransactionLine.account_id == acct_id, Transaction.date <= as_of)
+        .group_by(Transaction.id)
+        .order_by(Transaction.date, Transaction.id)
+        .all()
+    )
+    rows = [
+        (t, _q(_d(net)))
+        for t, net in rows
+        if (t.source_type or "") not in _ACCRUAL_SOURCES
+        and not (t.source_type or "").endswith("_void")
+        and _q(_d(net)) != ZERO
+    ]
+    voided = voided_transaction_ids(db, [t.id for t, _ in rows])
+    return [
+        _txn_doc(
+            t,
+            net,
+            f"Posted to {control_accounts.ACCRUED_JOB_COSTS} Accrued Job Costs by "
+            "something other than a job "
+            "cost entry, so no accrual reverses it.",
+        )
+        for t, net in rows
+        if t.id not in voided
+    ]
+
+
+def check_accrued_job_costs(db: Session, as_of: date, t) -> Optional[Check]:
+    """Open accruals (job cost entries crediting 2010 not yet reversed) =
+    2010 Accrued Job Costs (#897). No row for a chart without 2010: nothing
+    was ever accrued there."""
+    from app.services.accrued_job_costs import account_id, open_accruals
+
+    acct_id = account_id(db)
+    if acct_id is None:
+        return None
+    accruals = open_accruals(db, as_of)
+    sub = sum((amount for _, amount in accruals), ZERO)
+    ctl = _balance(db, [acct_id], as_of, False)
+    words = _account_words(db, acct_id)
+
+    def documents():
+        out = []
+        for jc, amount in accruals:
+            when = (
+                f"reverses on {jc.reverses_on.isoformat()}"
+                if jc.reverses_on
+                else "has no reversal date"
+            )
+            out.append(
+                _doc(
+                    "job_cost",
+                    jc.id,
+                    jc.number,
+                    amount,
+                    f"Accrued on {jc.date.isoformat()} and not reversed yet; it "
+                    f"{when}.",
+                )
+            )
+        return out + _accrual_strays(db, acct_id, as_of)
+
+    return _row(
+        "accrued_job_costs",
+        "Open accruals = Accrued Job Costs",
+        "Open accruals",
+        "Accrued Job Costs",
+        sub,
+        ctl,
+        f"The open accrued job costs add up to {words} as of {as_of.isoformat()}.",
+        "The open accrued job costs add up to {sub} and " + words + " is {ctl}, "
+        "{diff} apart. Look at the entries below: each accrual still open, and "
+        "anything posted to the account that is not a job cost entry, which "
+        "no accrual reverses.",
         documents,
         t,
     )
@@ -1721,6 +1800,9 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
         check_payroll_liabilities(db, as_of, t),
         check_sales_tax(db, as_of, t),
     ]
+    accrued = check_accrued_job_costs(db, as_of, t)
+    if accrued is not None:
+        rows.append(accrued)
     if t.is_construction:
         rows += _retainage_rows(db, as_of, t)
     rows += [
