@@ -299,6 +299,10 @@ const EstimatesPage = {
 
         EstimatesPage.lineCount = est.lines.length;
         EstimatesPage._items = items;
+        // a reader without the cost side (#824) is shown the server's bid
+        // figures: the form has no unit costs to compute them from
+        EstimatesPage._readTotals = EstimatesPage.showsCost() ? null : (est.totals || null);
+        EstimatesPage._readLines = est.lines;
 
         EstimatesPage._customers = customers;
         const custOpts = customers.map(c => `<option value="${c.id}" ${est.customer_id==c.id?'selected':''}>${escapeHtml(customerLabel(c))}</option>`).join('');
@@ -330,7 +334,7 @@ const EstimatesPage = {
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <div class="table-container table-container--scroll"><table class="line-items-table">
                     <thead><tr>
-                        <th scope="col">Item</th><th scope="col">Description</th>${EstimatesPage.pkgHead()}${EstimatesPage.kindHead()}${CostCodes.headHtml()}${CostTypes.headHtml()}<th scope="col" title='Unit cost (budget side)'>Cost</th>${EstimatesPage.unitHead()}<th scope="col" class="col-qty">Qty</th>
+                        <th scope="col">Item</th><th scope="col">Description</th>${EstimatesPage.pkgHead()}${EstimatesPage.kindHead()}${CostCodes.headHtml()}${CostTypes.headHtml()}${EstimatesPage.costHead()}${EstimatesPage.unitHead()}<th scope="col" class="col-qty">Qty</th>
                         <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>
                     </tr></thead>
                     <tbody id="est-lines">
@@ -362,6 +366,19 @@ const EstimatesPage = {
     // and the Accept button all show in construction mode only; a Business or
     // Nonprofit company sees exactly the estimate form it always had.
     pkgHead() { return TradePackages.headHtml(); },
+
+    // An estimate's cost side is the contractor's own (#824): a read-only or
+    // accountant sign-in reads the estimate without it (the server leaves it
+    // out), so its form has no Cost column and no Cost of work row.
+    showsCost() {
+        const role = typeof App !== 'undefined' ? App.role : null;
+        return role !== 'readonly' && role !== 'accountant';
+    },
+    costHead() { return EstimatesPage.showsCost() ? `<th scope="col" title='Unit cost (budget side)'>Cost</th>` : ''; },
+    costCell(line) {
+        if (!EstimatesPage.showsCost()) return '';
+        return `<td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" title="Unit cost; in construction mode a base or alternate line is priced at cost (the markups are rows under the subtotal)" oninput="EstimatesPage.recalc()"></td>`;
+    },
     kindHead() { return Terms.isConstruction() ? '<th scope="col" title="Base, allowance, alternate or unit price">Kind</th>' : ''; },
     unitHead() { return Terms.isConstruction() ? '<th scope="col" class="col-qty" title="Unit of measure">Unit</th>' : ''; },
 
@@ -426,7 +443,7 @@ const EstimatesPage = {
         if (!Terms.isConstruction()) return '';
         const row = (label, id) => `<div class="total-row"><span class="label">${label}</span><span class="value" id="${id}">$0.00</span></div>`;
         return `<div class="invoice-totals" id="est-bid-totals" style="margin-top:8px;">
-            ${row('Cost of work', 'est-bid-cost')}
+            ${EstimatesPage.showsCost() ? row('Cost of work', 'est-bid-cost') : ''}
             ${row('Priced direct', 'est-bid-direct')}
             ${row('Allowances', 'est-bid-allow')}
             ${row('Subtotal', 'est-bid-subtotal')}
@@ -510,9 +527,32 @@ const EstimatesPage = {
         return { markupAllowances, markupBase, gc, insurance, fee, bond, markupTotal, pricedDirect, allowanceTotal, subtotal, bid, tax, total, alternates, unitPrices };
     },
 
+    // The server's bid figures in bidTotals()'s shape, for a reader whose
+    // estimate came without the cost side (#824); an alternate's handle is
+    // its line's row index, as the live panel's is.
+    readerBidTotals(t, lines) {
+        const idx = id => (lines || []).findIndex(l => l.id === id);
+        return {
+            markupAllowances: !!t.markup_allowances,
+            gc: Number(t.gc) || 0, insurance: Number(t.insurance) || 0,
+            fee: Number(t.fee) || 0, bond: Number(t.bond) || 0,
+            markupTotal: Number(t.markup_total) || 0,
+            pricedDirect: Number(t.priced_direct) || 0,
+            allowanceTotal: Number(t.allowance_total) || 0,
+            subtotal: Number(t.subtotal) || 0,
+            bid: Number(t.bid_total) || 0,
+            tax: Number(t.bid_tax) || 0,
+            total: Number(t.bid_total_with_tax) || 0,
+            alternates: (t.alternates || []).map(a => ({ idx: idx(a.id), desc: a.description || '', amount: Number(a.amount) || 0, accepted: !!a.accepted })),
+            unitPrices: (t.unit_prices || []).map(u => ({ idx: idx(u.id), desc: u.description || '', unit: u.unit || '', rate: u.rate })),
+        };
+    },
+
     renderBidTotals() {
         if (!Terms.isConstruction() || !$('#est-bid-totals')) return;
-        const t = EstimatesPage.bidTotals();
+        const t = EstimatesPage._readTotals
+            ? EstimatesPage.readerBidTotals(EstimatesPage._readTotals, EstimatesPage._readLines)
+            : EstimatesPage.bidTotals();
         const set = (id, v) => { const el = $(`#${id}`); if (el) el.textContent = formatCurrency(v); };
         set('est-bid-cost', t.markupBase); set('est-bid-direct', t.pricedDirect); set('est-bid-allow', t.allowanceTotal);
         set('est-bid-subtotal', t.subtotal); set('est-bid-gc', t.gc); set('est-bid-ins', t.insurance);
@@ -596,7 +636,7 @@ const EstimatesPage = {
                 ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             ${EstimatesPage.pkgCell(line)}${EstimatesPage.kindCell(line)}${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}${CostTypes.cellHtml('line-cost-type', line.cost_type || null)}
-            <td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" title="Unit cost; in construction mode a base or alternate line is priced at cost (the markups are rows under the subtotal)" oninput="EstimatesPage.recalc()"></td>
+            ${EstimatesPage.costCell(line)}
             ${EstimatesPage.unitCell(line)}<td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
             <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="EstimatesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="EstimatesPage.recalc()"></td>

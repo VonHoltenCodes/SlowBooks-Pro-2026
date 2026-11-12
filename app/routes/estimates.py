@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field
 from sqlalchemy.exc import IntegrityError
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
 from app.database import get_db
@@ -55,6 +55,7 @@ from app.schemas.estimates import (
     EstimateAccept,
     EstimateLost,
     totals_from_dict,
+    without_cost_side,
 )
 from app.schemas.common import StrictModel
 from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
@@ -66,6 +67,7 @@ from app.services.accounting import (
     _q,
     compute_line_totals,
 )
+from app.routes._roles import sees_estimate_cost
 from app.services.jobs_service import (
     own_job,
     refuse_other_customers_jobs,
@@ -235,6 +237,19 @@ def _estimate_response(est: Estimate) -> EstimateResponse:
     return resp
 
 
+def _shown_to(request: Request, shown):
+    """An estimate read (one or the list) as this sign-in or token may read
+    it: whole for a bookkeeper or an administrator; without the cost side
+    (ESTIMATE_COST_FIELDS) for a read-only or accountant one (#824)."""
+    if sees_estimate_cost(request):
+        return shown
+    if isinstance(shown, list):
+        data = [r.model_dump(mode="json") for r in shown]
+    else:
+        data = shown.model_dump(mode="json")
+    return JSONResponse(without_cost_side(data))
+
+
 def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     """Accept an estimate (#551): lock its job's budget to it. Shared by the
     POST /accept endpoint and a PUT that sets status=accepted, so there is one
@@ -298,6 +313,7 @@ def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     dependencies=[Depends(refuse_unknown_filters)],
 )
 def list_estimates(
+    request: Request,
     status: str = None,
     customer_id: int = None,
     skip: int = 0,
@@ -339,11 +355,11 @@ def list_estimates(
             resp.customer_name = est.customer.name
         resp.bills_by_pay_app = est.job_id in pay_app_jobs
         results.append(resp)
-    return results
+    return _shown_to(request, results)
 
 
 @router.get("/{estimate_id}", response_model=EstimateResponse)
-def get_estimate(estimate_id: int, db: Session = Depends(get_db)):
+def get_estimate(request: Request, estimate_id: int, db: Session = Depends(get_db)):
     est = (
         db.query(Estimate)
         .options(
@@ -357,7 +373,7 @@ def get_estimate(estimate_id: int, db: Session = Depends(get_db)):
     )
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
-    return _estimate_response(est)
+    return _shown_to(request, _estimate_response(est))
 
 
 @router.post("", response_model=EstimateResponse, status_code=201)
@@ -711,7 +727,9 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{estimate_id}/print-preview")
 def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
-    """Render estimate as HTML page for browser print dialog (window.print())"""
+    """Render estimate as HTML page for browser print dialog (window.print()).
+    It is the owner's PDF, which prints none of the cost side, so it reads the
+    same for every role (#824)."""
     est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")

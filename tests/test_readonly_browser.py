@@ -329,6 +329,8 @@ DIALOGS = [
     # a record's form, where it is the only view: shown locked, including
     # what it fills in after it opens (the lines, the pickers)
     ("#/customers", "CustomersPage.showForm({customer})"),
+    # an estimate's form, without its cost side for a read-only sign-in (#824)
+    ("#/estimates", "EstimatesPage.showForm({estimate})"),
     ("#/items", "ItemsPage.showForm({loaf})"),
     ("#/jobs", "JobsPage.showForm({job})"),
     ("#/recurring", "RecurringPage.showForm({recurring})"),
@@ -488,7 +490,9 @@ def _sweep_pages(browser, client, role, books):
     }
 
 
-def _sweep_dialogs(browser, client, role, books):
+def _sweep_dialogs(browser, client, role, books, columns=None):
+    """Every dialog's controls; with `columns`, each dialog's column headings
+    as well (the estimate form's Cost column is the administrator's, #824)."""
     page, handled = _signed_in(browser, client, role)
     swept, unopened = {}, []
     try:
@@ -503,6 +507,11 @@ def _sweep_dialogs(browser, client, role, books):
                 continue
             settle(page, handled)
             swept[opener] = page.evaluate(SWEEP, "#modal")
+            if columns is not None:
+                columns[opener] = page.evaluate(
+                    "() => [...document.querySelectorAll('#modal th')]"
+                    ".map(th => th.textContent.trim())"
+                )
         page.evaluate("() => closeModal()")
     finally:
         page.close()
@@ -623,8 +632,9 @@ def test_no_document_or_dialog_offers_a_read_only_sign_in_a_write(
     browser, company, books, db_session
 ):
     reader = _reader(company, db_session)
-    admin = _sweep_dialogs(browser, company, "admin", books)
-    ro = _sweep_dialogs(browser, reader, "readonly", books)
+    admin_columns, ro_columns = {}, {}
+    admin = _sweep_dialogs(browser, company, "admin", books, admin_columns)
+    ro = _sweep_dialogs(browser, reader, "readonly", books, ro_columns)
 
     assert _unseen(admin, FOUND_IN_DIALOGS) == {}
     assert _offered_writes(ro) == {}
@@ -637,6 +647,13 @@ def test_no_document_or_dialog_offers_a_read_only_sign_in_a_write(
     # the statement picker only opens a document: it stays usable
     picker = {c["text"] for c in ro["ReportsPage.customerStatementPicker()"]}
     assert "Generate PDF" in picker
+    # an estimate's cost side is the contractor's own (#824): the read-only
+    # form has no Cost column, the administrator's does, and every other
+    # column is the same
+    form = "EstimatesPage.showForm({estimate})"
+    assert "Cost" in admin_columns[form]
+    assert "Cost" not in ro_columns[form]
+    assert [c for c in admin_columns[form] if c != "Cost"] == ro_columns[form]
 
 
 def test_a_read_only_sign_in_leaves_settings_unasked(
