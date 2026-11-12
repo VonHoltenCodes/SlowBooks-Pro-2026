@@ -205,3 +205,29 @@ def test_1099_summary_takes_a_year_in_range(client, year):
     r = client.get(f"/api/reports/1099-summary?year={year}")
     assert r.status_code == 200, r.text
     assert r.json()["year"] == int(year)
+
+
+def test_the_bound_sentence_names_the_largest_64_bit_id_exactly(client):
+    """NEW-224: the limit printed through float() read 9223372036854775808,
+    one past the bound, a number the bound itself refuses."""
+    r = client.get(f"/api/reports/sales-by-item?customer_id={HUGE}")
+    assert r.status_code == 422, r.text
+    assert f"must be {INT64_MAX} or less" in r.text, r.text
+    assert str(int(INT64_MAX) + 1) not in r.text
+
+
+def test_the_limit_formatter_prints_whole_numbers_exactly():
+    from decimal import Decimal
+
+    from app.services.validation_messages import _number
+
+    assert _number(int(INT64_MAX)) == "9223372036854775807"
+    assert _number(-(2**63)) == "-9223372036854775808"
+    assert _number(Decimal("100.00")) == "100"
+    assert _number(0.0) == "0"
+    assert _number("12") == "12"
+    # fractions keep their current form
+    assert _number(Decimal("0.01")) == "0.01"
+    assert _number(2.5) == "2.5"
+    assert _number("1.50") == "1.50"
+    assert _number("abc") == "abc"
