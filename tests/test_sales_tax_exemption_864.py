@@ -630,7 +630,7 @@ def test_the_cash_basis_report_lists_exempt_sales_by_what_was_paid(
 
 
 def test_the_sales_tax_screen_draws_the_exempt_sales():
-    js = (ROOT / "app/static/js/reports.js").read_text()
+    js = (ROOT / "app/static/js/reports.js").read_text(encoding="utf-8")
     assert "ReportsPage.exemptSalesHtml(data)" in js
     body = js[js.index("exemptSalesHtml(data) {") :]
     assert "data.exempt_sales" in body[:600] and "Total exempt sales" in body[:2000]
