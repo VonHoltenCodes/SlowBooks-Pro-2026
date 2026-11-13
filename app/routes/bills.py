@@ -734,6 +734,22 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         key in update_data and update_data[key] != getattr(bill, key)
         for key in repost_fields
     )
+    # A bill the QuickBooks Online import carried onto 2000 has no posting of
+    # its own: its balance is the history's. An edit of its lines or amount
+    # would move the A/P aging without moving 2000, so they stay as they
+    # came (#713, as #704 keeps a carried invoice's); the rest edits as on any
+    # bill, with nothing posted.
+    from app.services.qbo_export_import import (
+        carried_bill_edit_refusal,
+        is_carried_payable,
+    )
+
+    if is_carried_payable(db, bill):
+        refusal = carried_bill_edit_refusal(bill, data, update_data)
+        if refusal:
+            raise HTTPException(status_code=409, detail=refusal)
+        needs_repost = False
+
     # A retainage release bill (#555) debits 2050, not an expense account; a
     # re-post would put its line on the vendor's default expense instead.
     if needs_repost and (bill.retainage_released or 0) > 0:
@@ -1065,6 +1081,13 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
     from app.services.inventory_hooks import oversold_by_reversal
 
     stock_warnings = warn_or_refuse_shorts(db, oversold_by_reversal(db, bill), "void")
+
+    # A bill the QuickBooks Online import carried onto 2000 with no posting:
+    # its balance moves off 2000 to QuickBooks' payable, so the A/P aging
+    # still equals 2000 (#713, as #704 does for a carried invoice)
+    from app.services.qbo_export_import import void_carried_payable_posting
+
+    void_carried_payable_posting(db, bill=bill)
 
     reversal_id = None
     if bill.transaction_id:

@@ -121,6 +121,13 @@ const MigrationPage = {
         const unapplied = imported ? data.imported_unapplied_payments : data.unapplied_payments;
         if (open != null) parts.push(n(open, 'open invoice'));
         if (unapplied != null) parts.push(n(unapplied, 'unapplied payment'));
+        // and its A/P Aging Detail report (#713)
+        const bills = imported ? data.imported_open_bills : data.open_bills;
+        const credits = imported ? data.imported_vendor_credits : data.vendor_credits;
+        const billPays = imported ? data.imported_unapplied_bill_payments : data.unapplied_bill_payments;
+        if (bills != null) parts.push(n(bills, 'open bill'));
+        if (credits != null) parts.push(n(credits, 'vendor credit'));
+        if (billPays != null) parts.push(n(billPays, 'unapplied bill payment'));
         return parts;
     },
 

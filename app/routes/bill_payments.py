@@ -636,6 +636,14 @@ def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
             # A statement line matched to this check goes back to review.
             release_statement_links(db, payment.transaction)
 
+    # A bill payment the QuickBooks Online import carried onto 2000 with no
+    # posting (an unapplied one, or a carried bill's paid part): its amount
+    # comes back onto 2000 from QuickBooks' payable, so the A/P aging still
+    # equals 2000 (#713)
+    from app.services.qbo_export_import import void_carried_payable_posting
+
+    void_carried_payable_posting(db, payment=payment)
+
     # The discounts taken with it go first (#664), then its own amounts.
     from app.services.early_pay_discounts import void_vendor_discounts
 
