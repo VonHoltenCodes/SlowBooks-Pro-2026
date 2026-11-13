@@ -31,6 +31,7 @@ from app.services import (
     xero_import,
     zoho_import,
 )
+from app.services.column_fit import add_notes, fit_to_columns
 from app.services.safe_errors import DataProblem
 from app.services.settings_service import set_setting
 from app.services.upload_limits import read_limited
@@ -518,10 +519,16 @@ async def migration_import(
     chosen = _choose_employees(
         request, db, module, upload, include_employees, imported=True
     )
+    # a value longer than its column is cut to fit and said so, for every
+    # source and every list it brings (column_fit), not refused by the
+    # database with nothing saved
+    cut: list[str] = []
     try:
-        result = module.run_import(db, upload.bundle)
+        with fit_to_columns(db, cut):
+            result = module.run_import(db, upload.bundle)
     except DataProblem as e:
         raise _refused(db, e, upload, classify)
+    add_notes(result, cut)
     result = _with_employee_choice(_say_what_was_left(result, upload, classify), chosen)
     if result["ok"]:
         from datetime import date

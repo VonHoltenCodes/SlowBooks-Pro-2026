@@ -29,6 +29,7 @@ from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.bills import Bill, BillLine, BillStatus
 from app.models.transactions import Transaction
 from app.services.account_label import label_for
+from app.services.column_fit import add_notes, fit_notes, fit_to_columns
 from app.services.csv_export import strip_formula_guard
 from app.services.iif_common import (
     IIF_SKIPPED_TYPES,
@@ -917,6 +918,28 @@ def import_customers(db: Session, rows: list, sub_customers: bool = False) -> di
     return {"imported": imported, "errors": errors, "warnings": warnings}
 
 
+def _vendor_fields(row: dict) -> dict:
+    """A VEND row's contact fields, as Vendor takes them."""
+    addr4 = row.get("ADDR4", "").strip()
+    city, state, zipcode = "", "", ""
+    if addr4:
+        city, state, zipcode = _parse_city_state_zip(addr4)
+    return dict(
+        company=row.get("ADDR1", "").strip() or None,
+        email=row.get("EMAIL", "").strip() or None,
+        phone=row.get("PHONE1", "").strip() or None,
+        fax=row.get("PHONE2", "").strip() or None,
+        address1=row.get("ADDR2", "").strip() or None,
+        address2=row.get("ADDR3", "").strip() or None,
+        city=city or None,
+        state=state or None,
+        zip=zipcode or None,
+        terms=row.get("TERMS", "").strip() or "Net 30",
+        tax_id=row.get("TAXID", "").strip() or None,
+        is_active=True,
+    )
+
+
 def import_vendors(db: Session, rows: list) -> dict:
     """Import vendor rows from IIF."""
     imported = 0
@@ -936,26 +959,7 @@ def import_vendors(db: Session, rows: list) -> dict:
                 sp.rollback()
                 continue
 
-            addr4 = row.get("ADDR4", "").strip()
-            city, state, zipcode = "", "", ""
-            if addr4:
-                city, state, zipcode = _parse_city_state_zip(addr4)
-
-            vend = Vendor(
-                name=name,
-                company=row.get("ADDR1", "").strip() or None,
-                email=row.get("EMAIL", "").strip() or None,
-                phone=row.get("PHONE1", "").strip() or None,
-                fax=row.get("PHONE2", "").strip() or None,
-                address1=row.get("ADDR2", "").strip() or None,
-                address2=row.get("ADDR3", "").strip() or None,
-                city=city or None,
-                state=state or None,
-                zip=zipcode or None,
-                terms=row.get("TERMS", "").strip() or "Net 30",
-                tax_id=row.get("TAXID", "").strip() or None,
-                is_active=True,
-            )
+            vend = Vendor(name=name, **_vendor_fields(row))
             db.add(vend)
             db.flush()
             sp.commit()
@@ -2437,6 +2441,26 @@ def validate_iif(content: str) -> dict:
             report["errors"].append(f"Vendor row {i + 1}: missing NAME")
             report["valid"] = False
 
+    # A value longer than its column is cut to fit on import, and said so:
+    # the same sentences before the person decides (column_fit)
+    for section, model, fields in (
+        ("CUST", Customer, _customer_fields),
+        ("VEND", Vendor, _vendor_fields),
+    ):
+        for row in parsed.get(section, []):
+            name = row.get("NAME", "").strip()[:200]
+            if not name or (section == "CUST" and split_customer_job(name)[1]):
+                # a "Customer:Job" row is a job, or a sub-customer under its
+                # own name, as the person importing chooses: said on import
+                continue
+            try:
+                record = model(name=name, **fields(row))
+            except Exception:
+                continue  # the import names the row it cannot read
+            for sentence in fit_notes(record):
+                if sentence not in report["warnings"]:
+                    report["warnings"].append(sentence)
+
     # Validate items
     for i, row in enumerate(parsed.get("INVITEM", [])):
         name = row.get("NAME", "").strip()
@@ -2504,6 +2528,30 @@ def validate_iif(content: str) -> dict:
 
 
 def import_all(
+    db: Session,
+    content: str,
+    retitle_names: bool = False,
+    adjusting: bool = False,
+    posted_by: str = None,
+    sub_customers: bool = False,
+) -> dict:
+    """Import an entire IIF file (see _import_all). A value longer than its
+    column is cut to the column's length and the answer says so
+    (column_fit): PostgreSQL refuses the row otherwise."""
+    cut: list[str] = []
+    with fit_to_columns(db, cut):
+        result = _import_all(
+            db,
+            content,
+            retitle_names=retitle_names,
+            adjusting=adjusting,
+            posted_by=posted_by,
+            sub_customers=sub_customers,
+        )
+    return add_notes(result, cut)
+
+
+def _import_all(
     db: Session,
     content: str,
     retitle_names: bool = False,

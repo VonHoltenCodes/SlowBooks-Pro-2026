@@ -29,6 +29,7 @@ from app.services.csv_export import (
 )
 from app.services.csv_import import import_customers, import_vendors, import_items
 from app.services.chart_import import import_chart
+from app.services.column_fit import add_notes, fit_to_columns
 from app.services.upload_limits import read_limited
 from app.services.request_utils import content_disposition
 
@@ -148,12 +149,21 @@ def _decode_csv_upload(raw: bytes) -> str:
             )
 
 
+def _fitted(db: Session, run):
+    """An import whose values longer than their column are cut to fit and
+    said in its warnings (column_fit), not refused by PostgreSQL."""
+    cut: list[str] = []
+    with fit_to_columns(db, cut):
+        result = run()
+    return add_notes(result, cut)
+
+
 @router.post("/import/customers")
 async def csv_import_customers(
     file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
     content = _decode_csv_upload(await read_limited(file, label="CSV file"))
-    result = import_customers(db, content)
+    result = _fitted(db, lambda: import_customers(db, content))
     return result
 
 
@@ -162,14 +172,14 @@ async def csv_import_vendors(
     file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
     content = _decode_csv_upload(await read_limited(file, label="CSV file"))
-    result = import_vendors(db, content)
+    result = _fitted(db, lambda: import_vendors(db, content))
     return result
 
 
 @router.post("/import/items")
 async def csv_import_items(file: UploadFile = File(...), db: Session = Depends(get_db)):
     content = _decode_csv_upload(await read_limited(file, label="CSV file"))
-    result = import_items(db, content)
+    result = _fitted(db, lambda: import_items(db, content))
     return result
 
 
@@ -192,7 +202,9 @@ async def csv_import_accounts(
     content = _decode_csv_upload(await read_limited(file, label="chart file"))
     if not content.strip():
         raise HTTPException(status_code=400, detail="The file is empty.")
-    return import_chart(db, content, replace=replace, dry_run=dry_run)
+    return _fitted(
+        db, lambda: import_chart(db, content, replace=replace, dry_run=dry_run)
+    )
 
 
 @router.get("/import/invoices/template")
@@ -220,7 +232,7 @@ async def csv_import_invoices(
     content = _decode_csv_upload(await read_limited(file, label="CSV file"))
     if not content.strip():
         raise HTTPException(status_code=400, detail="The file is empty.")
-    return import_invoices(db, content, dry_run=dry_run)
+    return _fitted(db, lambda: import_invoices(db, content, dry_run=dry_run))
 
 
 @router.post("/import/qb-report")
@@ -299,16 +311,19 @@ async def csv_import_qb_report(
     # ``outflow_positive`` (#328): a categorized bank sheet whose amounts
     # read money out as positive
     try:
-        return import_qb_report(
+        return _fitted(
             db,
-            content,
-            adjusting_only=adjusting_only,
-            posted_by=db.info.get("acting_username"),
-            outflow_positive=outflow_positive,
-            answers=answered,
-            file_sha=sha,
-            add_employees=may_add if add_employees is None else add_employees,
-            may_add_employees=may_add,
+            lambda: import_qb_report(
+                db,
+                content,
+                adjusting_only=adjusting_only,
+                posted_by=db.info.get("acting_username"),
+                outflow_positive=outflow_positive,
+                answers=answered,
+                file_sha=sha,
+                add_employees=may_add if add_employees is None else add_employees,
+                may_add_employees=may_add,
+            ),
         )
     except DataProblem as e:
         # an answer the chart's rules refuse (an account made with a type
