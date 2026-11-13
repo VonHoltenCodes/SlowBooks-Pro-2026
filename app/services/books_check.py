@@ -1634,11 +1634,18 @@ def check_voided_live(db: Session, as_of: date, t) -> Check:
     )
 
 
+# The payables documents a QuickBooks Online import carries onto 2000 with no
+# posting of their own: their balance is the imported history's (#713).
+_CARRIED_KINDS = ("bill", "vendor_credit", "bill_payment")
+
+
 def check_missing_entries(db: Session, as_of: date, t) -> Check:
     """No posted document lacks its journal entry: an invoice, bill,
     payment, bill payment, credit memo, vendor credit or pay run that was
     posted (not a draft, not void, not zero) with no entry, and no payment
     marked deposited by an entry that is not there."""
+    from app.services.qbo_export_import import is_carried_payable
+
     existing = {tid for (tid,) in db.query(Transaction.id)}
 
     def lacks(tid):
@@ -1709,6 +1716,8 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
             amount = _d(getattr(d, amount_attr))
             if amount == ZERO or not lacks(d.transaction_id):
                 continue
+            if kind in _CARRIED_KINDS and is_carried_payable(d):
+                continue  # on 2000 by the imported history, by design (#713)
             total += abs(amount)
             docs.append(
                 _doc(
