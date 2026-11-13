@@ -304,7 +304,9 @@ jobs:
           # test_browser_estimate_line_markup.py, a browser module that skips
           # as one where playwright is absent; its PDF tests read the print
           # preview, so nothing new needs WeasyPrint).
-          MAX_SKIPS: "340"
+          # 341 since the import column-length guard: tests/test_import_column_lengths.py
+          # has one PostgreSQL-only test that skips without SLOWBOOKS_TEST_POSTGRES_URL.
+          MAX_SKIPS: "341"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
