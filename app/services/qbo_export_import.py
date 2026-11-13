@@ -2074,6 +2074,16 @@ def void_carried_posting(db: Session, *, invoice=None, payment=None) -> str | No
 # What a carried-over payables document's notes open with: a second upload
 # knows it, and does not carry it twice.
 _AP_CARRIED = "Carried over from QuickBooks Online's A/P Aging Detail report"
+# What the bill payment for a carried bill's paid part opens its notes with:
+# it is no unapplied payment, and a second upload does not take it for one.
+_AP_PAID_PART = "The part of QuickBooks Online bill"
+# The setting that keeps the export's payable account's name, for the
+# account a void of a carried payables document moves its amount to.
+PAYABLE_SETTING = "qbo_export_payable_name"
+_DEFAULT_PAYABLE = "Accounts Payable (A/P)"
+# The source type of the entry such a void posts: not the document's own
+# "<kind>_void", which Books Check reads as the reversal of its posting.
+CARRY_VOID_SOURCE = "qbo_carry_void"
 
 # The vendor column of the A/P Aging Detail report: "Vendor display name"
 # as QuickBooks Online writes it, the older "Vendor" and "Vendor full name",
@@ -2289,6 +2299,50 @@ def _vendor_names(db: Session, bundle: dict) -> tuple[dict[str, str], set[str]]:
     return names, set(names)
 
 
+def _journal_bill_payments(gl_text: str, payable: str) -> list[tuple]:
+    """The Journal's bill payments, for dating a carried bill's paid part
+    (#711's mirror): [(vendor lowercased, date, amount off the payable,
+    number)]."""
+    key = strip_code_suffix(payable)
+    groups, _ = parse_gl(gl_text)
+    out = []
+    for group in groups:
+        first = group[0] if group else None
+        if first is None:
+            continue
+        kind = (first.get("type") or "").lower()
+        if not kind.startswith(("bill payment", "supplier payment")):
+            continue
+        off = sum(
+            (
+                (r["debit"] or Decimal("0")) - (r["credit"] or Decimal("0"))
+                for r in group
+                if strip_code_suffix(r["account"]) == key
+            ),
+            Decimal("0"),
+        )
+        if off > 0:
+            name = (first.get("name") or "").lower()
+            out.append((name, first["date"], off, first.get("num") or ""))
+    return out
+
+
+def _bill_at_total(item: dict, journal: list[tuple]) -> None:
+    """A bill the report shows partly paid (its Amount above its Open
+    balance) is carried at its Amount with a bill payment for the part
+    paid, dated as the Journal's payment of that amount to the vendor on or
+    after the bill (else on the bill's date). Sets item["total"],
+    item["paid"], item["paid_on"] and item["paid_ref"]."""
+    paid = item["amount"] - item["open"]
+    names = {item["vendor"].lower(), item.get("listed_as", "").lower()}
+    paid_on, paid_ref = item["date"], ""
+    for name, when, amount, num in sorted(journal, key=lambda p: (p[1], p[3])):
+        if name in names and when >= item["date"] and amount == paid:
+            paid_on, paid_ref = when, num
+            break
+    item.update(total=item["amount"], paid=paid, paid_on=paid_on, paid_ref=paid_ref)
+
+
 def _payables_plan(db: Session, bundle: dict) -> dict:
     """What the A/P Aging Detail report carries over, checked against the
     Journal and the books before anything is written: the bills, vendor
@@ -2346,6 +2400,7 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
     names, known = _vendor_names(db, bundle)
     matched, unknown = set(), set()
     for item in items:
+        item["listed_as"] = item["vendor"]  # as the report writes it
         name = names.get(item["vendor"].lower())
         if name is None:
             unknown.add(item["vendor"])
@@ -2378,8 +2433,13 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
     numbers = {n for (n,) in db.query(VendorCredit.credit_number).all()}
     lists = {"bill": "bills", "credit": "credits", "payment": "payments"}
     seen = {"bill": carried_bills, "credit": carried_credits}
+    journal = _journal_bill_payments(bundle["gl"], payable)
     for item in items:
-        amount = item["open"] if item["kind"] == "bill" else -item["open"]
+        if item["kind"] == "bill" and item["amount"] > item["open"]:
+            _bill_at_total(item, journal)
+        amount = (
+            item.get("total", item["open"]) if item["kind"] == "bill" else -item["open"]
+        )
         key = (item["vendor"].lower(), item["date"], amount)
         held = seen.get(item["kind"], carried_payments)
         if held.get(key):
@@ -2409,6 +2469,15 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
     total = sum((i["open"] for i in items), Decimal("0"))
     plan["total"] = total
     control_name = label_for(control, db)
+    partly = [b for b in plan["bills"] if b.get("paid")]
+    if partly:
+        plan["notes"].append(
+            f"{len(partly)} of the open bills "
+            f"{'is' if len(partly) == 1 else 'are'} carried at "
+            f"{'its' if len(partly) == 1 else 'their'} full amount, with a bill "
+            "payment for the part already paid, so the vendor's history reads "
+            "as it did in QuickBooks Online."
+        )
     if plan["duplicates"] == len(items):
         plan["notes"].append(
             f"All {len(items)} rows of the A/P Aging Detail report are in the books "
@@ -2440,10 +2509,184 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
     return plan
 
 
-def is_carried_payable(doc) -> bool:
+def _ap_control(db: Session):
+    from app.services.accounting import get_ap_account_id
+
+    try:
+        return db.get(Account, get_ap_account_id(db))
+    except Exception:  # MissingControlAccount: nothing carried onto it
+        return None
+
+
+def is_carried_payable(db: Session, doc, ap_id: int | None = None) -> bool:
     """A bill, vendor credit or bill payment the A/P carry-over wrote onto
-    2000 with no posting: Books Check does not look for its entry."""
-    return doc.transaction_id is None and (doc.notes or "").startswith(_AP_CARRIED)
+    2000 with no posting (#713). Only the carry-over makes one: a bill or a
+    credit whose every line is on 2000 itself and that posted nothing, a
+    bill payment paid from 2000 that posted nothing. Books Check does not
+    look for its entry, a void moves its amount off 2000, and its lines
+    are not edited."""
+    from app.models.bills import BillPayment
+
+    if doc.transaction_id is not None:
+        return False
+    if ap_id is None:
+        control = _ap_control(db)
+        if control is None:
+            return False
+        ap_id = control.id
+    if isinstance(doc, BillPayment):
+        return doc.pay_from_account_id == ap_id
+    if str(getattr(doc.status, "value", doc.status)) in ("draft", "void"):
+        return False
+    lines = list(doc.lines)
+    return bool(lines) and all(ln.account_id == ap_id for ln in lines)
+
+
+def _payable_account(db: Session, control):
+    """QuickBooks Online's payable account, made now if the books lack it:
+    an Other Current Liability, not a control."""
+    from app.models.accounts import AccountType, DetailType
+    from app.services.settings_service import get_setting_raw
+
+    name = (get_setting_raw(db, PAYABLE_SETTING) or "").strip() or _DEFAULT_PAYABLE
+    found = books_by_name(db).get(name.lower())
+    if found is not None and found.id == control.id:
+        # the export named it as 2000 is named here
+        name = f"{name} (QuickBooks Online)"
+        found = books_by_name(db).get(name.lower())
+    if found is not None:
+        return found
+    account = Account(
+        name=name[:200],
+        account_type=AccountType.LIABILITY,
+        detail_type=DetailType.OTHER_CURRENT_LIABILITY.value,
+        description=(
+            "QuickBooks Online's payable: the balances of carried-over bills, "
+            "vendor credits and bill payments voided here."
+        ),
+    )
+    db.add(account)
+    db.flush()
+    return account
+
+
+def void_carried_payable_posting(
+    db: Session, *, bill=None, credit=None, payment=None
+) -> str | None:
+    """For a carried payables document voided: the entry that moves what
+    the void takes off the A/P aging off 2000, dated today, the way a
+    carried invoice's void moves its balance off 1100 (#704). A bill's open
+    balance leaves 2000 for QuickBooks' payable; a vendor credit's total and
+    a bill payment's amount, which the void adds back to the aging, come
+    back onto 2000 from it. Returns the sentence for the person, or None
+    for any other document. Call it before the document's amounts change."""
+    from datetime import date
+
+    from app.services.accounting import create_journal_entry
+
+    control = _ap_control(db)
+    if control is None:
+        return None
+    doc = bill if bill is not None else credit if credit is not None else payment
+    if doc is None or not is_carried_payable(db, doc, control.id):
+        return None
+    if bill is not None:
+        amount = Decimal(str(bill.balance_due or 0))
+        what = f"Bill {bill.bill_number}"
+        reference = bill.bill_number or ""
+    elif credit is not None:
+        amount = Decimal(str(credit.total or 0))
+        what = f"Vendor credit {credit.credit_number}"
+        reference = credit.credit_number or ""
+    else:
+        amount = Decimal(str(payment.amount or 0))
+        what = "Bill payment" + (
+            f" {payment.check_number}" if payment.check_number else ""
+        )
+        reference = payment.check_number or ""
+    if amount <= 0:
+        return None
+    payable = _payable_account(db, control)
+    memo = f"VOID {what}, carried over from QuickBooks Online"
+    off_control = bill is not None  # a bill leaves 2000; a credit returns
+    create_journal_entry(
+        db,
+        date.today(),
+        memo,
+        [
+            {
+                "account_id": control.id if off_control else payable.id,
+                "debit": amount,
+                "credit": Decimal("0"),
+                "description": memo,
+            },
+            {
+                "account_id": payable.id if off_control else control.id,
+                "debit": Decimal("0"),
+                "credit": amount,
+                "description": memo,
+            },
+        ],
+        source_type=CARRY_VOID_SOURCE,
+        source_id=doc.id,
+        reference=reference,
+    )
+    control_name = label_for(control, db)
+    if off_control:
+        return (
+            f"{what} was carried over from QuickBooks Online: its {amount:,.2f} "
+            f"moved from {control_name} to {payable.name}, where it sat in "
+            "QuickBooks Online."
+        )
+    return (
+        f"{what} was carried over from QuickBooks Online: its {amount:,.2f} "
+        f"moved from {payable.name} back to {control_name}."
+    )
+
+
+# A carried bill's fields whose change would move its amount or post it.
+_CARRIED_BILL_MONEY = ("tax_rate", "currency", "exchange_rate", "retainage_held")
+
+
+def carried_bill_edit_refusal(bill, data, update_data: dict) -> str | None:
+    """The sentence refusing an edit of a carried bill that changes its
+    lines or its amount (#713, as #704 keeps a carried invoice's lines): it
+    has no posting of its own, so an edit would move the aging without
+    moving 2000. The lines sent back as stored are no change; the dates,
+    terms, number, vendor and notes edit as on any bill."""
+
+    def as_sent(ln):
+        qty = Decimal(str(ln.quantity if ln.quantity is not None else 1))
+        rate = Decimal(str(ln.rate or 0))
+        return (
+            ln.account_id,
+            (qty * rate).quantize(Decimal("0.01")),
+            ln.description or "",
+        )
+
+    changed = False
+    if data.lines is not None:
+        sent = [as_sent(ln) for ln in data.lines]
+        stored = [
+            as_sent(ln)
+            for ln in sorted(bill.lines, key=lambda x: (x.line_order or 0, x.id))
+        ]
+        changed = sent != stored
+    for key in _CARRIED_BILL_MONEY:
+        if key in update_data:
+            old = getattr(bill, key)
+            new = update_data[key]
+            if isinstance(old, Decimal) or isinstance(new, (int, float, Decimal)):
+                changed = changed or Decimal(str(old or 0)) != Decimal(str(new or 0))
+            else:
+                changed = changed or (old or None) != (new or None)
+    if not changed:
+        return None
+    return (
+        "This bill was carried over from QuickBooks Online as an open balance, "
+        "so its lines and amount stay as they came. Void it and enter the bill "
+        "again, or enter a vendor credit for the difference."
+    )
 
 
 def _import_carried_payables(db: Session, plan: dict) -> tuple[int, int, int]:
@@ -2452,7 +2695,13 @@ def _import_carried_payables(db: Session, plan: dict) -> tuple[int, int, int]:
     A bill's one line, for its open balance, is on 2000 itself, as the A/R
     carry item's account is 1100 when the receivable lands there (#704), so
     the bill moves nothing. Returns (bills, credits, payments)."""
-    from app.models.bills import Bill, BillLine, BillPayment, BillStatus
+    from app.models.bills import (
+        Bill,
+        BillLine,
+        BillPayment,
+        BillPaymentAllocation,
+        BillStatus,
+    )
     from app.models.vendor_credits import (
         VendorCredit,
         VendorCreditLine,
@@ -2497,24 +2746,32 @@ def _import_carried_payables(db: Session, plan: dict) -> tuple[int, int, int]:
     for spec in plan["bills"]:
         who = vendor(spec["vendor"])
         amount = spec["open"]
+        total = spec.get("total") or amount
+        paid = total - amount
         num = bill_number(who, spec)
-        partly = spec["amount"] != amount
+        partly = spec["amount"] != amount and not paid
         bill = Bill(
             bill_number=num,
             vendor_id=who.id,
-            status=BillStatus.UNPAID,
+            status=BillStatus.PARTIAL if paid else BillStatus.UNPAID,
             date=spec["date"],
             due_date=spec["due_date"],
             terms="",
-            subtotal=amount,
+            subtotal=total,
             tax_rate=Decimal("0"),
             tax_amount=Decimal("0"),
-            total=amount,
-            amount_paid=Decimal("0"),
+            total=total,
+            amount_paid=paid,
             balance_due=amount,
             notes=(
-                f"{_AP_CARRIED}: the bill is in the imported history, and this "
-                "is what was open."
+                f"{_AP_CARRIED}: "
+                + (
+                    f"the bill is in the imported history, at its total, with "
+                    f"the {paid:,.2f} already paid."
+                    if paid
+                    else "the bill is in the imported history, and this is what "
+                    "was open."
+                )
             ),
         )
         db.add(bill)
@@ -2533,11 +2790,30 @@ def _import_carried_payables(db: Session, plan: dict) -> tuple[int, int, int]:
                     )
                 ),
                 quantity=Decimal("1"),
-                rate=amount,
-                amount=amount,
+                rate=total,
+                amount=total,
                 line_order=0,
             )
         )
+        if paid:
+            payment = BillPayment(
+                vendor_id=who.id,
+                date=spec.get("paid_on") or spec["date"],
+                amount=paid,
+                check_number=spec.get("paid_ref") or None,
+                pay_from_account_id=ap_id,
+                notes=(
+                    f"{_AP_PAID_PART} {spec['num'] or num} already paid there. "
+                    "The money is in the imported history."
+                ),
+            )
+            db.add(payment)
+            db.flush()
+            db.add(
+                BillPaymentAllocation(
+                    bill_payment_id=payment.id, bill_id=bill.id, amount=paid
+                )
+            )
     for spec in plan["credits"]:
         who = vendor(spec["vendor"])
         amount = -spec["open"]
@@ -2602,6 +2878,10 @@ def _import_carried_payables(db: Session, plan: dict) -> tuple[int, int, int]:
                 ),
             )
         )
+    # the name a void of one of them moves its amount to (#704's mirror)
+    from app.services.settings_service import set_setting
+
+    set_setting(db, PAYABLE_SETTING, plan["payable"])
     db.flush()
     return len(plan["bills"]), len(plan["credits"]), len(plan["payments"])
 

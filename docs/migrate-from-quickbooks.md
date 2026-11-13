@@ -110,7 +110,9 @@ payable aging detail → Export → Export to Excel; the file is named
 Journal's bills, bill payments and vendor credits land on 2000 Accounts
 Payable, so 2000 holds what is owed; the report brings the documents behind
 it. Each open **Bill** comes across as a bill with its vendor, number, date,
-due date and open balance; each **Vendor Credit** not yet applied as a vendor
+due date and open balance (a bill partly paid there comes at its full
+amount with a bill payment for the part paid, so its open balance is the
+same); each **Vendor Credit** not yet applied as a vendor
 credit; each **Bill Payment (Check)** or **Bill Payment (Credit Card)** not
 yet applied as a bill payment applied to no bill. They post nothing of their
 own (the history already put their balance on 2000), so A/P Aging equals
@@ -124,8 +126,12 @@ leaves on 2000, and lists by its row number every row it does not carry (a
 transaction type other than those three, or an open balance the wrong way
 round for its type) and refuses an unreadable row by its number. A report
 with nothing open (its header and no rows) carries nothing and is no error.
-Without the report the payables come across as a balance on 2000 with no
-bills behind it, and the dry run says so.
+A void of a carried bill, vendor credit or bill payment moves its amount
+between 2000 and QuickBooks' own payable account ("Accounts Payable (A/P)",
+made then), so A/P Aging still equals 2000; a carried bill's lines and
+amount are not edited (its dates, terms and notes are). Without the report
+the payables come across as a balance on 2000 with no bills behind it, and
+the dry run says so.
 
 ## Path 2 — QuickBooks Desktop (IIF files)
 

@@ -440,14 +440,30 @@ def _assert_carried(client, db_session):
         Decimal("50.00"),
     )
     assert credit.transaction_id is None
-    (payment,) = db_session.query(BillPayment).all()
-    assert (payment.vendor.name, payment.amount, payment.check_number) == (
-        "Ridge Lumber Co",
-        Decimal("75.00"),
-        "3002",
+    # the partly paid bill: at its full amount, the paid part a bill payment
+    # applied to it, dated and numbered as the Journal's payment (#711's mirror)
+    partly = bills[1]
+    assert (partly.total, partly.amount_paid, partly.balance_due) == (
+        Decimal("900.00"),
+        Decimal("300.00"),
+        Decimal("600.00"),
     )
-    assert payment.transaction_id is None
-    assert db_session.query(BillPaymentAllocation).count() == 0  # applied to none
+    assert partly.status.value == "partial"
+    assert [ln.amount for ln in partly.lines] == [Decimal("900.00")]
+    payments = db_session.query(BillPayment).order_by(BillPayment.date).all()
+    assert [
+        (p.vendor.name, p.date.isoformat(), p.amount, p.check_number) for p in payments
+    ] == [
+        ("Ridge Lumber Co", "2026-09-15", Decimal("300.00"), "3001"),
+        ("Ridge Lumber Co", "2026-10-20", Decimal("75.00"), "3002"),
+    ]
+    assert all(p.transaction_id is None for p in payments)
+    (alloc,) = db_session.query(BillPaymentAllocation).all()
+    assert (alloc.bill_payment_id, alloc.bill_id, alloc.amount) == (
+        payments[0].id,
+        partly.id,
+        Decimal("300.00"),
+    )  # the unapplied one is applied to none
 
     # the A/P aging reads them, and ties to the Journal's 2000
     aging = client.get("/api/reports/ap-aging").json()
@@ -659,3 +675,105 @@ def test_a_dry_run_on_a_company_file_writes_nothing(file_app):
         assert data["open_bills"] == 3 and data["unapplied_bill_payments"] == 1
     assert _on_disk(engine) == before
     assert before[1:5] == (0, 0, 0, 0)
+
+
+# ── voids and edits of the carried documents (#704's mirror) ──────────────
+
+# What each void adds to (or takes off) the A/P aging: a bill's open balance
+# leaves it; a credit's or a payment's amount comes back onto it.
+VOIDS = {
+    "bill": ("/api/bills/{}/void", Decimal("-400.00")),
+    "vendor_credit": ("/api/vendor-credits/{}/void", Decimal("50.00")),
+    "unapplied_payment": ("/api/bill-payments/{}/void", Decimal("75.00")),
+    "paid_part": ("/api/bill-payments/{}/void", Decimal("300.00")),
+}
+
+
+def _carried_id(db_session, kind):
+    if kind == "bill":
+        return db_session.query(Bill).filter(Bill.bill_number == "B-100").one().id
+    if kind == "vendor_credit":
+        return db_session.query(VendorCredit).one().id
+    number = "3002" if kind == "unapplied_payment" else "3001"
+    return (
+        db_session.query(BillPayment).filter(BillPayment.check_number == number).one()
+    ).id
+
+
+def _ties(client, db_session, total):
+    aging = client.get("/api/reports/ap-aging").json()
+    assert Decimal(str(aging["totals"]["total"])) == total
+    db_session.expire_all()
+    assert _journal_ap(db_session) == total
+    rows = _books_check(client)
+    for key in ("ap_aging", "vendor_balances", "journal_entries", "journal_voids"):
+        assert rows[key]["status"] == "pass", rows[key]
+
+
+@pytest.mark.parametrize("kind", list(VOIDS))
+def test_a_void_of_a_carried_document_keeps_the_aging_on_2000(
+    client, db_session, seed_accounts, kind
+):
+    data = client.post("/api/migration/qbo_export/import", files=_files()).json()
+    assert data["ok"] is True, data["errors"]
+    path, change = VOIDS[kind]
+    r = client.post(path.format(_carried_id(db_session, kind)))
+    assert r.status_code == 200, r.text
+    _ties(client, db_session, Decimal("1025.00") + change)
+    # the amount moved to QuickBooks' own payable account, where it sat
+    moved = (
+        db_session.query(Account)
+        .filter(Account.name == "Accounts Payable (A/P) (QuickBooks Online)")
+        .one_or_none()
+        or db_session.query(Account)
+        .filter(Account.name == "Accounts Payable (A/P)")
+        .one()
+    )
+    assert moved.account_number != "2000"
+
+
+def test_voiding_every_carried_document_leaves_2000_at_zero(
+    client, db_session, seed_accounts
+):
+    client.post("/api/migration/qbo_export/import", files=_files())
+    # a paid bill is voided after its payment, as on any bill
+    for kind in ("paid_part", "unapplied_payment", "vendor_credit", "bill"):
+        path, _ = VOIDS[kind]
+        r = client.post(path.format(_carried_id(db_session, kind)))
+        assert r.status_code == 200, r.text
+    for number in ("B-101", "B-102"):
+        bill = db_session.query(Bill).filter(Bill.bill_number == number).one()
+        r = client.post(f"/api/bills/{bill.id}/void")
+        assert r.status_code == 200, r.text
+    _ties(client, db_session, Decimal("0.00"))
+
+
+def test_a_carried_bills_lines_stay_as_they_came(client, db_session, seed_accounts):
+    client.post("/api/migration/qbo_export/import", files=_files())
+    bill = db_session.query(Bill).filter(Bill.bill_number == "B-100").one()
+    line = bill.lines[0]
+    same = {
+        "id": line.id,
+        "account_id": line.account_id,
+        "description": line.description,
+        "quantity": 1,
+        "rate": 400,
+    }
+    r = client.put(f"/api/bills/{bill.id}", json={"lines": [{**same, "rate": 450}]})
+    assert r.status_code == 409, r.text
+    assert "carried over from QuickBooks Online" in r.json()["detail"]
+    # the same lines and a new due date and memo: saved, nothing posted
+    r = client.put(
+        f"/api/bills/{bill.id}",
+        json={"lines": [same], "due_date": "2026-12-01", "notes": "Call first"},
+    )
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    bill = db_session.get(Bill, bill.id)
+    assert bill.due_date.isoformat() == "2026-12-01"
+    assert bill.transaction_id is None and bill.balance_due == Decimal("400.00")
+    _ties(client, db_session, Decimal("1025.00"))
+    # still carried, notes edited or not: a void still moves it off 2000
+    r = client.post(f"/api/bills/{bill.id}/void")
+    assert r.status_code == 200, r.text
+    _ties(client, db_session, Decimal("625.00"))

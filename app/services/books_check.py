@@ -1647,6 +1647,7 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
     from app.services.qbo_export_import import is_carried_payable
 
     existing = {tid for (tid,) in db.query(Transaction.id)}
+    carried_ap = control_accounts.find(db, "2000")
 
     def lacks(tid):
         return tid is None or tid not in existing
@@ -1716,7 +1717,7 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
             amount = _d(getattr(d, amount_attr))
             if amount == ZERO or not lacks(d.transaction_id):
                 continue
-            if kind in _CARRIED_KINDS and is_carried_payable(d):
+            if kind in _CARRIED_KINDS and is_carried_payable(db, d, carried_ap):
                 continue  # on 2000 by the imported history, by design (#713)
             total += abs(amount)
             docs.append(
