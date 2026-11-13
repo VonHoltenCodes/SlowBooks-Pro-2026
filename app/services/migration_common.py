@@ -35,6 +35,13 @@ from app.models.transactions import Transaction
 from app.services.account_label import account_label
 from app.services.account_tree import inherited_detail_type, parent_link_problem
 from app.services.accounting import _q, create_journal_entry
+from app.services.column_fit import (
+    add_notes,
+    fit_notes,
+    fit_to_columns,
+    journal_label,
+    line_label,
+)
 from app.services.safe_errors import DataProblem
 from app.services.settings_service import use_account_numbers
 
@@ -672,6 +679,10 @@ def dry_run_bundle(
         if decision["warning"]:
             warnings.append(decision["warning"])
 
+    # A value longer than its column is cut to fit on import, and said so
+    # (PostgreSQL refuses it; SQLite took it): the same sentences here.
+    warnings.extend(_column_fit_notes(db, accounts, journals, seen))
+
     existing = set(books_by_name(db)) | set(onto_accounts(db, accounts))
     return {
         "ok": not errors,
@@ -688,10 +699,50 @@ def dry_run_bundle(
     }
 
 
+def _column_fit_notes(db: Session, accounts, journals, seen) -> list[str]:
+    """What the import will cut to fit a column: the planned accounts'
+    names and descriptions and each posted journal line's memo, in the words
+    the import's own cut says (column_fit)."""
+    from app.models.transactions import TransactionLine
+
+    notes: list[str] = []
+    for decision in sorted(_plan_accounts(db, accounts), key=lambda d: d["index"]):
+        spec = decision["spec"]
+        notes.extend(
+            fit_notes(Account(name=spec["name"], description=spec["description"]))
+        )
+    for group in journals:
+        if not group or _group_reference(group) in seen:
+            continue
+        journal = journal_label(_group_reference(group), group[0]["date"])
+        for row in group:
+            if row["debit"] == 0 and row["credit"] == 0:
+                continue
+            description = row.get("description") or None
+            for sentence in fit_notes(
+                TransactionLine(description=description),
+                label=line_label(journal, description),
+            ):
+                if sentence not in notes:
+                    notes.append(sentence)
+    return notes
+
+
 def run_import_bundle(
     db: Session, bundle: dict, parsers: dict, source_type: str, source_label: str
 ) -> dict:
-    """Execute the import. Refuses when the dry-run fails."""
+    """Execute the import. Refuses when the dry-run fails. A value longer
+    than its column is cut to the column's length and the answer says so
+    (column_fit): PostgreSQL refuses it otherwise, and nothing is saved."""
+    cut: list[str] = []
+    with fit_to_columns(db, cut):
+        result = _run_import_bundle(db, bundle, parsers, source_type, source_label)
+    return add_notes(result, cut)
+
+
+def _run_import_bundle(
+    db: Session, bundle: dict, parsers: dict, source_type: str, source_label: str
+) -> dict:
     verdict = dry_run_bundle(db, bundle, parsers, source_label, source_type)
     if not verdict["ok"]:
         return {**verdict, "imported_accounts": 0, "imported_journals": 0}
