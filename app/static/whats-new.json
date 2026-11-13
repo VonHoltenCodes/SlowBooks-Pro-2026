@@ -1,4 +1,21 @@
 {
+  "2.32.0": {
+    "title": "Tax-exempt jobs, deposits that hold every line, estimates priced line by line, and attachments before the first save",
+    "items": [
+      "Sales tax exemption on the job: an exempt job holds its certificate (number, state, kind, expiry), estimates, invoices and sales receipts have a Sales tax exempt switch, the PDF says so, and the Sales Tax report lists exempt sales by reason.",
+      "Make Deposits takes lines for money that was never invoiced (a reimbursement, a refund, a rebate), each to its own account, and lists only customer money for deposit.",
+      "Deposits print onto the bank's pre-printed deposit slips, with a layout for each figure and a test slip.",
+      "Attach a receipt or a supplier's paper on every new bill, expense, card charge, invoice, estimate, sales receipt, purchase order, vendor credit, journal and register entry, before the first save.",
+      "One inventory adjustment holds several items, in the window and through the API.",
+      "Construction estimates can price each line as cost plus a markup (Settings → Estimate style), and a read-only or accountant sign-in never sees the contractor's cost side.",
+      "A new Estimate Closing Rate report: bids won, lost and open, by count and by dollars, by customer and job type, with the days to a decision.",
+      "The Reports page opens on your starred reports with Saved Reports beside them, Budget vs Actual shows every month, and the agings and Sales Tax print to PDF.",
+      "Import invoices from a CSV in SlowBooks' own template, with a dry run first; the QuickBooks Online import reads customers called Members, Donors, Clients and the rest.",
+      "Checks: the memo can be the bill's invoice number, its memo or nothing, and the dollar sign can be left off for stock that prints its own.",
+      "Payroll figures each run with its own year's tables, a Washington or Oregon employer share can follow the agency's letter, and salaried Washington staff are charged L&I on 160 hours.",
+      "Online payments can wait in a clearing account per provider with the fee booked, and a payout clears it against the bank feed."
+    ]
+  },
   "2.31.14": {
     "title": "Cash basis after the retainage change, and sentences where there were errors",
     "items": [
