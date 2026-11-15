@@ -14,6 +14,10 @@
 # makes the server POST to a URL decoded from the token, so a non-admin
 # must not be able to reach it at all. Syncing and reading status on an
 # already-connected feed is daily books work and stays the bookkeeper's.
+# Refreshing the account list, moving a mapping to another SimpleFIN account
+# and updating the token (#905) are the same connection work: an
+# administrator's. Each writes settings rows, which the audit hooks log as
+# they log claim and disconnect.
 # ============================================================================
 
 import json
@@ -61,6 +65,78 @@ class SyncRequest(StrictModel):
     )
 
 
+class MoveRequest(StrictModel):
+    # the mapped SimpleFIN account, and the one its mapping moves to
+    from_id: str = Field(min_length=1, max_length=200)
+    to_id: str = Field(min_length=1, max_length=200)
+
+
+def _account_map(db: Session) -> dict[str, int]:
+    return simplefin_service.parse_account_map(
+        get_setting_raw(db, "simplefin_account_map") or "{}"
+    )
+
+
+def _reversed(db: Session) -> list[str]:
+    return simplefin_service.parse_reversed(
+        get_setting_raw(db, "simplefin_reversed") or "[]"
+    )
+
+
+def _cache(db: Session) -> list:
+    try:
+        cache = json.loads(get_setting_raw(db, "simplefin_accounts_cache") or "[]")
+    except ValueError:
+        return []
+    return cache if isinstance(cache, list) else []
+
+
+def _feed_dates(db: Session, account_map: dict[str, int]) -> dict[str, str]:
+    """Each feed's own last sync (#905). A connection from before these were
+    kept has only the one shared date: every feed mapped then has synced to
+    it, so each is seeded with it. A feed mapped after that has none, and
+    its first sync takes the first-sync window."""
+    raw = get_setting_raw(db, "simplefin_feed_last_sync")
+    if raw:
+        return simplefin_service.parse_feed_last_sync(raw)
+    shared = get_setting_raw(db, "simplefin_last_sync") or ""
+    return {sf_id: shared for sf_id in account_map} if shared else {}
+
+
+def _save_feed_dates(db: Session, dates: dict[str, str], keep) -> dict[str, str]:
+    keep = set(keep)
+    kept = {sf_id: when for sf_id, when in dates.items() if sf_id in keep}
+    set_setting(db, "simplefin_feed_last_sync", json.dumps(kept, sort_keys=True))
+    return kept
+
+
+def _present_cache(cache: list) -> list[dict]:
+    """The accounts the bridge reported last, as account_summaries gave them."""
+    return [
+        a for a in cache if isinstance(a, dict) and a.get("id") and not a.get("gone")
+    ]
+
+
+def _status_body(db: Session) -> dict:
+    account_map = _account_map(db)
+    accounts = simplefin_service.merge_accounts_cache(
+        _cache(db), _present_cache(_cache(db)), account_map.keys()
+    )
+    for a in accounts:
+        # what the account table says of each row (#905)
+        a["state"] = (
+            "gone" if a["gone"] else "mapped" if a["id"] in account_map else "new"
+        )
+    return {
+        "connected": bool(get_setting_raw(db, "simplefin_access_url") or ""),
+        "last_sync": get_setting_raw(db, "simplefin_last_sync") or "",
+        "feed_last_sync": _feed_dates(db, account_map),
+        "account_map": account_map,
+        "reversed": _reversed(db),
+        "accounts": accounts,
+    }
+
+
 def _connected(db: Session) -> str:
     access_url = get_setting_raw(db, "simplefin_access_url") or ""
     if not access_url:
@@ -92,22 +168,7 @@ def _refuse_a_second_feed(db: Session, mapping: dict[str, int]) -> None:
 
 @router.get("/status")
 def status(db: Session = Depends(get_db)):
-    access_url = get_setting_raw(db, "simplefin_access_url") or ""
-    try:
-        cache = json.loads(get_setting_raw(db, "simplefin_accounts_cache") or "[]")
-    except ValueError:
-        cache = []
-    return {
-        "connected": bool(access_url),
-        "last_sync": get_setting_raw(db, "simplefin_last_sync") or "",
-        "account_map": simplefin_service.parse_account_map(
-            get_setting_raw(db, "simplefin_account_map") or "{}"
-        ),
-        "reversed": simplefin_service.parse_reversed(
-            get_setting_raw(db, "simplefin_reversed") or "[]"
-        ),
-        "accounts": cache if isinstance(cache, list) else [],
-    }
+    return _status_body(db)
 
 
 @router.post("/claim")
@@ -125,8 +186,152 @@ def claim(payload: ClaimRequest, request: Request, db: Session = Depends(get_db)
     set_setting(db, "simplefin_account_map", "{}")
     set_setting(db, "simplefin_reversed", "[]")
     set_setting(db, "simplefin_last_sync", "")
+    set_setting(db, "simplefin_feed_last_sync", "{}")
     db.commit()
     return {"connected": True, "accounts": accounts}
+
+
+@router.post("/update-token")
+def update_token(
+    payload: ClaimRequest, request: Request, db: Session = Depends(get_db)
+):
+    """Claim a fresh setup token for a feed already connected (#905): the
+    new access URL replaces the stored one and nothing else is cleared. Every
+    mapping, Reverse signs choice and feed's last sync stays; a mapped
+    account the new connection does not report is named in "missing" and
+    shown as gone, to be moved to its new account or unmapped."""
+    require_admin(request)  # replaces the stored credential; outbound POST
+    _connected(db)
+    try:
+        access_url = simplefin_service.claim_access_url(payload.setup_token)
+        data = simplefin_service.fetch_accounts(access_url, balances_only=True)
+    except SimpleFINError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    account_map = _account_map(db)
+    dates = _feed_dates(db, account_map)
+    old_cache = _cache(db)
+    summaries = simplefin_service.account_summaries(data)
+    present = {a["id"] for a in summaries}
+    names = {
+        str(a.get("id")): str(a.get("name") or a.get("id"))
+        for a in old_cache
+        if isinstance(a, dict)
+    }
+    missing = [
+        {"id": sf_id, "name": names.get(sf_id, sf_id)}
+        for sf_id in account_map
+        if sf_id not in present
+    ]
+    keep = present | set(account_map)
+    set_setting(db, "simplefin_access_url", access_url)
+    set_setting(
+        db,
+        "simplefin_accounts_cache",
+        json.dumps(
+            simplefin_service.merge_accounts_cache(
+                old_cache, summaries, account_map.keys()
+            )
+        ),
+    )
+    set_setting(
+        db,
+        "simplefin_reversed",
+        json.dumps(sorted(i for i in _reversed(db) if i in keep)),
+    )
+    _save_feed_dates(db, dates, keep)
+    db.commit()
+    body = _status_body(db)
+    body["missing"] = missing
+    return body
+
+
+@router.post("/refresh")
+def refresh(request: Request, db: Session = Depends(get_db)):
+    """Read the bridge's account list again, balances only (#905): accounts
+    added at the SimpleFIN provider since appear unmapped, and a mapped one
+    it no longer reports is kept and shown as gone. Needs no mapping."""
+    require_admin(request)  # the account list is the connection's wiring
+    access_url = _connected(db)
+    try:
+        data = simplefin_service.fetch_accounts(access_url, balances_only=True)
+    except SimpleFINError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    old_cache = _cache(db)
+    before = {str(a.get("id")) for a in _present_cache(old_cache)}
+    summaries = simplefin_service.account_summaries(data)
+    set_setting(
+        db,
+        "simplefin_accounts_cache",
+        json.dumps(
+            simplefin_service.merge_accounts_cache(
+                old_cache, summaries, _account_map(db).keys()
+            )
+        ),
+    )
+    db.commit()
+    body = _status_body(db)
+    body["added"] = [a["id"] for a in summaries if a["id"] not in before]
+    body["gone"] = [a["id"] for a in body["accounts"] if a["gone"]]
+    body["warnings"] = [str(e) for e in data.get("errors", []) or []]
+    return body
+
+
+@router.post("/move")
+def move_mapping(payload: MoveRequest, request: Request, db: Session = Depends(get_db)):
+    """Move one mapping to another SimpleFIN account (#905) — a reissued
+    card that came through under a new id: the old id is unmapped and the
+    new one imports into the same SlowBooks account, with the old one's
+    Reverse signs choice. The new id has synced nothing, so its first sync
+    takes the first-sync window."""
+    require_admin(request)  # the feed's wiring is a connection setting
+    _connected(db)
+    from_id, to_id = payload.from_id, payload.to_id
+    account_map = _account_map(db)
+    if from_id not in account_map:
+        raise HTTPException(
+            status_code=400, detail="That SimpleFIN account is not mapped"
+        )
+    if to_id == from_id:
+        raise HTTPException(
+            status_code=400, detail="Choose a different SimpleFIN account"
+        )
+    present = {str(a.get("id")) for a in _present_cache(_cache(db))}
+    if to_id not in present:
+        raise HTTPException(
+            status_code=400,
+            detail="That SimpleFIN account is not in the account list "
+            "(use Refresh accounts first)",
+        )
+    if to_id in account_map:
+        raise HTTPException(
+            status_code=400,
+            detail="That SimpleFIN account already imports into an account "
+            "(set it to not imported first)",
+        )
+    dates = _feed_dates(db, account_map)
+    moved = {k: v for k, v in account_map.items() if k != from_id}
+    moved[to_id] = account_map[from_id]
+    _refuse_a_second_feed(db, moved)
+    reversed_ids = set(_reversed(db))
+    if from_id in reversed_ids:
+        reversed_ids.add(to_id)
+    else:
+        reversed_ids.discard(to_id)
+    reversed_ids.discard(from_id)
+    set_setting(db, "simplefin_account_map", json.dumps(moved))
+    set_setting(db, "simplefin_reversed", json.dumps(sorted(reversed_ids)))
+    _save_feed_dates(db, dates, moved.keys())
+    set_setting(
+        db,
+        "simplefin_accounts_cache",
+        json.dumps(
+            simplefin_service.merge_accounts_cache(
+                _cache(db), _present_cache(_cache(db)), moved.keys()
+            )
+        ),
+    )
+    db.commit()
+    return _status_body(db)
 
 
 @router.post("/map")
@@ -134,6 +339,8 @@ def save_mapping(payload: MapRequest, request: Request, db: Session = Depends(ge
     """Store which bridge account feeds which SlowBooks bank account."""
     require_admin(request)  # the feed's wiring is a connection setting
     _connected(db)
+    # seeded from the map as it was, before this save changes it (#905)
+    dates = _feed_dates(db, _account_map(db))
     clean: dict[str, int] = {}
     for sf_id, bank_account_id in payload.mapping.items():
         if not bank_account_id:
@@ -152,6 +359,9 @@ def save_mapping(payload: MapRequest, request: Request, db: Session = Depends(ge
         clean[str(sf_id)] = feed.id
     _refuse_a_second_feed(db, clean)
     set_setting(db, "simplefin_account_map", json.dumps(clean))
+    # a feed unmapped forgets its last sync: mapped again, it starts afresh
+    # (anything it brought in before is a duplicate and skipped)
+    _save_feed_dates(db, dates, clean.keys())
     if payload.reversed is not None:
         reversed_ids = sorted({str(sf_id) for sf_id in payload.reversed})
         set_setting(db, "simplefin_reversed", json.dumps(reversed_ids))
@@ -179,46 +389,59 @@ def sync(payload: Optional[SyncRequest] = None, db: Session = Depends(get_db)):
         )
 
     history = payload.history_months if payload else None
-    last_sync_raw = get_setting_raw(db, "simplefin_last_sync") or ""
+    today = date.today()
+    dates = _feed_dates(db, account_map)
+    since_by_id: Optional[dict[str, date]] = None
     if history:
-        start = simplefin_service.months_before(date.today(), history)
-    elif last_sync_raw:
-        try:
-            last = date.fromisoformat(last_sync_raw[:10])
-            start = last - timedelta(days=simplefin_service.RESYNC_OVERLAP_DAYS)
-        except ValueError:
-            start = date.today() - timedelta(days=simplefin_service.FIRST_SYNC_DAYS)
+        start = simplefin_service.months_before(today, history)
     else:
-        start = date.today() - timedelta(days=simplefin_service.FIRST_SYNC_DAYS)
+        # each feed from its own last sync, or the first-sync window for a
+        # feed that has never synced (#905); one request reaches back as far
+        # as the feed that needs the most
+        since_by_id = {
+            sf_id: simplefin_service.feed_start(today, dates.get(sf_id, ""))
+            for sf_id in account_map
+        }
+        start = min(since_by_id.values())
+        # only a feed whose window starts later than the request's is
+        # trimmed: what the bridge returns for the request is otherwise
+        # taken as it comes, as before
+        since_by_id = {k: v for k, v in since_by_id.items() if v > start}
 
     try:
         if history:
             # through today: the protocol's end-date is exclusive
             data = simplefin_service.fetch_history(
-                access_url, start, date.today() + timedelta(days=1)
+                access_url, start, today + timedelta(days=1)
             )
         else:
             data = simplefin_service.fetch_accounts(access_url, start_date=start)
     except SimpleFINError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    reversed_ids = set(
-        simplefin_service.parse_reversed(
-            get_setting_raw(db, "simplefin_reversed") or "[]"
-        )
+    reversed_ids = set(_reversed(db))
+    result = simplefin_service.sync_accounts(
+        db, data, account_map, reversed_ids, since_by_id
     )
-    result = simplefin_service.sync_accounts(db, data, account_map, reversed_ids)
+    synced = result.pop("synced", [])
     result["since"] = start.isoformat()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     set_setting(
         db,
         "simplefin_accounts_cache",
-        json.dumps(simplefin_service.account_summaries(data)),
+        json.dumps(
+            simplefin_service.merge_accounts_cache(
+                _cache(db),
+                simplefin_service.account_summaries(data),
+                account_map.keys(),
+            )
+        ),
     )
-    set_setting(
-        db,
-        "simplefin_last_sync",
-        datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    )
+    set_setting(db, "simplefin_last_sync", now)
+    # a feed the bridge did not answer for keeps its date, so the next sync
+    # reaches back to it
+    dates.update({sf_id: now for sf_id in synced})
+    _save_feed_dates(db, dates, account_map.keys())
     db.commit()
     return result
 
@@ -232,5 +455,6 @@ def disconnect(request: Request, db: Session = Depends(get_db)):
     set_setting(db, "simplefin_reversed", "[]")
     set_setting(db, "simplefin_accounts_cache", "[]")
     set_setting(db, "simplefin_last_sync", "")
+    set_setting(db, "simplefin_feed_last_sync", "{}")
     db.commit()
     return {"connected": False}

@@ -137,6 +137,13 @@ BANKING = [
     "BankingPage.showReconciliations({checking})",
     "BankingPage.showOFXImport({checking})",
     "BankingPage.showSimpleFINHistory()",
+    # #905: a gone card's mapping moved to its replacement, and a new token
+    "(BankingPage._sfFeed = {{accounts: ["
+    "{{id: 'OLD', name: 'Visa 1111', gone: true}}, "
+    "{{id: 'NEW', name: 'Visa 2222', org: 'Demo Bank', gone: false}}], "
+    "account_map: {{OLD: 1}}}}, "
+    "BankingPage.showSimpleFINMove({{dataset: {{sfid: 'OLD', rowName: 'Visa 1111'}}}}))",
+    "BankingPage.showSimpleFINUpdateToken()",
     "BankingPage.showMatch({feed_line}, {checking})",
     "BankingPage.showReconReport({reconciliation})",
 ]
