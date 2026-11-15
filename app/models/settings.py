@@ -246,6 +246,11 @@ DEFAULT_SETTINGS = {
     "simplefin_reversed": "[]",
     "simplefin_accounts_cache": "[]",  # last-seen bridge accounts, for the UI
     "simplefin_last_sync": "",
+    # JSON {simplefin id: ISO time} (#905): each feed's own last sync, so a
+    # feed mapped later gets the first-sync window rather than the overlap
+    # after the others' last sync. "" = not kept yet (a connection from
+    # before 2.32.0): its mapped feeds are seeded from simplefin_last_sync.
+    "simplefin_feed_last_sync": "",
     # Mercury read-only feed; mapping and sync state are managed by its routes.
     "mercury_api_token": "",
     "mercury_webhook_secret": "",
