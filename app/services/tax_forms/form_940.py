@@ -28,10 +28,20 @@ from app.services.pdf_service import _jinja_env, render_pdf
 # California is 0.012 (1.2%). The credit reduction rate for the U.S. Virgin
 # Islands is 0.045 (4.5%)." — Schedule A (Form 940) for 2025, Cat. No.
 # 16997C, created 11/12/25, https://www.irs.gov/pub/irs-pdf/f940sa.pdf
-# (checked 2026-10-31). A year with no row has no credit-reduction states
-# that SlowBooks knows of; the 2026 Schedule A is published in November 2026.
+# (checked 2026-10-31).
+# 2026: the Department of Labor's final determination, made as of November
+# 10, 2026: "employers in California are subject to a 1.5% credit reduction"
+# (an outstanding advance every January 1 from 2021 through 2026, the BCR
+# add-on waived); "The US Virgin Islands (USVI) ... repaid all outstanding
+# advances before November 10, 2026", so 0.0% and no row. — "Final 2026
+# Federal Unemployment Tax Act (FUTA) Credit Reductions", DOL/ETA/OUI,
+# updated November 10, 2026, https://oui.doleta.gov/unemploy/docs/
+# final_credit_states_2026.xlsx (read 2026-11-15). Schedule A (Form 940)
+# for 2026 prints the same rates when the IRS posts it.
+# A year with no row has no credit-reduction states that SlowBooks knows of.
 FUTA_CREDIT_REDUCTION: dict[int, dict[str, Decimal]] = {
     2025: {"CA": Decimal("0.012"), "VI": Decimal("0.045")},
+    2026: {"CA": Decimal("0.015")},
 }
 
 
