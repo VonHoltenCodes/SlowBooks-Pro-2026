@@ -513,10 +513,22 @@ const BankingPage = {
                 ? `<label style="font-size:11px; white-space:nowrap;"><input type="checkbox" data-sfid="${escapeHtml(sfId)}" class="simplefin-reverse" data-admin
                         ${reversed.has(sfId) ? 'checked' : ''}> Reverse signs</label>`
                 : `<span style="font-size:11px;">${reversed.has(sfId) ? 'Signs reversed' : 'As the bank sends them'}</span>`;
-            const tableRows = feed.accounts.map(a => `<tr>
-                    <td>${escapeHtml(a.name)}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.org || '')}</div></td>
-                    <td class="amount">${escapeHtml(a.balance)} ${escapeHtml(a.currency)}</td>
-                    <td>${BankingPage._importCell('simplefin', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank', 'credit_card'])}</td>
+            // #905: a row the bridge no longer reports, and one it reports
+            // that imports nowhere yet, say so under the account's name
+            const marks = {
+                gone: '<span class="badge badge-void">Gone from SimpleFIN</span>',
+                new: '<span class="badge badge-sent">New — not mapped</span>',
+            };
+            BankingPage._sfFeed = feed;
+            const moveTo = (a) => feed.account_map[a.id] && mayMap
+                ? `<div style="margin-top:4px;"><button type="button" class="btn btn-secondary btn-sm" data-admin
+                        data-sfid="${escapeHtml(a.id)}" data-row-name="${escapeHtml(a.name)}"
+                        onclick="BankingPage.showSimpleFINMove(this)">Move this mapping to…</button></div>`
+                : '';
+            const tableRows = feed.accounts.map(a => `<tr class="simplefin-row" data-sfid="${escapeHtml(a.id)}" data-state="${escapeHtml(a.state || '')}">
+                    <td>${escapeHtml(a.name)}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.org || '')}</div>${marks[a.state] ? `<div>${marks[a.state]}</div>` : ''}</td>
+                    <td class="amount">${a.gone ? '—' : `${escapeHtml(a.balance)} ${escapeHtml(a.currency)}`}</td>
+                    <td>${BankingPage._importCell('simplefin', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank', 'credit_card'])}${moveTo(a)}</td>
                     <td>${signs(a.id)}</td>
                 </tr>`).join('');
             body = `
@@ -529,6 +541,10 @@ const BankingPage = {
                     back as far as your SimpleFIN provider keeps.
                     If a feed shows a bank account's balance as negative and its deposits as withdrawals,
                     tick <em>Reverse signs</em> for it before syncing.
+                    <em>Refresh accounts</em> reads the account list again (an account added at your SimpleFIN
+                    provider, or a replacement card); a card that came back under a new account takes its
+                    old one's place with <em>Move this mapping to…</em>, and its first sync reaches back
+                    the usual three months.
                 </p>
                 <p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)} The administrator also sets whether a feed's signs are reversed.</p>
                 <div class="table-container"><table>
@@ -538,6 +554,8 @@ const BankingPage = {
                 <div class="form-actions" style="margin-top:12px;">
                     <button class="btn btn-primary" onclick="BankingPage.syncSimpleFIN()">Sync Now</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showSimpleFINHistory()">Fetch older history…</button>
+                    <button class="btn btn-secondary" data-admin onclick="BankingPage.refreshSimpleFIN()">Refresh accounts</button>
+                    <button class="btn btn-secondary" data-admin onclick="BankingPage.showSimpleFINUpdateToken()">Update token…</button>
                     <button class="btn btn-secondary" data-admin onclick="BankingPage.disconnectSimpleFIN()">Disconnect</button>
                 </div>`;
         }
@@ -616,6 +634,106 @@ const BankingPage = {
             BankingPage.go('#/banking');
         } catch (err) {
             if (btn) { btn.disabled = false; btn.textContent = 'Fetch'; }
+            toast(err.message, 'error');
+        }
+    },
+
+    // Refresh accounts (#905): the bridge's account list again, balances
+    // only; needs no mapping, unlike Sync Now.
+    async refreshSimpleFIN() {
+        try {
+            const r = await API.post('/simplefin/refresh');
+            const parts = [`${r.added.length} new`];
+            if (r.gone.length) parts.push(`${r.gone.length} gone from SimpleFIN`);
+            toast(`Account list refreshed: ${parts.join(', ')}`);
+            if (r.warnings && r.warnings.length) toast(r.warnings[0], 'error');
+            BankingPage.go('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Move this mapping to… (#905): a mapped row's SlowBooks account and its
+    // Reverse signs choice go to another SimpleFIN account in one step, the
+    // old one unmapped (a reissued card under a new account id).
+    showSimpleFINMove(btn) {
+        const { sfid, rowName } = btn.dataset;
+        const feed = BankingPage._sfFeed || { accounts: [], account_map: {} };
+        const choices = feed.accounts.filter(a => !a.gone && a.id !== sfid && !feed.account_map[a.id]);
+        if (!choices.length) {
+            openModal('Move this mapping', `
+                <p>Every SimpleFIN account in the list already imports somewhere. If the account this mapping
+                    belongs to now is new at your SimpleFIN provider, use <strong>Refresh accounts</strong> first;
+                    one that imports elsewhere is set to <em>— not imported —</em> and saved first.</p>
+                <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+            return;
+        }
+        openModal('Move this mapping', `
+            <form onsubmit="BankingPage.moveSimpleFIN(event)" data-sfid="${escapeHtml(sfid)}">
+                <p>${escapeHtml(rowName)} stops importing. The SimpleFIN account you choose imports into the same
+                    SlowBooks account from now on, with the same Reverse signs choice. Its first sync brings in
+                    about the last three months; anything already imported is skipped.</p>
+                <div class="form-group"><label for="simplefin-move-to">Move to</label>
+                    <select id="simplefin-move-to" name="to_id" required>
+                        ${choices.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}${a.org ? ' (' + escapeHtml(a.org) + ')' : ''}</option>`).join('')}
+                    </select></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Move mapping</button>
+                </div>
+            </form>`);
+    },
+
+    async moveSimpleFIN(e) {
+        e.preventDefault();
+        const form = e.target;
+        const button = form.querySelector('button[type=submit]');
+        button.disabled = true;
+        try {
+            await API.post('/simplefin/move', { from_id: form.dataset.sfid, to_id: form.to_id.value });
+            closeModal();
+            toast('Mapping moved');
+            BankingPage.go('#/banking');
+        } catch (err) {
+            button.disabled = false;
+            toast(err.message, 'error');
+        }
+    },
+
+    // Update token (#905): a fresh setup token for the connection already
+    // here; the mappings, Reverse signs choices and sync dates stay.
+    showSimpleFINUpdateToken() {
+        openModal('Update SimpleFIN token', `
+            <form onsubmit="BankingPage.updateSimpleFINToken(event)">
+                <p>Paste a new setup token from your SimpleFIN provider. Every mapping and Reverse signs choice
+                    is kept; a mapped account the new connection does not report is shown as
+                    <em>Gone from SimpleFIN</em>, to move to its new account or set to not imported.</p>
+                <div class="form-group"><label for="simplefin-new-token">New setup token</label>
+                    <input type="password" id="simplefin-new-token" name="setup_token" required autocomplete="off"
+                           placeholder="Paste the one-time setup token"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update token</button>
+                </div>
+            </form>`);
+    },
+
+    async updateSimpleFINToken(e) {
+        e.preventDefault();
+        const form = e.target;
+        const token = form.setup_token.value.trim();
+        if (!token) return;
+        const button = form.querySelector('button[type=submit]');
+        button.disabled = true;
+        try {
+            const r = await API.post('/simplefin/update-token', { setup_token: token });
+            closeModal();
+            toast(`Token updated: ${Object.keys(r.account_map).length - r.missing.length} mapping(s) kept`);
+            if (r.missing.length) {
+                toast(`Not in the new connection: ${r.missing.map(m => m.name).join(', ')}. ` +
+                    'Move each mapping to its new account, or set it to not imported.', 'error');
+            }
+            BankingPage.go('#/banking');
+        } catch (err) {
+            button.disabled = false;
             toast(err.message, 'error');
         }
     },
