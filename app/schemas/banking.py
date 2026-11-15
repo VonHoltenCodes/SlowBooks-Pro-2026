@@ -208,6 +208,14 @@ class BankTransactionResponse(BaseModel):
     # clearing_balance}; null unless the payee names a provider whose
     # clearing is on.
     suggested_payout: Optional[dict] = None
+    # what the review row picked besides the category (#904), kept on the
+    # line until it is added: the row is drawn with them
+    pick_class_id: Optional[int] = None
+    pick_job_id: Optional[int] = None
+    pick_vendor_id: Optional[int] = None
+    pick_vendor_name: Optional[str] = None
+    pick_customer_id: Optional[int] = None
+    pick_payee: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -281,9 +289,18 @@ class StatementVendors(StrictModel):
 class StatementCategory(StrictModel):
     """The category picked for a statement line in the review list (null
     clears it). Kept on the line, so Add all posts it and a reload shows
-    it."""
+    it. The row's class, job and name are kept the same way (#904): each
+    field sent is saved (null clears it), a field left out is left as it
+    was, so a category pick and a name pick never undo each other."""
 
     category_account_id: Optional[int] = None
+    class_id: Optional[int] = None
+    job_id: Optional[int] = None
+    # the vendor (money out) or customer (money in) the entry names
+    vendor_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    # a name typed that is no vendor's: the entry's payee, as text
+    payee: Optional[str] = Field(default=None, max_length=200)
 
 
 class ReconciliationCreate(StrictModel):

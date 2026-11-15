@@ -317,6 +317,13 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
         else {}
     )
     vendors = entry_vendors(db, rows)
+    # the names of the vendors review rows picked (#904), to draw them with
+    picked_ids = {r.pick_vendor_id for r in rows if r.pick_vendor_id}
+    picked_vendors = (
+        {v.id: v.name for v in db.query(Vendor).filter(Vendor.id.in_(picked_ids)).all()}
+        if picked_ids
+        else {}
+    )
     # A payout suggestion (#584) is offered only on an unmatched deposit, so
     # the settings read and the per-provider lookup stay off the common path.
     settings = get_all_settings(db)
@@ -346,6 +353,12 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
             "vendor_id": vendors[r.id].id if r.id in vendors else None,
             "vendor_name": vendors[r.id].name if r.id in vendors else None,
             "suggested_payout": _payout(r),
+            "pick_class_id": r.pick_class_id,
+            "pick_job_id": r.pick_job_id,
+            "pick_vendor_id": r.pick_vendor_id,
+            "pick_vendor_name": picked_vendors.get(r.pick_vendor_id),
+            "pick_customer_id": r.pick_customer_id,
+            "pick_payee": r.pick_payee,
         }
         for r in rows
     ]
@@ -568,10 +581,18 @@ def statement_vendors(data: StatementVendors, db: Session = Depends(get_db)):
 def statement_set_category(
     txn_id: int, data: StatementCategory, db: Session = Depends(get_db)
 ):
-    """Save the category picked for a statement line in the review list."""
+    """Save the category picked for a statement line in the review list,
+    and the class, job and name picked beside it (#904): each field sent is
+    saved, one left out is left as it was."""
     from app.services import bank_matching as m
 
-    bt = m.set_category(db, _statement_line(db, txn_id), data.category_account_id)
+    bt = _statement_line(db, txn_id)
+    sent = data.model_fields_set
+    if "category_account_id" in sent:
+        bt = m.set_category(db, bt, data.category_account_id)
+    picks = {k: getattr(data, k) for k in m.PICKS if k in sent}
+    if picks:
+        bt = m.set_picks(db, bt, picks)
     db.commit()
     db.refresh(bt)
     return _statement_out([bt], db)[0]

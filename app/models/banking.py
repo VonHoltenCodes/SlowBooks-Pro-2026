@@ -82,6 +82,17 @@ class BankTransaction(Base):
     # (auto/manual = linked to an existing posting; added = posted from here;
     # in_books = excluded by an import as already in the books, W-116)
     match_status = Column(String(20), nullable=True)
+    # What the To review row picked besides the category (#904), kept on
+    # the line as it is picked so a redraw or a reload keeps it: the
+    # entry's class and job, and the vendor or customer it names, or a name
+    # typed that is no vendor's. Used when the line is added, then cleared.
+    # Plain ids, no foreign keys: a pick never stops a record's delete, and
+    # one whose record is gone is ignored.
+    pick_class_id = Column(Integer, nullable=True)
+    pick_job_id = Column(Integer, nullable=True)
+    pick_vendor_id = Column(Integer, nullable=True)
+    pick_customer_id = Column(Integer, nullable=True)
+    pick_payee = Column(String(200), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

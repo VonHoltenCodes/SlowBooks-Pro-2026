@@ -14,7 +14,7 @@ from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
 from app.models.accounts import Account
-from app.models.contacts import Vendor
+from app.models.contacts import Customer, Vendor
 from app.models.banking import BankAccount, BankTransaction
 from app.models.transactions import Transaction, TransactionLine
 from app.services.accounting import _q
@@ -271,6 +271,12 @@ def add(
         if not category:
             raise HTTPException(status_code=404, detail="Category account not found")
     check_closing_date(db, bt.date)
+    if not splits:
+        # what the review row picked and kept on the line (#904), where the
+        # caller named nothing; a split's lines carry their own
+        class_id, job_id, vendor_id, customer_id, payee = _with_picks(
+            db, bt, class_id, job_id, vendor_id, customer_id, payee
+        )
     payee = payee or bt.payee
     vendor = _entry_vendor(db, bt, payee, vendor_id)
     if not splits and (class_id is None or job_id is None):
@@ -311,7 +317,100 @@ def add(
     _link(bt, line, "added")
     if category_account_id:
         bt.category_account_id = category_account_id
+    # the entry has them now; the line is out of To review (#904)
+    clear_picks(bt)
     return bt
+
+
+# The review row's picks kept on a statement line (#904): the request
+# field -> the line's column.
+PICKS = {
+    "class_id": "pick_class_id",
+    "job_id": "pick_job_id",
+    "vendor_id": "pick_vendor_id",
+    "customer_id": "pick_customer_id",
+    "payee": "pick_payee",
+}
+
+
+def clear_picks(bt: BankTransaction) -> None:
+    for column in PICKS.values():
+        setattr(bt, column, None)
+
+
+def set_picks(db: Session, bt: BankTransaction, picks: dict) -> BankTransaction:
+    """Keep what a review row picked besides the category (#904): the
+    class, the job, the vendor or customer, or a name typed that is no
+    vendor's. Saved as picked, the way the category is (set_category), so
+    another line's Add, Exclude, Match or Rule…, which draw the list again,
+    and a reload keep them. Each key given is saved (None clears it); a key
+    left out is left as it was. Each is checked as Add checks it: a live
+    class and job, a vendor or an active customer that exists."""
+    from app.services.dimensions import require_dimensions
+
+    if bt.transaction_line_id or bt.match_status == "added":
+        raise HTTPException(
+            status_code=400,
+            detail="This statement line is already in the books; its picks can't change here",
+        )
+    require_dimensions(db, picks.get("class_id"), picks.get("job_id"))
+    vendor_id = picks.get("vendor_id")
+    if vendor_id is not None and db.get(Vendor, vendor_id) is None:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    customer_id = picks.get("customer_id")
+    if customer_id is not None:
+        customer = db.get(Customer, customer_id)
+        if customer is None:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        if not customer.is_active:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{customer.name} is inactive; pick another name",
+            )
+    for key, value in picks.items():
+        if key == "payee":
+            value = (value or "").strip() or None
+        setattr(bt, PICKS[key], value)
+    return bt
+
+
+def _with_picks(db, bt, class_id, job_id, vendor_id, customer_id, payee):
+    """The add call's class, job, vendor, customer and payee, each one the
+    caller left out taken from the line's kept picks (#904). A pick whose
+    record is gone since is passed over; one used is checked as a picked
+    one is (a live class and job of the customer named, an active
+    customer)."""
+    from app.services.dimensions import require_dimensions
+    from app.models.classes import TxnClass
+    from app.models.jobs import Job
+
+    used = False
+
+    def kept(value, column, model=None):
+        nonlocal used
+        if value is not None:
+            return value
+        pick = getattr(bt, column)
+        if pick is None or (model is not None and db.get(model, pick) is None):
+            return None
+        used = True
+        return pick
+
+    class_id = kept(class_id, "pick_class_id", TxnClass)
+    job_id = kept(job_id, "pick_job_id", Job)
+    vendor_id = kept(vendor_id, "pick_vendor_id", Vendor)
+    customer_id = kept(customer_id, "pick_customer_id", Customer)
+    if not payee and bt.pick_payee:
+        payee, used = bt.pick_payee, True
+    if used:
+        require_dimensions(db, class_id, job_id, customer_id)
+        customer = db.get(Customer, customer_id) if customer_id else None
+        if customer is not None and not customer.is_active:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{customer.name} is inactive; pick another name",
+            )
+    return class_id, job_id, vendor_id, customer_id, payee
 
 
 def entry_vendors(db: Session, rows) -> dict[int, Vendor]:
