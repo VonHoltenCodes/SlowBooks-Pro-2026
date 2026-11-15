@@ -458,7 +458,14 @@ def test_the_page_takes_a_zip_or_a_workbook():
         encoding="utf-8"
     )
     assert 'accept=".csv,.txt,.xlsx,.zip"' in js
-    assert "upload the Export data zip as downloaded" in js
+    # the QuickBooks Online hint names the zip and warns off Reports-page
+    # downloads (#910)
+    assert "gear → <strong>Export data</strong>" in js
+    assert (
+        "Upload the\n                    <strong>zip</strong> it downloads as it is"
+        in js
+    )
+    assert "are not the export and are not read" in js
 
 
 def _sheet(rows) -> bytes:
