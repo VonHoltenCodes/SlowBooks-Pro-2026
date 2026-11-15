@@ -2,7 +2,12 @@
 About, the company name was the one thing in the bar that could shrink, and
 it shrank to an "N" (2.30.0 gate, macbase1). It keeps room for a word, the
 search box gives next, and below 1366 the clock goes; nothing in the bar is
-pushed past the window's edge."""
+pushed past the window's edge.
+
+The bar's middle is the Fast Rack since #912: the buttons each sign-in
+chooses, every one 80px wide. Which of them fit is measured: the rack folds
+into More the last first, so what shows is always the rack's first few, in
+its order, and every one folded is listed under More."""
 
 import pytest
 
@@ -26,6 +31,10 @@ MEASURE = """() => {
         window: window.innerWidth,
         quick: [...document.querySelectorAll('#topbar .tb-btn')]
             .filter(b => b.offsetWidth > 0).map(b => b.textContent.trim()),
+        rack: [...document.querySelectorAll('#fast-rack .tb-btn')]
+            .filter(b => b.offsetWidth > 0).map(b => b.textContent.trim()),
+        rackSizes: [...document.querySelectorAll('#fast-rack .tb-btn')]
+            .filter(b => b.offsetWidth > 0).map(b => [b.offsetWidth, b.offsetHeight]),
         signOut: document.getElementById('logout-btn').getBoundingClientRect().right,
     };
 }"""
@@ -38,6 +47,10 @@ ALL_FIVE = [
     "Quick Entry",
     "Bill Quick Entry",
 ]
+# The Fast Rack's shipped set (#912): the bar as it was, Home to Reports
+RACK = ["Home", *ALL_FIVE, "Reports"]
+MORE_LIST = """() => [...document.querySelectorAll('#topbar-more-menu > *')]
+    .map(el => el.textContent.trim())"""
 
 
 @pytest.mark.parametrize(
@@ -64,27 +77,38 @@ ALL_FIVE = [
 def test_the_company_name_keeps_its_room_beside_contact_support(browser, width):
     page = _open(browser, width, 800, "#/")
     got = page.evaluate(MEASURE)
+    listed = []
+    if len(got["rack"]) < len(RACK):
+        page.click("#topbar-more")
+        listed = page.evaluate(MORE_LIST)
     page.close()
     assert got["window"] == width
     assert got["company"] >= 100, got
     assert got["support"] >= 80, got  # the button still says Contact support
     assert got["right"] <= width, got
     assert got["overflow"] <= 0, got
-    assert got["clock"] == (
-        "none" if width < 1426 else "block"
-    ), got  # W-105: tight below 1400; 1426 since the bar says Bill Quick Entry
+    # W-105: tight below 1410; the clock was back only from 1426 once the bar
+    # said Bill Quick Entry, and from 1410 again with the Fast Rack (#912),
+    # whose seven are narrower than the shipped seven were
+    assert got["clock"] == ("none" if width < 1410 else "block"), got
     assert got["signOut"] <= width, got
     # The quick-entry buttons stay wherever they fit (2.31.1 gate W-87:
     # Windows' own default window is a 1264px page, and hiding all five
     # below 1280 took them from every Windows install): all five at 1250
-    # and wider, the three that open a form from 1110, none below.
+    # and wider, the three that open a form from 1110 at least. Below,
+    # the Fast Rack (#912) keeps the first ones that fit, Home first.
     shown = [t for t in got["quick"] if t in ALL_FIVE]
     if width >= 1250:
         assert shown == ALL_FIVE, got
     elif width >= 1110:
-        assert shown == ALL_FIVE[:3], got
-    else:
-        assert shown == [], got
+        assert shown[:3] == ALL_FIVE[:3], got
+    # what shows is the rack's first few, in its order; the rest are in More
+    assert got["rack"] == RACK[: len(got["rack"])], got
+    assert got["rack"], got  # Home, at the least
+    for name in RACK[len(got["rack"]) :]:
+        assert name in listed, (width, name, listed)
+    # every rack button the same size (#912)
+    assert {tuple(s) for s in got["rackSizes"]} == {(80, 32)}, got
 
 
 def test_the_bar_names_its_shortcuts_and_quick_entry_is_on_the_sidebar(browser):
@@ -97,6 +121,13 @@ def test_the_bar_names_its_shortcuts_and_quick_entry_is_on_the_sidebar(browser):
         """() => [...document.querySelectorAll('#topbar .tb-btn')].map(b =>
             [b.textContent.trim(), b.getAttribute('aria-keyshortcuts'), b.title])"""
     )
+    # the buttons are the Fast Rack's (#912), drawn from the sign-in's list,
+    # a group the screen reader names
+    rack = page.evaluate(
+        """() => { const r = document.getElementById('fast-rack');
+            return [r.getAttribute('role'), r.getAttribute('aria-label'), r.dataset.rendered]; }"""
+    )
+    assert rack == ["group", "Fast Rack", "1"], rack
     link = page.evaluate(
         "() => !!document.querySelector('#sidebar a.nav-link[href=\"#/quick-entry\"]')"
     )

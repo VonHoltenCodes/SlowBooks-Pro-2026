@@ -565,21 +565,13 @@ body {
 }
 /* Below 1366 the clock and the brand's year go, so Contact support, About
    and the company name all keep their words (2.30.0 gate, macbase1) */
-/* The bar keeps its quick-entry buttons wherever they fit and gives them up
+/* The bar keeps its Fast Rack's buttons wherever they fit and gives them up
    only as the window narrows, so nothing is ever past the edge (2.31.1 gate:
    at 900 the bar ran 1265px wide and Sign Out sat out of view; then W-87,
    hiding all five below 1280 caught Windows' own default window, a 1264px
-   page). Below 1366 the bar's spacing tightens, so all five fit a 1264px
-   window; below 1250 Quick Entry and Bill Quick Entry step aside (both on the
-   sidebar), and below 1110 New Customer, Create Invoice and Receive Payment
-   too (on the sidebar's pages; Alt+N and Alt+P). */
-@media (max-width: 1249px) {
-    #topbar .tb-btn[data-nav="#/quick-entry"],
-    #topbar .tb-btn[data-nav="#/bill-entry"] { display: none; }
-}
-@media (max-width: 1109px) {
-    #topbar .tb-btn[data-action] { display: none; }
-}
+   page). Which of them fit is measured, not read off the window's width:
+   the rack is each sign-in's own (#912), so the bar folds them into More,
+   the last first (topbar_fit.js, "TOP BAR — folding" below). */
 /* Below 1410 the bar tightens (2.31.5 round 2, W-105: with the Hide
    sidebar control the bar ran 38 px past a 1366 window and 8 px past
    Windows' 1264 default under WebView2's wider fonts; the clock and the
@@ -596,9 +588,11 @@ body {
  * TOP BAR — folding (W-126, 2.31.8). The rules above read the window; at a
  * larger text size the page is narrower than the window, and a long
  * sign-in name takes room no window width knows of. topbar_fit.js measures
- * the bar and, while it is wider than the window, adds tb-fold-1, then
- * tb-fold-2 and so on: each step below puts something away, and More (in
- * the bar from step 4) lists all of it. Sign Out, Back and the search box
+ * the bar and, while it is wider than the window, takes one step at a
+ * time: tb-fold-1, then the Fast Rack's buttons one by one (fr-folded, the
+ * last first), then tb-fold-who, tb-fold-brand and tb-fold-theme. Each puts
+ * something away, and More (in the bar from the first button folded) lists
+ * all of it. Sign Out, Back and the search box
  * never fold, so nothing is past the window's edge and the page never
  * scrolls sideways, at any size.
  * ======================================================================== */
@@ -618,20 +612,53 @@ body {
 #topbar.tb-fold-1 .tb-sep { margin: 0 2px; }
 #topbar.tb-fold-1 .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
 #topbar.tb-fold-1 .topbar-right { gap: 4px; }
-#topbar.tb-fold-2 .tb-btn[data-nav="#/quick-entry"],
-#topbar.tb-fold-2 .tb-btn[data-nav="#/bill-entry"] { display: none; }
-#topbar.tb-fold-3 .tb-btn[data-action] { display: none; }
-#topbar.tb-fold-4 #user-chip,
-#topbar.tb-fold-4 #about-btn,
-#topbar.tb-fold-4 #support-btn { display: none; }
-#topbar.tb-fold-5 .tb-btn[data-nav="#/"],
-#topbar.tb-fold-5 .tb-btn[data-nav="#/reports"],
-#topbar.tb-fold-5 .tb-btn[data-nav="#/bill-entry"] + .tb-sep,
-#topbar.tb-fold-5 .tb-btn[data-nav="#/reports"] + .tb-sep { display: none; }
-#topbar.tb-fold-6 .topbar-brand { display: none; }
-#topbar.tb-fold-7 #theme-toggle { display: none; }
+/* the Fast Rack's buttons, the last first; with all of them gone, the
+   rack and the line after it */
+#topbar .fast-rack > .tb-btn.fr-folded { display: none; }
+#topbar .fast-rack.fr-all-folded,
+#topbar .fast-rack.fr-all-folded + .tb-sep { display: none; }
+#topbar.tb-fold-who #user-chip,
+#topbar.tb-fold-who #about-btn,
+#topbar.tb-fold-who #support-btn { display: none; }
+#topbar.tb-fold-brand .topbar-brand { display: none; }
+#topbar.tb-fold-theme #theme-toggle { display: none; }
 #topbar .tb-more[hidden],
 #topbar .tb-more-menu[hidden] { display: none; }
+
+/* ========================================================================
+ * FAST RACK (#912) — the bar's buttons each sign-in chooses (fast_rack.js).
+ * Every one the same size: 80 x 32. The width is the longest word any of
+ * them carries on one line ("Interoperability", 72px at the bar's 11px)
+ * with 2px each side and the 1px border; a two-word name wraps onto two
+ * lines ("New / Customer"), a one-word name sits in the middle, and every
+ * name in the catalog fits two lines (tests/test_browser_fast_rack_912.py).
+ * In px, as the rest of the bar, so the Text size (a zoom) scales it whole:
+ * at 150% it is 120 x 48 on the screen, the words 16.5px. Seven of them
+ * (574px) are narrower than the shipped seven were at their own widths
+ * (584px at 1600), so all seven still fit a 1250px window.
+ * ======================================================================== */
+#topbar .fast-rack {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    min-width: 0;
+}
+#topbar .fast-rack.fr-empty,
+#topbar .fast-rack.fr-empty + .tb-sep { display: none; }
+#topbar .fast-rack > .tb-btn.fr-btn {
+    flex: 0 0 auto;
+    width: 80px;
+    height: 32px;
+    padding: 0 2px;
+    font-size: 11px;
+    line-height: 13px;
+    text-align: center;
+    white-space: normal;
+    overflow: hidden;
+    overflow-wrap: break-word;
+}
+#topbar .fast-rack > .tb-btn.fr-btn > .fr-line { display: block; }
 /* More's list opens under it, at the bar's right edge, above the page */
 .topbar-right { position: relative; }
 .tb-more-menu {
@@ -2547,6 +2574,20 @@ tr.clickable { cursor: pointer; }
     padding-bottom: 6px;
     border-bottom: 1px solid var(--panel-border);
 }
+
+/* My Preferences -> Fast Rack (#912): the rack as a list, a row per
+   button with its moves; the words in the page's own colours */
+.fast-rack-editor { margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid var(--panel-border); }
+.fast-rack-editor h4 { font-size: 12px; font-weight: 700; color: var(--text-primary); margin: 0 0 4px; }
+.fast-rack-editor .fr-hint { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; }
+.fast-rack-editor .fr-list { list-style: decimal; margin: 0 0 6px 22px; padding: 0; max-width: 520px; }
+.fast-rack-editor .fr-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.fast-rack-editor .fr-row--none { display: list-item; color: var(--text-muted); }
+.fast-rack-editor .fr-name { flex: 1 1 auto; min-width: 0; }
+.fast-rack-editor .fr-count { font-size: 11px; color: var(--text-secondary); margin: 0 0 6px; }
+.fast-rack-editor .fr-add-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.fast-rack-editor .fr-add-row select { width: auto; max-width: 280px; }
+.fast-rack-editor .fr-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* The groups (#720): the list down the left, one group of sections shown
    at a time in the panel beside it (SettingsPage._refreshGroups). The list

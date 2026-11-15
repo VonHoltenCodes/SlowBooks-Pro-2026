@@ -90,14 +90,19 @@
             <!-- whose books: filled from Settings → company name (app.js loadCompanySettings) -->
             <div class="topbar-company" id="topbar-company" title="Company file in use"></div>
             <div class="tb-sep"></div>
-            <button class="tb-btn" data-nav="#/">Home</button>
-            <button class="tb-btn" data-action="CustomersPage.showForm">New Customer</button>
-            <button class="tb-btn" data-action="InvoicesPage.showForm">Create Invoice</button>
-            <button class="tb-btn" data-action="PaymentsPage.showForm">Receive Payment</button>
-            <button class="tb-btn" data-nav="#/quick-entry">Quick Entry</button>
-            <button class="tb-btn" data-nav="#/bill-entry">Bill Quick Entry</button>
-            <div class="tb-sep"></div>
-            <button class="tb-btn" data-nav="#/reports">Reports</button>
+            <!-- The Fast Rack (#912): the buttons each sign-in chooses and
+                 orders (Settings → My Preferences → Fast Rack). These are the
+                 shipped set, shown until App.init has read the sign-in's own
+                 list and drawn it in their place (fast_rack.js). -->
+            <div class="fast-rack" id="fast-rack" role="group" aria-label="Fast Rack">
+                <button class="tb-btn fr-btn" type="button" data-rack-id="home" data-nav="#/"><span class="fr-line">Home</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="new_customer" data-action="CustomersPage.showForm"><span class="fr-line">New</span> <span class="fr-line">Customer</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="create_invoice" data-action="InvoicesPage.showForm"><span class="fr-line">Create</span> <span class="fr-line">Invoice</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="receive_payment" data-action="PaymentsPage.showForm"><span class="fr-line">Receive</span> <span class="fr-line">Payment</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="quick_entry" data-nav="#/quick-entry"><span class="fr-line">Quick</span> <span class="fr-line">Entry</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="bill_entry" data-nav="#/bill-entry"><span class="fr-line">Bill Quick</span> <span class="fr-line">Entry</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="reports" data-nav="#/reports"><span class="fr-line">Reports</span></button>
+            </div>
             <div class="tb-sep"></div>
             <input type="text" id="global-search" class="tb-search" placeholder="Search customers, invoices...">
             <div id="search-results" class="search-dropdown hidden"></div>
@@ -366,6 +371,8 @@
     <script src="/static/js/budgets.js"></script>
     <!-- Contact support form (uses API / openModal / toast; standalone of App) -->
     <script src="/static/js/support.js"></script>
+    <!-- The Fast Rack's catalog and drawing (#912), read by App.init -->
+    <script src="/static/js/fast_rack.js"></script>
     <!-- App must be last -->
     <script src="/static/js/app.js"></script>
     <!-- Static-page event wiring (replaces what used to be inline onclick=) -->

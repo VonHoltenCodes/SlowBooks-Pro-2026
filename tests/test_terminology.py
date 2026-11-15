@@ -164,9 +164,12 @@ def _shell_texts():
     ):
         inner = re.sub(r"<span[^>]*>.*?</span>", "", m.group(0), flags=re.S)
         texts.append(re.sub(r"<[^>]+>", "", inner).strip())
-    texts += re.findall(
-        r'<button class="tb-btn" data-action="[^"]*">([^<]+)</button>', html
-    )
+    # the Fast Rack's shipped new-document buttons (#912), a line to a span
+    for m in re.finditer(
+        r'<button class="tb-btn fr-btn"[^>]* data-action="[^"]*">(.*?)</button>', html
+    ):
+        texts.append(re.sub(r"<[^>]+>", "", m.group(1)).strip())
+    assert len(texts) > 3 and "Create Invoice" in texts, texts
     return [t.replace("&amp;", "&") for t in texts]
 
 
@@ -182,8 +185,10 @@ def test_shell_loads_terms_before_pages():
     assert html.index("terms.js") < html.index("customers.js")
     app_js = (ROOT / "app/static/js/app.js").read_text(encoding="utf-8")
     # the first page waits for the settings (and the sign-in's state) since 2.24.0
+    # (and the Fast Rack's list, #912, read alongside)
     assert (
-        "Promise.all([App.loadCompanySettings(), App.initSystemInfo()]).then(" in app_js
+        "Promise.all([App.loadCompanySettings(), App.initSystemInfo(), rack]).then("
+        in app_js
     )
     assert "App.applyTerminology();" in app_js
 
@@ -495,10 +500,22 @@ def test_no_unwrapped_business_words_in_spa_text():
     lines = (ROOT / "app/static/js/app.js").read_text(encoding="utf-8").splitlines()
     start = next(i for i, ln in enumerate(lines, 1) if ln.strip() == "routes: {")
     end = next(i for i, ln in enumerate(lines, 1) if i > start and ln == "    },")
+    # the Fast Rack's catalog (#912): its labels are put in the company's
+    # words where they are drawn (FastRack.label, Terms.text)
+    rack = (ROOT / "app/static/js/fast_rack.js").read_text(encoding="utf-8")
+    assert "Terms.text(item.label)" in rack
+    rack_lines = rack.splitlines()
+    rack_start = next(
+        i for i, ln in enumerate(rack_lines, 1) if ln.strip() == "CATALOG: ["
+    )
+    rack_end = next(
+        i for i, ln in enumerate(rack_lines, 1) if i > rack_start and ln == "    ],"
+    )
     leaks = [
         h
         for h in _sweep_hits()
         if not (h[0] == "app.js" and start < h[1] < end and h[2] in keys)
+        and not (h[0] == "fast_rack.js" and rack_start < h[1] < rack_end)
     ]
     assert leaks == [], "unwrapped business words in SPA text:\n" + "\n".join(
         f"  {f}:{n}: {t}" for f, n, t in leaks

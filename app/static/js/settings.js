@@ -325,6 +325,8 @@ const SettingsPage = {
                 'An open report runs again after a change to the books, here or in another window, and when you come back to the window. '
                 + 'Off: use the report&rsquo;s Refresh button.', 'SettingsPage.saveReportRefresh(this)')
             + SettingsPage._textSizeHtml()
+            // the top bar's buttons (#912): arranged here, saved with Save
+            + (typeof FastRack !== 'undefined' ? FastRack.editorHtml() : '')
             + '</div>';
     },
 
@@ -349,6 +351,7 @@ const SettingsPage = {
         // (the probes that draw this page without utils.js or reports.js
         // have no copy of one or the other)
         if (typeof document.querySelectorAll !== 'function') return;
+        if (typeof FastRack !== 'undefined') FastRack.loadEditor();
         if (typeof DataEntryPrefs !== 'undefined') {
             const sync = () => document.querySelectorAll('#settings-my-preferences input[data-pref]')
                 .forEach(el => { el.checked = DataEntryPrefs[el.dataset.pref] === true; });
@@ -4048,6 +4051,11 @@ const SettingsPage = {
         // its group opens, and the page lands on its heading (once it is
         // shown, for a section a loader reveals: Recent sends)
         if (el) SettingsPage.showSetting(el);
+        // a block inside a section (the Fast Rack's, #912) is brought into
+        // view itself: the landing puts its section's top there
+        if (el && el.hasAttribute && el.hasAttribute('data-land-block') && typeof FastRack !== 'undefined') {
+            FastRack._landOnEditor();
+        }
     },
 };
 

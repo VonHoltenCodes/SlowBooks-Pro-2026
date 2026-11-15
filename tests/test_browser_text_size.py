@@ -543,7 +543,12 @@ def test_more_opens_what_the_bar_folded_away(browser, company, books):
     )
     try:
         page.wait_for_function("() => !!document.getElementById('user-chip')")
-        assert page.evaluate("document.getElementById('topbar').dataset.fold") >= "4"
+        # folded past the Fast Rack's buttons (#912) to About and Contact
+        # support: a step whose number is the rack's length plus two
+        assert page.evaluate(
+            "document.getElementById('topbar').classList.contains('tb-fold-who')"
+        )
+        assert int(page.evaluate("document.getElementById('topbar').dataset.fold")) >= 9
         page.click("#topbar-more")
         assert page.get_attribute("#topbar-more", "aria-expanded") == "true"
         # the first choice has focus; the list is inside the window

@@ -79,7 +79,8 @@ def test_settings_counts_the_plain_backups_from_the_list_it_reads():
 def test_the_first_page_waits_for_the_sign_ins_state():
     app = _src("app/static/js/app.js")
     assert (
-        "Promise.all([App.loadCompanySettings(), App.initSystemInfo()]).then(() => {"
+        # (the Fast Rack's list, #912, read alongside)
+        "Promise.all([App.loadCompanySettings(), App.initSystemInfo(), rack]).then(() => {"
         in app
     )
     init = app[

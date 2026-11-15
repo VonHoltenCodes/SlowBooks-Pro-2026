@@ -548,6 +548,11 @@ def _reads(controls):
 # Reads that are the administrator's alone: a backup is the whole company,
 # password hashes and payroll records included (the server refuses the rest).
 ADMIN_ONLY_READS = ("/api/backups/download/",)
+# The rows of the sign-in's own Fast Rack (#912, Settings -> My
+# Preferences): each sign-in's list holds what it may use, so a read-only
+# one has fewer rows to move or remove than the administrator's. Its own
+# Add, Reset and Save are still compared.
+OWN_RACK_ROWS = ("FastRack.move(", "FastRack.remove(")
 
 
 def _lost_reads(admin, reader):
@@ -558,7 +563,7 @@ def _lost_reads(admin, reader):
         lost = sorted(
             k
             for k in _reads(controls) - shown
-            if not any(ref in str(k) for ref in ADMIN_ONLY_READS)
+            if not any(ref in str(k) for ref in ADMIN_ONLY_READS + OWN_RACK_ROWS)
         )
         if lost:
             out[where] = lost
