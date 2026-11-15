@@ -41,6 +41,13 @@ QuickBooks Online's own export is enough, and needs no Intuit app at all.
    export** → upload the zip (or the workbooks inside it, or those saved as
    CSV) → **Dry run**, read the result, then **Import**.
 
+The zip is the export. Reports downloaded one at a time from the Reports
+page, such as the General Ledger or a chart of accounts report, are not
+it: the import reads the **Journal** inside the zip and leaves the General
+Ledger alone (it repeats the Journal by account), and the dry run says so
+when they come without the zip. The two reports it does read beside the
+zip are the Account List and the A/R Aging Detail, below.
+
 What comes across:
 
 - **The chart** from the Balance Sheet and the Profit and Loss: every

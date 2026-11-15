@@ -19,6 +19,7 @@
 import csv
 import io
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
@@ -485,17 +486,12 @@ def _plan_accounts(db: Session, accounts: list[dict]) -> list[dict]:
     return decisions
 
 
-def dry_run_bundle(
-    db: Session,
-    bundle: dict,
-    parsers: dict,
-    source_label: str,
-    source_type: str | None = None,
-) -> dict:
-    """Validate a bundle {kind: csv_text}. Nothing is written."""
+def missing_files(bundle: dict) -> list[str]:
+    """The dry run's refusals for the chart or the ledger not being in the
+    upload, in the words of a source whose files are called that. A source
+    that reads something else (QuickBooks Online's Export data zip) hands
+    dry_run_bundle its own sentences (#910)."""
     errors: list[str] = []
-    warnings: list[str] = []
-
     if "coa" not in bundle:
         errors.append(
             "Missing chart of accounts file (filename containing 'chart' or 'accounts')"
@@ -505,6 +501,23 @@ def dry_run_bundle(
             "Missing general ledger / journal file (filename containing "
             "'general', 'ledger', or 'journal')"
         )
+    return errors
+
+
+def dry_run_bundle(
+    db: Session,
+    bundle: dict,
+    parsers: dict,
+    source_label: str,
+    source_type: str | None = None,
+    missing: Callable[[dict], list[str]] = missing_files,
+) -> dict:
+    """Validate a bundle {kind: csv_text}. Nothing is written. ``missing``
+    says, in the source's own words, what a bundle without the chart or
+    the ledger lacks."""
+    errors: list[str] = list(missing(bundle))
+    warnings: list[str] = []
+
     if errors:
         return {
             "ok": False,
@@ -729,21 +742,33 @@ def _column_fit_notes(db: Session, accounts, journals, seen) -> list[str]:
 
 
 def run_import_bundle(
-    db: Session, bundle: dict, parsers: dict, source_type: str, source_label: str
+    db: Session,
+    bundle: dict,
+    parsers: dict,
+    source_type: str,
+    source_label: str,
+    missing: Callable[[dict], list[str]] = missing_files,
 ) -> dict:
     """Execute the import. Refuses when the dry-run fails. A value longer
     than its column is cut to the column's length and the answer says so
     (column_fit): PostgreSQL refuses it otherwise, and nothing is saved."""
     cut: list[str] = []
     with fit_to_columns(db, cut):
-        result = _run_import_bundle(db, bundle, parsers, source_type, source_label)
+        result = _run_import_bundle(
+            db, bundle, parsers, source_type, source_label, missing
+        )
     return add_notes(result, cut)
 
 
 def _run_import_bundle(
-    db: Session, bundle: dict, parsers: dict, source_type: str, source_label: str
+    db: Session,
+    bundle: dict,
+    parsers: dict,
+    source_type: str,
+    source_label: str,
+    missing: Callable[[dict], list[str]] = missing_files,
 ) -> dict:
-    verdict = dry_run_bundle(db, bundle, parsers, source_label, source_type)
+    verdict = dry_run_bundle(db, bundle, parsers, source_label, source_type, missing)
     if not verdict["ok"]:
         return {**verdict, "imported_accounts": 0, "imported_journals": 0}
 

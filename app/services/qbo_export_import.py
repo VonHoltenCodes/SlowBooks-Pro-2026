@@ -2406,13 +2406,48 @@ def _named_once(errors: list[str]) -> list[str]:
     ]
 
 
+_EXPORT_DATA = (
+    "QuickBooks Online's Export data zip (the gear → Export data → Reports "
+    "tab, All dates → Export to Excel), uploaded as it downloads, with the "
+    "Account List and A/R Aging Detail reports beside it"
+)
+
+
+def _missing_files(bundle: dict) -> list[str]:
+    """What an upload without the Journal, or without the statements, lacks,
+    in this source's words (#910). The shared sentence asked for "a file
+    whose name has 'general', 'ledger' or 'journal' in it" while a General
+    Ledger report sat in the upload: this path reads the Journal inside the
+    Export data zip and leaves the General Ledger alone (it repeats the
+    Journal by account), and reports downloaded one by one from the Reports
+    page are not that export."""
+    errors: list[str] = []
+    if "gl" not in bundle:
+        sentence = f"No Journal was uploaded. The import reads the Journal inside {_EXPORT_DATA}."
+        if "gl_order" in bundle:
+            sentence += (
+                " The General Ledger report was uploaded and is not read: it "
+                "repeats the Journal by account, and the import needs the "
+                "Journal itself."
+            )
+        errors.append(sentence)
+    if "coa" not in bundle:
+        errors.append(
+            "No Balance Sheet or Profit and Loss was uploaded. The chart is read "
+            f"from the two statements inside {_EXPORT_DATA}; a chart of accounts "
+            "report downloaded on its own from the Reports page is not it, "
+            "though the Account List report is read beside the zip."
+        )
+    return errors
+
+
 def dry_run(db: Session, bundle: dict) -> dict:
     bundle = _fold_list(bundle)
     plan = _carry_plan(db, bundle)
     prepared, notes = _prepare(bundle)
     _COA_PAYABLE.clear()
     verdict = dry_run_bundle(
-        db, prepared, _parsers(prepared, db, plan), LABEL, SOURCE_TYPE
+        db, prepared, _parsers(prepared, db, plan), LABEL, SOURCE_TYPE, _missing_files
     )
     if _COA_UNREAD:
         # A statement refused for its shape leaves its accounts out of the
@@ -2479,7 +2514,9 @@ def run_import(db: Session, bundle: dict) -> dict:
             if plan["given"]:
                 refused.update(imported_open_invoices=0, imported_unapplied_payments=0)
             return refused
-    result = run_import_bundle(db, prepared, parsers, SOURCE_TYPE, LABEL)
+    result = run_import_bundle(
+        db, prepared, parsers, SOURCE_TYPE, LABEL, _missing_files
+    )
     result["warnings"] = (
         notes
         + list(_COA_NOTES)
