@@ -1704,10 +1704,19 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
             BillPayment.date,
         ),
     )
+    # The QuickBooks Online import carries a company's open invoices and
+    # unapplied payments over as documents with no entry of their own, on
+    # purpose: the imported Journal already posted them, and an entry each
+    # would double A/R. They are not missing anything (#914).
+    from app.services.qbo_export_import import is_carried_invoice, is_carried_payment
+
+    carried = {"invoice": is_carried_invoice, "payment": is_carried_payment}
     for kind, model, number_attr, amount_attr, conds, date_col in specs:
         for d in db.query(model).filter(*conds, date_col <= as_of):
             amount = _d(getattr(d, amount_attr))
             if amount == ZERO or not lacks(d.transaction_id):
+                continue
+            if kind in carried and carried[kind](db, d):
                 continue
             total += abs(amount)
             docs.append(

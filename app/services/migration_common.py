@@ -896,11 +896,21 @@ def _run_import_bundle(
     posted = 0
     duplicates = 0
     seen = already_imported(db, source_type)
+    # A row that names its party (QuickBooks Online's Journal puts the
+    # block's name on every line it builds) and sits on Accounts Payable or
+    # Accounts Receivable is remembered with its posting, for the source to
+    # name once its contact lists are in (#915): a vendor-named A/P entry
+    # and a customer-named A/R line age as that party's (#897).
+    from app.services.control_journal_lines import _account as _control
+
+    ar_id, ap_id = _control(db, "1100"), _control(db, "2000")
+    named_control_lines: list[dict] = []
     for group in journals:
         if group and _group_reference(group) in seen:
             duplicates += 1
             continue
         lines = []
+        named_here: list[tuple[str, str]] = []
         for row in group:
             # Exact name first (disambiguated duplicates keep their code
             # suffix); the stripped form covers "Name (Code)" GL exports.
@@ -929,13 +939,18 @@ def _run_import_bundle(
                     "description": row.get("description") or None,
                 }
             )
+            name = str(row.get("name") or "").strip()
+            if name and acct.id in (ar_id, ap_id):
+                named_here.append(
+                    ("payable" if acct.id == ap_id else "receivable", name)
+                )
         if not lines:
             continue
         first = group[0]
         # Store the same value the dedupe key uses (cut to the column width),
         # so a re-import recognises this journal (#498).
         reference = _group_reference(group)
-        create_journal_entry(
+        txn = create_journal_entry(
             db,
             first["date"],
             first.get("description")
@@ -945,6 +960,10 @@ def _run_import_bundle(
             reference=reference,
         )
         posted += 1
+        for kind, name in dict.fromkeys(named_here):
+            named_control_lines.append(
+                {"kind": kind, "transaction_id": txn.id, "name": name}
+            )
 
     db.commit()
     return {
@@ -952,6 +971,10 @@ def _run_import_bundle(
         "warnings": warnings,
         "imported_accounts": created,
         "imported_journals": posted,
+        # the A/P and A/R lines that named their party, for the source to
+        # resolve (#915); only when there are any, so the answer of a source
+        # whose rows carry no name reads as before
+        **({"named_control_lines": named_control_lines} if named_control_lines else {}),
         # journals the file held that posted nothing (all-zero lines)
         "skipped_journals": len([g for g in journals if g]) - posted - duplicates,
         # journals an earlier import already posted (same reference)

@@ -2476,6 +2476,59 @@ def dry_run(db: Session, bundle: dict) -> dict:
     return verdict
 
 
+def _name_control_lines(db: Session, named: list[dict], plan: dict) -> int:
+    """The Journal names a transaction's party once, on its first row
+    ("Bill · BN-24827 · Brookside Nursery · Job Materials", then the A/P
+    line with no Name), and the parser puts that name on every line of the
+    block. Here, once the Vendors and Customers lists are in, an A/P entry
+    whose name is a vendor's takes that vendor (Transaction.vendor_id) and
+    an A/R line whose name is a customer's takes that customer
+    (TransactionLine.customer_id), the shape the IIF import gives them, so
+    the agings, the balances and Books Check read them as that party's
+    (#897, #915). A name on neither list is left as it is.
+
+    Not when carried documents cover that side: with the A/R Aging Detail
+    given, the open invoices and unapplied payments ARE the receivable, and
+    naming the Journal's A/R lines too would count the balance twice; the
+    same holds for A/P once the A/P Aging Detail carries the open bills
+    (#713, ``plan["ap_given"]`` when it lands)."""
+    if not named:
+        return 0
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services import control_accounts
+
+    vendors = {v.name.lower(): v.id for v in db.query(Vendor.id, Vendor.name)}
+    customers = {c.qb_name.lower(): c.id for c in db.query(Customer)}
+    ar_id = control_accounts.find(db, "1100")
+    count = 0
+    for entry in named:
+        key = entry["name"].lower()
+        if entry["kind"] == "payable":
+            if plan.get("ap_given"):
+                continue
+            vid = vendors.get(key)
+            txn = db.get(Transaction, entry["transaction_id"]) if vid else None
+            if txn is not None and txn.vendor_id is None:
+                txn.vendor_id = vid
+                count += 1
+        else:
+            if plan.get("given"):
+                continue
+            cid = customers.get(key)
+            if cid is None or ar_id is None:
+                continue
+            for line in db.query(TransactionLine).filter(
+                TransactionLine.transaction_id == entry["transaction_id"],
+                TransactionLine.account_id == ar_id,
+                TransactionLine.customer_id.is_(None),
+            ):
+                line.customer_id = cid
+                count += 1
+    if count:
+        db.flush()
+    return count
+
+
 def run_import(db: Session, bundle: dict) -> dict:
     bundle = _fold_list(bundle)
     plan = _carry_plan(db, bundle)  # checked before anything is written
@@ -2526,10 +2579,12 @@ def run_import(db: Session, bundle: dict) -> dict:
     )
     result.update(_counts(db, bundle))
     invoices = payments = 0
+    named = result.pop("named_control_lines", [])
     if result["ok"]:
         _retire_deleted(db)
         customers, vendors = _import_contacts(db, bundle)
         employees = _import_employees(db, bundle)
+        _name_control_lines(db, named, plan)
         invoices, payments = _import_carried(db, plan)
         db.commit()
         # the payments it created get their cash-basis lines now (#483)
