@@ -1470,7 +1470,7 @@ const BankingPage = {
         // the lines by id, for "Rule…" (the payee and the category chosen)
         BankingPage._reviewLines = Object.fromEntries(review.map(t => [t.id, t]));
         const rows = review.map(t => `
-            <tr>
+            <tr data-review-line="${t.id}">
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(t.description || '')}</div></td>
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)'}">${formatCurrency(t.amount)}</td>
@@ -1489,7 +1489,7 @@ const BankingPage = {
         // one column for the row's picks (NEW-197: three columns pushed
         // Match / Exclude / Rule… past the right edge at 1280)
         const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name'].filter(Boolean).join(' / ')}</th>`;
-        return `<div class="card" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
+        return `<div class="card" data-review-panel style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
@@ -1500,7 +1500,7 @@ const BankingPage = {
                 <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
                 <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
@@ -1568,6 +1568,8 @@ const BankingPage = {
     },
 
     async addLine(lineId, accountId) {
+        // a pick on another row a moment ago is kept before this one posts
+        await Promise.allSettled([...BankingPage._pendingCategories]);
         const sel = $(`#cat-${lineId}`);
         const picks = BankingPage._reviewPicks(lineId);
         const body = { ...picks };
@@ -1578,7 +1580,7 @@ const BankingPage = {
             const said = added.vendor_name ? `Added to the books for ${added.vendor_name}` : 'Added to the books';
             const outside = BankingPage._outsideFilter(BankingPage._lineDate(added, lineId));
             toast(outside ? `${said}. ${outside}` : said);
-            BankingPage._backToRegister(accountId);
+            BankingPage._dropReviewRow(lineId, accountId);
             // a name typed that is no vendor's is the payee the offer names
             BankingPage._offerFeedVendors([picks.payee ? { ...added, payee: picks.payee } : added]);
         } catch (err) { toast(err.message, 'error'); }
@@ -1592,27 +1594,35 @@ const BankingPage = {
     // no vendor's posts as the payee's text); money in, a customer, whose
     // jobs the Job box then narrows to. Left blank, the line posts as it
     // always did: no class, no job, the vendor its payee or rule names.
+    //
+    // Each box is kept on the line as it is picked (#904), the way the
+    // category is, and the row is drawn with what was kept: another line's
+    // Add, Exclude, Match or Rule…, and a reload, used to lose every name,
+    // class and job not yet added.
     _reviewDimCells(t) {
         const small = 'font-size:11px; padding:2px 4px; width:150px; display:block;';
+        const save = `onchange="BankingPage.setPicks(${t.id})"`;
+        const sel = (id, kept) => (String(id) === String(kept) ? ' selected' : '');
         let html = '';
         if (BankingPage._lineClassShown()) {
             const opts = BankingPage._classes_().filter(c => !c.is_archived)
-                .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-            html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
+                .map(c => `<option value="${c.id}"${sel(c.id, t.pick_class_id)}>${escapeHtml(c.name)}</option>`).join('');
+            html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         }
         const moneyIn = parseFloat(t.amount) > 0;
         const jobs = BankingPage._jobs || [];
         if (jobs.length) {
-            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}"${sel(j.id, t.pick_job_id)}>${escapeHtml(j.full_name || j.name)}</option>`).join('');
             const bind = moneyIn ? ` data-customer-select="rv-customer-${t.id}"` : '';
-            html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}"><option value="">— No job —</option>${opts}</select>`;
+            html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}" ${save}><option value="">— No job —</option>${opts}</select>`;
         }
         if (moneyIn) {
             const opts = (BankingPage._customers || [])
-                .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
-            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
+                .map(c => `<option value="${c.id}"${sel(c.id, t.pick_customer_id)}>${escapeHtml(customerLabel(c))}</option>`).join('');
+            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         } else {
-            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}">`;
+            const kept = t.pick_vendor_name || t.pick_payee || '';
+            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" value="${escapeHtml(kept)}" style="${small}" ${save}>`;
         }
         return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';
     },
@@ -1631,6 +1641,78 @@ const BankingPage = {
             if (vendorId) picks.vendor_id = vendorId; else picks.payee = name;
         }
         return picks;
+    },
+
+    // A review row's class, job and name kept on the line as they are
+    // picked (#904), as setCategory keeps the category: the whole row at
+    // once, a box left blank clearing its pick, so a job the Customer box
+    // just cleared (JobPicker, after this handler) is cleared on the line
+    // too. Read a moment later for that reason; tracked with the category
+    // saves, which Add, Add all, Rule… and the rest wait for.
+    setPicks(lineId) {
+        const saving = new Promise(resolve => setTimeout(resolve, 0))
+            .then(() => API.request('PATCH', `/banking/transactions/${lineId}`, {
+                class_id: null, job_id: null, customer_id: null, vendor_id: null, payee: null,
+                ...BankingPage._reviewPicks(lineId),
+            }))
+            .then(saved => {
+                const t = (BankingPage._reviewLines || {})[lineId];
+                if (t && saved) Object.assign(t, saved);
+            })
+            .catch(err => toast(err.message, 'error'));
+        BankingPage._pendingCategories.add(saving);
+        saving.finally(() => BankingPage._pendingCategories.delete(saving));
+        return saving;
+    },
+
+    // A line gone from To review by its own Add, Exclude or Match (#904):
+    // only its row leaves the list. The rest of the list stays as it is,
+    // each row with what was typed and the focus where it was; the page
+    // around it (the counts, the register with the new entry, its balance,
+    // Show excluded) is drawn again. The list as the server has it now
+    // decides: a line that arrived meanwhile, or no list left, draws the
+    // whole page again, as before.
+    _drops: 0,
+    async _dropReviewRow(lineId, accountId) {
+        const content = document.getElementById('page-content');
+        const live = content && content.querySelector('[data-review-panel]');
+        const row = live && live.querySelector(`tr[data-review-line="${Number(lineId)}"]`);
+        if (!row || !BankingPage._onRegister(accountId)) return BankingPage._backToRegister(accountId);
+        const next = row.nextElementSibling || row.previousElementSibling;
+        const hadFocus = row.contains(document.activeElement);
+        row.remove();
+        if (BankingPage._reviewLines) delete BankingPage._reviewLines[lineId];
+        if (hadFocus && next) {
+            const add = next.querySelector('button.btn-primary');
+            if (add) add.focus();
+        }
+        const mine = ++BankingPage._drops;
+        const box = document.getElementById('content');
+        let html;
+        try {
+            html = await BankingPage.renderRegister(accountId, App.parseHash(location.hash).query);
+        } catch (err) { return BankingPage._backToRegister(accountId); }
+        if (mine !== BankingPage._drops || !live.isConnected) return;
+        const at = box ? box.scrollTop : 0;
+        const fresh = document.createElement('div');
+        fresh.innerHTML = html;
+        const panel = fresh.querySelector('[data-review-panel]');
+        const want = new Set(Object.keys(BankingPage._reviewLines || {}));
+        const shown = [...live.querySelectorAll('tr[data-review-line]')];
+        if (!panel || [...want].some(id => !shown.some(tr => tr.dataset.reviewLine === id))) {
+            content.innerHTML = html;
+        } else {
+            // a line added or matched elsewhere meanwhile leaves too
+            shown.filter(tr => !want.has(tr.dataset.reviewLine)).forEach(tr => tr.remove());
+            const head = live.querySelector('.card-header');
+            if (head) head.replaceWith(panel.querySelector('.card-header'));
+            const kids = [...fresh.childNodes];
+            const i = kids.indexOf(panel);
+            [...content.childNodes].forEach(n => { if (n !== live) n.remove(); });
+            kids.slice(0, i).forEach(n => content.insertBefore(n, live));
+            kids.slice(i + 1).forEach(n => content.appendChild(n));
+        }
+        if (box) box.scrollTop = at;
     },
 
     // Record a provider payout from the review queue (#584): the deposit
@@ -1738,8 +1820,9 @@ const BankingPage = {
 
     async excludeLine(lineId, accountId) {
         try {
+            await Promise.allSettled([...BankingPage._pendingCategories]);
             await API.post(`/banking/transactions/${lineId}/exclude`);
-            BankingPage._backToRegister(accountId);
+            BankingPage._dropReviewRow(lineId, accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -1782,8 +1865,11 @@ const BankingPage = {
 
     // A bank rule from a statement line (#259): the rule form opens with
     // the payee as the pattern and the category chosen here filled in, so
-    // the two screens that know the same payee hand it across. Saved, the
-    // rules run over the queue, and the register comes back.
+    // the two screens that know the same payee hand it across; the vendor,
+    // class and job picked on the row come too (#904: a rule names no
+    // customer, nor a name that is no vendor's). Saved, the rules run over
+    // the queue, and the register comes back with every row's picks, which
+    // are kept on the lines.
     async ruleFromLine(lineId, accountId) {
         const line = (BankingPage._reviewLines || {})[lineId] || {};
         const sel = document.getElementById(`cat-${lineId}`);
@@ -1791,10 +1877,14 @@ const BankingPage = {
         const accountChosen = sel && (sel.value || sel.dataset.current);
         const payee = (line.payee || line.description || '').trim();
         if (!payee) { toast('This line has no payee to make a rule from.', 'error'); return; }
+        const picks = BankingPage._reviewPicks(lineId);
         BankRulesPage.showForm(null, {
             name: payee,
             pattern: payee,
             account_id: accountChosen ? parseInt(accountChosen, 10) : '',
+            vendor_id: picks.vendor_id || '',
+            class_id: picks.class_id || '',
+            job_id: picks.job_id || '',
             from: 'a statement line',
             afterSave: async () => {
                 try { await API.post('/bank-rules/apply'); } catch (e) { /* the rule is saved; the queue catches it on the next import */ }
@@ -1868,11 +1958,12 @@ const BankingPage = {
 
     async matchLine(lineId, ledgerLineId, accountId) {
         try {
+            await Promise.allSettled([...BankingPage._pendingCategories]);
             await API.post(`/banking/transactions/${lineId}/match`, { line_id: ledgerLineId });
             const outside = BankingPage._outsideFilter(String((BankingPage._matchDates || {})[ledgerLineId] || ''));
             toast(outside ? `Matched. ${outside}` : 'Matched');
             closeModal();
-            BankingPage._backToRegister(accountId);
+            BankingPage._dropReviewRow(lineId, accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
 
