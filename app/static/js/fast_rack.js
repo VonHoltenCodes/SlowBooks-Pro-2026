@@ -61,7 +61,7 @@ const FastRack = {
         { id: 'vendors', label: 'Vendors', kind: 'nav', target: '#/vendors', page: 'vendors' },
         { id: 'purchase_orders', label: 'Purchase Orders', kind: 'nav', target: '#/purchase-orders', page: 'purchase-orders' },
         { id: 'bills', label: 'Bills', kind: 'nav', target: '#/bills', page: 'bills' },
-        { id: 'bill_entry', label: 'Bill Quick Entry', kind: 'nav', target: '#/bill-entry', page: 'bill-entry', write: true },
+        { id: 'bill_entry', label: 'Bill Quick Entry', kind: 'nav', target: '#/bill-entry', page: 'bill-entry', write: true, lines: ['Bill', 'Quick Entry'] },
         { id: 'vendor_credits', label: 'Vendor Credits', kind: 'nav', target: '#/vendor-credits', page: 'vendor-credits' },
         { id: 'job_costs', label: 'Job Costs', kind: 'nav', target: '#/job-costs', page: 'job-costs' },
         { id: 'expenses', label: 'Expenses', kind: 'nav', target: '#/expenses', page: 'expenses' },
@@ -157,8 +157,12 @@ const FastRack = {
     },
 
     // A name of more than one word on two lines, as even as the words
-    // allow ("New / Customer", "Bill Quick / Entry"); one word on one.
-    lines(name) {
+    // allow ("New / Customer"); one word on one. An item may say where its
+    // own break goes when the even split reads wrong ("Bill / Quick Entry",
+    // not "Bill Quick / Entry"), for the shipped label only: a company's
+    // own word for it (Terms.text) is split by the rule.
+    lines(name, item) {
+        if (item && item.lines && name === item.label) return item.lines.slice();
         const words = String(name).split(/\s+/).filter(Boolean);
         if (words.length < 2) return [words.join('')];
         let best = 1, worst = Infinity;
@@ -171,9 +175,9 @@ const FastRack = {
 
     // The button's words, a line to a span: its text (and so its name) is
     // still the name, the lines a space apart
-    fillButton(b, name) {
+    fillButton(b, name, item) {
         b.textContent = '';
-        FastRack.lines(name).forEach((line, i) => {
+        FastRack.lines(name, item).forEach((line, i) => {
             if (i) b.appendChild(document.createTextNode(' '));
             const span = document.createElement('span');
             span.className = 'fr-line';
@@ -222,7 +226,7 @@ const FastRack = {
             if (item.kind === 'nav') b.dataset.nav = item.target;
             else b.dataset.action = item.target;
             const name = FastRack.label(item);
-            FastRack.fillButton(b, name);
+            FastRack.fillButton(b, name, item);
             if (item.alt) {
                 b.title = `${name} (${mac ? '⌥' : 'Alt+'}${item.alt})`;
                 b.setAttribute('aria-keyshortcuts', 'Alt+' + item.alt);

@@ -20,13 +20,13 @@ def test_the_page_has_a_route_a_sidebar_link_and_a_top_bar_button():
     # the top bar's button is the Fast Rack's (#912), in its shipped set
     assert (
         '<button class="tb-btn fr-btn" type="button" data-rack-id="bill_entry" data-nav="#/bill-entry">'
-        '<span class="fr-line">Bill Quick</span> <span class="fr-line">Entry</span></button>'
+        '<span class="fr-line">Bill</span> <span class="fr-line">Quick Entry</span></button>'
         in INDEX
     )
     RACK = (JS / "fast_rack.js").read_text(encoding="utf-8")
     assert (
         "{ id: 'bill_entry', label: 'Bill Quick Entry', kind: 'nav', target: '#/bill-entry',"
-        " page: 'bill-entry', write: true }" in RACK
+        " page: 'bill-entry', write: true, lines: ['Bill', 'Quick Entry'] }" in RACK
     )
     assert "'bill_entry', 'reports']" in RACK  # the shipped set
     # a page that only enters things: the sidebar's link is a write control
