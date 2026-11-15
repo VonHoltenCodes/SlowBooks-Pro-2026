@@ -1003,6 +1003,86 @@ const BankingPage = {
         if (again) focusFor(again, keyboard);
     },
 
+    // How the register is read (#903): its order (Oldest first, as a
+    // ledger reads, or Newest first) and where it opens (its newest
+    // entries, #728, or the top of the page, where To review is). Kept in
+    // this browser by sign-in for every register and company, as Hide
+    // voided is. Open at not chosen: the top of the page while lines wait
+    // in To review, the newest entries otherwise.
+    _regPrefKey(name) {
+        const owner = (typeof App !== 'undefined' && App._tabsOwner) || '';
+        const bar = owner.indexOf('|');
+        return `slowbooks-register-${name}:${bar < 0 ? '' : owner.slice(0, bar)}`;
+    },
+    _regPref(name) {
+        return typeof Store !== 'undefined' ? Store.get(BankingPage._regPrefKey(name)) : null;
+    },
+    _keepRegPref(name, value) {
+        if (typeof Store === 'undefined') return;
+        if (value) Store.set(BankingPage._regPrefKey(name), value);
+        else Store.remove(BankingPage._regPrefKey(name));
+    },
+    _newestFirst() { return BankingPage._regPref('sort') === 'newest'; },
+    _openAtChosen() {
+        const v = BankingPage._regPref('open-at');
+        return v === 'newest' || v === 'top' ? v : '';
+    },
+    // The order changed: kept, and the register drawn again in place, the
+    // keyboard back on the box.
+    async regSortChanged(sel, id) {
+        BankingPage._keepRegPref('sort', sel.value === 'newest' ? 'newest' : '');
+        const keyboard = typeof App !== 'undefined' && typeof App.keyboardFocus === 'function' && App.keyboardFocus();
+        await BankingPage._backToRegister(id);
+        const again = document.getElementById('reg-sort');
+        if (again) focusFor(again, keyboard);
+    },
+    // Where it opens: kept for the next opening; the page stays put.
+    regOpenAtChanged(sel) {
+        BankingPage._keepRegPref('open-at', sel.value === 'newest' || sel.value === 'top' ? sel.value : '');
+    },
+    // Where the newest entries are: the foot of the page read oldest first,
+    // the entry row under the filter bar read newest first.
+    _scrollToNewest() {
+        const box = document.getElementById('content');
+        if (!box) return;
+        const bar = document.getElementById('reg-filters');
+        if (BankingPage._newestFirst() && bar) {
+            box.scrollTop += bar.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+        } else {
+            box.scrollTop = box.scrollHeight;
+        }
+    },
+    // Jump to top / Jump to newest (#903). From the keyboard the focus goes
+    // too: to the entry row's date (or the Sort box, the row hidden) for
+    // the newest, to the page's heading for the top.
+    jumpRegister(where) {
+        const keyboard = typeof App !== 'undefined' && typeof App.keyboardFocus === 'function' && App.keyboardFocus();
+        const box = document.getElementById('content');
+        let to = null;
+        if (where === 'top') {
+            if (box) box.scrollTop = 0;
+            to = document.querySelector('#page-content .page-header h2');
+        } else {
+            BankingPage._scrollToNewest();
+            const qe = document.getElementById('qe-date');
+            to = qe && qe.offsetParent !== null ? qe : document.getElementById('reg-sort');
+        }
+        if (keyboard && to) {
+            if (to.tagName === 'H2' && !to.hasAttribute('tabindex')) to.setAttribute('tabindex', '-1');
+            try { to.focus({ preventScroll: true, focusVisible: true }); } catch (e) { /* stays */ }
+        }
+    },
+    // The To review count, a link to the list (#903): the list comes into
+    // view and takes the focus, as a skip link's target does.
+    jumpToReview(e) {
+        if (e) e.preventDefault();
+        const panel = document.getElementById('reg-review');
+        if (!panel) return false;
+        if (typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+        try { panel.focus({ preventScroll: true }); } catch (err) { /* stays */ }
+        return false;
+    },
+
     // A date the register takes from its boxes, its address or the From it
     // keeps (#663): a real date in a year the books can hold, 1900 to 2199
     // (the years a request may carry, app/schemas/common.py). A year typed
@@ -1267,15 +1347,17 @@ const BankingPage = {
     },
 
     // The register drawn (#728): opened, it shows the newest entries and
-    // the entry row at the foot, the list still oldest to newest; drawn
-    // again in place (a filter changed by hand) the page stays where it
-    // was. A save's way back (_backToRegister) puts its own place after
-    // this. Only the scroll moves: nothing takes the focus.
+    // the entry row; drawn again in place (a filter changed by hand) the
+    // page stays where it was. A save's way back (_backToRegister) puts its
+    // own place after this. Only the scroll moves: nothing takes the focus.
+    // Open at (#903) can choose the top of the page instead; not chosen,
+    // the register opens there while lines wait in To review.
     mountRegister() {
         if (!BankingPage._openAtEnd) return;
         BankingPage._openAtEnd = false;
+        const at = BankingPage._openAtChosen() || (BankingPage._reviewWaiting ? 'top' : 'newest');
         const box = document.getElementById('content');
-        if (box) box.scrollTop = box.scrollHeight;
+        if (at === 'top') { if (box) box.scrollTop = 0; } else BankingPage._scrollToNewest();
     },
 
     // Whether the page under any dialog open is this account's register.
@@ -1338,6 +1420,7 @@ const BankingPage = {
         let review = [];
         // the whole queue: a year fetched from a feed can be more than a page
         if (feed) review = await fetchAllPages(`/banking/transactions?bank_account_id=${feed.bank_account_id}&status=unmatched`);
+        BankingPage._reviewWaiting = review.length > 0;  // where it opens (#903)
         // the lines set aside, by the user or by an import as already in
         // the books, for Show excluded (W-116)
         const excluded = feed ? await API.get(`/banking/accounts/${feed.bank_account_id}/feed/excluded`).catch(() => null) : null;
@@ -1363,7 +1446,7 @@ const BankingPage = {
                 <div class="card"><div class="card-header">${kind === 'credit_card' ? 'Amount owed' : 'Balance'}</div>
                     <div class="card-value">${formatCurrency(reg.balance)}</div></div>
                 <div class="card"><div class="card-header">To review</div>
-                    <div class="card-value">${review.length}</div>
+                    <div class="card-value">${review.length ? `<a href="#/banking/${id}" id="reg-review-count" style="color:inherit;" onclick="return BankingPage.jumpToReview(event)" aria-label="${review.length} to review: go to the To review list">${review.length}</a>` : review.length}</div>
                     <div style="font-size:11px; color:var(--gray-500);">${feed ? 'statement lines not yet in the books' : 'no bank feed on this account'}</div></div>
                 ${info.last_reconciled ? `<div class="card"><div class="card-header">Last reconciled</div><div class="card-value" style="font-size:16px;">${formatDate(info.last_reconciled)}</div></div>` : ''}
             </div>`;
@@ -1396,6 +1479,8 @@ const BankingPage = {
                 : '';
         // From and To apply on Enter or once the bar is left, a pick from the
         // calendar at once (#663: regFiltersKey)
+        const newestFirst = BankingPage._newestFirst();
+        const openAt = BankingPage._openAtChosen();
         const dateBox = `onpointerdown="BankingPage.regDatePointer(this)" onchange="BankingPage.regDateChanged(this, ${id})"`;
         html += `
             <div class="toolbar" id="reg-filters" data-drawn="${drawing}" data-account="${id}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
@@ -1407,6 +1492,11 @@ const BankingPage = {
                 <label for="reg-class" style="font-size:11px;">${T('Class')}</label>
                 <select id="reg-class" data-no-search onchange="BankingPage.regFilterChanged(${id})"><option value="">All ${T('classes').toLowerCase()}</option>${classOpts}</select>
                 <label for="reg-hide-voided" style="font-size:11px; display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="reg-hide-voided"${hideVoided ? ' checked' : ''} onchange="BankingPage.regHideVoided(this, ${id})">Hide voided</label>
+                <label for="reg-sort" style="font-size:11px;">Sort</label>
+                <select id="reg-sort" data-no-search onchange="BankingPage.regSortChanged(this, ${id})"><option value="oldest"${newestFirst ? '' : ' selected'}>Oldest first</option><option value="newest"${newestFirst ? ' selected' : ''}>Newest first</option></select>
+                <label for="reg-open-at" style="font-size:11px;">Open at</label>
+                <select id="reg-open-at" data-no-search onchange="BankingPage.regOpenAtChanged(this)"><option value=""${openAt ? '' : ' selected'}>To review if any, else newest</option><option value="newest"${openAt === 'newest' ? ' selected' : ''}>Newest entries</option><option value="top"${openAt === 'top' ? ' selected' : ''}>Top of page (To review)</option></select>
+                <button type="button" class="btn btn-sm btn-secondary" id="reg-jump-newest" onclick="BankingPage.jumpRegister('newest')">Jump to newest</button>
                 ${filtered ? `<button type="button" class="btn btn-sm btn-secondary" onclick="BankingPage.regClear(${id})">Clear</button>` : ''}
                 ${filtered ? `<span id="reg-filter-note" style="font-size:11px; color:var(--gray-500);">Showing ${reg.class_name ? `${T('class').toLowerCase()} <strong>${escapeHtml(reg.class_name)}</strong>` : 'every ' + T('class').toLowerCase()}${f.start_date ? ` from ${formatDate(f.start_date)}` : ''}${f.end_date ? ` to ${formatDate(f.end_date)}` : ''}: the running balance counts these lines${reg.class_name ? ` only — the account's whole balance is ${formatCurrency(reg.balance)}` : ''}.</span>` : ''}
             </div>`;
@@ -1423,18 +1513,26 @@ const BankingPage = {
         // with none and leave the list).
         const quickRow = f.class_id ? BankingPage._entryRowOff(!!(chosen && chosen.is_system_default))
             : BankingPage._quickEntryRow(id, kind, chart, outLabel, inLabel);
+        // Newest first (#903): the entry row heads the list, under the
+        // column heads, in a body of its own (a <tfoot> draws at the foot
+        // wherever it is written)
+        const entryFirst = newestFirst && quickRow.replace(/^<tfoot>/, '<tbody class="reg-entry-first">').replace(/<\/tfoot>$/, '</tbody>');
+        const jumpTop = `<div id="reg-jumps" style="margin:6px 0 0;"><button type="button" class="btn btn-sm btn-secondary" id="reg-jump-top" onclick="BankingPage.jumpRegister('top')">Jump to top</button></div>`;
         // one set of columns, empty or not (#729): the empty register's
         // header said Category where the populated one said Type
         const head = `<thead><tr>
-                    <th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col">Category</th>
+                    <th scope="col" aria-sort="${newestFirst ? 'descending' : 'ascending'}">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col">Category</th>
                     <th scope="col" class="amount">${outLabel}</th><th scope="col" class="amount">${inLabel}</th><th scope="col" class="amount">Balance</th>
                     <th scope="col" title="✓ cleared · R reconciled">✓</th><th scope="col"></th>
                 </tr></thead>`;
         if (!reg.entries.length) {
             html += `<div class="empty-state"><p>${filtered ? 'Nothing posted to this account for these filters' : 'Nothing posted to this account yet'}</p></div>`;
-            html += `<div class="table-container"><table>${head}<tbody></tbody>${quickRow}</table></div>`;
+            html += newestFirst ? `<div class="table-container"><table>${head}${entryFirst}<tbody></tbody></table></div>`
+                : `<div class="table-container"><table>${head}<tbody></tbody>${quickRow}</table></div>`;
         } else {
-            const rows = shown.map(e => `
+            // the running balance is the service's, read oldest first;
+            // Newest first only draws the rows the other way up (#903)
+            const rows = (newestFirst ? [...shown].reverse() : shown).map(e => `
                 <tr data-txn="${e.transaction_id}" style="${e.voided ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                     <td>${formatDate(e.date)}</td>
                     <td>${escapeHtml(e.payee || '')}</td>
@@ -1453,7 +1551,11 @@ const BankingPage = {
             // row follows the entries on a populated register as on an
             // empty one (W-14, NEW-140)
             const opening = f.start_date ? `<tr style="color:var(--gray-500);" id="reg-opening"><td>${formatDate(f.start_date)}</td><td colspan="7">Balance brought forward${reg.class_name ? ` (${escapeHtml(reg.class_name)})` : ''}</td><td class="amount">${formatCurrency(reg.opening_balance)}</td><td></td><td></td></tr>` : '';
-            html += `<div class="table-container"><table>${head}<tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}`;
+            // Newest first: the balance brought forward is the oldest line,
+            // so it closes the table
+            html += newestFirst
+                ? `<div class="table-container"><table>${head}${entryFirst}<tbody>${rows}${opening}</tbody></table></div>${hiddenNote}${jumpTop}`
+                : `<div class="table-container"><table>${head}<tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}${jumpTop}`;
         }
         return html;
     },
@@ -1607,7 +1709,7 @@ const BankingPage = {
         // one column for the row's picks (NEW-197: three columns pushed
         // Match / Exclude / Rule… past the right edge at 1280)
         const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name'].filter(Boolean).join(' / ')}</th>`;
-        return `<div class="card" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
+        return `<div class="card" id="reg-review" tabindex="-1" role="region" aria-label="To review" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
@@ -2015,7 +2117,8 @@ const BankingPage = {
         const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         // the date of this register's last post, while the page lives (#566)
         const carried = BankingPage._lastDate[accountId] || '';
-        // the row lives in its own <tfoot>, after the entries; every field is
+        // the row lives in its own <tfoot>, after the entries (a <tbody>
+        // before them, read newest first, #903); every field is
         // named for the new entry, apart from the page's other fields
         return `<tfoot><tr id="reg-quick-entry" data-write style="background:var(--primary-light);">
                     <td><input type="date" id="qe-date" aria-label="New entry date" value="${carried || today}" data-carried="${carried}" style="width:120px; font-size:11px; padding:2px 4px;" ${key}></td>
