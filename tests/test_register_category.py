@@ -131,7 +131,8 @@ def test_the_empty_and_populated_registers_have_the_same_columns():
     body = js[start : js.index("_clearedCell(e, accountId) {", start)]
     # one header, drawn for both
     assert body.count("<thead>") == 1
-    assert body.count("${head}") == 2
+    # (each drawn oldest first or newest first, #903)
+    assert body.count("${head}") == 4
     head = body[body.index("const head = `") : body.index("</thead>`;")]
     assert '<th scope="col">Type</th><th scope="col">Category</th>' in head
     assert head.count("<th ") == 11
