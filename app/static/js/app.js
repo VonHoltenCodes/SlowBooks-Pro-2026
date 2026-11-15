@@ -1037,8 +1037,12 @@ const App = {
         if ((App.isAdmin() && !App.inCopy) || !page) return;
         if (App.isLocked()) {
             // the toolbar's shortcuts to new documents, and batch entry
+            // (the shipped ones index.html has; the Fast Rack, once drawn,
+            // leaves out what the role may not use: fast_rack.js allowed)
             document.querySelectorAll('#topbar .tb-btn[data-action], #topbar .tb-btn[data-nav="#/quick-entry"], #topbar .tb-btn[data-nav="#/bill-entry"]')
                 .forEach(b => b.classList.add('hidden'));
+            const rack = document.getElementById('fast-rack');
+            if (rack && rack.dataset.rendered && typeof FastRack !== 'undefined') FastRack.render();
             // the sidebar's pages that only enter things (Batch Payments...)
             App.hideWriteControls(document.getElementById('sidebar'));
         }
@@ -2819,20 +2823,27 @@ const App = {
             const t = [...a.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
             if (t) t.textContent = ' ' + T(t.textContent.trim());
         });
-        $$('#topbar .tb-btn[data-action]').forEach(b => { b.textContent = T(b.textContent.trim()); });
-        // The bar's buttons that have a shortcut name it, as the pages' own
-        // buttons do: the hover reads "Quick Entry (Alt+Q)", a screen reader
-        // hears the ARIA token (2.31.1 gate W-87: Alt+Q was labelled nowhere).
-        for (const [sel, letter] of [
-            ['[data-nav="#/"]', 'H'],
-            ['[data-action="InvoicesPage.showForm"]', 'N'],
-            ['[data-action="PaymentsPage.showForm"]', 'P'],
-            ['[data-nav="#/quick-entry"]', 'Q'],
-        ]) {
-            const b = document.querySelector('#topbar .tb-btn' + sel);
-            if (!b) continue;
-            b.title = `${b.textContent.trim()} (${App.isMac() ? '⌥' : 'Alt+'}${letter})`;
-            b.setAttribute('aria-keyshortcuts', 'Alt+' + letter);
+        // The Fast Rack (#912), drawn from the sign-in's own list in the
+        // company's words; its buttons that have a shortcut name it, as the
+        // pages' own buttons do: the hover reads "Quick Entry (Alt+Q)", a
+        // screen reader hears the ARIA token (2.31.1 gate W-87: Alt+Q was
+        // labelled nowhere). Without fast_rack.js (the probes), the shipped
+        // buttons index.html has are labelled in place.
+        if (typeof FastRack !== 'undefined') {
+            FastRack.render();
+        } else {
+            $$('#topbar .tb-btn[data-action]').forEach(b => { b.textContent = T(b.textContent.trim()); });
+            for (const [sel, letter] of [
+                ['[data-nav="#/"]', 'H'],
+                ['[data-action="InvoicesPage.showForm"]', 'N'],
+                ['[data-action="PaymentsPage.showForm"]', 'P'],
+                ['[data-nav="#/quick-entry"]', 'Q'],
+            ]) {
+                const b = document.querySelector('#topbar .tb-btn' + sel);
+                if (!b) continue;
+                b.title = `${b.textContent.trim()} (${App.isMac() ? '⌥' : 'Alt+'}${letter})`;
+                b.setAttribute('aria-keyshortcuts', 'Alt+' + letter);
+            }
         }
         const search = $('#global-search');
         if (search) search.placeholder = Terms.text(search.placeholder);
@@ -3165,7 +3176,12 @@ const App = {
         // to replace): the first page waited for neither, so a sign-in that
         // must set its password got the dashboard's 403 painted over the
         // form (2.24.0 round 2, NEW-149 on the Mac).
-        Promise.all([App.loadCompanySettings(), App.initSystemInfo()]).then(() => {
+        // The Fast Rack's list (#912) is read alongside: the bar is drawn
+        // from it once the role and the company's kind are known
+        // (applyTerminology), before the first page; until then the shipped
+        // buttons show. It never rejects.
+        const rack = typeof FastRack !== 'undefined' ? FastRack.load() : null;
+        Promise.all([App.loadCompanySettings(), App.initSystemInfo(), rack]).then(() => {
             App.applyTerminology();
             App.renderOpenTabs();  // the session's open screens (#336)
             App.navigate(location.hash || '#/');
