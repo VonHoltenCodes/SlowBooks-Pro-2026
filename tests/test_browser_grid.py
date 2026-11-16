@@ -531,6 +531,8 @@ def test_the_unclassified_card_is_the_uncategorized_column_of_the_grid(
     page, handled = _open_at(browser, company, "#/reports")
     try:
         length = _history(page)
+        # under the folded All reports (#794, #936)
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         page.get_by_text("P&L Unclassified", exact=True).click()
         page.wait_for_selector("#class-pl-body table")
         page.wait_for_function(f"({TITLE})() === 'Profit & Loss — Uncategorized'")
@@ -705,6 +707,8 @@ def test_p_and_l_by_job_is_the_grid_by_job_and_a_heading_opens_the_job_on_its_da
 ):
     page, handled = _open_at(browser, company, "#/reports")
     try:
+        # under the folded All reports (#794, #936)
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         page.get_by_text("P&L by Job", exact=True).click()
         page.wait_for_selector("#report-content .pivot-grid")
         assert page.evaluate(TITLE) == "P&L by Job"

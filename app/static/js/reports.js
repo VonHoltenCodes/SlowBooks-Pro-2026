@@ -393,7 +393,7 @@ const ReportsPage = {
             <div style="display:flex; align-items:center; gap:10px; margin:0 0 8px;">
                 <button type="button" class="btn btn-sm btn-secondary" id="all-reports-toggle" aria-expanded="${open}" aria-controls="all-reports" onclick="ReportsPage.toggleAll()">${open ? '▾' : '▸'} All reports</button>
             </div>
-            <div class="card-grid" id="all-reports" ${open ? '' : 'hidden'}>${ReportsPage._allGrid()}</div>`;
+            <div id="all-reports" ${open ? '' : 'hidden'}>${ReportsPage._allGrid()}</div>`;
     },
 
     // The views starred, in the order they were starred (render reads them;
@@ -410,9 +410,10 @@ const ReportsPage = {
         return [...statements, 'ar-aging', 'ap-aging', ...(Terms.isConstruction() ? ['job-profitability'] : [])];
     },
 
-    // The Report Center's cards in their fixed order, each as its view and
-    // its html (ReportsPage._pick): the nonprofit's own statements lead in
-    // place of the P&L and Balance Sheet.
+    // The Report Center's cards, each as its view, section, title and html
+    // (ReportsPage._pick), in their sections' order and alphabetical within
+    // each (#936): the nonprofit's own statements in place of the P&L and
+    // Balance Sheet.
     _cards() {
         const card = ReportsPage._pick;
         const cards = [
@@ -448,11 +449,8 @@ const ReportsPage = {
             card('1099-summary', '1099 Summary', 'Vendor payments for 1099 filing'),
             card('budget-vs-actual', 'Budget vs Actual', 'Monthly budget variance analysis'),
         ];
-        // Construction leads with a Construction group: the three contractor
-        // reports that always existed, then the five job reports added in #556.
-        // The job reports are construction-only cards (a Business or Nonprofit
-        // company never sees them); the rest keep their fixed order. Mirrors
-        // the nonprofit swap above.
+        // The job reports are construction-only cards (a Business or
+        // Nonprofit company never sees them). Mirrors the nonprofit swap above.
         if (Terms.isConstruction()) {
             cards.push(
                 card('wip-schedule', 'WIP Schedule', Terms.text('Work in progress: revised contract, cost to date, percent complete, earned vs billed and over/under billing per job')),
@@ -466,18 +464,59 @@ const ReportsPage = {
                 card('retainage', 'Retainage', Terms.text('Per job: retainage owners hold from you and you hold from each sub, held, released and outstanding, tied to the Balance Sheet')),
                 card('compliance', 'Sub Compliance', Terms.text('Subs with an expired or expiring certificate of insurance, no W-9 on file, or a paid bill with no lien waiver')),
             );
-            const lead = ['job-profitability', 'job-budget-vs-actual', 'profit-loss-by-job',
-                'wip-schedule', 'cost-to-complete', 'change-order-log', 'buyout', 'job-cost-by-vendor',
-                'cost-to-complete-forecast', 'commitment-status', 'field-ticket-log', 'retainage', 'compliance'];
-            const front = lead.map(v => cards.find(c => c.view === v)).filter(Boolean);
-            return [...front, ...cards.filter(c => !lead.includes(c.view))];
         }
-        return cards;
+        // In their sections (#936), the sections in their fixed order, each
+        // section's cards alphabetical by the title shown (the company's
+        // own words), ignoring case.
+        const order = ReportsPage._sections().map(s => s.key);
+        const rank = (c) => order.indexOf(c.section);
+        return cards.sort((a, b) => (rank(a) - rank(b))
+            || a.title.localeCompare(b.title, undefined, { sensitivity: 'base', numeric: true }));
     },
 
-    // A card and its view, for arranging; the html is ReportsPage._card's.
+    // The sections All reports is in (#936), in their fixed order, each
+    // headed in the company's own words. A card's section is its view's in
+    // _sectionOf; a view not listed there is a books tool.
+    _sections() {
+        return [
+            { key: 'statements', head: 'Statements' },
+            { key: 'customers', head: `${T('Customers')} and sales` },
+            { key: 'vendors', head: 'Vendors and purchases' },
+            { key: 'jobs', head: T('Jobs') },
+            { key: 'payroll', head: 'Payroll and tax' },
+            { key: 'books', head: 'Books tools' },
+        ];
+    },
+
+    _sectionOf: {
+        'profit-loss': 'statements', 'profit-loss-detail': 'statements',
+        'profit-loss-by-class': 'statements', 'profit-loss-unclassified': 'statements',
+        'profit-loss-by-job': 'statements', 'balance-sheet': 'statements',
+        'cash-flow': 'statements', 'financial-statements': 'statements',
+        'statement-of-activities': 'statements', 'statement-of-financial-position': 'statements',
+        'fund-balances': 'statements', 'functional-expenses': 'statements',
+        'ar-aging': 'customers', 'sales-tax': 'customers', 'income-by-customer': 'customers',
+        'past-customers': 'customers', 'sales-by-item': 'customers',
+        'estimate-closing-rate': 'customers', 'customer-statement': 'customers',
+        'pledges': 'customers', 'giving-statements': 'customers',
+        'ap-aging': 'vendors', 'purchases-by-item': 'vendors', '1099-summary': 'vendors',
+        'job-budget-vs-actual': 'jobs', 'job-profitability': 'jobs',
+        'wip-schedule': 'jobs', 'cost-to-complete': 'jobs', 'change-order-log': 'jobs',
+        'buyout': 'jobs', 'job-cost-by-vendor': 'jobs', 'cost-to-complete-forecast': 'jobs',
+        'commitment-status': 'jobs', 'field-ticket-log': 'jobs', 'retainage': 'jobs',
+        'compliance': 'jobs',
+    },
+
+    // A card and its view, for arranging: its section (#936), its title as
+    // shown (the sort key; every card's title is plain text of our own, so
+    // it is taken as it is) and its html (ReportsPage._card's).
     _pick(view, title, text) {
-        return { view, html: ReportsPage._card(view, title, text) };
+        return {
+            view,
+            section: ReportsPage._sectionOf[view] || 'books',
+            title: String(title).trim(),
+            html: ReportsPage._card(view, title, text),
+        };
     },
 
     // The starred cards, in the order they were starred (#395, #794).
@@ -488,9 +527,20 @@ const ReportsPage = {
             : '<p style="color:var(--text-muted); margin:0;">Star a report under All reports to keep it here.</p>';
     },
 
-    // All reports: every card not starred, in the fixed order.
+    // All reports: every card not starred, in its section under the
+    // section's heading (#936), alphabetical within it. A section with no
+    // card left in it (none for this company type, or every one starred)
+    // has no heading.
     _allGrid() {
-        return ReportsPage._cards().filter(c => !ReportsPage._pins.includes(c.view)).map(c => c.html).join('');
+        const rest = ReportsPage._cards().filter(c => !ReportsPage._pins.includes(c.view));
+        return ReportsPage._sections().map(s => {
+            const mine = rest.filter(c => c.section === s.key);
+            if (!mine.length) return '';
+            return `<div class="report-section" data-section="${s.key}">
+                <h3 id="report-section-${s.key}" class="report-section-head" style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin:16px 0 8px;">${escapeHtml(s.head)}</h3>
+                <div class="card-grid" aria-labelledby="report-section-${s.key}">${mine.map(c => c.html).join('')}</div>
+            </div>`;
+        }).join('');
     },
 
     // Fold or open All reports; the choice sticks.

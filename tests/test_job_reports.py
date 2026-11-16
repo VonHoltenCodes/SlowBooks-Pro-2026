@@ -685,16 +685,11 @@ console.log(JSON.stringify({con:run(true), biz:run(false)}));
     added = ["cost-to-complete-forecast", "commitment-status"]
     assert all(v in res["con"]["views"] for v in five + added)
     assert all(v not in res["biz"]["views"] for v in five + added)
-    # the Construction group leads: three existing, then the five new
-    assert (
-        res["con"]["views"][:8]
-        == [
-            "job-profitability",
-            "job-budget-vs-actual",
-            "profit-loss-by-job",
-        ]
-        + five
-    )
+    # the job reports sit together in the Jobs section (#936), alphabetical
+    views = res["con"]["views"]
+    jobs = views[views.index("buyout") : views.index("wip-schedule") + 1]
+    assert set(five + added) <= set(jobs)
+    assert "profit-loss-by-job" not in jobs
     # a starred card is in the starred grid, an unstarred one under All reports
     assert res["con"]["pinned"] >= 0 and res["con"]["unpinned"] >= 0
     assert res["con"]["pinned"] < res["con"]["unpinned"]

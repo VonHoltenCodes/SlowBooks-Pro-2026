@@ -3511,6 +3511,10 @@ def test_every_report_center_card_is_reached_and_opened_by_the_keyboard(
     try:
         _no_splash(page)
         _visit(page, handled, "#/reports")
+        # All reports is folded under the stars (#794), and since its
+        # sections (#936) a folded list is hidden for real: open it to
+        # read its cards' names
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         cards = page.evaluate(CARD_LIST)
         assert (
             len(cards) == 31
@@ -3586,12 +3590,22 @@ def test_a_nonprofits_report_center_cards_are_reached_and_opened_by_the_keyboard
             "report:ar-aging",
             "report:ap-aging",
         ], keys
-        assert keys[4:8] == [
+        # the rest under All reports in sections (#936): its own statements
+        # under Statements, the pledge report and giving statements on the
+        # donor side
+        for k in (
             "report:fund-balances",
             "report:functional-expenses",
             "report:pledges",
             "report:giving-statements",
-        ], keys
+        ):
+            assert keys.count(k) == 1, (k, keys)
+        statements = page.evaluate(
+            "() => [...document.querySelectorAll('#all-reports [data-section=statements] a.card-link')].map(a => a.dataset.rowKey)"
+        )
+        assert {"report:fund-balances", "report:functional-expenses"} <= set(
+            statements
+        ), statements
         assert "report:profit-loss" not in keys and "report:balance-sheet" not in keys
         _cards_by_keyboard(
             page, handled, cards, opened={"report:statement-of-activities"}
