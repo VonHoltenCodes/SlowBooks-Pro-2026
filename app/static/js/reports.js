@@ -4874,14 +4874,17 @@ ReportsPage._BOOKS_CHECK_PAGES = {
     journal: '/journal', pay_run: '/payroll', expense: '/expenses', cc_charge: '/cc-charges',
     job_cost: '/job-costs', customer: '/customers', vendor: '/vendors', job: '/jobs',
 };
-ReportsPage._booksCheckKind = function (kind) {
+// The company's own words for an invoice, a customer and a job; for the
+// rest the server's label (books_check.DOCUMENT_WORDS, the same table the
+// PDF and the CSV print, #928), so the window and the files never differ.
+ReportsPage._booksCheckKind = function (kind, label) {
+    const own = { invoice: T('Invoice'), customer: T('Customer'), job: T('Job'), job_cost: `${T('Job')} cost` };
     const words = {
-        invoice: T('Invoice'), customer: T('Customer'), job: T('Job'), credit_memo: 'Credit memo',
-        bill: 'Bill', bill_payment: 'Bill payment', payment: 'Payment', vendor_credit: 'Vendor credit',
-        deposit: 'Deposit', journal: 'Journal entry', pay_run: 'Pay run', expense: 'Expense',
-        cc_charge: 'Card charge', job_cost: `${T('Job')} cost`, vendor: 'Vendor', item: 'Item',
+        credit_memo: 'Credit memo', bill: 'Bill', bill_payment: 'Bill payment', payment: 'Payment',
+        vendor_credit: 'Vendor credit', deposit: 'Deposit', journal: 'Journal entry', pay_run: 'Pay run',
+        expense: 'Expense', cc_charge: 'Card charge', vendor: 'Vendor', item: 'Item',
     };
-    return words[kind] || String(kind || '').replace(/_/g, ' ');
+    return own[kind] || label || words[kind] || String(kind || '').replace(/_/g, ' ');
 };
 // The address a named document opens at; an item opens the Item List, a
 // job-less row ("No job") opens nothing.
@@ -4903,7 +4906,7 @@ ReportsPage.booksCheckBody = function (data) {
             : '<span style="color:var(--gray-500);">Not checked</span>';
     const docRow = (r, d, i) => {
         const href = ReportsPage.booksCheckHref(d);
-        const name = `${ReportsPage._booksCheckKind(d.type)}${d.number ? ` ${d.number}` : ''}`;
+        const name = `${ReportsPage._booksCheckKind(d.type, d.type_label)}${d.number ? ` ${d.number}` : ''}`;
         const link = href
             ? ReportsPage._rowLink(`ReportsPage.openBooksCheckDocument(${JSON.stringify(href)}, this)`, name, `books:${r.key}:${d.type}:${d.id}:${i}`)
             : escapeHtml(name);
