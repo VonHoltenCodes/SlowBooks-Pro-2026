@@ -29,45 +29,43 @@ def test_the_sign_in_check_runs_off_the_event_loop():
     )
 
 
-def _engine_kwargs_for(url: str, monkeypatch, pool_env=None):
-    import importlib
+def test_a_company_file_gets_a_pool_the_size_of_the_thread_pool(monkeypatch):
+    # the pure helper, never a reload of app.database: the suite shares one
+    # in-memory engine, and swapping it mid-run left later tests with no tables
+    from app.database import engine_kwargs
 
-    import app.database as database
-
-    monkeypatch.setenv("DATABASE_URL", url)
-    if pool_env is None:
-        monkeypatch.delenv("SLOWBOOKS_DB_POOL_SIZE", raising=False)
-    else:
-        monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", pool_env)
-    import app.config as config
-
-    importlib.reload(config)
-    try:
-        importlib.reload(database)
-        return dict(database._engine_kwargs), database.engine
-    finally:
-        monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
-        monkeypatch.delenv("SLOWBOOKS_DB_POOL_SIZE", raising=False)
-        importlib.reload(config)
-        importlib.reload(database)
-
-
-def test_a_company_file_gets_a_pool_the_size_of_the_thread_pool(tmp_path, monkeypatch):
-    url = f"sqlite:///{tmp_path / 'books.db'}"
-    kwargs, engine = _engine_kwargs_for(url, monkeypatch)
-    assert kwargs["pool_size"] == 40 and kwargs["max_overflow"] == 10
-    assert engine.pool.size() == 40
-    kwargs, engine = _engine_kwargs_for(url, monkeypatch, pool_env="80")
-    assert kwargs["pool_size"] == 80 and engine.pool.size() == 80
-    kwargs, _ = _engine_kwargs_for(url, monkeypatch, pool_env="not a number")
-    assert kwargs["pool_size"] == 40
-    kwargs, _ = _engine_kwargs_for(url, monkeypatch, pool_env="1")
-    assert kwargs["pool_size"] == 5
+    url = "sqlite:////books/company.db"
+    monkeypatch.delenv("SLOWBOOKS_DB_POOL_SIZE", raising=False)
+    kw = engine_kwargs(url)
+    assert kw["pool_size"] == 40 and kw["max_overflow"] == 10 and kw["pool_pre_ping"]
+    monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", "80")
+    assert engine_kwargs(url)["pool_size"] == 80
+    monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", "not a number")
+    assert engine_kwargs(url)["pool_size"] == 40
+    monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", "1")
+    assert engine_kwargs(url)["pool_size"] == 5
+    pg = engine_kwargs("postgresql://u:p@host/books")
+    assert pg["pool_size"] == 5 and pg["max_overflow"] == 20
 
 
 def test_the_in_memory_database_takes_no_pool_size(monkeypatch):
-    kwargs, _ = _engine_kwargs_for("sqlite:///:memory:", monkeypatch)
-    assert "pool_size" not in kwargs and "max_overflow" not in kwargs
+    from app.database import engine_kwargs
+
+    monkeypatch.delenv("SLOWBOOKS_DB_POOL_SIZE", raising=False)
+    kw = engine_kwargs("sqlite:///:memory:")
+    assert "pool_size" not in kw and "max_overflow" not in kw
+
+
+def test_a_company_files_engine_pool_is_that_size(tmp_path):
+    from app.database import engine_kwargs
+
+    engine = create_sqlite_engine(
+        f"sqlite:///{tmp_path / 'sized.db'}", None, **engine_kwargs("sqlite:///x.db")
+    )
+    try:
+        assert engine.pool.size() == 40
+    finally:
+        engine.dispose()
 
 
 def test_forty_connections_open_on_one_file_at_once(tmp_path):

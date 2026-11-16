@@ -29,7 +29,6 @@ from app.config import DATABASE_URL
 # stalled a server at 24 requests in flight, every one waiting 30 s for a
 # connection); :memory: keeps its own pool class and takes no size.
 _is_sqlite = DATABASE_URL.startswith("sqlite")
-_is_memory = _is_sqlite and ":memory:" in DATABASE_URL
 
 
 def _pool_size(default: int = 40) -> int:
@@ -40,16 +39,22 @@ def _pool_size(default: int = 40) -> int:
         return default
 
 
-_engine_kwargs = dict(pool_pre_ping=True)
-if not _is_sqlite:
-    _engine_kwargs.update(
-        pool_size=_pool_size(),
-        max_overflow=20,
-        pool_recycle=1800,
-        pool_use_lifo=True,
-    )
-elif not _is_memory:
-    _engine_kwargs.update(pool_size=_pool_size(), max_overflow=10)
+def engine_kwargs(url: str) -> dict:
+    """The create_engine keyword arguments for a database URL (#959)."""
+    kwargs = dict(pool_pre_ping=True)
+    if not url.startswith("sqlite"):
+        kwargs.update(
+            pool_size=_pool_size(),
+            max_overflow=20,
+            pool_recycle=1800,
+            pool_use_lifo=True,
+        )
+    elif ":memory:" not in url:
+        kwargs.update(pool_size=_pool_size(), max_overflow=10)
+    return kwargs
+
+
+_engine_kwargs = engine_kwargs(DATABASE_URL)
 if _is_sqlite:
     # A company file may be encrypted (SQLCipher, #290). The engine takes
     # the sqlcipher3 module in place of sqlite3 and keys each connection
