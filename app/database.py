@@ -7,28 +7,54 @@ import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from starlette.requests import HTTPConnection
 
 from app.config import DATABASE_URL
 
-# Pool tuning rationale (Phase 9.6 perf pass):
-#   pool_size=10        small base pool; most requests are short-lived
-#   max_overflow=20     burst capacity when analytics + concurrent users hit
+# Pool tuning rationale (Phase 9.6 perf pass; sized to the thread pool, #959):
+#   pool_size           one connection for every sync handler the thread pool
+#                       can run at once (anyio's default limiter is 40), so a
+#                       request waits for a thread, never for a connection
+#                       while it holds a thread; SLOWBOOKS_DB_POOL_SIZE raises
+#                       it on a server with more people than that
+#   max_overflow        burst capacity when analytics + concurrent users hit
 #   pool_recycle=1800   recycle every 30 min to avoid stale TCP idle kills
 #   pool_pre_ping=True  cheap SELECT 1 before each checkout; catches dead conns
 #   pool_use_lifo=True  reuse hottest conn first -> better CPU cache locality
-# SQLite URLs skip pool_size/max_overflow since SQLite uses a different strategy.
+# A SQLite file takes the same pool_size (its default of 5 + 10 overflow
+# stalled a server at 24 requests in flight, every one waiting 30 s for a
+# connection); :memory: keeps its own pool class and takes no size.
 _is_sqlite = DATABASE_URL.startswith("sqlite")
-_engine_kwargs = dict(pool_pre_ping=True)
-if not _is_sqlite:
-    _engine_kwargs.update(
-        pool_size=10,
-        max_overflow=20,
-        pool_recycle=1800,
-        pool_use_lifo=True,
-    )
+
+
+def _pool_size(default: int = 40) -> int:
+    raw = (os.environ.get("SLOWBOOKS_DB_POOL_SIZE") or "").strip()
+    try:
+        return max(5, int(raw)) if raw else default
+    except ValueError:
+        return default
+
+
+def engine_kwargs(url: str) -> dict:
+    """The create_engine keyword arguments for a database URL (#959)."""
+    kwargs = dict(pool_pre_ping=True)
+    if not url.startswith("sqlite"):
+        kwargs.update(
+            pool_size=_pool_size(),
+            max_overflow=20,
+            pool_recycle=1800,
+            pool_use_lifo=True,
+        )
+    elif ":memory:" not in url:
+        kwargs.update(pool_size=_pool_size(), max_overflow=10)
+    return kwargs
+
+
+_engine_kwargs = engine_kwargs(DATABASE_URL)
 if _is_sqlite:
     # A company file may be encrypted (SQLCipher, #290). The engine takes
     # the sqlcipher3 module in place of sqlite3 and keys each connection

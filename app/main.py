@@ -23,6 +23,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -1417,7 +1418,13 @@ async def _require_session(request: Request, call_next):
         # deactivated, its role or password changed since, or the row is
         # gone. The role comes from the row too, so a demotion takes effect
         # on the next request instead of living in the cookie.
-        state, db_role, db_version = _check_session_user(request.session)
+        # Off the event loop (#959): the lookup opens a session and waits
+        # for a pooled connection; run on the loop's thread, an empty pool
+        # froze every request for the checkout timeout, and the handlers
+        # holding the connections could not hand them back meanwhile.
+        state, db_role, db_version = await run_in_threadpool(
+            _check_session_user, request.session
+        )
         if state == "revoked":
             request.session.clear()
             return JSONResponse(
