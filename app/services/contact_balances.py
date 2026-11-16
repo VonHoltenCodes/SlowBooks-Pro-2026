@@ -151,22 +151,48 @@ def customer_balances(
     as_of: Optional[date] = None,
 ) -> dict[int, Decimal]:
     """Home-currency balance per customer id; ids with no open documents
-    are absent (read them as zero). With `as_of`, only documents and named
-    lines dated on or before it count (#930: Books Check sets the balances
-    beside a ledger and an aging as of today, which leave a future-dated
-    invoice out)."""
+    are absent (read them as zero). With `as_of`, the balance as it stood on
+    that date, read the way the A/R Aging reads it (#930, #939): each
+    invoice dated on or before it at what was still owed then (the payments
+    and credits applied to it by that date), each payment and credit memo
+    dated on or before it at the part not yet applied then, and the named
+    journal lines to that date. Books Check sets these beside a ledger and
+    an aging as of today, so a document, a payment or an application on the
+    far side of the date is neither side's yet."""
     if customer_ids is not None:
         customer_ids = list(customer_ids)  # read twice below
     ids = _ids(customer_ids)
     out: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    from app.services.control_journal_lines import by_party, receivable_lines
+
+    if as_of is not None:
+        from app.services.open_balances import (
+            open_invoices_as_of,
+            unapplied_credit_memos_as_of,
+            unapplied_payments_as_of,
+        )
+
+        wanted = None if ids is None else set(ids)
+        for inv, open_amount in open_invoices_as_of(db, as_of):
+            if wanted is None or inv.customer_id in wanted:
+                out[inv.customer_id] += home_amount(open_amount, inv.exchange_rate)
+        for cm, left in unapplied_credit_memos_as_of(db, as_of):
+            if wanted is None or cm.customer_id in wanted:
+                out[cm.customer_id] -= _q(left)
+        for p, left in unapplied_payments_as_of(db, as_of):
+            if wanted is None or p.customer_id in wanted:
+                out[p.customer_id] -= home_amount(left, p.exchange_rate)
+        for cid, amount in by_party(
+            receivable_lines(db, as_of, named_only=True), customer_ids
+        ).items():
+            out[cid] += amount
+        return dict(out)
 
     inv = db.query(
         Invoice.customer_id, Invoice.exchange_rate, func.sum(Invoice.balance_due)
     ).filter(Invoice.status != InvoiceStatus.VOID, Invoice.balance_due > 0)
     if ids is not None:
         inv = inv.filter(Invoice.customer_id.in_(ids))
-    if as_of is not None:
-        inv = inv.filter(Invoice.date <= as_of)
     for cid, rate, total in inv.group_by(Invoice.customer_id, Invoice.exchange_rate):
         out[cid] += home_amount(total, rate)
 
@@ -177,20 +203,16 @@ def customer_balances(
     )
     if ids is not None:
         cm = cm.filter(CreditMemo.customer_id.in_(ids))
-    if as_of is not None:
-        cm = cm.filter(CreditMemo.date <= as_of)
     for cid, total in cm.group_by(CreditMemo.customer_id):
         out[cid] -= _q(total)
 
-    for p in unapplied_payments(db, customer_ids=ids, end=as_of):
+    for p in unapplied_payments(db, customer_ids=ids):
         out[p.customer_id] -= p.unapplied_home
 
     # a journal line on A/R that names the customer, as QuickBooks keeps one
     # and an import carries it (#897)
-    from app.services.control_journal_lines import by_party, receivable_lines
-
     for cid, amount in by_party(
-        receivable_lines(db, as_of, named_only=True), customer_ids
+        receivable_lines(db, named_only=True), customer_ids
     ).items():
         out[cid] += amount
 
@@ -207,20 +229,44 @@ def vendor_balances(
     as_of: Optional[date] = None,
 ) -> dict[int, Decimal]:
     """Home-currency amount owed per vendor id (absent = zero). With
-    `as_of`, only documents and named entries dated on or before it count
-    (#930)."""
+    `as_of`, the amount as it stood on that date, read the way the A/P Aging
+    reads it (#930, #939): bills dated on or before it at what was still
+    owed then, bill payments and vendor credits dated on or before it at the
+    part not yet applied then, and the named entries to that date."""
     if vendor_ids is not None:
         vendor_ids = list(vendor_ids)  # read twice below
     ids = _ids(vendor_ids)
     out: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    from app.services.control_journal_lines import by_party, payable_lines
+
+    if as_of is not None:
+        from app.services.open_balances import (
+            open_bills_as_of,
+            unapplied_bill_payments_as_of,
+            unapplied_vendor_credits_as_of,
+        )
+
+        wanted = None if ids is None else set(ids)
+        for bill, open_amount in open_bills_as_of(db, as_of):
+            if wanted is None or bill.vendor_id in wanted:
+                out[bill.vendor_id] += home_amount(open_amount, bill.exchange_rate)
+        for vc, left in unapplied_vendor_credits_as_of(db, as_of):
+            if wanted is None or vc.vendor_id in wanted:
+                out[vc.vendor_id] -= _q(left)
+        for bp, left in unapplied_bill_payments_as_of(db, as_of):
+            if wanted is None or bp.vendor_id in wanted:
+                out[bp.vendor_id] -= home_amount(left, bp.exchange_rate)
+        for vid, amount in by_party(
+            payable_lines(db, as_of, named_only=True), vendor_ids
+        ).items():
+            out[vid] += amount
+        return dict(out)
 
     bills = db.query(
         Bill.vendor_id, Bill.exchange_rate, func.sum(Bill.balance_due)
     ).filter(Bill.status != BillStatus.VOID, Bill.balance_due > 0)
     if ids is not None:
         bills = bills.filter(Bill.vendor_id.in_(ids))
-    if as_of is not None:
-        bills = bills.filter(Bill.date <= as_of)
     for vid, rate, total in bills.group_by(Bill.vendor_id, Bill.exchange_rate):
         out[vid] += home_amount(total, rate)
 
@@ -232,8 +278,6 @@ def vendor_balances(
     )
     if ids is not None:
         vc = vc.filter(VendorCredit.vendor_id.in_(ids))
-    if as_of is not None:
-        vc = vc.filter(VendorCredit.date <= as_of)
     for vid, total in vc.group_by(VendorCredit.vendor_id):
         out[vid] -= _q(total)
 
@@ -257,19 +301,13 @@ def vendor_balances(
     )
     if ids is not None:
         bp = bp.filter(BillPayment.vendor_id.in_(ids))
-    if as_of is not None:
-        bp = bp.filter(BillPayment.date <= as_of)
     for vid, rate, amount, applied_amt in bp:
         left = _q(Decimal(str(amount or 0)) - Decimal(str(applied_amt or 0)))
         if left > 0:
             out[vid] -= home_amount(left, rate)
 
     # a journal entry on A/P that names the vendor (#897)
-    from app.services.control_journal_lines import by_party, payable_lines
-
-    for vid, amount in by_party(
-        payable_lines(db, as_of, named_only=True), vendor_ids
-    ).items():
+    for vid, amount in by_party(payable_lines(db, named_only=True), vendor_ids).items():
         out[vid] += amount
 
     return dict(out)

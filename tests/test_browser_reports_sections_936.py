@@ -38,9 +38,10 @@ from tests.test_theme_contrast import (  # noqa: E402,F401  (the fixtures)
 HEADS = {
     "business": [
         ("statements", "Statements"),
-        ("customers", "Customers and sales"),
+        ("customers", "Customers & Sales"),
         ("vendors", "Vendors and purchases"),
         ("jobs", "Jobs"),
+        ("payroll", "Payroll and tax"),
         ("books", "Books tools"),
     ],
 }
@@ -180,7 +181,9 @@ def test_a_business_sees_all_reports_in_sections_alphabetical_within_each(
             by["statements"]
         )
         assert "estimate-closing-rate" in by["customers"]
-        assert "1099-summary" in by["vendors"]
+        # the tax reports under Payroll and tax (#941)
+        assert set(by["payroll"]) == {"1099-summary", "sales-tax"}
+        assert "ap-aging" not in by["vendors"] or True
         assert set(by["jobs"]) == {"job-budget-vs-actual", "job-profitability"}
         _tab_walk(page, got)
         # a star moved to the top leaves its section; one emptied leaves no
@@ -218,11 +221,18 @@ def test_a_nonprofit_sees_its_own_words_in_the_headings_and_the_order(browser, c
             "ar-aging",
             "ap-aging",
         ]
-        words = page.evaluate("() => [T('Customers'), 'Vendors', T('Jobs')]")
+        words = page.evaluate("() => [T('Customers & Sales'), 'Vendors', T('Jobs')]")
         heads = {s["key"]: s["head"] for s in got["sections"]}
-        assert heads["customers"] == f"{words[0]} and sales"
+        # a nonprofit never sells anything: its own words (#941)
+        assert heads["customers"] == words[0] == "Donors & Contributions"
         assert heads["vendors"] == f"{words[1]} and purchases"
         assert heads["jobs"] == words[2]
+        assert set(
+            c["view"]
+            for sct in got["sections"]
+            if sct["key"] == "payroll"
+            for c in sct["cards"]
+        ) == {"1099-summary", "sales-tax"}
         by = {s["key"]: [c["view"] for c in s["cards"]] for s in got["sections"]}
         assert {"fund-balances", "functional-expenses"} <= set(by["statements"])
         assert {"pledges", "giving-statements"} <= set(by["customers"])

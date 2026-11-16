@@ -480,7 +480,7 @@ const ReportsPage = {
     _sections() {
         return [
             { key: 'statements', head: 'Statements' },
-            { key: 'customers', head: `${T('Customers')} and sales` },
+            { key: 'customers', head: T('Customers & Sales') },
             { key: 'vendors', head: 'Vendors and purchases' },
             { key: 'jobs', head: T('Jobs') },
             { key: 'payroll', head: 'Payroll and tax' },
@@ -495,11 +495,11 @@ const ReportsPage = {
         'cash-flow': 'statements', 'financial-statements': 'statements',
         'statement-of-activities': 'statements', 'statement-of-financial-position': 'statements',
         'fund-balances': 'statements', 'functional-expenses': 'statements',
-        'ar-aging': 'customers', 'sales-tax': 'customers', 'income-by-customer': 'customers',
+        'ar-aging': 'customers', 'sales-tax': 'payroll', 'income-by-customer': 'customers',
         'past-customers': 'customers', 'sales-by-item': 'customers',
         'estimate-closing-rate': 'customers', 'customer-statement': 'customers',
         'pledges': 'customers', 'giving-statements': 'customers',
-        'ap-aging': 'vendors', 'purchases-by-item': 'vendors', '1099-summary': 'vendors',
+        'ap-aging': 'vendors', 'purchases-by-item': 'vendors', '1099-summary': 'payroll',
         'job-budget-vs-actual': 'jobs', 'job-profitability': 'jobs',
         'wip-schedule': 'jobs', 'cost-to-complete': 'jobs', 'change-order-log': 'jobs',
         'buyout': 'jobs', 'job-cost-by-vendor': 'jobs', 'cost-to-complete-forecast': 'jobs',
