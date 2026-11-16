@@ -72,21 +72,53 @@ def _money(value) -> Decimal:
     return Decimal(str(value or 0))
 
 
-def _named_journal_overdue(lines) -> int:
-    """How many open amounts a customer- or vendor-named journal entry
-    leaves past 30 days (#924): the agings read such an entry from its date
-    (#897), its party's payments applied to the oldest first (#917), and an
-    imported book has only those until its open bills and invoices are
-    entered. Counted the way the aging buckets it, so the card's "N overdue"
-    and the report's buckets past 1–30 say the same thing."""
-    from app.services.control_journal_lines import applied
+_BUCKET_RANK = {"1-30": 1, "31-60": 2, "61+": 3}
 
-    today = date.today()
-    return sum(
-        1
-        for aged in applied(lines).values()
-        for on, _left in aged.open_items
-        if (today - on).days > 30
+
+def _past_due_rows(items: list[dict], id_key: str, name_key: str) -> list[dict]:
+    """Who the aging puts past due, from its rows (#935): the party, what is
+    past due (the 1-30, 31-60 and 61+ columns) and the oldest column it
+    reaches, oldest and largest first. One pool for every receivables and
+    payables number on Home: invoices and bills by their due date, a
+    customer- or vendor-named journal entry from its own date with the
+    party's payments applied to the oldest first (#897, #917), credits
+    netted, exactly as the A/R and A/P Aging report them."""
+    out = []
+    for r in items:
+        over_30, over_60, over_90 = (
+            _money(r["over_30"]),
+            _money(r["over_60"]),
+            _money(r["over_90"]),
+        )
+        past = _q(over_30 + over_60 + over_90)
+        if past <= 0:
+            continue
+        oldest = "61+" if over_90 > 0 else ("31-60" if over_60 > 0 else "1-30")
+        out.append(
+            {
+                "id": r[id_key],
+                "name": r[name_key],
+                "past_due": _f(past),
+                "oldest": oldest,
+            }
+        )
+    out.sort(key=lambda x: (-_BUCKET_RANK[x["oldest"]], -x["past_due"], x["name"]))
+    return out
+
+
+def _ar_past_due(db: Session) -> list[dict]:
+    from app.routes.reports.receivables import ar_aging_report
+
+    return _past_due_rows(
+        ar_aging_report(db, date.today())["items"], "customer_id", "customer_name"
+    )
+
+
+def _ap_past_due(db: Session) -> list[dict]:
+    from app.routes.reports.payables_tax import ap_aging_report
+
+    return _past_due_rows(
+        ap_aging_report(db, date.today())["items"], "vendor_id", "vendor_name"
     )
 
 
@@ -94,44 +126,31 @@ def receivables(db: Session) -> dict:
     # What customers owe net of the credits they hold (unapplied payments,
     # credit memos), in home currency: the A/R Aging total and account 1100.
     # Summing invoice balances alone read $782.13 against a balance sheet of
-    # $555.74 (explore 2.17.3, F17).
-    from app.services.control_journal_lines import receivable_lines
-
+    # $555.74 (explore 2.17.3, F17). The overdue count is the aging's too
+    # (#935): how many customers it puts past due, so this card, the
+    # Overdue list and the A/R Aging card can never disagree.
     total = _ar_aging_totals(db)["total"]
-    overdue = (
-        db.query(func.count(Invoice.id))
-        .filter(*_owing(), _past_due(Invoice.due_date))
-        .scalar()
-    )
-    named = _named_journal_overdue(receivable_lines(db, date.today(), named_only=True))
-    return {"total": _f(total), "overdue_count": int(overdue or 0) + named}
+    return {"total": _f(total), "overdue_count": len(_ar_past_due(db))}
 
 
 def overdue_invoices(db: Session) -> dict:
-    rows = (
-        db.query(Invoice)
-        .filter(*_owing(), _past_due(Invoice.due_date))
-        .order_by(Invoice.due_date)
-        .limit(5)
-        .all()
-    )
-    count = (
-        db.query(func.count(Invoice.id))
-        .filter(*_owing(), _past_due(Invoice.due_date))
-        .scalar()
-    )
-    today = date.today()
+    """Who is past due, from the A/R Aging (#935): each customer the aging
+    puts past due, what is past due and the oldest column it reaches; the
+    five oldest and largest, and the count of all of them. It listed the
+    invoices table alone before, where a customer-named journal entry could
+    never appear, so it read "Nothing overdue." beside a Total Receivables
+    that counted one."""
+    rows = _ar_past_due(db)
     return {
-        "count": int(count or 0),
+        "count": len(rows),
         "items": [
             {
-                "id": i.id,
-                "invoice_number": i.invoice_number,
-                "customer": i.customer.name if i.customer else "",
-                "balance_due": _f(i.balance_due),
-                "days_overdue": (today - i.due_date).days if i.due_date else 0,
+                "id": r["id"],
+                "customer": r["name"],
+                "past_due": r["past_due"],
+                "oldest": r["oldest"],
             }
-            for i in rows
+            for r in rows[:5]
         ],
     }
 
@@ -153,16 +172,9 @@ def payables(db: Session) -> dict:
     # _ar_aging_totals reaches ar_aging_report), which would otherwise cycle.
     from app.routes.reports.payables_tax import ap_aging_report
 
-    from app.services.control_journal_lines import payable_lines
-
     total = ap_aging_report(db, date.today())["totals"]["total"]
-    overdue = (
-        db.query(func.count(Bill.id))
-        .filter(*_bills_owing(), _past_due(Bill.due_date))
-        .scalar()
-    )
-    named = _named_journal_overdue(payable_lines(db, date.today(), named_only=True))
-    return {"total": _f(total), "overdue_count": int(overdue or 0) + named}
+    # the vendors the aging puts past due (#935), the one pool
+    return {"total": _f(total), "overdue_count": len(_ap_past_due(db))}
 
 
 def _bank_ledger_rows(db: Session) -> list[dict]:
@@ -728,13 +740,13 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "receivables": (
         "Total Receivables",
         "stat",
-        "Open invoice balances, with the overdue count",
+        "What customers owe, with how many the A/R Aging puts past due",
         receivables,
     ),
     "overdue_invoices": (
         "Overdue Invoices",
         "half",
-        "The oldest overdue invoices and who owes them",
+        "Who is past due and by how much, from the A/R Aging",
         overdue_invoices,
     ),
     "active_customers": (
@@ -746,7 +758,7 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "payables": (
         "Total Payables",
         "stat",
-        "Open bill balances, with the overdue count",
+        "What is owed to vendors, with how many the A/P Aging puts past due",
         payables,
     ),
     "bank_balances": (

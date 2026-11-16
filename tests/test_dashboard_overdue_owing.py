@@ -94,9 +94,12 @@ def _cards(client, ids):
 def test_a_zero_invoice_is_not_on_the_overdue_list(client, books):
     d = _cards(client, ["overdue_invoices", "receivables"])
     listed = d["overdue_invoices"]
-    assert [i["invoice_number"] for i in listed["items"]] == ["1002"]
+    # the list reads the A/R Aging (#935): the customer, with only 1002's
+    # 250.00 past due (the zero invoices add nothing), in 1-30
+    assert [(i["customer"], i["past_due"], i["oldest"]) for i in listed["items"]] == [
+        ("Harbor Light Bakery", 250.0, "1-30")
+    ]
     assert listed["count"] == 1
-    assert all(i["balance_due"] > 0 for i in listed["items"])
     assert d["receivables"]["overdue_count"] == 1
 
 
