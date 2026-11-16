@@ -1,5 +1,5 @@
 """Books Check and the QuickBooks Online import, after the 2.32.0 round-3
-gate (#914, #915).
+and round-4 gates (#914, #915, #919).
 
 #914 (NEW-225): the import carries a company's open invoices and unapplied
 payments over as documents with no entry of their own, on purpose, because
@@ -262,3 +262,107 @@ def test_a_second_import_of_the_same_bundle_posts_and_names_nothing_twice(
         db_session.query(Transaction).filter(Transaction.vendor_id == vendor.id).count()
         == 1
     )
+
+
+# ── #919: the A/R rows on an imported book, and a word ────────────────────
+
+
+def _sent_invoice_without_its_entry(client, db_session, amount=111.0):
+    from app.models.invoices import Invoice, InvoiceStatus
+
+    customer = db_session.query(Customer).first()
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": customer.id,
+            "date": "2026-10-20",
+            "due_date": "2026-11-19",
+            "lines": [{"description": "Consulting", "quantity": 1, "rate": amount}],
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    inv = db_session.get(Invoice, r.json()["id"])
+    inv.status = InvoiceStatus.SENT
+    db_session.flush()
+    # the invoice stays and its entry goes (direct writes, as the gate did):
+    # A/R is now off by the invoice's amount, for a reason that is not the
+    # import's
+    tid = inv.transaction_id
+    inv.transaction_id = None
+    db_session.flush()
+    if tid is not None:
+        db_session.query(TransactionLine).filter(
+            TransactionLine.transaction_id == tid
+        ).delete()
+        db_session.query(Transaction).filter(Transaction.id == tid).delete()
+    db_session.commit()
+    return inv.id
+
+
+def test_the_receivable_rows_leave_out_the_imports_covered_lines(
+    client, db_session, seed_accounts
+):
+    """With the A/R Aging Detail given, the carried documents are the
+    receivable and the Journal's A/R lines stay unnamed (#915). Once A/R is
+    off for another reason, the A/R rows name that reason, not the import's
+    own lines ("move it to an invoice" would count the balance twice)."""
+    _import(client, _files())
+    _sent_invoice_without_its_entry(client, db_session)
+    rows = _rows(db_session)
+    for key in ("ar_aging", "customer_balances"):
+        row = rows[key]
+        assert row["status"] == "difference", row
+        imported = (
+            db_session.query(Transaction.id)
+            .filter(Transaction.source_type == "qbo_export_import")
+            .all()
+        )
+        imported_ids = {t for (t,) in imported}
+        assert not any(
+            d["type"] == "journal" and d["id"] in imported_ids for d in row["documents"]
+        ), row["documents"][:3]
+        assert not any("names no customer" in d["why"] for d in row["documents"])
+
+
+def test_a_nameless_import_line_is_still_named_on_a_book_with_no_carried_documents(
+    client, db_session, seed_accounts
+):
+    """No A/R Aging Detail, no carried documents: an import line on the
+    control that names nobody is the stray it always was."""
+    from datetime import date
+
+    from app.services.qbo_export_import import has_carried_documents
+
+    assert has_carried_documents(db_session) is False
+    a = seed_accounts
+    txn = Transaction(
+        date=date(2026, 9, 1), description="imported", source_type="qbo_export_import"
+    )
+    db_session.add(txn)
+    db_session.flush()
+    db_session.add_all(
+        [
+            TransactionLine(
+                transaction_id=txn.id, account_id=a["1100"].id, debit=40, credit=0
+            ),
+            TransactionLine(
+                transaction_id=txn.id, account_id=a["4000"].id, debit=0, credit=40
+            ),
+        ]
+    )
+    db_session.commit()
+    row = _rows(db_session)["ar_aging"]
+    assert row["status"] == "difference", row
+    assert any(
+        d["type"] == "journal" and d["id"] == txn.id for d in row["documents"]
+    ), (txn.id, row["documents"])
+
+
+def test_the_payable_sentence_says_an_entry():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[1] / "app/services/books_check.py"
+    ).read_text()
+    assert 'or a "\n        "entry posted' not in text
+    assert text.count('or an "\n        "entry posted straight to the account') >= 2

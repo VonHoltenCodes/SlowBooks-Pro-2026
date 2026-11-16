@@ -342,11 +342,22 @@ def _strays(db: Session, account_id: int, as_of: date, words: str, receivable: b
             f"move it to a bill or to {control_accounts.ACCRUED_JOB_COSTS} "
             "Accrued Job Costs"
         )
+    # On a QuickBooks Online import given its A/R Aging Detail, the open
+    # invoices and unapplied payments are carried as documents and the
+    # Journal's A/R lines stay unnamed on purpose (#915): the documents are
+    # the receivable, so those lines are not strays, and "move it to an
+    # invoice" would count the balance twice (#919). The same for A/P once
+    # #713 carries the open bills.
+    from app.services.qbo_export_import import SOURCE_TYPE as QBO, has_carried_documents
+
+    covered = receivable and has_carried_documents(db)
     out = []
     for c in lines:
         if c.party_id is not None:
             continue
         txn = c.transaction
+        if covered and txn.source_type == QBO:
+            continue
         kind = (txn.source_type or "journal entry").replace("_", " ")
         out.append(
             _txn_doc(
@@ -532,7 +543,7 @@ def check_ap_aging(db: Session, as_of: date, t) -> Check:
         "The A/P Aging total is {sub} and "
         + words
         + " is {ctl}, {diff} apart. Look at the documents below: a bill whose "
-        "balance due drifted from what was paid and credited on it, or a "
+        "balance due drifted from what was paid and credited on it, or an "
         "entry posted straight to the account (a journal entry, a job cost entry) "
         "that names no vendor, which no vendor's balance carries. The "
         "Journal checks further down name a voided document still posting and "
