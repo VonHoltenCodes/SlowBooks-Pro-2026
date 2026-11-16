@@ -48,8 +48,8 @@ def books_check_report(as_of: date = _AS_OF, db: Session = Depends(get_db)):
     return books_check(db, as_of)
 
 
-def _sections(data: dict, company_type_terms) -> list[dict]:
-    t = company_type_terms
+def _sections(data: dict, company_type_terms=None) -> list[dict]:
+    # the rows arrive in the company's words already (#933, #944, #950)
     rows = []
     for r in data["rows"]:
         rows.append(
@@ -71,7 +71,7 @@ def _sections(data: dict, company_type_terms) -> list[dict]:
             rows.append(
                 {
                     "cells": [
-                        t.text(_document_words(doc)),
+                        _document_words(doc),  # already in the company's words (#950)
                         "",
                         "",
                         "",
