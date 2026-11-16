@@ -358,16 +358,59 @@ def _strays(db: Session, account_id: int, as_of: date, words: str, receivable: b
         txn = c.transaction
         if covered and txn.source_type == QBO:
             continue
-        kind = (txn.source_type or "journal entry").replace("_", " ")
         out.append(
             _txn_doc(
                 txn,
                 c.amount if receivable else -c.amount,
-                f"Posted straight to {words} by a {kind} that names no {party}, "
-                f"so no {party}'s balance carries it; {fix}.",
+                f"Posted straight to {words} by {_source_words(txn.source_type)} "
+                f"that names no {party}, so no {party}'s balance carries it; {fix}.",
             )
         )
     return out
+
+
+# What posted a stray entry, in words with its article (#922): the sentence
+# is what a person reads to fix a difference, and the raw source type gave
+# "by a iif import" and "by a manual". Anything not listed is a journal
+# entry, which is what every one of them is underneath.
+_SOURCE_WORDS = {
+    "manual": "a journal entry",
+    "iif_import": "an IIF import",
+    "qb_ledger_import": "a QuickBooks Desktop import",
+    "qbo_export_import": "a QuickBooks Online import",
+    "xero_import": "a Xero import",
+    "myob_import": "a MYOB import",
+    "sage_import": "a Sage 50 import",
+    "wave_import": "a Wave import",
+    "zoho_import": "a Zoho Books import",
+    "gnucash_import": "a GnuCash import",
+    "opening_balance": "the opening balance entry",
+    "bank_entry": "a register entry",
+    "job_cost": "a job cost entry",
+    "functional_allocation": "an allocation",
+    "adjustment": "an inventory adjustment",
+    "item_opening": "an item's opening count",
+    "depreciation": "a depreciation entry",
+    "asset_acquisition": "a fixed asset's acquisition",
+    "asset_disposal": "a fixed asset's disposal",
+    "transfer": "a transfer",
+    "deposit": "a deposit",
+    "check": "a check",
+    "expense": "an expense",
+    "cc_charge": "a credit card charge",
+    "payroll": "a pay run",
+    "pto": "a time-off accrual",
+    "sales_tax_payment": "a sales tax payment",
+    "restriction_release": "a release from restriction",
+    "in_kind_gift": "an in-kind gift",
+    "job_deposit": "a job deposit",
+    "accountants_copy": "the accountant's changes",
+}
+
+
+def _source_words(source_type) -> str:
+    base = (source_type or "manual").removesuffix("_void").removesuffix("_edit")
+    return _SOURCE_WORDS.get(base, "a journal entry")
 
 
 def check_ar_aging(db: Session, as_of: date, t) -> Check:
