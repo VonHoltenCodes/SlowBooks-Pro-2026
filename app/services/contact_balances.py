@@ -146,10 +146,15 @@ def unapplied_payments(
 
 
 def customer_balances(
-    db: Session, customer_ids: Optional[Iterable[int]] = None
+    db: Session,
+    customer_ids: Optional[Iterable[int]] = None,
+    as_of: Optional[date] = None,
 ) -> dict[int, Decimal]:
     """Home-currency balance per customer id; ids with no open documents
-    are absent (read them as zero)."""
+    are absent (read them as zero). With `as_of`, only documents and named
+    lines dated on or before it count (#930: Books Check sets the balances
+    beside a ledger and an aging as of today, which leave a future-dated
+    invoice out)."""
     if customer_ids is not None:
         customer_ids = list(customer_ids)  # read twice below
     ids = _ids(customer_ids)
@@ -160,6 +165,8 @@ def customer_balances(
     ).filter(Invoice.status != InvoiceStatus.VOID, Invoice.balance_due > 0)
     if ids is not None:
         inv = inv.filter(Invoice.customer_id.in_(ids))
+    if as_of is not None:
+        inv = inv.filter(Invoice.date <= as_of)
     for cid, rate, total in inv.group_by(Invoice.customer_id, Invoice.exchange_rate):
         out[cid] += home_amount(total, rate)
 
@@ -170,10 +177,12 @@ def customer_balances(
     )
     if ids is not None:
         cm = cm.filter(CreditMemo.customer_id.in_(ids))
+    if as_of is not None:
+        cm = cm.filter(CreditMemo.date <= as_of)
     for cid, total in cm.group_by(CreditMemo.customer_id):
         out[cid] -= _q(total)
 
-    for p in unapplied_payments(db, customer_ids=ids):
+    for p in unapplied_payments(db, customer_ids=ids, end=as_of):
         out[p.customer_id] -= p.unapplied_home
 
     # a journal line on A/R that names the customer, as QuickBooks keeps one
@@ -181,7 +190,7 @@ def customer_balances(
     from app.services.control_journal_lines import by_party, receivable_lines
 
     for cid, amount in by_party(
-        receivable_lines(db, named_only=True), customer_ids
+        receivable_lines(db, as_of, named_only=True), customer_ids
     ).items():
         out[cid] += amount
 
@@ -193,9 +202,13 @@ def customer_balance(db: Session, customer_id: int) -> Decimal:
 
 
 def vendor_balances(
-    db: Session, vendor_ids: Optional[Iterable[int]] = None
+    db: Session,
+    vendor_ids: Optional[Iterable[int]] = None,
+    as_of: Optional[date] = None,
 ) -> dict[int, Decimal]:
-    """Home-currency amount owed per vendor id (absent = zero)."""
+    """Home-currency amount owed per vendor id (absent = zero). With
+    `as_of`, only documents and named entries dated on or before it count
+    (#930)."""
     if vendor_ids is not None:
         vendor_ids = list(vendor_ids)  # read twice below
     ids = _ids(vendor_ids)
@@ -206,6 +219,8 @@ def vendor_balances(
     ).filter(Bill.status != BillStatus.VOID, Bill.balance_due > 0)
     if ids is not None:
         bills = bills.filter(Bill.vendor_id.in_(ids))
+    if as_of is not None:
+        bills = bills.filter(Bill.date <= as_of)
     for vid, rate, total in bills.group_by(Bill.vendor_id, Bill.exchange_rate):
         out[vid] += home_amount(total, rate)
 
@@ -217,6 +232,8 @@ def vendor_balances(
     )
     if ids is not None:
         vc = vc.filter(VendorCredit.vendor_id.in_(ids))
+    if as_of is not None:
+        vc = vc.filter(VendorCredit.date <= as_of)
     for vid, total in vc.group_by(VendorCredit.vendor_id):
         out[vid] -= _q(total)
 
@@ -240,6 +257,8 @@ def vendor_balances(
     )
     if ids is not None:
         bp = bp.filter(BillPayment.vendor_id.in_(ids))
+    if as_of is not None:
+        bp = bp.filter(BillPayment.date <= as_of)
     for vid, rate, amount, applied_amt in bp:
         left = _q(Decimal(str(amount or 0)) - Decimal(str(applied_amt or 0)))
         if left > 0:
@@ -248,7 +267,9 @@ def vendor_balances(
     # a journal entry on A/P that names the vendor (#897)
     from app.services.control_journal_lines import by_party, payable_lines
 
-    for vid, amount in by_party(payable_lines(db, named_only=True), vendor_ids).items():
+    for vid, amount in by_party(
+        payable_lines(db, as_of, named_only=True), vendor_ids
+    ).items():
         out[vid] += amount
 
     return dict(out)
