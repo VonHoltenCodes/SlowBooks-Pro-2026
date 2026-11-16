@@ -77,7 +77,12 @@ def test_the_count_is_overdue_invoices_and_the_total_is_the_aging(
     d = client.get(
         "/api/dashboard/data?ids=receivables,overdue_invoices,ar_aging"
     ).json()
-    assert d["receivables"] == {"total": 362.0, "overdue_count": 1}
+    assert d["receivables"] == {
+        "total": 362.0,
+        "overdue_count": 1,
+        "overdue_pledges": 0,
+        "overdue_invoices": 1,
+    }
     assert d["overdue_invoices"]["count"] == 1
     assert [i["invoice_number"] for i in d["overdue_invoices"]["items"]] == ["3001"]
     assert d["overdue_invoices"]["items"][0]["days_overdue"] == 10
@@ -86,7 +91,8 @@ def test_the_count_is_overdue_invoices_and_the_total_is_the_aging(
 
 def test_the_labels_say_what_each_card_counts():
     rec = JS.split("receivables(d)")[1].split("active_customers(d)")[0]
-    assert "overdue ${d.overdue_count === 1 ? T('invoice') : T('invoices')}" in rec
+    assert "word(d.overdue_count, T('invoice'), T('invoices'))" in rec
+    assert "word(d.overdue_pledges, 'pledge', 'pledges')" in rec
     pay = JS.split("payables(d)")[1].split("overdue_invoices(d)")[0]
     assert "overdue ${d.overdue_count === 1 ? 'bill' : 'bills'}" in pay
     # the Overdue Invoices card lists invoices again

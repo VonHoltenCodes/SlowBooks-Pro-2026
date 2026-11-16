@@ -39,10 +39,10 @@ HEADS = {
     "business": [
         ("statements", "Statements"),
         ("customers", "Customers & Sales"),
-        ("vendors", "Vendors and purchases"),
+        ("vendors", "Vendors & Purchases"),
         ("jobs", "Jobs"),
-        ("payroll", "Payroll and tax"),
-        ("books", "Books tools"),
+        ("payroll", "Payroll & Tax"),
+        ("books", "Books Tools"),
     ],
 }
 ORDER = ["statements", "customers", "vendors", "jobs", "payroll", "books"]
@@ -225,7 +225,7 @@ def test_a_nonprofit_sees_its_own_words_in_the_headings_and_the_order(browser, c
         heads = {s["key"]: s["head"] for s in got["sections"]}
         # a nonprofit never sells anything: its own words (#941)
         assert heads["customers"] == words[0] == "Donors & Contributions"
-        assert heads["vendors"] == f"{words[1]} and purchases"
+        assert heads["vendors"] == f"{words[1]} & Purchases"
         assert heads["jobs"] == words[2]
         assert set(
             c["view"]

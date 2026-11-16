@@ -481,10 +481,10 @@ const ReportsPage = {
         return [
             { key: 'statements', head: 'Statements' },
             { key: 'customers', head: T('Customers & Sales') },
-            { key: 'vendors', head: 'Vendors and purchases' },
+            { key: 'vendors', head: 'Vendors & Purchases' },
             { key: 'jobs', head: T('Jobs') },
-            { key: 'payroll', head: 'Payroll and tax' },
-            { key: 'books', head: 'Books tools' },
+            { key: 'payroll', head: 'Payroll & Tax' },
+            { key: 'books', head: 'Books Tools' },
         ];
     },
 
