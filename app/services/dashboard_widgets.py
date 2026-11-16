@@ -72,18 +72,39 @@ def _money(value) -> Decimal:
     return Decimal(str(value or 0))
 
 
+def _named_journal_overdue(lines) -> int:
+    """How many open amounts a customer- or vendor-named journal entry
+    leaves past 30 days (#924): the agings read such an entry from its date
+    (#897), its party's payments applied to the oldest first (#917), and an
+    imported book has only those until its open bills and invoices are
+    entered. Counted the way the aging buckets it, so the card's "N overdue"
+    and the report's buckets past 1–30 say the same thing."""
+    from app.services.control_journal_lines import applied
+
+    today = date.today()
+    return sum(
+        1
+        for aged in applied(lines).values()
+        for on, _left in aged.open_items
+        if (today - on).days > 30
+    )
+
+
 def receivables(db: Session) -> dict:
     # What customers owe net of the credits they hold (unapplied payments,
     # credit memos), in home currency: the A/R Aging total and account 1100.
     # Summing invoice balances alone read $782.13 against a balance sheet of
     # $555.74 (explore 2.17.3, F17).
+    from app.services.control_journal_lines import receivable_lines
+
     total = _ar_aging_totals(db)["total"]
     overdue = (
         db.query(func.count(Invoice.id))
         .filter(*_owing(), _past_due(Invoice.due_date))
         .scalar()
     )
-    return {"total": _f(total), "overdue_count": int(overdue or 0)}
+    named = _named_journal_overdue(receivable_lines(db, date.today(), named_only=True))
+    return {"total": _f(total), "overdue_count": int(overdue or 0) + named}
 
 
 def overdue_invoices(db: Session) -> dict:
@@ -132,13 +153,16 @@ def payables(db: Session) -> dict:
     # _ar_aging_totals reaches ar_aging_report), which would otherwise cycle.
     from app.routes.reports.payables_tax import ap_aging_report
 
+    from app.services.control_journal_lines import payable_lines
+
     total = ap_aging_report(db, date.today())["totals"]["total"]
     overdue = (
         db.query(func.count(Bill.id))
         .filter(*_bills_owing(), _past_due(Bill.due_date))
         .scalar()
     )
-    return {"total": _f(total), "overdue_count": int(overdue or 0)}
+    named = _named_journal_overdue(payable_lines(db, date.today(), named_only=True))
+    return {"total": _f(total), "overdue_count": int(overdue or 0) + named}
 
 
 def _bank_ledger_rows(db: Session) -> list[dict]:
