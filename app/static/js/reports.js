@@ -4879,7 +4879,12 @@ ReportsPage._BOOKS_CHECK_PAGES = {
 // PDF and the CSV print, #928), so the window and the files never differ.
 ReportsPage._booksCheckKind = function (kind, label) {
     const own = { invoice: T('Invoice'), customer: T('Customer'), job: T('Job'), job_cost: `${T('Job')} cost` };
-    return own[kind] || label || String(kind || '').replace(/_/g, ' ');
+    const words = {
+        credit_memo: 'Credit memo', bill: 'Bill', bill_payment: 'Bill payment', payment: 'Payment',
+        vendor_credit: 'Vendor credit', deposit: 'Deposit', journal: 'Journal entry', pay_run: 'Pay run',
+        expense: 'Expense', cc_charge: 'Card charge', vendor: 'Vendor', item: 'Item',
+    };
+    return own[kind] || label || words[kind] || String(kind || '').replace(/_/g, ' ');
 };
 // The address a named document opens at; an item opens the Item List, a
 // job-less row ("No job") opens nothing.
