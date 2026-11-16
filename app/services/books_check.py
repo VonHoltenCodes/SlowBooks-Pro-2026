@@ -1912,6 +1912,23 @@ def _integrity(key, name, docs, total, pass_text, diff_text, t) -> Check:
 # ── the report ───────────────────────────────────────────────────────────
 
 
+def _label_invoices_by_their_face(db: Session, rows, t) -> None:
+    """An invoice-kind document is named from its own face, as its PDF and
+    its ledger line name it (donor_documents.document_label): Invoice,
+    Pledge, Sales Receipt or Donation Receipt. The company's word alone
+    called a nonprofit's program-fee invoice a Pledge (#940); the sentences
+    keep the company's words (#933)."""
+    from app.services.donor_documents import document_label
+
+    for r in rows:
+        for d in r.documents or []:
+            if d.get("type") != "invoice" or d.get("id") is None:
+                continue
+            inv = db.get(Invoice, d["id"])
+            if inv is not None:
+                d["type_label"] = document_label(inv, t)
+
+
 def books_check(db: Session, as_of: Optional[date] = None) -> dict:
     """Every pair, as of a date (today by default): the rows, how many
     differ, and the sentence the dashboard widget shows."""
@@ -1945,6 +1962,7 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
         r.name = t.text(r.name)
         r.subledger_label = t.text(r.subledger_label)
         r.control_label = t.text(r.control_label)
+    _label_invoices_by_their_face(db, rows, t)
     differences = sum(1 for r in rows if r.ok is False)
     return {
         "as_of": as_of.isoformat(),
