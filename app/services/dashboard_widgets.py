@@ -86,7 +86,20 @@ def receivables(db: Session) -> dict:
         .filter(*_owing(), _past_due(Invoice.due_date))
         .scalar()
     )
-    return {"total": _f(total), "overdue_count": int(overdue or 0)}
+    # pledges apart from invoices (#952): a nonprofit's program-fee invoice
+    # is an Invoice on its own face, and only a flagged pledge is a Pledge,
+    # so the label names each kind it counts
+    pledges = (
+        db.query(func.count(Invoice.id))
+        .filter(*_owing(), _past_due(Invoice.due_date), Invoice.is_pledge.is_(True))
+        .scalar()
+    )
+    return {
+        "total": _f(total),
+        "overdue_count": int(overdue or 0),
+        "overdue_pledges": int(pledges or 0),
+        "overdue_invoices": int(overdue or 0) - int(pledges or 0),
+    }
 
 
 def overdue_invoices(db: Session) -> dict:
@@ -103,12 +116,18 @@ def overdue_invoices(db: Session) -> dict:
         .scalar()
     )
     today = date.today()
+    from app.services.donor_documents import document_label
+    from app.services.terminology import terms_from_db
+
+    t = terms_from_db(db)
     return {
         "count": int(count or 0),
         "items": [
             {
                 "id": i.id,
                 "invoice_number": i.invoice_number,
+                # the document's own face (#952): Invoice, Pledge, …
+                "label": document_label(i, t),
                 "customer": i.customer.name if i.customer else "",
                 "balance_due": _f(i.balance_due),
                 "days_overdue": (today - i.due_date).days if i.due_date else 0,

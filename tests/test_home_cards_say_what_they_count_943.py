@@ -86,7 +86,8 @@ def test_the_count_is_overdue_invoices_and_the_total_is_the_aging(
 
 def test_the_labels_say_what_each_card_counts():
     rec = JS.split("receivables(d)")[1].split("active_customers(d)")[0]
-    assert "overdue ${d.overdue_count === 1 ? T('invoice') : T('invoices')}" in rec
+    assert "word(d.overdue_count, T('invoice'), T('invoices'))" in rec
+    assert "word(d.overdue_pledges, 'pledge', 'pledges')" in rec
     pay = JS.split("payables(d)")[1].split("overdue_invoices(d)")[0]
     assert "overdue ${d.overdue_count === 1 ? 'bill' : 'bills'}" in pay
     # the Overdue Invoices card lists invoices again
