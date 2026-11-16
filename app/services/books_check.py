@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import date
@@ -236,10 +237,27 @@ def _row(
         ctl,
         diff,
         False,
-        t.text(sentence),
-        docs,
+        _words(t, sentence),
+        [_doc_words(t, d) for d in docs],
         more,
     )
+
+
+def _words(t, text: str) -> str:
+    """The company's own words for a sentence, with the article made to fit
+    the word that replaced the key (#933): Terms swaps the noun and left "an
+    invoice" as "an pledge"."""
+    return re.sub(r"\b([Aa])n (?=[^aeiouAEIOU\W])", r"\1 ", t.text(text))
+
+
+def _doc_words(t, doc: dict) -> dict:
+    """A document's label and reason in the company's words, once, here,
+    so the JSON, the window, the PDF and the CSV share one text (#933)."""
+    return {
+        **doc,
+        "type_label": _words(t, doc.get("type_label") or ""),
+        "why": _words(t, doc.get("why") or ""),
+    }
 
 
 def _not_checked(key, name, sub_label, ctl_label, sentence, t) -> Check:
@@ -496,15 +514,17 @@ def check_ar_aging(db: Session, as_of: date, t) -> Check:
     )
 
 
-def _routed_customer_balances(db: Session) -> dict[int, Decimal]:
+def _routed_customer_balances(db: Session, as_of: date) -> dict[int, Decimal]:
     """Each customer's balance on the A/R Aging row it lands on: a
-    sub-customer billed with its parent (#638) adds to the parent's."""
+    sub-customer billed with its parent (#638) adds to the parent's. As of
+    the check's date, so a future-dated invoice is neither side's yet
+    (#930)."""
     from app.services.contact_balances import customer_balances
     from app.services.sub_customers import billed_with_parent
 
     routed = billed_with_parent(db)
     out: dict[int, Decimal] = defaultdict(lambda: ZERO)
-    for cid, bal in customer_balances(db).items():
+    for cid, bal in customer_balances(db, as_of=as_of).items():
         out[routed.get(cid, cid)] += _d(bal)
     return dict(out)
 
@@ -538,15 +558,20 @@ def check_customer_balances(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    balances = _routed_customer_balances(db)
+    balances = _routed_customer_balances(db, as_of)
     sub = sum(balances.values(), ZERO)
     ctl = _balance(db, [ar_id], as_of, True)
     words = _account_words(db, ar_id)
 
     def documents():
+        from app.models.contacts import Customer
+
         rows = ar_aging_report(db, as_of)["items"]
         aged = {r["customer_id"]: _q(_d(r["total"])) for r in rows}
-        names = {r["customer_id"]: r["customer_name"] for r in rows}
+        # the party by name from its record (#930): a customer with no
+        # aging row has a name all the same
+        names = {cid: name for cid, name in db.query(Customer.id, Customer.name)}
+        names.update({r["customer_id"]: r["customer_name"] for r in rows})
         out = []
         for cid in sorted(set(aged) | set(balances)):
             bal = _q(balances.get(cid, ZERO))
@@ -666,7 +691,7 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    balances = {vid: _d(b) for vid, b in vendor_balances(db).items()}
+    balances = {vid: _d(b) for vid, b in vendor_balances(db, as_of=as_of).items()}
     sub = sum(balances.values(), ZERO)
     ctl = _balance(db, [ap_id], as_of, False)
     words = _account_words(db, ap_id)
@@ -674,7 +699,10 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
     def documents():
         rows = ap_aging_report(db, as_of)["items"]
         aged = {r["vendor_id"]: _q(_d(r["total"])) for r in rows}
-        names = {r["vendor_id"]: r["vendor_name"] for r in rows}
+        from app.models.contacts import Vendor
+
+        names = {vid: name for vid, name in db.query(Vendor.id, Vendor.name)}
+        names.update({r["vendor_id"]: r["vendor_name"] for r in rows})
         out = []
         for vid in sorted(set(aged) | set(balances)):
             bal = _q(balances.get(vid, ZERO))
@@ -1186,7 +1214,7 @@ def check_payroll_liabilities(db: Session, as_of: date, t) -> Check:
         owed = run_liabilities(run) + _q(_d(net_held.get(run.transaction_id)))
         accrued += owed
         posted = _q(_d(posted_by_txn.get(run.transaction_id)))
-        label = f"Pay run {run.pay_date.isoformat()}"
+        label = run.pay_date.isoformat()  # the number; "Pay run" is its type (#932)
         if not run.transaction_id:
             run_docs.append(
                 _doc(
@@ -1698,7 +1726,7 @@ def check_voided_live(db: Session, as_of: date, t) -> Check:
             d = by_id[doc_id]
             number = getattr(d, number_attr, None) if number_attr else None
             if kind == "payroll":
-                number = f"Pay run {d.pay_date.isoformat()}"
+                number = d.pay_date.isoformat()  # "Pay run" is its type (#932)
             docs.append(
                 _doc(
                     _DOC_TYPE.get(kind, kind),
@@ -1831,7 +1859,7 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
                 _doc(
                     "pay_run",
                     run.id,
-                    f"Pay run {run.pay_date.isoformat()}",
+                    run.pay_date.isoformat(),  # "Pay run" is its type (#932)
                     run.total_gross,
                     "Processed, but it has no journal entry.",
                 )
