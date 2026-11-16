@@ -88,12 +88,18 @@ def receivables(db: Session) -> dict:
     )
     # pledges apart from invoices (#952): a nonprofit's program-fee invoice
     # is an Invoice on its own face, and only a flagged pledge is a Pledge,
-    # so the label names each kind it counts
-    pledges = (
-        db.query(func.count(Invoice.id))
-        .filter(*_owing(), _past_due(Invoice.due_date), Invoice.is_pledge.is_(True))
-        .scalar()
-    )
+    # so the label names each kind it counts. Only a nonprofit has pledges
+    # (#960): any other company reads every invoice as an invoice, flag or
+    # not, as Books Check and the Overdue rows do.
+    from app.services.terminology import terms_from_db
+
+    pledges = 0
+    if terms_from_db(db).is_nonprofit:
+        pledges = (
+            db.query(func.count(Invoice.id))
+            .filter(*_owing(), _past_due(Invoice.due_date), Invoice.is_pledge.is_(True))
+            .scalar()
+        )
     return {
         "total": _f(total),
         "overdue_count": int(overdue or 0),
@@ -270,12 +276,18 @@ def monthly_revenue(db: Session) -> dict:
 
 
 def recent_invoices(db: Session) -> dict:
+    from app.services.donor_documents import document_label
+    from app.services.terminology import terms_from_db
+
+    t = terms_from_db(db)
     rows = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
     return {
         "items": [
             {
                 "id": i.id,
                 "invoice_number": i.invoice_number,
+                # the document's own face (#958), as the Overdue rows carry
+                "label": document_label(i, t),
                 "customer": i.customer.name if i.customer else "",
                 "total": _f(i.total),
                 "balance_due": _f(i.balance_due),
