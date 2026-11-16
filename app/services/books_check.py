@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -245,8 +246,12 @@ def _row(
 
 # The chart's account names as they stand while one Books Check runs
 # (#944): the vocabulary pass must leave them as the chart has them. Set by
-# books_check(), read by _words.
-_CHART_LABELS: list[str] = []
+# books_check() for its own run and read by _words; a context variable, not
+# a module list, so two checks at once (two sign-ins, the window and a CSV)
+# never read each other's names or clear them mid-run (#951).
+_chart_labels: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "books_check_chart_labels", default=()
+)
 
 
 def _words(t, text: str) -> str:
@@ -256,7 +261,7 @@ def _words(t, text: str) -> str:
     from its chart and is put back as the chart has it (#944: a nonprofit's
     2010 Accrued Job Costs read "Accrued Grant Costs")."""
     out = re.sub(r"\b([Aa])n (?=[^aeiouAEIOU\W])", r"\1 ", t.text(text))
-    for label in _CHART_LABELS:
+    for label in _chart_labels.get():
         if label and label in text:
             swapped = t.text(label)
             if swapped != label and swapped in out:
@@ -1953,13 +1958,25 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
     t = terms_from_db(db)
     from app.services.account_label import label_for
 
-    _CHART_LABELS[:] = sorted(
-        {label_for(a, db) for a in db.query(Account).all()}
-        | {a.name for a in db.query(Account).all() if a.name}
-        | {"Accrued Job Costs"},
-        key=len,
-        reverse=True,
+    accounts = db.query(Account).all()
+    token = _chart_labels.set(
+        tuple(
+            sorted(
+                {label_for(a, db) for a in accounts}
+                | {a.name for a in accounts if a.name}
+                | {"Accrued Job Costs"},
+                key=len,
+                reverse=True,
+            )
+        )
     )
+    try:
+        return _books_check_rows(db, as_of, today, t)
+    finally:
+        _chart_labels.reset(token)
+
+
+def _books_check_rows(db: Session, as_of: date, today: date, t) -> dict:
     rows = [
         check_ar_aging(db, as_of, t),
         check_customer_balances(db, as_of, today, t),
@@ -1986,7 +2003,6 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
         r.subledger_label = _words(t, r.subledger_label)
         r.control_label = _words(t, r.control_label)
     _label_invoices_by_their_face(db, rows, t)
-    _CHART_LABELS.clear()
     differences = sum(1 for r in rows if r.ok is False)
     return {
         "as_of": as_of.isoformat(),

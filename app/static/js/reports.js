@@ -4934,7 +4934,11 @@ ReportsPage._booksCheckKind = function (kind, label) {
         vendor_credit: 'Vendor credit', deposit: 'Deposit', journal: 'Journal entry', pay_run: 'Pay run',
         expense: 'Expense', cc_charge: 'Card charge', vendor: 'Vendor', item: 'Item',
     };
-    return own[kind] || label || words[kind] || String(kind || '').replace(/_/g, ' ');
+    // the server's label first (#950): it already carries the company's
+    // words, and an invoice-kind document's own face (Invoice, Pledge, Sales
+    // Receipt, Donation Receipt), which the company's word for "Invoice"
+    // would overwrite
+    return label || own[kind] || words[kind] || String(kind || '').replace(/_/g, ' ');
 };
 // The address a named document opens at; an item opens the Item List, a
 // job-less row ("No job") opens nothing.
