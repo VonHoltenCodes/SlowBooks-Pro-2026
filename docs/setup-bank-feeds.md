@@ -55,6 +55,14 @@ Synced transactions land in the same review flow as OFX/CSV imports:
   it; *Add all categorised* posts the rule-suggested ones in one click.
 - Pending transactions are ignored until they post (their ids aren't
   stable before that).
+- **A transfer between two of your own accounts** (checking to checking,
+  checking to a card) is a line whose category is the other bank or card
+  account: the Category list keeps those under **Transfer to another
+  account**. **Add** it on one side and the line posts as a transfer, not as
+  income or an expense; when the other account's feed brings in its side of
+  the same amount, that line finds the transfer you posted and offers
+  **Match**, so nothing posts twice. Paying a credit card from checking works
+  the same way, with the card as the category.
 
 The first sync reaches back roughly three months; every later sync re-checks a 7-day
 overlap window before your last sync so late-posting transactions are

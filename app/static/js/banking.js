@@ -1778,12 +1778,19 @@ const BankingPage = {
     // now; a line keeps its own choice (one picked a moment ago, not yet
     // reloaded, included).
     _reviewAccounts: null,
+    // The bank and card accounts under their own heading (#948): a line
+    // whose category is another bank or card account posts as a transfer,
+    // and the heading says so where the hand goes; the kind label stays.
     _fillReviewCats() {
         const usable = BankingPage._reviewAccounts || [];
         document.querySelectorAll('select.review-cat').forEach(sel => {
             const current = sel.value || sel.dataset.current;
-            sel.innerHTML = '<option value="">Pick a category…</option>' + usable.map(a =>
-                `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`).join('');
+            const opt = (a) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
+            const transfers = usable.filter(a => a.bank_kind);
+            const categories = usable.filter(a => !a.bank_kind);
+            sel.innerHTML = '<option value="">Pick a category…</option>'
+                + `<optgroup label="Categories">${categories.map(opt).join('')}</optgroup>`
+                + (transfers.length ? `<optgroup label="Transfer to another account">${transfers.map(opt).join('')}</optgroup>` : '');
         });
     },
 
