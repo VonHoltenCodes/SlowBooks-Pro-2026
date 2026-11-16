@@ -12,7 +12,6 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.models.transactions import Transaction, TransactionLine
 
 
-
 def _entry(
     db, when, debit_acct, credit_acct, amount, *, vendor_id=None, customer_id=None
 ):
