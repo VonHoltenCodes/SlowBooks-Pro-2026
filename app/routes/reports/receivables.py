@@ -194,18 +194,26 @@ def ar_aging_report(db: Session, as_of_date: date) -> dict:
             row["total"] -= amt
 
     # A journal line on A/R that names the customer (#897): QuickBooks keeps
-    # it as the customer's receivable and an import carries it, so it ages by
-    # its date (a credit one offsets the newest bucket, as a credit memo).
-    from app.services.control_journal_lines import aging_bucket, receivable_lines
+    # it as the customer's receivable and an import carries it. The
+    # customer's lines that lower what is owed pay its oldest raising ones
+    # first (#917), so what is still owed ages from the line it is owed on,
+    # and only a payment with nothing left to pay is a credit (offsetting the
+    # newest bucket, as a credit memo does).
+    from app.services.control_journal_lines import (
+        aging_bucket,
+        applied,
+        receivable_lines,
+    )
 
-    for named in receivable_lines(db, as_of_date, named_only=True):
-        for row in rows_for(named.party_id):
-            if named.amount > 0:
-                row[aging_bucket(as_of_date, named.date)] += named.amount
-            else:
-                row["unapplied_credits"] -= named.amount
-                row["current"] += named.amount
-            row["total"] += named.amount
+    for cid, aged in applied(receivable_lines(db, as_of_date, named_only=True)).items():
+        for row in rows_for(cid):
+            for on, left in aged.open_items:
+                row[aging_bucket(as_of_date, on)] += left
+                row["total"] += left
+            if aged.credit:
+                row["unapplied_credits"] += aged.credit
+                row["current"] -= aged.credit
+                row["total"] -= aged.credit
 
     _COLS = _AGING_COLS
     items = sorted(aging.values(), key=lambda i: (i["customer_name"] or "").lower())

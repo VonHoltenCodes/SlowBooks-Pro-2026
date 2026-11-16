@@ -169,6 +169,55 @@ def by_party(
     return dict(out)
 
 
+@dataclass
+class Aged:
+    """One party's named lines after its lowering entries are applied to its
+    raising ones (#917): what is still owed, item by item with the date it
+    ages from, and the credit left over when the lowering entries exceed
+    what there was to lower."""
+
+    open_items: list[tuple[date, Decimal]]
+    credit: Decimal
+
+
+def applied(lines: Iterable[ControlLine]) -> dict[int, Aged]:
+    """Each named party's lines read the way the agings read documents: an
+    entry that lowers what is owed (a bill payment's debit to A/P, a customer
+    payment's credit to A/R) pays the party's oldest open raising entries
+    first, so a paid bill leaves no overdue amount behind and a payment is
+    not a credit the party holds. Lines are taken in date order; a lowering
+    entry dated before any raising one waits as credit and pays the next
+    raising entry. Only what is left when every raising entry is covered is
+    an unapplied credit (#917; before this, each entry aged by its own date
+    and a paid bill read as overdue beside an equal credit)."""
+    out: dict[int, Aged] = {}
+    for c in sorted(lines, key=lambda c: (c.date, c.transaction.id)):
+        if c.party_id is None:
+            continue
+        aged = out.setdefault(c.party_id, Aged([], ZERO))
+        amount = c.amount
+        if amount > 0:
+            take = min(amount, aged.credit)
+            aged.credit -= take
+            amount -= take
+            if amount > 0:
+                aged.open_items.append((c.date, amount))
+            continue
+        lowering = -amount
+        items = []
+        for on, left in aged.open_items:
+            if lowering <= 0:
+                items.append((on, left))
+                continue
+            take = min(left, lowering)
+            lowering -= take
+            if left - take > 0:
+                items.append((on, _q(left - take)))
+        aged.open_items = items
+        aged.credit = _q(aged.credit + lowering)
+    return out
+
+
 def aging_bucket(as_of: date, on: date) -> str:
     """The aging column a named line lands in: by its entry date, as
     QuickBooks ages a journal line that has no due date."""
