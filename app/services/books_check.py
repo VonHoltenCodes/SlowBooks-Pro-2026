@@ -187,7 +187,12 @@ def _row(
             key, name, sub_label, ctl_label, sub, ctl, diff, True, t.text(pass_text)
         )
     docs, more = _cap(docs_fn() if docs_fn else [])
-    sentence = diff_text.format(sub=_money(sub), ctl=_money(ctl), diff=_money(diff))
+    # the distance between the two figures, unsigned: the sentence already
+    # says which is bigger, and "-$80.00 apart" read as a typo (#926); the
+    # Difference column and the JSON's `difference` keep the sign
+    sentence = diff_text.format(
+        sub=_money(sub), ctl=_money(ctl), diff=_money(abs(diff))
+    )
     return Check(
         key,
         name,
