@@ -508,12 +508,13 @@ const ReportsPage = {
     },
 
     // A card and its view, for arranging: its section (#936), its title as
-    // shown (for the order) and its html (ReportsPage._card's).
+    // shown (the sort key; every card's title is plain text of our own, so
+    // it is taken as it is) and its html (ReportsPage._card's).
     _pick(view, title, text) {
         return {
             view,
             section: ReportsPage._sectionOf[view] || 'books',
-            title: String(title).replace(/<[^>]*>/g, '').trim(),
+            title: String(title).trim(),
             html: ReportsPage._card(view, title, text),
         };
     },
