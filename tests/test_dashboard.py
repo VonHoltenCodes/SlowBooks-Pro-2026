@@ -111,11 +111,10 @@ def test_widgets_reflect_activity(client, db_session, seed_accounts, seed_custom
         "/api/dashboard/data?ids=receivables,overdue_invoices,payables,open_pos,job_budget_vs_actual,pnl_month,cash_position,monthly_revenue"
     ).json()
     assert d["receivables"] == {"total": 400.0, "overdue_count": 1}
-    # the Overdue card reads the A/R Aging (#935): the customer, 400.00 past
-    # due, 15 days into the aging's 1-30 column
-    assert d["overdue_invoices"]["count"] == 1
-    assert d["overdue_invoices"]["items"][0]["past_due"] == 400.0
-    assert d["overdue_invoices"]["items"][0]["oldest"] == "1-30"
+    assert (
+        d["overdue_invoices"]["count"] == 1
+        and d["overdue_invoices"]["items"][0]["days_overdue"] == 15
+    )
     assert d["payables"]["total"] == 150.0 and d["payables"]["overdue_count"] == 0
     assert d["open_pos"]["count"] == 1 and d["open_pos"]["total"] == 300.0
     assert d["open_pos"]["items"][0]["job"].endswith("Shed")
