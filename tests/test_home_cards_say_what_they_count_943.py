@@ -77,7 +77,12 @@ def test_the_count_is_overdue_invoices_and_the_total_is_the_aging(
     d = client.get(
         "/api/dashboard/data?ids=receivables,overdue_invoices,ar_aging"
     ).json()
-    assert d["receivables"] == {"total": 362.0, "overdue_count": 1}
+    assert d["receivables"] == {
+        "total": 362.0,
+        "overdue_count": 1,
+        "overdue_pledges": 0,
+        "overdue_invoices": 1,
+    }
     assert d["overdue_invoices"]["count"] == 1
     assert [i["invoice_number"] for i in d["overdue_invoices"]["items"]] == ["3001"]
     assert d["overdue_invoices"]["items"][0]["days_overdue"] == 10
