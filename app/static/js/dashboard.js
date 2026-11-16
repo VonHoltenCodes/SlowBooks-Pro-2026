@@ -168,24 +168,23 @@ const DashboardPage = {
     renderers: {
         _default(d) { return `<pre style="font-size:11px;white-space:pre-wrap">${escapeHtml(JSON.stringify(d, null, 1))}</pre>`; },
 
+        // The total is the A/R Aging's (named journal entries included); the
+        // count is overdue invoices, and the label says so (#943): the two
+        // cards read different pools and each says which.
         receivables(d) {
             return `<div class="card-value">${formatCurrency(d.total)}</div>
-                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${d.overdue_count} overdue</div>`;
+                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${d.overdue_count} overdue ${d.overdue_count === 1 ? T('invoice') : T('invoices')}</div>`;
         },
         active_customers(d) { return `<div class="card-value">${d.count}</div>`; },
         payables(d) {
             return `<div class="card-value">${formatCurrency(d.total)}</div>
-                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${d.overdue_count} overdue</div>`;
+                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${d.overdue_count} overdue ${d.overdue_count === 1 ? 'bill' : 'bills'}</div>`;
         },
-        // Who the A/R Aging puts past due (#935): the customer, what is past
-        // due and the oldest column it reaches; a row opens the customer, the
-        // tail opens the A/R Aging. One pool with Total Receivables' count
-        // and the A/R Aging card, so the three never disagree.
         overdue_invoices(d) {
             if (!d.count) return '<div style="color:var(--gray-500);font-size:12px">Nothing overdue.</div>';
-            return `<table class="data-table" style="font-size:12px"><thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Past due</th><th scope="col" class="amount">Oldest</th></tr></thead>
-                <tbody>${d.items.map(i => `<tr class="clickable" onclick="App.navigate('#/customers/${i.id}')"><td>${escapeHtml(i.customer)}</td><td class="amount">${formatCurrency(i.past_due)}</td><td class="amount" style="color:var(--qb-red)">${escapeHtml(i.oldest)} days</td></tr>`).join('')}</tbody></table>
-                ${d.count > d.items.length ? `<div style="font-size:11px;margin-top:4px"><a href="${DashboardPage._tileLink('ar-aging')}" onclick="ReportsPage._leaveFrom(this)">${d.count} past due in all →</a></div>` : ''}`;
+            return `<table class="data-table" style="font-size:12px"><thead><tr><th scope="col">#</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Due</th><th scope="col" class="amount">Days</th></tr></thead>
+                <tbody>${d.items.map(i => `<tr class="clickable" onclick="InvoicesPage.view(${i.id})"><td>${escapeHtml(i.invoice_number)}</td><td>${escapeHtml(i.customer)}</td><td class="amount">${formatCurrency(i.balance_due)}</td><td class="amount" style="color:var(--qb-red)">${i.days_overdue}</td></tr>`).join('')}</tbody></table>
+                ${d.count > d.items.length ? `<div style="font-size:11px;margin-top:4px"><a href="#/invoices">${d.count} overdue in all →</a></div>` : ''}`;
         },
         bank_balances(d) {
             if (!d.accounts.length) return '<div style="color:var(--gray-500);font-size:12px">No bank accounts yet. <a href="#/banking">Add one</a>.</div>';
@@ -277,7 +276,7 @@ const DashboardPage = {
                     <tr><td>− Payables due within 30 days</td><td class="amount">${formatCurrency(d.ap_due_30)}</td></tr>
                     <tr style="font-weight:700"><td>30-day forecast</td><td class="amount" style="color:${d.forecast_30 < 0 ? 'var(--text-danger)' : 'var(--text-success)'}">${formatCurrency(d.forecast_30)}</td></tr>
                 </tbody></table>
-                <div style="font-size:10px;color:var(--gray-500);margin-top:4px">Assumes customers pay on the due date.</div>`;
+                <div style="font-size:10px;color:var(--gray-500);margin-top:4px">Assumes ${T('customers')} pay on the due date.</div>`;
         },
         open_pos(d) {
             if (!d.count) return '<div style="color:var(--gray-500);font-size:12px">No open purchase orders.</div>';

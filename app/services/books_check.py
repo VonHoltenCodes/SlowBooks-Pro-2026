@@ -219,7 +219,7 @@ def _row(
     diff = _q(sub - ctl)
     if diff == ZERO:
         return Check(
-            key, name, sub_label, ctl_label, sub, ctl, diff, True, t.text(pass_text)
+            key, name, sub_label, ctl_label, sub, ctl, diff, True, _words(t, pass_text)
         )
     docs, more = _cap(docs_fn() if docs_fn else [])
     # the distance between the two figures, unsigned: the sentence already
@@ -243,11 +243,25 @@ def _row(
     )
 
 
+# The chart's account names as they stand while one Books Check runs
+# (#944): the vocabulary pass must leave them as the chart has them. Set by
+# books_check(), read by _words.
+_CHART_LABELS: list[str] = []
+
+
 def _words(t, text: str) -> str:
     """The company's own words for a sentence, with the article made to fit
     the word that replaced the key (#933): Terms swaps the noun and left "an
-    invoice" as "an pledge"."""
-    return re.sub(r"\b([Aa])n (?=[^aeiouAEIOU\W])", r"\1 ", t.text(text))
+    invoice" as "an pledge". An account's name is the company's own word
+    from its chart and is put back as the chart has it (#944: a nonprofit's
+    2010 Accrued Job Costs read "Accrued Grant Costs")."""
+    out = re.sub(r"\b([Aa])n (?=[^aeiouAEIOU\W])", r"\1 ", t.text(text))
+    for label in _CHART_LABELS:
+        if label and label in text:
+            swapped = t.text(label)
+            if swapped != label and swapped in out:
+                out = out.replace(swapped, label)
+    return out
 
 
 def _doc_words(t, doc: dict) -> dict:
@@ -262,7 +276,7 @@ def _doc_words(t, doc: dict) -> dict:
 
 def _not_checked(key, name, sub_label, ctl_label, sentence, t) -> Check:
     return Check(
-        key, name, sub_label, ctl_label, None, None, None, None, t.text(sentence)
+        key, name, sub_label, ctl_label, None, None, None, None, _words(t, sentence)
     )
 
 
@@ -1937,6 +1951,15 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
     today = date.today()
     as_of = as_of or today
     t = terms_from_db(db)
+    from app.services.account_label import label_for
+
+    _CHART_LABELS[:] = sorted(
+        {label_for(a, db) for a in db.query(Account).all()}
+        | {a.name for a in db.query(Account).all() if a.name}
+        | {"Accrued Job Costs"},
+        key=len,
+        reverse=True,
+    )
     rows = [
         check_ar_aging(db, as_of, t),
         check_customer_balances(db, as_of, today, t),
@@ -1959,10 +1982,11 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
         check_missing_entries(db, as_of, t),
     ]
     for r in rows:
-        r.name = t.text(r.name)
-        r.subledger_label = t.text(r.subledger_label)
-        r.control_label = t.text(r.control_label)
+        r.name = _words(t, r.name)
+        r.subledger_label = _words(t, r.subledger_label)
+        r.control_label = _words(t, r.control_label)
     _label_invoices_by_their_face(db, rows, t)
+    _CHART_LABELS.clear()
     differences = sum(1 for r in rows if r.ok is False)
     return {
         "as_of": as_of.isoformat(),
