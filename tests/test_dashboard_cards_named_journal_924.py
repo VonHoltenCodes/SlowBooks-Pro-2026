@@ -1,7 +1,9 @@
 """The Payables and Receivables cards count a vendor- or customer-named
-journal entry's open amount as overdue the way the agings bucket it (#924):
-an imported book has only those entries until its bills and invoices are
-entered, and the card read "0 overdue" beside an aging at 31–60 days."""
+journal entry's open amount as overdue the way the agings bucket it (#924,
+then #935: every Home number reads the aging, so an entry is past due from
+its first day, as the aging's 1-30 column has it): an imported book has only
+those entries until its bills and invoices are entered, and the card read
+"0 overdue" beside an aging at 31–60 days."""
 
 from datetime import date, timedelta
 
@@ -43,7 +45,9 @@ def _entry(
     return txn
 
 
-def test_the_payables_card_counts_a_named_entry_past_30_days(db_session, seed_accounts):
+def test_the_payables_card_counts_the_vendors_the_aging_puts_past_due(
+    db_session, seed_accounts
+):
     a = seed_accounts
     vendor = Vendor(name="Brookside Nursery", is_active=True)
     db_session.add(vendor)
@@ -62,21 +66,26 @@ def test_the_payables_card_counts_a_named_entry_past_30_days(db_session, seed_ac
     )
     card = dashboard_widgets.payables(db_session)
     assert card == {"total": 2236.90, "overdue_count": 1}
-    # a bill 10 days old: not overdue yet
-    _entry(
-        db_session, today - timedelta(days=10), expense, ap, 100, vendor_id=vendor.id
-    )
+    # a second vendor's bill 10 days old: in the aging's 1-30, so past due
+    # too (#935: the card reads the aging)
+    other = Vendor(name="Dockside Supply", is_active=True)
+    db_session.add(other)
+    db_session.commit()
+    _entry(db_session, today - timedelta(days=10), expense, ap, 100, vendor_id=other.id)
     card = dashboard_widgets.payables(db_session)
-    assert card["overdue_count"] == 1 and card["total"] == 2336.90
-    # the old bill paid in full (applied oldest first): nothing overdue
+    assert card["overdue_count"] == 2 and card["total"] == 2336.90
+    # the old bill paid in full (applied oldest first): that vendor drops out
     _entry(
         db_session, today - timedelta(days=5), ap, bank, 2236.90, vendor_id=vendor.id
     )
     card = dashboard_widgets.payables(db_session)
-    assert card == {"total": 100.0, "overdue_count": 0}
+    assert card == {"total": 100.0, "overdue_count": 1}
+    # an entry dated today is current, not past due
+    _entry(db_session, today, expense, ap, 7, vendor_id=vendor.id)
+    assert dashboard_widgets.payables(db_session)["overdue_count"] == 1
 
 
-def test_the_receivables_card_counts_a_named_entry_past_30_days(
+def test_the_receivables_card_counts_the_customers_the_aging_puts_past_due(
     db_session, seed_accounts
 ):
     a = seed_accounts
