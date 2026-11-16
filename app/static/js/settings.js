@@ -1027,8 +1027,8 @@ const SettingsPage = {
                 <div class="settings-section" data-group="email" role="group" aria-labelledby="settings-h-email-templates">
                     <h3 id="settings-h-email-templates">Email Templates</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Customize email templates for invoices, payment receipts, and collection notices.
-                        Templates use Jinja2 syntax. Available variables: {{ invoice }}, {{ customer_name }}, {{ company }}, {{ pay_url }}. The donation acknowledgment letter (nonprofit) also gets {{ donor }}, {{ donor_name }}, {{ gift }} and {{ irs.text }}.
+                        Customize email templates for invoices, estimates, payment receipts, and collection notices.
+                        Templates use Jinja2 syntax. Available variables: {{ invoice }}, {{ customer_name }}, {{ company }}, {{ pay_url }}; the estimate email (estimate_email) gets {{ estimate }} in place of {{ invoice }}. The donation acknowledgment letter (nonprofit) also gets {{ donor }}, {{ donor_name }}, {{ gift }} and {{ irs.text }}.
                     </div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-write>
                         <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.seedTemplates()">Seed Default Templates</button>
@@ -2866,13 +2866,15 @@ const SettingsPage = {
     },
 
     async editTemplate(id) {
-        let t, invoices = [];
+        let t, invoices = [], estimates = [];
         try {
             t = await API.get(`/email-templates/${id}`);
             if (t.template_type === 'invoice') {
                 // Enough to pick one to preview against; the endpoint would
                 // otherwise return up to 500, each with its lines.
                 invoices = await API.get('/invoices?is_sales_receipt=false&limit=50');
+            } else if (t.template_type === 'estimate') {
+                estimates = await API.get('/estimates?limit=50');
             }
         } catch (err) { toast(err.message, 'error'); return; }
         openModal('Edit Email Template', `
@@ -2888,16 +2890,25 @@ const SettingsPage = {
                         <textarea name="body_template" rows="10" style="font-family:monospace; font-size:11px;">${escapeHtml(t.body_template)}</textarea></div>
                 </div>
                 <div style="font-size:10px; color:var(--text-muted); margin:8px 0;">
-                    Variables: {{ invoice.invoice_number }}, {{ invoice.total }}, {{ invoice.due_date }}, {{ customer_name }},
+                    ${t.template_type !== 'estimate' ? `Variables: {{ invoice.invoice_number }}, {{ invoice.total }}, {{ invoice.due_date }}, {{ customer_name }},
                     {{ company.company_name }}, {{ company.display_name }}, {{ doc_label }}, {{ pay_url }}. Filters: | currency, | fdate
                     <br><span>{{ doc_label }} reads &ldquo;Invoice&rdquo; or &ldquo;Sales Receipt&rdquo; to match the document.
-                    {{ pay_url }} is only set when a payment provider is enabled &mdash; guard it with {% if pay_url %}.</span>
+                    {{ pay_url }} is only set when a payment provider is enabled &mdash; guard it with {% if pay_url %}.</span>` : `For an estimate: {{ estimate.estimate_number }}, {{ estimate.date }}, {{ estimate.expiration_date }}, {{ estimate.total }}, {{ customer_name }},
+                    {{ company.company_name }}, {{ company.display_name }}, {{ doc_label }}. Filters: | currency, | fdate
+                    <br><span>{{ estimate.expiration_date }} can be empty &mdash; guard it with {% if estimate.expiration_date %}. The Message typed in the send dialog goes above the template.</span>`}
                 </div>
                 ${t.template_type === 'invoice' ? `<div style="margin-top:12px;">
                     <label>Preview against ${T('invoice')}
                         <select id="email-template-invoice">${invoices.map(inv => `<option value="${inv.id}">#${escapeHtml(inv.invoice_number)} — ${escapeHtml(inv.customer_name || '')}</option>`).join('')}</select></label>
                     <button type="button" class="btn btn-secondary" onclick="SettingsPage.previewTemplate()" ${invoices.length ? '' : 'disabled'}>Preview</button>
                     <p style="font-size:11px; color:var(--text-muted);">Renders what you have typed, without saving or sending.</p>
+                    <div id="email-template-preview"></div>
+                </div>` : ''}
+                ${t.template_type === 'estimate' ? `<div style="margin-top:12px;">
+                    <label>Preview against estimate
+                        <select id="email-template-estimate">${estimates.map(est => `<option value="${est.id}">#${escapeHtml(est.estimate_number)} — ${escapeHtml(est.customer_name || '')}</option>`).join('')}</select></label>
+                    <button type="button" class="btn btn-secondary" onclick="SettingsPage.previewTemplate()" ${estimates.length ? '' : 'disabled'}>Preview</button>
+                    <p style="font-size:11px; color:var(--text-muted);">${estimates.length ? 'Renders what you have typed, without saving or sending.' : 'There is no estimate to preview against yet.'}</p>
                     <div id="email-template-preview"></div>
                 </div>` : ''}
                 <div class="form-actions">
@@ -2909,13 +2920,18 @@ const SettingsPage = {
 
     async previewTemplate() {
         const form = document.getElementById('email-template-editor');
-        const picker = document.getElementById('email-template-invoice');
+        const invoicePicker = document.getElementById('email-template-invoice');
+        const estimatePicker = document.getElementById('email-template-estimate');
+        const picker = invoicePicker || estimatePicker;
         const out = document.getElementById('email-template-preview');
         if (!form || !picker || !out) return;
         out.innerHTML = '';
+        const against = invoicePicker
+            ? { invoice_id: Number(invoicePicker.value) }
+            : { estimate_id: Number(estimatePicker.value), template_name: form.elements.name.value, template_type: 'estimate' };
         try {
             const p = await API.post('/email-templates/preview', {
-                invoice_id: Number(picker.value),
+                ...against,
                 subject_template: form.elements.subject_template.value,
                 body_template: form.elements.body_template.value,
             });
@@ -2935,7 +2951,7 @@ const SettingsPage = {
                     the email would send with the same gaps.`);
             }
             for (const c of conditional) {
-                lines.push(`<strong>${escapeHtml(c.name)} is not set for this ${T('Invoice').toLowerCase()}:</strong>
+                lines.push(`<strong>${escapeHtml(c.name)} is not set for this ${(invoicePicker ? T('Invoice') : 'Estimate').toLowerCase()}:</strong>
                     ${escapeHtml(c.why)}.`);
             }
             const note = lines.length

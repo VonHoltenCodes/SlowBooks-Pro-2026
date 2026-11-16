@@ -4,6 +4,7 @@
 # ============================================================================
 
 import re
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -33,6 +34,17 @@ DEFAULT_TEMPLATES = [
 <p>Thank you for your business.</p>
 <p>{{ company.display_name or company.company_name }}</p>""",
         "template_type": "invoice",
+    },
+    # #957: the estimate's Email reads this one, by the fixed name.
+    {
+        "name": "estimate_email",
+        "subject_template": "{{ doc_label }} #{{ estimate.estimate_number }} from {{ company.display_name or company.company_name }}",
+        "body_template": """<p>Dear {{ customer_name }},</p>
+<p>Please find attached {{ doc_label }} #{{ estimate.estimate_number }} for {{ estimate.total | currency }}.</p>
+{% if estimate.expiration_date %}<p>This {{ doc_label | lower }} is good through {{ estimate.expiration_date | fdate }}.</p>{% endif %}
+<p>Thank you for the opportunity.</p>
+<p>{{ company.display_name or company.company_name }}</p>""",
+        "template_type": "estimate",
     },
     {
         "name": "payment_receipt",
@@ -90,9 +102,45 @@ def get_template(template_id: int, db: Session = Depends(get_db)):
 
 
 class _TemplatePreviewRequest(StrictModel):
-    invoice_id: int
+    # An invoice template previews against `invoice_id`; an estimate template
+    # (named `estimate_email` or of type `estimate`, #957) against
+    # `estimate_id`, or the most recent estimate when none is picked.
+    invoice_id: Optional[int] = None
+    estimate_id: Optional[int] = None
+    template_name: str = ""
+    template_type: str = ""
     subject_template: str = ""
     body_template: str = ""
+
+
+def _is_estimate_preview(data: "_TemplatePreviewRequest") -> bool:
+    return (
+        data.template_name == "estimate_email"
+        or data.template_type == "estimate"
+        or (data.estimate_id is not None and data.invoice_id is None)
+    )
+
+
+def _estimate_preview_context(db: Session, data: "_TemplatePreviewRequest", company):
+    from app.models.estimates import Estimate
+    from app.services.email_service import estimate_email_context
+
+    q = db.query(Estimate)
+    if data.estimate_id is not None:
+        est = q.filter(Estimate.id == data.estimate_id).first()
+        if not est:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+    else:
+        est = q.order_by(Estimate.date.desc(), Estimate.id.desc()).first()
+        if not est:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "There is no estimate to preview against yet. Create an "
+                    "estimate, then preview this template."
+                ),
+            )
+    return estimate_email_context(est, company)
 
 
 @router.post("/preview")
@@ -101,7 +149,8 @@ def preview_template(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Render candidate template text against a real invoice, without saving.
+    """Render candidate template text against a real invoice (or, for the
+    `estimate_email` template, a real estimate), without saving.
 
     #140 gave the send dialog a preview of what it is about to send. This is
     the other half: the operator editing `invoice_email` under Settings can
@@ -120,16 +169,23 @@ def preview_template(
     from app.services.payments import enabled_providers
     from app.services.settings_service import get_all_settings
 
-    inv = db.query(Invoice).filter(Invoice.id == data.invoice_id).first()
-    if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-
     company = get_all_settings(db)
-    pay_url = None
-    if inv.payment_token and enabled_providers(db):
-        pay_url = f"{str(request.base_url).rstrip('/')}/pay/{inv.payment_token}"
+    if _is_estimate_preview(data):
+        ctx = _estimate_preview_context(db, data, company)
+    else:
+        if data.invoice_id is None:
+            raise HTTPException(
+                status_code=400, detail="Choose an invoice to preview against."
+            )
+        inv = db.query(Invoice).filter(Invoice.id == data.invoice_id).first()
+        if not inv:
+            raise HTTPException(status_code=404, detail="Invoice not found")
 
-    ctx = invoice_email_context(inv, company, pay_url=pay_url)
+        pay_url = None
+        if inv.payment_token and enabled_providers(db):
+            pay_url = f"{str(request.base_url).rstrip('/')}/pay/{inv.payment_token}"
+
+        ctx = invoice_email_context(inv, company, pay_url=pay_url)
     env, resolved_to_nothing = recording_template_env()
     try:
         subject = render_subject(env, data.subject_template, ctx)
@@ -208,7 +264,9 @@ _JINJA_TAG = re.compile(r"(\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\})", re.S)
 def _prose_in_company_words(template_text: str, terms) -> str:
     """Swap the words in the prose and leave every Jinja expression alone —
     `{{ invoice.invoice_number }}` is a variable name, not a sentence, and
-    the first cut turned it into `{{ pledge.invoice_number }}`."""
+    the first cut turned it into `{{ pledge.invoice_number }}`. The same
+    holds for `{{ estimate.estimate_number }}` in `estimate_email` (#957):
+    its document word comes from `{{ doc_label }}`, never from the prose."""
     parts = _JINJA_TAG.split(template_text)
     return "".join(part if i % 2 else terms.text(part) for i, part in enumerate(parts))
 

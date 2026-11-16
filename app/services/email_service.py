@@ -565,6 +565,72 @@ def render_invoice_email_parts(
     return (subject or tpl_subject or default_subject), _note_paragraph(note) + body
 
 
+def estimate_email_context(estimate, company_settings: dict) -> dict:
+    """What a saved `estimate_email` template can reference (#957).
+
+    The invoice context's shape, for an estimate: the preview and the send
+    both build it here so they cannot drift. No `pay_url` — an estimate is
+    not paid online.
+    """
+    from app.services.terminology import terms_for
+
+    terms = terms_for(company_settings)
+    return {
+        "estimate": estimate,
+        "est": estimate,  # the PDF template's name for it
+        # GHSA-c3v4-f43f-4wqm: redacted here, never the raw settings.
+        "company": customer_facing_company(company_settings),
+        "customer_name": (
+            estimate.customer.name if estimate.customer else terms("Customer")
+        ),
+        # "Estimate" is a protected word in every vocabulary (construction
+        # keeps it, as the PDF's title does); terms() is asked anyway so a
+        # future vocabulary that renames it is honoured in one place.
+        "doc_label": terms("Estimate"),
+        "terms": terms,
+    }
+
+
+def render_estimate_email_parts(
+    db, estimate, company_settings: dict, note: str = None
+) -> tuple[str, str]:
+    """(subject, html_body) for an estimate email (#957).
+
+    The saved template named `estimate_email` under Settings -> Email
+    Templates is used when one exists; otherwise, or when it fails to
+    render, the fixed sentences estimates have sent since 2.31.11. The
+    operator's note is prepended either way, as on an invoice.
+    """
+    import html as _html
+
+    ctx = estimate_email_context(estimate, company_settings)
+    company_name = (ctx["company"].get("company_name") or "").strip()
+    default_subject = f"{ctx['doc_label']} #{estimate.estimate_number}" + (
+        f" from {company_name}" if company_name else ""
+    )
+
+    body = None
+    tpl_subject = None
+    if db is not None:
+        try:
+            tpl_subject, tpl_body = render_template_from_db(db, "estimate_email", ctx)
+            if tpl_body:
+                body = tpl_body
+        except Exception:
+            # A saved template with a bad expression must not stop the mail
+            # going out; fall through to the built-in sentences.
+            logger.exception("saved estimate_email template failed to render")
+            tpl_subject = None
+
+    if body is None:
+        body = (
+            f"<p>Please find {_html.escape(ctx['doc_label'].lower())} "
+            f"#{_html.escape(str(estimate.estimate_number))} attached.</p>"
+        ) + (f"<p>{_html.escape(company_name)}</p>" if company_name else "")
+
+    return (tpl_subject or default_subject), _note_paragraph(note) + body
+
+
 def render_invoice_email(
     invoice, company_settings: dict, pay_url: str = None, note: str = None, db=None
 ) -> str:

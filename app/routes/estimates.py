@@ -847,14 +847,13 @@ def email_estimate(
     """Email the estimate PDF as an attachment, by the path an invoice uses:
     the same address checks, the same send_email (EmailLog row, always-copy
     settings) and the same 502 when SMTP is not set up."""
-    import html as _html
-
     from app.routes._roles import is_admin
     from app.services.email_errors import send_failed_detail
     from app.services.email_service import (
         _get_smtp_settings,
         bad_addresses,
         copy_lists,
+        render_estimate_email_parts,
         send_email,
     )
 
@@ -884,15 +883,10 @@ def email_estimate(
         raise HTTPException(status_code=400, detail=str(e))
 
     company = get_settings(db)
-    name = (company.get("display_name") or company.get("company_name") or "").strip()
-    subject = (data.subject or "").strip() or (
-        f"Estimate #{est.estimate_number}" + (f" from {name}" if name else "")
-    )
-    note = (data.message or "").strip()
-    body = (f"<p>{_html.escape(note)}</p>\n" if note else "") + (
-        f"<p>Please find estimate #{_html.escape(est.estimate_number)} attached.</p>"
-        + (f"<p>{_html.escape(name)}</p>" if name else "")
-    )
+    # The saved `estimate_email` template when there is one, the fixed
+    # sentences when not (#957); a subject typed in the dialog still wins.
+    tpl_subject, body = render_estimate_email_parts(db, est, company, note=data.message)
+    subject = (data.subject or "").strip() or tpl_subject
     sent = send_email(
         db=db,
         to_email=recipient,
