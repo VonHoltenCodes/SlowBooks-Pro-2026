@@ -141,7 +141,7 @@ def _probe(name, *args):
 
 
 @requires_node
-def test_report_center_leads_with_contractor_cards_and_keeps_the_set():
+def test_report_center_holds_the_contractor_cards_in_the_jobs_section_and_keeps_the_set():
     got = _probe("reports_cards_probe.js")
     # the Construction group leads: the three contractor reports that always
     # existed, then the seven job reports added in #556, the Field Ticket Log
@@ -158,15 +158,17 @@ def test_report_center_leads_with_contractor_cards_and_keeps_the_set():
         "retainage",
         "compliance",
     ]
-    assert (
-        got["construction"][:13]
-        == [
-            "job-profitability",
-            "job-budget-vs-actual",
-            "profit-loss-by-job",
-        ]
-        + construction_only
-    )
+    # the job reports sit together in the Jobs section (#936), alphabetical
+    # by title, between the vendor side and the books tools
+    jobs = [v for v in got["construction"] if v in construction_only]
+    start = got["construction"].index(jobs[0])
+    block = got["construction"][start : start + 12]
+    assert set(block) == set(construction_only) | {
+        "job-profitability",
+        "job-budget-vs-actual",
+    }
+    assert got["construction"].index("ap-aging") < start
+    assert got["construction"].index("books-check") > start + 11
     # the five show in construction mode only; everything else is the business
     # set, unchanged
     assert set(got["construction"]) - set(got["business"]) == set(construction_only)

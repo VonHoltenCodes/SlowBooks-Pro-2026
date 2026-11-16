@@ -320,6 +320,8 @@ def test_browser_back_from_an_open_report_closes_it(browser, company, books):
         page.wait_for_function(f"!({MODAL_SHOWN})()")
         # the Report Center, usable: a card opens its report
         assert page.locator("#page-content .card-grid .card").count() > 5
+        # P&L by Class is under the folded All reports (#794, #936)
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         page.get_by_text("P&L by Class", exact=True).click(timeout=5000)
         page.wait_for_selector("#report-content table")
         assert page.evaluate(TITLE) == "P&L by Class"
@@ -386,6 +388,8 @@ def test_a_three_deep_chain_goes_back_twice_through_history_and_keeps_the_preset
     # losing the preset, and Back from there landed on the class P&L.
     page, handled = _open_at(browser, company, "#/reports")
     try:
+        # under the folded All reports (#794, #936)
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         page.get_by_text("P&L by Class", exact=True).click()
         page.wait_for_selector("#report-content thead a")
         by_class = _hash(page)
