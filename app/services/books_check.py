@@ -100,9 +100,43 @@ def _money(amount) -> str:
     return f"-${-amount:,.2f}" if amount < 0 else f"${amount:,.2f}"
 
 
+# What a document behind a difference is called, in words (#928): the one
+# table the JSON (`type_label`), the PDF and the CSV read, so the files a
+# person takes away say what the window says ("Card charge", not "Cc
+# charge"). The window keeps the company's own words for an invoice, a
+# customer and a job (Terms) and reads this for the rest.
+DOCUMENT_WORDS = {
+    "invoice": "Invoice",
+    "customer": "Customer",
+    "job": "Job",
+    "credit_memo": "Credit memo",
+    "bill": "Bill",
+    "bill_payment": "Bill payment",
+    "payment": "Payment",
+    "vendor_credit": "Vendor credit",
+    "deposit": "Deposit",
+    "journal": "Journal entry",
+    "pay_run": "Pay run",
+    "expense": "Expense",
+    "cc_charge": "Card charge",
+    "job_cost": "Job cost",
+    "vendor": "Vendor",
+    "item": "Item",
+}
+
+
+def document_words(kind: str) -> str:
+    words = DOCUMENT_WORDS.get(kind)
+    if words:
+        return words
+    plain = str(kind or "").replace("_", " ")
+    return plain[:1].upper() + plain[1:]
+
+
 def _doc(kind: str, rid, number, amount, why: str) -> dict:
     return {
         "type": kind,
+        "type_label": document_words(kind),
         "id": rid,
         "number": "" if number is None else str(number),
         "amount": None if amount is None else float(_q(_d(amount))),
