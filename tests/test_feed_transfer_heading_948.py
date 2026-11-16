@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_the_review_category_list_groups_transfers():
-    js = (ROOT / "app/static/js/banking.js").read_text()
+    js = (ROOT / "app/static/js/banking.js").read_text(encoding="utf-8")
     fill = js.split("_fillReviewCats() {")[1].split("async addLine(")[0]
     assert '<optgroup label="Categories">' in fill
     assert '<optgroup label="Transfer to another account">' in fill
@@ -16,7 +16,7 @@ def test_the_review_category_list_groups_transfers():
 
 
 def test_the_guide_says_how_a_transfer_is_posted_from_the_feed():
-    doc = (ROOT / "docs/setup-bank-feeds.md").read_text()
+    doc = (ROOT / "docs/setup-bank-feeds.md").read_text(encoding="utf-8")
     assert "A transfer between two of your own accounts" in doc
     assert (
         "Transfer to another\n  account" in doc or "Transfer to another account" in doc
