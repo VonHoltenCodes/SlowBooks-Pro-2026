@@ -2362,27 +2362,90 @@ def _payable_balance(prepared: dict, path: str) -> Decimal:
     return total
 
 
-def _payable_note(prepared: dict) -> list[str]:
+def _payable_named(db: Session, prepared: dict, path: str) -> Decimal:
+    """Of what the Journal leaves owed on the payable account, the part whose
+    entries name a vendor the import will know: one on the Vendors list in
+    the upload, or already in the books. Those entries age as that vendor's
+    once imported (#915); the rest is the balance W-117 spoke of."""
+    key = strip_code_suffix(path)
+    known = {v.lower() for (v,) in db.query(Vendor.name)}
+    if "vendors" in prepared:
+        known |= {
+            spec["name"].lower()
+            for spec in parse_contacts(prepared["vendors"], "Vendor")
+        }
+    total = Decimal("0")
+    if "gl" in prepared and known:
+        groups, _ = parse_gl(prepared["gl"])
+        for group in groups:
+            for row in group:
+                if strip_code_suffix(row["account"]) != key:
+                    continue
+                if str(row.get("name") or "").strip().lower() in known:
+                    total += (row["credit"] or Decimal("0")) - (
+                        row["debit"] or Decimal("0")
+                    )
+    return total
+
+
+def _payable_note(db: Session, prepared: dict) -> list[str]:
     """W-117: the export brings the payable account's balance and none of
-    the bills behind it, so A/P Aging cannot show it; said when it is not
-    zero."""
+    the bills behind it. Since #915 the entries that name a vendor age as
+    that vendor's, so the note says where each part of the balance shows
+    (NEW-226): the named part on the A/P Aging and the vendors' balances,
+    with Pay Bills still empty; the unnamed part nowhere until the bills
+    are entered. Said when either part is not zero."""
     if len(_COA_PAYABLE) != 1:
         return []
     path, control = _COA_PAYABLE[0]
     owed = _payable_balance(prepared, path)
     if not owed:
         return []
-    what = (
-        f"{owed:,.2f} owed to vendors"
-        if owed > 0
-        else f"{-owed:,.2f} paid to vendors ahead of their bills"
-    )
-    return [
-        f"The export brings {what} as a balance on {control}, with no bills "
-        f"behind it. A/P Aging lists only bills entered here, so it will not "
-        f"show that {abs(owed):,.2f} until those bills are entered here or "
-        f"paid off against {control}."
-    ]
+    named = _payable_named(db, prepared, path)
+    unnamed = owed - named
+    notes = []
+    if named:
+        what = (
+            f"{named:,.2f} owed to vendors"
+            if named > 0
+            else f"{-named:,.2f} paid to vendors ahead of their bills"
+        )
+        notes.append(
+            f"The export brings {what} on {control} as the Journal's own entries, "
+            f"each with its vendor, and none of the bills behind them: the A/P "
+            f"Aging and the vendors' balances show it by vendor, and Pay Bills has "
+            f"nothing to pay until those open bills are entered here."
+        )
+    if unnamed:
+        what = (
+            f"{unnamed:,.2f} owed to vendors"
+            if unnamed > 0
+            else f"{-unnamed:,.2f} paid to vendors ahead of their bills"
+        )
+        notes.append(
+            f"The export brings {what} as a balance on {control}, with no bills "
+            f"behind it and no vendor on the Vendors list named on its entries. "
+            f"A/P Aging lists only bills entered here and the vendors' own entries, "
+            f"so it will not show that {abs(unnamed):,.2f} until those bills are "
+            f"entered here or paid off against {control}."
+        )
+    return notes
+
+
+def has_carried_documents(db: Session) -> bool:
+    """Whether the books hold a document the carry-over wrote: an open
+    invoice or a payment with no entry of its own, covered by the imported
+    Journal (#914, #919)."""
+    from app.models.invoices import Invoice
+    from app.models.payments import Payment
+
+    for invoice in db.query(Invoice).filter(Invoice.transaction_id.is_(None)):
+        if is_carried_invoice(db, invoice):
+            return True
+    for payment in db.query(Payment).filter(Payment.transaction_id.is_(None)):
+        if is_carried_payment(db, payment):
+            return True
+    return False
 
 
 _NOT_ON_STATEMENTS = re.compile(
@@ -2460,7 +2523,7 @@ def dry_run(db: Session, bundle: dict) -> dict:
         ]
     verdict["errors"] = _named_once(verdict["errors"])
     verdict["warnings"] = (
-        notes + list(_COA_NOTES) + _payable_note(prepared) + verdict["warnings"]
+        notes + list(_COA_NOTES) + _payable_note(db, prepared) + verdict["warnings"]
     )
     unplaced = _unplaced_problem(verdict["errors"])
     if unplaced:
@@ -2573,7 +2636,7 @@ def run_import(db: Session, bundle: dict) -> dict:
     result["warnings"] = (
         notes
         + list(_COA_NOTES)
-        + _payable_note(prepared)
+        + _payable_note(db, prepared)
         + result["warnings"]
         + plan["notes"]
     )

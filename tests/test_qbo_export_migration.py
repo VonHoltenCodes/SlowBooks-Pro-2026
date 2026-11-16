@@ -764,7 +764,9 @@ def test_a_leaf_name_under_another_parent_is_another_account(
 _FOOTER = "Tuesday, Nov 03, 2026 09:00:00 AM GMT-6 - Accrual Basis"
 
 
-def _controls_export(*, aging=True, journal_invoice=True, more=False, bill_paid=False):
+def _controls_export(
+    *, aging=True, journal_invoice=True, more=False, bill_paid=False, vendor_listed=True
+):
     """The export as loose workbooks. ``aging`` adds the A/R Aging Detail
     report (invoice 1001 open for 740.00 of 1,240.00); ``journal_invoice``
     False numbers the Journal's invoice 999, so the Journal does not hold
@@ -920,7 +922,11 @@ def _controls_export(*, aging=True, journal_invoice=True, more=False, bill_paid=
         ["", "Invented Landscaping Co"],
         ["", "Vendor Contact List"],
         ["", "Vendor", "Phone Numbers", "Email", "Full Name", "Address"],
-        ["", "Brookside", "Phone: (815) 555-0100", "orders@example.com", ""],
+        *(
+            [["", "Brookside", "Phone: (815) 555-0100", "orders@example.com", ""]]
+            if vendor_listed
+            else [["", "Someone Else", "", "", ""]]
+        ),
     ]
     employees = [
         ["", "Invented Landscaping Co"],
@@ -1022,11 +1028,21 @@ def test_the_payable_account_lands_on_the_ap_control(
     assert Decimal(str(after["balance"])) == Decimal("350.00")
 
 
+# the bill's vendor, Brookside, is on the Vendors list: the entry ages as
+# Brookside's once imported (#915), and the note says so (#918)
 _AP_NOTE = (
+    "The export brings 300.00 owed to vendors on 2000 Accounts Payable as the "
+    "Journal's own entries, each with its vendor, and none of the bills behind "
+    "them: the A/P Aging and the vendors' balances show it by vendor, and Pay "
+    "Bills has nothing to pay until those open bills are entered here."
+)
+# the vendor on no list: the balance shows nowhere until the bills are entered
+_AP_NOTE_UNNAMED = (
     "The export brings 300.00 owed to vendors as a balance on 2000 Accounts "
-    "Payable, with no bills behind it. A/P Aging lists only bills entered "
-    "here, so it will not show that 300.00 until those bills are entered "
-    "here or paid off against 2000 Accounts Payable."
+    "Payable, with no bills behind it and no vendor on the Vendors list named "
+    "on its entries. A/P Aging lists only bills entered here and the vendors' "
+    "own entries, so it will not show that 300.00 until those bills are "
+    "entered here or paid off against 2000 Accounts Payable."
 )
 
 
@@ -1042,6 +1058,21 @@ def test_the_payable_balance_is_said_to_have_no_bills_behind_it(
     data = client.post("/api/migration/qbo_export/import", files=files()).json()
     assert data["ok"] is True, data["errors"]
     assert _AP_NOTE in data["warnings"], data["warnings"]
+
+
+def test_the_payable_balance_whose_entries_name_no_listed_vendor_is_said_to_show_nowhere(
+    client, db_session, seed_accounts
+):
+    # the Journal names Brookside, the Vendors list does not: the entries
+    # stay nameless on import (#915), and the note keeps W-117's sentence
+    files = _controls_export(vendor_listed=False)
+    dry = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert dry["ok"] is True, dry["errors"]
+    assert _AP_NOTE_UNNAMED in dry["warnings"], dry["warnings"]
+    assert _AP_NOTE not in dry["warnings"]
+    data = client.post("/api/migration/qbo_export/import", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert _AP_NOTE_UNNAMED in data["warnings"], data["warnings"]
 
 
 def test_no_payable_note_when_nothing_is_owed(client, db_session, seed_accounts):
