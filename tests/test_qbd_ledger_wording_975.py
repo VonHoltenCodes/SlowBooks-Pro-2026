@@ -57,7 +57,7 @@ def test_the_import_page_hint_names_debit_and_credit():
     js = (ROOT / "app/static/js/iif.js").read_text(encoding="utf-8")
     assert "Keep the report's default" not in js
     assert (
-        "needs <strong>Debit</strong> and <strong>Credit</strong> ticked in place of Amount"
+        "need <strong>Debit</strong> and <strong>Credit</strong> ticked (Customize Report &gt; Display; Amount may stay)"
         in js
     )
 
@@ -76,6 +76,27 @@ def test_the_unrecognized_layout_refusal_scopes_the_debit_credit_advice(
     assert "Unrecognized report layout" in text
     assert (
         "Transaction Detail (filtered to Sales Receipt or Invoice) and Transaction Detail by Account, "
-        "each with Debit and Credit ticked under Customize Report > Display in place of Amount; "
+        "each with Debit and Credit ticked under Customize Report > Display (Amount may stay); "
         "Deposit Detail, Check Detail and Time by Name by Job detail with their default columns"
     ) in text
+
+
+def test_the_sales_transaction_detail_keeps_amount_beside_debit_and_credit(
+    client, seed_accounts
+):
+    # #991: the sales fixture carries Debit, Credit and Amount and imports;
+    # the guide's and the hint's words match the refusal's
+    guide = (ROOT / "docs/migrate-from-quickbooks.md").read_text(encoding="utf-8")
+    assert "in place of Amount" not in guide
+    assert (
+        guide.count("(Amount may stay)") >= 2
+        and "(Amount and\nBalance may stay)" in guide
+    )
+    assert "Keep the report's **default columns** — the importer needs" not in guide
+    js = (ROOT / "app/static/js/iif.js").read_text(encoding="utf-8")
+    assert (
+        "the sales Transaction Detail and Transaction Detail by Account, which need"
+        in js
+    )
+    py = (ROOT / "app/services/qb_report_import.py").read_text(encoding="utf-8")
+    assert "in place of Amount" not in py

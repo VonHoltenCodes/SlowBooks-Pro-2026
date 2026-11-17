@@ -161,10 +161,10 @@ two trial balances match.
 The simplest way to bring every transaction across: in QuickBooks Desktop,
 **Reports > Accountant & Taxes > Transaction Detail by Account**, set the
 dates to **one year** (see *One year per file* below). Then, under
-**Customize Report → Display**, tick **Debit** and **Credit** and untick
-**Amount** (Balance may stay): QuickBooks' default for this report is one
-signed Amount column, and the import reads the two-column form, where each
-line's debit or credit is explicit (#965). Under **Customize Report →
+**Customize Report → Display**, tick **Debit** and **Credit** (Amount and
+Balance may stay): QuickBooks' default for this report is one signed Amount
+column, and the import reads the two columns, where each line's debit or
+credit is explicit (#965). Under **Customize Report →
 Filters → Account**, choose **All accounts**. Save it as CSV: **Excel →
 Create New Worksheet → Create a comma separated values (.csv) file →
 Export**. A default export with Amount is refused as an unrecognized
@@ -462,9 +462,10 @@ Desktop does not export transactions to IIF natively. Two other options:
   1. **Reports → Custom Reports → Transaction Detail**
   2. Set the date range to **All**.
   3. **Filters** tab → *Transaction Type* → **Sales Receipt**.
-  4. Keep the report's **default columns** — the importer needs at
-     least Date, Num, Name, Account, Split, Debit, and Credit (Memo,
-     Item, Qty, and Sales Price are used when present).
+  4. Under **Customize Report → Display**, tick **Debit** and **Credit**
+     (Amount may stay) — the importer needs at least Date, Num, Name,
+     Account, Split, Debit, and Credit (Memo, Item, Qty, and Sales Price
+     are used when present).
   5. **Excel → Create New Worksheet → Create a comma separated values
      (.csv) file → Export** (or Print → Print to: File → Comma delimited
      file).
@@ -485,8 +486,9 @@ The same report, filtered to **Invoice** instead of Sales Receipt:
 
 1. **Reports → Custom Reports → Transaction Detail**, date range **All**.
 2. **Filters** tab → *Transaction Type* → **Invoice**.
-3. **Customize Report → Display → Columns**: keep the defaults and add
-   **Open Balance** (and **Due Date** if you want due dates). Without
+3. **Customize Report → Display → Columns**: tick **Debit** and **Credit**
+   (Amount may stay) and add **Open Balance** (and **Due Date** if you want
+   due dates). Without
    Open Balance the importer cannot tell a paid invoice from an open one,
    so every invoice comes in open and the import says how many did; upload
    the report again with the column and the invoices here that have
