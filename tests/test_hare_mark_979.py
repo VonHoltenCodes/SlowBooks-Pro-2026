@@ -42,3 +42,11 @@ def test_the_mark_is_served_and_styled_and_in_the_guide(client):
     # nowhere in the chrome
     shell = (ROOT / "index.html").read_text(encoding="utf-8")
     assert "hare-mark" not in shell
+
+
+def test_the_mark_is_decorative_beside_its_heading():
+    # #998: the heading's accessible name is its text alone
+    for f in ("app/static/js/iif.js", "app/static/js/migration.js"):
+        js = (ROOT / f).read_text(encoding="utf-8")
+        assert 'alt="From QuickBooks"' not in js
+        assert js.count('class="hare-mark"') == js.count('alt="" aria-hidden="true"')

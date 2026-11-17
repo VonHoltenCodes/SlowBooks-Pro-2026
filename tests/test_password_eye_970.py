@@ -66,3 +66,34 @@ def test_enter_on_the_launchers_eye_does_not_unlock():
     )
     assert "!e.target.closest('.pw-eye')" in line
     assert "outline: 2px solid #8f6a1e" in src and "#cc9933; outline-offset" not in src
+
+
+def test_the_eyes_click_is_its_own_and_shown_text_is_typed_as_is():
+    # #996: never a click on a wrapping label's control; #999: no
+    # auto-capitalising or correcting while shown
+    js = (ROOT / "app/static/js/password_eye.js").read_text(encoding="utf-8")
+    assert "e.preventDefault(); e.stopPropagation(); toggle(input, button);" in js
+    for attr in (
+        "'autocapitalize', 'off'",
+        "'autocorrect', 'off'",
+        "'spellcheck', 'false'",
+    ):
+        assert attr in js
+    settings = (ROOT / "app/static/js/settings.js").read_text(encoding="utf-8")
+    assert '<label class="form-field" for="ai-settings-key">' in settings
+
+
+def test_the_launchers_eye_shows_its_state_and_hides_again():
+    # #997
+    src = (ROOT / "desktop_launcher.py").read_text(encoding="utf-8")
+    assert (
+        "function setEye(show)" in src
+        and "b.innerHTML = show ? EYE_OFF : EYE_ON;" in src
+    )
+    assert src.count("setEye(false);") == 2  # showUnlock and the failed try
+    assert "#unlock .pw-eye, #unlock .pw-eye:disabled" in src
+    assert (
+        'id="unlock-pass" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false"'
+        in src
+    )
+    assert "&#128065;" not in src

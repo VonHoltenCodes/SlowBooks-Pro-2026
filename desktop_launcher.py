@@ -731,6 +731,8 @@ PICKER_HTML = """<!DOCTYPE html>
                    color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
   #unlock button.alt { background: #e8ecf1; color: #1a2b3c; }
   #unlock button:disabled { background: #a9bce0; cursor: default; }
+  #unlock .pw-eye, #unlock .pw-eye:disabled { flex: none; padding: 0; border-radius: 4px; background: transparent; color: #667; width: 26px; height: 26px; }
+  #unlock .pw-eye[aria-pressed="true"], #unlock .pw-eye:hover { color: #1a2b3c; }
   #unlock .switch { font-size: 12px; color: #2f6fed; cursor: pointer; background: none; border: 0;
                     padding: 0; margin-top: 10px; text-decoration: underline; flex: none; font-weight: 400; }
 </style>
@@ -752,7 +754,7 @@ PICKER_HTML = """<!DOCTYPE html>
       <input id="unlock-user" autocomplete="username" list="unlock-admins">
       <datalist id="unlock-admins"></datalist>
       <label for="unlock-pass">Password</label>
-      <span class="pw-eye-wrap"><input id="unlock-pass" type="password" autocomplete="current-password"><button type="button" class="pw-eye" id="unlock-eye" aria-pressed="false" aria-label="Show password" title="Show password" onclick="toggleEye()">&#128065;</button></span>
+      <span class="pw-eye-wrap"><input id="unlock-pass" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false"><button type="button" class="pw-eye" id="unlock-eye" aria-pressed="false" aria-label="Show password" title="Show password" onclick="toggleEye()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5C6.5 5 2.3 9.3 1 12c1.3 2.7 5.5 7 11 7s9.7-4.3 11-7c-1.3-2.7-5.5-7-11-7z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg></button></span>
     </div>
     <div id="unlock-recovery" hidden>
       <label for="unlock-key">Recovery key</label>
@@ -768,20 +770,24 @@ PICKER_HTML = """<!DOCTYPE html>
 </div>
 <script>
 var unlocking = null;  // the file waiting for its key
-function toggleEye() {  // the show-password eye (#970)
+var EYE_ON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5C6.5 5 2.3 9.3 1 12c1.3 2.7 5.5 7 11 7s9.7-4.3 11-7c-1.3-2.7-5.5-7-11-7z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+var EYE_OFF = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5C6.5 5 2.3 9.3 1 12c1.3 2.7 5.5 7 11 7s9.7-4.3 11-7c-1.3-2.7-5.5-7-11-7z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 20L20 4" stroke="currentColor" stroke-width="2"/></svg>';
+function setEye(show) {  // the show-password eye (#970, #997): the field and the button agree
   var i = document.getElementById('unlock-pass'), b = document.getElementById('unlock-eye');
-  var show = i.type === 'password';
   i.type = show ? 'text' : 'password';
   b.setAttribute('aria-pressed', show ? 'true' : 'false');
   b.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
   b.title = b.getAttribute('aria-label');
+  b.innerHTML = show ? EYE_OFF : EYE_ON;
 }
+function toggleEye() { setEye(document.getElementById('unlock-pass').type === 'password'); }
 function showUnlock(file, name, admins) {
   unlocking = file;
   document.getElementById('unlock-title').textContent = 'Unlock ' + (name || 'the company file');
   document.getElementById('unlock-admins').innerHTML = (admins || []).map(function (a) { return '<option value="' + esc(a) + '">'; }).join('');
   if ((admins || []).length === 1) document.getElementById('unlock-user').value = admins[0];
   document.getElementById('unlock-pass').value = '';
+  setEye(false);
   document.getElementById('unlock-key').value = '';
   document.getElementById('unlock').hidden = false;
   setStatus('');
@@ -817,6 +823,7 @@ async function unlock() {
   setStatus((result && result.error) || 'Could not unlock the company file.', true);
   btn.disabled = false;
   document.getElementById('unlock-pass').value = '';
+  setEye(false);
   (recovery ? document.getElementById('unlock-key') : document.getElementById('unlock-pass')).focus();
 }
 document.addEventListener('keydown', function (e) {
