@@ -44,3 +44,25 @@ def test_no_password_field_opts_out_by_accident():
             if "data-no-eye" in m.group(0):
                 hits.append((f.name, m.group(0)[:80]))
     assert hits == [], hits
+
+
+def test_attaching_the_eye_gives_focus_back_and_the_ring_is_the_themes():
+    # #988: the sign-in page focuses the field before the observer wraps it
+    js = (ROOT / "app/static/js/password_eye.js").read_text(encoding="utf-8")
+    attach = js.split("function attach(input)")[1].split("function scan(")[0]
+    assert "document.activeElement === input" in attach
+    assert "input.focus()" in attach and "setSelectionRange" in attach
+    # #990: the theme's focus ring, never the gold alone
+    css = (ROOT / "app/static/css/style.css").read_text(encoding="utf-8")
+    assert ".pw-eye:focus-visible { outline: 2px solid var(--focus-ring)" in css
+    assert "var(--qb-gold)" not in css.split(".pw-eye:focus-visible")[1].split("}")[0]
+
+
+def test_enter_on_the_launchers_eye_does_not_unlock():
+    # #989
+    src = (ROOT / "desktop_launcher.py").read_text(encoding="utf-8")
+    line = next(
+        l for l in src.splitlines() if "e.key === 'Enter'" in l and "unlock()" in l
+    )
+    assert "!e.target.closest('.pw-eye')" in line
+    assert "outline: 2px solid #8f6a1e" in src and "#cc9933; outline-offset" not in src

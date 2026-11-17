@@ -4014,5 +4014,5 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
     display: inline-flex; align-items: center; justify-content: center;
 }
 .pw-eye:hover, .pw-eye[aria-pressed="true"] { color: var(--qb-navy); }
-.pw-eye:focus-visible { outline: 2px solid var(--qb-gold); outline-offset: 1px; }
+.pw-eye:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }  /* the theme's ring, 3:1+ (#990) */
 [data-theme="dark"] .pw-eye:hover, [data-theme="dark"] .pw-eye[aria-pressed="true"] { color: #e0e4ec; }
