@@ -73,6 +73,8 @@ DOC_TYPES: dict[str, DocType] = {
         (
             Related("payment_allocations", "invoice_id", "payment_applied"),
             Related("credit_applications", "invoice_id", "credit_applied"),
+            # a purchase order linked to it or unlinked (#986)
+            Related("purchase_orders", "invoice_id", "po_linked"),
         ),
         ("invoice",),
         ("invoice", "reminder"),
@@ -327,7 +329,13 @@ _FIELD_WORDS = {
     "credit_account_id": "Offset account",
 }
 # The vocabulary keys among those words (terms.text swaps them in prose too)
-_VOCAB_FIELDS = {"customer_id": "Customer", "job_id": "Job", "class_id": "Class"}
+_VOCAB_FIELDS = {
+    "customer_id": "Customer",
+    "job_id": "Job",
+    "class_id": "Class",
+    # the invoice a purchase order fills (#986)
+    "invoice_id": "Invoice",
+}
 # An id-field's table, for its value by name
 _NAMED_TABLES = {
     "account_id": ("accounts", ("name",)),
@@ -341,6 +349,7 @@ _NAMED_TABLES = {
     "item_id": ("items", ("name",)),
     "cost_code_id": ("cost_codes", ("code", "name")),
     "payment_term_id": ("payment_terms", ("name",)),
+    "invoice_id": ("invoices", ("invoice_number",)),
     "debit_account_id": ("accounts", ("account_number", "name")),
     "credit_account_id": ("accounts", ("account_number", "name")),
 }
@@ -569,7 +578,9 @@ def _child_rows(
                 owner[r.record_id] = r.record_id in current
             mine = owner[r.record_id]
             if fk in (r.changed_fields or []):
-                mine = mine or _same(old.get(fk), doc_id)
+                # moved off this document, or onto it (a purchase order
+                # linked to an invoice, #986)
+                mine = mine or _same(old.get(fk), doc_id) or _same(new.get(fk), doc_id)
                 owner[r.record_id] = _same(new.get(fk), doc_id)
         else:  # DELETE
             mine = _same(old.get(fk), doc_id) and (where is None or where(old))
@@ -698,8 +709,32 @@ def _group(rows: list[AuditLog]) -> list[list[AuditLog]]:
     return groups
 
 
-def _related_sentence(words: _Words, kind: str, row: AuditLog) -> str | None:
+def _po_link_sentence(words: _Words, row: AuditLog, doc_id: int) -> str | None:
+    """A purchase order's row as its invoice's event (#986): linked when it
+    came to name the invoice, unlinked when it stopped; any other edit of
+    the order is the order's own history, not the invoice's."""
+    old, new = row.old_values or {}, row.new_values or {}
+    values = new if row.action != "DELETE" else old
+    # an edit's snapshot carries only what moved: the number from the row
+    num = values.get("po_number") or old.get("po_number")
+    if not num:
+        num = _row(words.db, "purchase_orders", row.record_id).get("po_number")
+    po = f"Purchase order{' ' + str(num) if num else ''}"
+    if row.action == "INSERT":
+        return f"{po} linked"
+    if row.action == "DELETE":
+        return f"{po} deleted, so unlinked"
+    if "invoice_id" not in (row.changed_fields or []):
+        return None
+    return f"{po} linked" if _same(new.get("invoice_id"), doc_id) else f"{po} unlinked"
+
+
+def _related_sentence(
+    words: _Words, kind: str, row: AuditLog, doc_id: int | None = None
+) -> str | None:
     """A related record's row as this document's event."""
+    if kind == "po_linked":
+        return _po_link_sentence(words, row, doc_id)
     values = (row.new_values if row.action != "DELETE" else row.old_values) or {}
     amount = money_text(values.get("amount"))
     adding = row.action == "INSERT"
@@ -881,7 +916,7 @@ def _audit_events(
                 elif r.action == "DELETE":
                     heads.append(("attachment", f"Attachment {name} removed by {who}"))
             elif r.id in kinds:
-                sentence = _related_sentence(words, kinds[r.id], r)
+                sentence = _related_sentence(words, kinds[r.id], r, doc_id)
                 if sentence:
                     heads.append((kinds[r.id], f"{sentence} by {who}"))
         if not heads and details:

@@ -106,6 +106,8 @@ class POCreate(StrictModel):
     trade_package_id: Optional[int] = None
     retainage_pct: Optional[Decimal] = None
     scope_notes: Optional[str] = None
+    # The customer invoice this order fills (#986); null fills none.
+    invoice_id: Optional[int] = None
     lines: list[POLineCreate] = []
     # Files attached on the form before this first save (#881, as #796):
     # the ids POST /api/attachments/pending gave.
@@ -136,6 +138,8 @@ class POUpdate(StrictModel):
     trade_package_id: Optional[int] = None
     retainage_pct: Optional[Decimal] = None
     scope_notes: Optional[str] = None
+    # Sent as null, the order fills no invoice any more (#986).
+    invoice_id: Optional[int] = None
     lines: Optional[list[POLineCreate]] = None
 
     @field_validator("lines")
@@ -191,5 +195,8 @@ class POResponse(BaseModel):
     tax_amount: Decimal = Decimal("0")
     total: Decimal = Decimal("0")
     notes: Optional[str] = None
+    # The customer invoice this order fills (#986), and its number.
+    invoice_id: Optional[int] = None
+    invoice_number: Optional[str] = None
     lines: list[POLineResponse] = []
     model_config = {"from_attributes": True}

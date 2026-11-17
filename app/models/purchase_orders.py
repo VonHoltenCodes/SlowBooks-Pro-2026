@@ -64,6 +64,15 @@ class PurchaseOrder(Base):
     notes = Column(Text, nullable=True)
     # Job-costing dimension (QB "Customer:Job"); NULL = no job
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    # The customer invoice this order was bought for (#986): one invoice,
+    # many purchase orders. A plain reference: nothing posts on it and no
+    # total changes. Cleared when the invoice row goes.
+    invoice_id = Column(
+        Integer,
+        ForeignKey("invoices.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
@@ -72,6 +81,7 @@ class PurchaseOrder(Base):
 
     vendor = relationship("Vendor", backref="purchase_orders")
     job = relationship("Job")
+    invoice = relationship("Invoice", foreign_keys=[invoice_id])
     trade_package = relationship("TradePackage")
     lines = relationship(
         "PurchaseOrderLine",

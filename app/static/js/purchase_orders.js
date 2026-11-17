@@ -75,6 +75,7 @@ const PurchaseOrdersPage = {
                 <strong>Date:</strong> ${formatDate(po.date)}<br>
                 ${po.expected_date ? `<strong>Expected:</strong> ${formatDate(po.expected_date)}<br>` : ''}
                 <strong>Status:</strong> ${PurchaseOrdersPage.statusBadge(po.status)}${conMeta}
+                ${PurchaseOrdersPage.fillsInvoiceHtml(po)}
             </div>
             <div class="table-container"><table>
                 <thead>${head}</thead>
@@ -99,6 +100,43 @@ const PurchaseOrdersPage = {
         InvoicesPage.loadAttachments('purchase_order', po.id);
     },
 
+    // "Fills Invoice #1042" (#986): the customer invoice this order was
+    // bought for, opening it; × clears the link (hidden for a read-only or
+    // accountant sign-in). Nothing when it fills none.
+    fillsInvoiceHtml(po) {
+        if (!po.invoice_id) return '';
+        const inv = Number(po.invoice_id);
+        const num = escapeHtml(po.invoice_number || String(inv));
+        return `<br><span id="po-fills-invoice"><strong>Fills ${T('Invoice')}</strong> <a href="#" onclick="InvoicesPage.view(${inv}); return false;">#${num}</a>
+            <button type="button" data-write class="btn btn-sm btn-danger" aria-label="Unlink ${T('invoice')} ${num}" title="Unlink" onclick="PurchaseOrdersPage.unlinkInvoice(${Number(po.id)}, ${inv})" style="padding:0 4px; font-size:10px;">×</button></span>`;
+    },
+
+    async unlinkInvoice(poId, invId) {
+        try {
+            await API.del(`/invoices/${invId}/purchase-orders/${poId}`);
+            toast(`${T('Invoice')} unlinked`);
+            PurchaseOrdersPage.view(poId);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // The invoices the form's Fills invoice picker offers (#986): every one
+    // not void and not a sales receipt, newest first as the list comes, and
+    // always the one the order already fills.
+    fillableInvoices(invoices, currentId = null) {
+        return (invoices || []).filter(i =>
+            (i.status !== 'void' && !i.is_sales_receipt) || (currentId && String(i.id) === String(currentId)));
+    },
+
+    fillsInvoiceOptions(invoices, po) {
+        const list = PurchaseOrdersPage.fillableInvoices(invoices, po.invoice_id);
+        const opts = list.map(i => `<option value="${Number(i.id)}" ${String(po.invoice_id) === String(i.id) ? 'selected' : ''}>#${escapeHtml(i.invoice_number)}${i.customer_name ? ` · ${escapeHtml(i.customer_name)}` : ''}</option>`);
+        // filled from an invoice older than the list's page: still offered
+        if (po.invoice_id && !list.some(i => String(i.id) === String(po.invoice_id))) {
+            opts.unshift(`<option value="${Number(po.invoice_id)}" selected>#${escapeHtml(po.invoice_number || String(po.invoice_id))}</option>`);
+        }
+        return ['<option value="">None</option>'].concat(opts).join('');
+    },
+
     // Issue a draft commitment (draft -> sent): until it is issued it is in no
     // Buyout, committed or commitment-status figure.
     async issue(id) {
@@ -113,11 +151,16 @@ const PurchaseOrdersPage = {
     _items: [],
     lineCount: 0,
 
-    async showForm(id = null) {
-        const [vendors, items] = await Promise.all([
+    // preset: fields a new order starts with; Create PO on an invoice passes
+    // { invoice_id } (#986) so the order is linked when it is saved, and the
+    // save goes back to that invoice.
+    async showForm(id = null, preset = null) {
+        const [vendors, items, invoices] = await Promise.all([
             API.get('/vendors'),
             API.get('/items?active_only=true'),
+            API.get('/invoices?is_sales_receipt=false').catch(() => []),
         ]);
+        PurchaseOrdersPage._backToInvoice = (!id && preset && preset.invoice_id) || null;
         PurchaseOrdersPage._items = items;
 
         // A supplier's tax is not the company's selling rate: a new PO
@@ -134,7 +177,9 @@ const PurchaseOrdersPage = {
             trade_package_id: null,
             retainage_pct: null,
             scope_notes: '',
+            invoice_id: null,
             lines: [],
+            ...(preset || {}),
         };
         if (id) po = await API.get(`/purchase-orders/${id}`);
         if (po.lines.length === 0) po.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
@@ -165,6 +210,8 @@ const PurchaseOrdersPage = {
                             oninput="PurchaseOrdersPage.recalc()"
                             title="Sales tax the vendor charges, if any. It becomes part of what the goods cost."></div>
                     ${jobGroup}
+                    <div class="form-group"><label for="po-invoice-id">Fills ${T('invoice')}</label>
+                        <select name="invoice_id" id="po-invoice-id" title="The customer ${T('invoice')} this order was bought for. A reference only: nothing posts.">${PurchaseOrdersPage.fillsInvoiceOptions(invoices, po)}</select></div>
                     ${PurchaseOrdersPage.commitmentFieldsHtml(po)}
                 </div>
                 ${PurchaseOrdersPage.vendorNoteHtml(po)}
@@ -321,6 +368,7 @@ const PurchaseOrdersPage = {
             expected_date: form.expected_date.value || null,
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
             notes: form.notes.value || null,
+            invoice_id: form.invoice_id && form.invoice_id.value ? parseInt(form.invoice_id.value) : null,
             lines,
         };
         if (Terms.isConstruction()) {
@@ -339,6 +387,10 @@ const PurchaseOrdersPage = {
                 toast('PO created');
             }
             closeModal();
+            // made from an invoice's Create PO: back to that invoice
+            const back = !id && PurchaseOrdersPage._backToInvoice;
+            PurchaseOrdersPage._backToInvoice = null;
+            if (back && data.invoice_id) { InvoicesPage.view(back); return; }
             App.navigate('#/purchase-orders');
         } catch (err) { toast(err.message, 'error'); }
     },

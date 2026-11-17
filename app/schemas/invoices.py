@@ -228,6 +228,16 @@ class RetainageLine(BaseModel):
     amount: Decimal
 
 
+class LinkedPurchaseOrder(BaseModel):
+    """A purchase order that fills the invoice (#986): a plain reference."""
+
+    id: int
+    po_number: str
+    vendor_name: Optional[str] = None
+    status: str
+    total: Decimal = Decimal("0")
+
+
 class InvoiceResponse(BaseModel):
     id: int
     invoice_number: str
@@ -278,6 +288,9 @@ class InvoiceResponse(BaseModel):
     # no lines bills (the release, the retainage given back by a lower
     # percent, or held), the rows printed in place of an empty table (#815).
     retainage_lines: list[RetainageLine] = []
+    # Filled by GET /invoices/{id} only: the purchase orders that fill this
+    # invoice (#986), oldest first. Nothing posts on a link.
+    linked_purchase_orders: list[LinkedPurchaseOrder] = []
     # The newest send of this invoice that went out (#780), from the email
     # log: when, and to whom. Read-only and null until one has; a failed
     # send leaves them as they were. Filled by the list, the read, an edit,

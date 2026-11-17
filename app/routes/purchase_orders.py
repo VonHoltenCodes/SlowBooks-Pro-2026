@@ -30,6 +30,7 @@ from app.services.field_tickets import (
     received_line_refusal,
 )
 from app.services.job_costing import line_cost_type
+from app.services.invoice_po_links import invoice_to_fill
 from app.services.numbering import next_po_number
 from app.services import pending_attachments
 from app.services.payment_terms import term_id_for
@@ -45,6 +46,19 @@ from app.services.purchase_posting import (
 )
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
+
+
+def po_response(po: PurchaseOrder) -> POResponse:
+    """A purchase order as the API answers it: with its vendor's and its
+    package's names, and the number of the invoice it fills (#986)."""
+    resp = POResponse.model_validate(po)
+    if po.vendor:
+        resp.vendor_name = po.vendor.name
+    if po.trade_package:
+        resp.trade_package_name = po.trade_package.name
+    if po.invoice:
+        resp.invoice_number = po.invoice.invoice_number
+    return resp
 
 
 def append_commitment_lines(
@@ -103,6 +117,7 @@ def list_pos(
     # Eager-load to avoid N+1 on .vendor and .lines during model_validate.
     q = db.query(PurchaseOrder).options(
         joinedload(PurchaseOrder.vendor),
+        joinedload(PurchaseOrder.invoice),
         selectinload(PurchaseOrder.lines),
     )
     if vendor_id:
@@ -115,15 +130,7 @@ def list_pos(
         .limit(limit)
         .all()
     )
-    results = []
-    for po in pos:
-        resp = POResponse.model_validate(po)
-        if po.vendor:
-            resp.vendor_name = po.vendor.name
-        if po.trade_package:
-            resp.trade_package_name = po.trade_package.name
-        results.append(resp)
-    return results
+    return [po_response(po) for po in pos]
 
 
 @router.get("/{po_id}", response_model=POResponse)
@@ -131,12 +138,7 @@ def get_po(po_id: int, db: Session = Depends(get_db)):
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
-    resp = POResponse.model_validate(po)
-    if po.vendor:
-        resp.vendor_name = po.vendor.name
-    if po.trade_package:
-        resp.trade_package_name = po.trade_package.name
-    return resp
+    return po_response(po)
 
 
 @router.post("", response_model=POResponse, status_code=201)
@@ -149,7 +151,8 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     vendor_id = vendor.id
-    vendor_name = vendor.name
+    # the invoice it fills (#986), checked before anything is written
+    invoice_id = invoice_to_fill(db, data.invoice_id).id if data.invoice_id else None
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
     refuse_total_past_column(subtotal, tax_amount, total)
 
@@ -177,6 +180,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
             trade_package_id=data.trade_package_id,
             retainage_pct=data.retainage_pct,
             scope_notes=data.scope_notes,
+            invoice_id=invoice_id,
         )
         db.add(po)
         try:
@@ -213,11 +217,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(po)
-    resp = POResponse.model_validate(po)
-    resp.vendor_name = vendor_name
-    if po.trade_package:
-        resp.trade_package_name = po.trade_package.name
-    return resp
+    return po_response(po)
 
 
 @router.put("/{po_id}", response_model=POResponse)
@@ -230,6 +230,10 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
     update_data = reject_null_updates(
         PurchaseOrder, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
+    # A new invoice to fill (#986) must be one a link can be made to; the
+    # one it already fills, or none, is always allowed.
+    if update_data.get("invoice_id") not in (None, po.invoice_id):
+        invoice_to_fill(db, update_data["invoice_id"])
     # An order with deliveries received on it was issued: it does not go back
     # to draft (a draft is not received against) until the tickets are void.
     if (
@@ -415,12 +419,7 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(po)
-    resp = POResponse.model_validate(po)
-    if po.vendor:
-        resp.vendor_name = po.vendor.name
-    if po.trade_package:
-        resp.trade_package_name = po.trade_package.name
-    return resp
+    return po_response(po)
 
 
 def _po_html(db: Session, po_id: int) -> tuple[PurchaseOrder, str]:
