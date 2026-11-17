@@ -101,7 +101,7 @@ def test_nonprofit_year_through_the_api(client, seed_accounts, monkeypatch):
     # ---- the vocabulary and structure an agent would read first -------------
     widgets = reader.get("/api/dashboard/widgets").json()
     titles = {w["id"]: w["title"] for w in widgets["widgets"]}
-    assert titles["receivables"] == "Pledges Receivable"
+    assert titles["receivables"] == "Pledges & Invoices Receivable"
     assert titles["active_customers"] == "Active Donors"
     assert "job_budget_vs_actual" in widgets["default_order"]
     # a read never makes the default fund (#662); the first fund made does

@@ -370,7 +370,7 @@ def test_report_pdf_filenames_and_dashboard_follow_company_type(client, seed_acc
     )
     widgets = client.get("/api/dashboard/widgets").json()
     titles = {w["id"]: w["title"] for w in widgets["widgets"]}
-    assert titles["receivables"] == "Pledges Receivable"
+    assert titles["receivables"] == "Pledges & Invoices Receivable"
     assert titles["active_customers"] == "Active Donors"
     assert titles["pnl_month"].startswith("Activities:")
     assert "open_pos" not in widgets["default_order"]

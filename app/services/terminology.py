@@ -35,8 +35,12 @@ NONPROFIT: dict[str, str] = {
     "Create Invoices": "Create Pledges",
     "New Invoice": "New Pledge",
     "Recurring Invoices": "Recurring Pledges",
-    "Overdue Invoices": "Overdue Pledges",
-    "Recent Invoices": "Recent Pledges",
+    # the receivables cards hold pledges and program-fee invoices both, and
+    # their titles say so (#969)
+    "Overdue Invoices": "Overdue Pledges & Invoices",
+    "The oldest overdue invoices": "The oldest overdue pledges and invoices",
+    "Recent Invoices": "Recent Pledges & Invoices",
+    "The last five invoices": "The last five pledges and invoices",
     "Total Invoiced": "Total Pledged",
     "Sales Receipt": "Donation",
     "Sales Receipts": "Donations",
@@ -71,7 +75,7 @@ NONPROFIT: dict[str, str] = {
     "Jobs: Budget vs Actual": "Grants: Budget vs Actual",
     "Job Profitability": "Grant Income & Costs",
     # receivables
-    "Total Receivables": "Pledges Receivable",
+    "Total Receivables": "Pledges & Invoices Receivable",
     "A/R Aging": "Pledge Aging",
     "Accounts Receivable Aging": "Pledges Receivable Aging",
     "Monthly Revenue": "Monthly Revenue & Support",

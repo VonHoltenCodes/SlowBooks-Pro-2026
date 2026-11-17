@@ -738,7 +738,7 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "receivables": (
         "Total Receivables",
         "stat",
-        "What customers owe (the A/R Aging total), with how many invoices are overdue",
+        "What customers owe (the A/R Aging total), with how many are overdue",
         receivables,
     ),
     "overdue_invoices": (
