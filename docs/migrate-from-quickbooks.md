@@ -158,14 +158,19 @@ two trial balances match.
 
 The simplest way to bring every transaction across: in QuickBooks Desktop,
 **Reports > Accountant & Taxes > Transaction Detail by Account**, set the
-dates to **one year** (see *One year per file* below), and save it as CSV:
-**Excel → Create New Worksheet → Create a comma separated values (.csv)
-file → Export** (keep the report's default columns).
-In **Customize Report → Filters → Account**, choose **All accounts**.
-That is a filter, not a column: do **not** add an **Account** column. The
-account-grouped report already names each account above its transactions.
-An account-grouped report with that added column is refused before import;
-export it again with the default columns and the All accounts filter.
+dates to **one year** (see *One year per file* below). Then, under
+**Customize Report → Display**, tick **Debit** and **Credit** and untick
+**Amount** (Balance may stay): QuickBooks' default for this report is one
+signed Amount column, and the import reads the two-column form, where each
+line's debit or credit is explicit (#965). Under **Customize Report →
+Filters → Account**, choose **All accounts**. Save it as CSV: **Excel →
+Create New Worksheet → Create a comma separated values (.csv) file →
+Export**. A default export with Amount is refused as an unrecognized
+layout; export it again with Debit and Credit.
+The Account filter is a filter, not a column: do **not** add an **Account**
+column. The account-grouped report already names each account above its
+transactions. An account-grouped report with that added column is refused
+before import; export it again without it and with the All accounts filter.
 The refusal says:
 
 > This appears to be Transaction Detail by Account with an added Account column.

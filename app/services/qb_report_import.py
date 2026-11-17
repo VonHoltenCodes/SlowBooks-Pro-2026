@@ -1496,7 +1496,8 @@ def import_qb_report(
             "Unrecognized report layout. Supported exports: Transaction "
             "Detail (filtered to Sales Receipt or Invoice), Deposit Detail, "
             "Check Detail, Transaction Detail by Account and Time by Name by "
-            "Job detail — keep the report's default columns — or a categorized "
+            "Job detail — with Debit and Credit ticked under Customize Report → "
+            "Display, not the default Amount column — or a categorized "
             "bank sheet (Bank Account, Transaction Date, Memo, Payee, Account, "
             "Amount)."
         )
