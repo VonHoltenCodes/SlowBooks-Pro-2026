@@ -73,7 +73,7 @@ def vendor_payee(vendor) -> str:
     knows (RILEY'S JERKY)."""
     if vendor is None:
         return ""
-    return (vendor.company or "").strip() or (vendor.name or "")
+    return (getattr(vendor, "company", None) or "").strip() or (vendor.name or "")
 
 
 def register_check_data(db: Session, txn_id: int) -> dict:
