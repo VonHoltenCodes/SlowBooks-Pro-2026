@@ -2806,6 +2806,15 @@ tr.clickable { cursor: pointer; }
     border-bottom: 1px solid var(--panel-border);
 }
 
+/* The hare mark (#979): on the From QuickBooks sections only, at the heading's
+   right end, never in the chrome. */
+.hare-mark {
+    float: right;
+    height: 24px;
+    width: auto;
+    margin: -4px 0 0 8px;
+}
+
 .iif-export-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
