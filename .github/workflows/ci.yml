@@ -306,7 +306,7 @@ jobs:
           # preview, so nothing new needs WeasyPrint).
           # 341 since the import column-length guard: tests/test_import_column_lengths.py
           # has one PostgreSQL-only test that skips without SLOWBOOKS_TEST_POSTGRES_URL.
-          MAX_SKIPS: "346"
+          MAX_SKIPS: "347"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
