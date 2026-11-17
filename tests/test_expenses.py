@@ -343,7 +343,7 @@ JS_EXPENSES = (
 
 
 def test_the_expense_form_has_a_line_grid_with_a_running_total():
-    form = JS_EXPENSES[JS_EXPENSES.index("async showForm() {") :]
+    form = JS_EXPENSES[JS_EXPENSES.index("async showForm(keepPaidFromId) {") :]
     form = form[: form.index("\n    },")]
     # one line by default, a button for more, the paid amount and what is left
     assert 'id="expense-lines">${ExpensesPage.lineHtml()}' in form
