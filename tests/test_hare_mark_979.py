@@ -18,9 +18,10 @@ def test_the_three_interoperability_sections_carry_it():
     js = (ROOT / "app/static/js/iif.js").read_text(encoding="utf-8")
     assert js.count('class="hare-mark"') == 3
     for head in ("Export to IIF", "Import from IIF", "Import from Report CSV"):
-        assert re.search(
-            rf"<h3>[^<]*{re.escape(head)}<img class=\"hare-mark\"", js
-        ), head
+        # the mark first, then the heading's own text, which stays whole for
+        # the tests that split the page on it
+        pattern = r"<h3><img class=\"hare-mark\"[^>]*>[^<]*" + re.escape(head) + "</h3>"
+        assert re.search(pattern, js), head
 
 
 def test_migrate_data_shows_it_for_quickbooks_online_only():
