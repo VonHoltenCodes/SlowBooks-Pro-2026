@@ -208,7 +208,11 @@ def open_engine(filename: str):
 
     url = "sqlite:///" + path.as_posix()
     engine = company_file.create_sqlite_engine(
-        url, company_file.install_key, pool_pre_ping=True
+        url,
+        company_file.install_key,
+        # the same pool as the started company's (#966): sized to the thread
+        # pool, SLOWBOOKS_DB_POOL_SIZE reaching every company the server serves
+        **database.engine_kwargs(url),
     )
     database.enable_sqlite_tuning(engine)
     try:
