@@ -174,8 +174,9 @@ before import; export it again without it and with the All accounts filter.
 The refusal says:
 
 > This appears to be Transaction Detail by Account with an added Account column.
-> Nothing was imported. Export again using the default columns; set Customize
-> Report > Filters > Account > All accounts rather than adding an Account column.
+> Nothing was imported. Export again without the Account column, with Debit and
+> Credit ticked under Customize Report > Display; set Customize Report > Filters >
+> Account > All accounts rather than adding an Account column.
 
 Import your lists IIF first, then upload the report under
 **Interoperability → Import from Report CSV**. Every deposit, check,

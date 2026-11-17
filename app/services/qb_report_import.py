@@ -1538,8 +1538,9 @@ def import_qb_report(
         if "Account" in cols:
             base["errors"].append(
                 "This appears to be Transaction Detail by Account with an added "
-                "Account column. Nothing was imported. Export again using the "
-                "default columns; set Customize Report > Filters > Account > "
+                "Account column. Nothing was imported. Export again without the "
+                "Account column, with Debit and Credit ticked under Customize "
+                "Report > Display; set Customize Report > Filters > Account > "
                 "All accounts rather than adding an Account column."
             )
             return base
