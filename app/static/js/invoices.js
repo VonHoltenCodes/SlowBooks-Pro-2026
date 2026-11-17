@@ -226,6 +226,7 @@ const InvoicesPage = {
         return renderListPage({
             title: T('Invoices'),
             headerHtml: `<button class="btn btn-primary" ${App.shortcutAttrs('N', T('New Invoice'))} onclick="InvoicesPage.showForm()">+ ${T('New Invoice')}</button>`
+                + (invoices.length ? ` <button class="btn btn-secondary" data-invoice-print-all onclick="InvoicesPage.printAll()" title="Print every ${T('invoice')} the list shows, each on its own page">Print all</button>` : '')
                 + (all ? '' : listCapNote(rows, 500, 'InvoicesPage.showAll()', Terms.text('invoices'))),
             filter: {
                 id: 'inv-status-filter',
@@ -248,7 +249,7 @@ const InvoicesPage = {
             ],
             sort: { id: 'inv-list' },
             items: invoices,
-            row: inv => `<tr class="inv-row" data-status="${inv.status}">
+            row: inv => `<tr class="inv-row" data-status="${inv.status}" data-id="${inv.id}">
                     <td><strong>${escapeHtml(inv.invoice_number)}</strong></td>
                     <td>${escapeHtml(inv.customer_name || '')}</td>
                     <td>${formatDate(inv.date)}</td>
@@ -258,6 +259,7 @@ const InvoicesPage = {
                     <td class="amount">${SalesLines.money(inv.balance_due, inv.currency)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.view(${inv.id})">View</button>
+                        <button class="btn btn-sm btn-secondary" onclick="window.open('/api/invoices/${inv.id}/print-preview','_blank')">Print</button>
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showForm(${inv.id})">Edit</button>
                         ${inv.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="InvoicesPage.markSent(${inv.id})">Mark Sent</button>` : ''}
                         ${inv.status !== 'void' && parseFloat(inv.balance_due) > 0 ? `<button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showWriteOff(${inv.id}, ${parseFloat(inv.balance_due)})">Write Off</button>` : ''}
@@ -265,6 +267,27 @@ const InvoicesPage = {
                 </tr>`,
         });
     },
+
+    // Print all (#1007): every invoice the list shows, as filtered and in
+    // the order it is sorted, in one print preview, each on a page of its
+    // own. The same window.open as one invoice's Print, so the desktop app
+    // opens its print window (#823). Printing marks nothing as sent.
+    printAll() {
+        const ids = $$('.inv-row')
+            .filter(row => row.style.display !== 'none')
+            .map(row => row.dataset.id)
+            .filter(Boolean);
+        if (!ids.length) {
+            toast(`No ${T('invoices')} in the list to print.`, 'error');
+            return;
+        }
+        if (ids.length > InvoicesPage.PRINT_ALL_MAX) {
+            toast(`Print all prints up to ${InvoicesPage.PRINT_ALL_MAX} ${T('invoices')} at a time. Narrow the list and print it in parts.`, 'error');
+            return;
+        }
+        window.open(`/api/invoices/print-preview?ids=${ids.join(',')}`, '_blank');
+    },
+    PRINT_ALL_MAX: 200,
 
     // Forgive an open balance (a pledge that will never be paid, a balance
     // too small to collect): a write-off credit memo to Bad Debt Expense,
