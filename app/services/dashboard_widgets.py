@@ -738,7 +738,7 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "receivables": (
         "Total Receivables",
         "stat",
-        "What customers owe (the A/R Aging total), with how many are overdue",
+        "What customers owe (the A/R Aging total), with how many invoices are overdue",
         receivables,
     ),
     "overdue_invoices": (
@@ -948,6 +948,18 @@ def catalog(t=None) -> list[dict]:
 
         t = Terms()
     construction = t.is_construction
+
+    def describe(wid, desc):
+        text = t.text(desc)
+        if wid == "receivables" and t.is_nonprofit:
+            # the card counts pledges and program-fee invoices both (#952,
+            # #969, #983); the vocabulary alone would call them all pledges
+            text = text.replace(
+                "how many pledges are overdue",
+                "how many pledges and invoices are overdue",
+            )
+        return text
+
     return [
         {
             "id": wid,
@@ -955,7 +967,7 @@ def catalog(t=None) -> list[dict]:
                 CONSTRUCTION_TITLES.get(title, title) if construction else title
             ),
             "size": size,
-            "description": t.text(desc),
+            "description": describe(wid, desc),
         }
         for wid, (title, size, desc, _) in WIDGETS.items()
         if construction or wid not in CONSTRUCTION_ONLY

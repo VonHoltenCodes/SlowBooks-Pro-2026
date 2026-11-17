@@ -60,3 +60,22 @@ def test_the_import_page_hint_names_debit_and_credit():
         "needs <strong>Debit</strong> and <strong>Credit</strong> ticked in place of Amount"
         in js
     )
+
+
+def test_the_unrecognized_layout_refusal_scopes_the_debit_credit_advice(
+    client, seed_accounts
+):
+    # #982: only the sales Transaction Detail and Transaction Detail by
+    # Account need Debit and Credit; the others keep their default columns
+    csv_text = ',"Type","Date","Num","Name","Memo","Clr","Split","Amount","Balance"\r\n"Checking",,,,,,,,,""\r\n,"Deposit","1/16/2018",,"Google","Deposit","X","Product Revenue",4.18,4.18\r\n'
+    r = client.post(
+        "/api/csv/import/qb-report",
+        files={"file": ("default.csv", csv_text.encode("cp1252"), "text/csv")},
+    )
+    text = " ".join(r.json().get("errors", []))
+    assert "Unrecognized report layout" in text
+    assert (
+        "Transaction Detail (filtered to Sales Receipt or Invoice) and Transaction Detail by Account, "
+        "each with Debit and Credit ticked under Customize Report > Display in place of Amount; "
+        "Deposit Detail, Check Detail and Time by Name by Job detail with their default columns"
+    ) in text
