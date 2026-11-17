@@ -605,7 +605,10 @@ def test_the_pdf_and_csv_carry_the_rows(
 
 def test_the_route_reads_today_by_default(client, seed_accounts):
     data = client.get("/api/reports/books-check").json()
-    assert data["as_of"] == TODAY.isoformat() and data["basis"] == "accrual"
+    # the route reads its own date.today(); a run that crosses midnight UTC
+    # between the module's TODAY and the request sees the next day (#773)
+    assert data["as_of"] in (TODAY.isoformat(), date.today().isoformat())
+    assert data["basis"] == "accrual"
     yesterday = (TODAY - timedelta(days=1)).isoformat()
     assert (
         client.get(f"/api/reports/books-check?as_of={yesterday}").json()["as_of"]
