@@ -4001,3 +4001,18 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
     .bill-with-summary { flex-direction: column; align-items: stretch; }
     .bill-vendor-summary { flex-basis: auto; width: 100%; border-left: 0; border-top: 1px solid var(--border, #ccc); padding: 8px 0 0; }
 }
+
+/* The show-password eye (#970): a button at the field's right end that
+   shows what was typed while pressed. The wrap keeps the field's own width;
+   the input gets room for the button. */
+.pw-eye-wrap { position: relative; display: inline-block; width: 100%; }
+.pw-eye-wrap > input { width: 100%; padding-right: 32px; box-sizing: border-box; }
+.pw-eye {
+    position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+    width: 26px; height: 26px; padding: 0; border: 0; border-radius: 4px;
+    background: transparent; color: var(--text-secondary); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.pw-eye:hover, .pw-eye[aria-pressed="true"] { color: var(--qb-navy); }
+.pw-eye:focus-visible { outline: 2px solid var(--qb-gold); outline-offset: 1px; }
+[data-theme="dark"] .pw-eye:hover, [data-theme="dark"] .pw-eye[aria-pressed="true"] { color: #e0e4ec; }

@@ -694,6 +694,11 @@ PICKER_HTML = """<!DOCTYPE html>
   body { font-family: "Segoe UI", system-ui, sans-serif; background: #f4f6f8;
          margin: 0; display: flex; justify-content: center; }
   .wrap { max-width: 460px; width: 100%; padding: 40px 24px; }
+  .pw-eye-wrap { position: relative; display: block; }
+  .pw-eye-wrap > input { width: 100%; padding-right: 34px; box-sizing: border-box; }
+  .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #667; cursor: pointer; font-size: 15px; line-height: 1; }
+  .pw-eye[aria-pressed="true"], .pw-eye:hover { color: #1a2b3c; }
+  .pw-eye:focus-visible { outline: 2px solid #cc9933; outline-offset: 1px; }
   h1 { font-size: 22px; margin: 0 0 4px; color: #1a2b3c; }
   .sub { color: #667; font-size: 13px; margin-bottom: 24px; }
   .company { background: #fff; border: 1px solid #d8dee4; border-radius: 8px;
@@ -747,7 +752,7 @@ PICKER_HTML = """<!DOCTYPE html>
       <input id="unlock-user" autocomplete="username" list="unlock-admins">
       <datalist id="unlock-admins"></datalist>
       <label for="unlock-pass">Password</label>
-      <input id="unlock-pass" type="password" autocomplete="current-password">
+      <span class="pw-eye-wrap"><input id="unlock-pass" type="password" autocomplete="current-password"><button type="button" class="pw-eye" id="unlock-eye" aria-pressed="false" aria-label="Show password" title="Show password" onclick="toggleEye()">&#128065;</button></span>
     </div>
     <div id="unlock-recovery" hidden>
       <label for="unlock-key">Recovery key</label>
@@ -763,6 +768,14 @@ PICKER_HTML = """<!DOCTYPE html>
 </div>
 <script>
 var unlocking = null;  // the file waiting for its key
+function toggleEye() {  // the show-password eye (#970)
+  var i = document.getElementById('unlock-pass'), b = document.getElementById('unlock-eye');
+  var show = i.type === 'password';
+  i.type = show ? 'text' : 'password';
+  b.setAttribute('aria-pressed', show ? 'true' : 'false');
+  b.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  b.title = b.getAttribute('aria-label');
+}
 function showUnlock(file, name, admins) {
   unlocking = file;
   document.getElementById('unlock-title').textContent = 'Unlock ' + (name || 'the company file');
