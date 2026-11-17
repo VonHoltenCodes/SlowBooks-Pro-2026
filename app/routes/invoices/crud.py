@@ -16,6 +16,7 @@ from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.accounting import (
     _q,
 )
+from app.services.invoice_po_links import linked_purchase_orders
 from app.services.numbering import next_invoice_number
 from app.services.pay_applications import (
     invoice_is_release_only,
@@ -140,6 +141,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
     resp.pay_application_number = pay_application_number(db, inv)
     resp.release_only = invoice_is_release_only(inv)
     resp.retainage_lines = invoice_retainage_lines(inv, resp.pay_application_number)
+    resp.linked_purchase_orders = linked_purchase_orders(db, inv.id)
     fill_last_emailed(db, [resp])
     return resp
 

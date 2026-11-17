@@ -27,7 +27,7 @@ and job-cost tables are described in their own sections below the table.
 | `reconciliations` | Reconciliation sessions over a ledger account's lines (`account_id`, `beginning_balance`, `cleared_total`) |
 | `settings` | Company settings key-value store |
 | `audit_log` | Automatic change tracking for all entities |
-| `purchase_orders` | Purchase order headers |
+| `purchase_orders` | Purchase order headers; `invoice_id` (nullable FK `invoices.id`, ON DELETE SET NULL, indexed) is the customer invoice the order fills, one invoice to many POs, a plain reference that posts nothing (#986, migration `e986b4d2a7c3`) |
 | `purchase_order_lines` | PO line items with received quantities |
 | `bills` | Vendor bills (AP mirror of invoices) |
 | `bill_lines` | Bill line items with expense account tracking |

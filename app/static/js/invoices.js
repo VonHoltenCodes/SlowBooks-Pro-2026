@@ -352,6 +352,7 @@ const InvoicesPage = {
             </div>
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
             <div id="inv-credit-note"></div>
+            ${InvoicesPage.linkedPOsPanelHtml(inv)}
             ${InvoicesPage.attachmentsPanelHtml('invoice', inv.id)}
             ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('invoice', inv.id)}
             <div class="form-actions">
@@ -1110,6 +1111,90 @@ const InvoicesPage = {
         InvoicesPage._overLimitOk = confirm(`${customer.name}'s credit limit is ${formatCurrency(limit)}. `
             + `With this ${T('invoice')} they would owe ${formatCurrency(after)}. Save it anyway?`);
         return InvoicesPage._overLimitOk;
+    },
+
+    // The purchase orders that fill this invoice (#986): one invoice, many
+    // POs, each a plain reference (nothing posts, no total changes). Each
+    // opens its PO; × unlinks it; Create PO opens a new order with this
+    // invoice set, linked on save; Link a PO… offers the open orders that
+    // fill no invoice yet. The controls that change a link carry data-write,
+    // so a read-only or accountant sign-in sees the list and nothing more.
+    // A void invoice keeps its links and takes no new one.
+    linkedPOsPanelHtml(inv) {
+        if (inv.is_sales_receipt) return '';
+        const id = Number(inv.id);
+        const pos = inv.linked_purchase_orders || [];
+        const rows = pos.map(p => `<tr>
+                <td><a href="#" onclick="PurchaseOrdersPage.view(${Number(p.id)}); return false;">${escapeHtml(p.po_number)}</a></td>
+                <td>${escapeHtml(p.vendor_name || '')}</td>
+                <td>${PurchaseOrdersPage.statusBadge(p.status)}</td>
+                <td class="amount">${formatCurrency(p.total)}</td>
+                <td><button type="button" data-write class="btn btn-sm btn-danger" aria-label="Unlink purchase order ${escapeHtml(p.po_number)}" title="Unlink" onclick="InvoicesPage.unlinkPO(${id}, ${Number(p.id)})" style="padding:0 4px; font-size:10px;">×</button></td>
+            </tr>`).join('');
+        const list = pos.length
+            ? `<div class="table-container"><table>
+                    <thead><tr><th scope="col">PO</th><th scope="col">Vendor</th><th scope="col">Status</th><th scope="col" class="amount">Total</th><th scope="col"><span class="visually-hidden">Unlink</span></th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>`
+            : `<div style="margin-bottom:8px; font-size:11px; color:var(--text-muted);">No purchase orders fill this ${T('invoice')}.</div>`;
+        const actions = inv.status === 'void' ? '' : `
+                <div style="display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:6px;">
+                    <button type="button" data-write class="btn btn-sm btn-secondary" onclick="InvoicesPage.createLinkedPO(${id})">Create PO</button>
+                    <button type="button" data-write class="btn btn-sm btn-secondary" onclick="InvoicesPage.linkPOPicker(${id})">Link a PO…</button>
+                    <span id="inv-po-picker"></span>
+                </div>`;
+        return `
+            <div id="inv-po-links" style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
+                <h3 style="font-size:13px; margin-bottom:8px;">Linked purchase orders</h3>
+                ${list}${actions}
+            </div>`;
+    },
+
+    // The orders Link a PO… offers: open (not closed) and filling no
+    // invoice yet, by number.
+    linkablePOs(pos) {
+        return (pos || [])
+            .filter(p => !p.invoice_id && p.status !== 'closed')
+            .sort((a, b) => String(a.po_number).localeCompare(String(b.po_number), undefined, { numeric: true }));
+    },
+
+    async linkPOPicker(invId) {
+        const el = $('#inv-po-picker');
+        if (!el) return;
+        let pos;
+        try { pos = await API.get('/purchase-orders'); } catch (err) { toast(err.message, 'error'); return; }
+        const open = InvoicesPage.linkablePOs(pos);
+        if (!open.length) {
+            el.innerHTML = '<span style="font-size:11px; color:var(--text-muted);">No open purchase orders to link.</span>';
+            return;
+        }
+        el.innerHTML = `<select id="inv-po-pick" data-write aria-label="Purchase order to link">${open.map(p =>
+            `<option value="${Number(p.id)}">${escapeHtml(p.po_number)} · ${escapeHtml(p.vendor_name || '')} · ${formatCurrency(p.total)}</option>`).join('')}</select>
+            <button type="button" data-write class="btn btn-sm btn-primary" onclick="InvoicesPage.linkPO(${Number(invId)})">Link</button>`;
+    },
+
+    async linkPO(invId, poId = null) {
+        const pick = poId || parseInt($('#inv-po-pick')?.value);
+        if (!pick) return;
+        try {
+            await API.post(`/invoices/${invId}/purchase-orders/${pick}`, {});
+            toast('Purchase order linked');
+            InvoicesPage.view(invId);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async unlinkPO(invId, poId) {
+        try {
+            await API.del(`/invoices/${invId}/purchase-orders/${poId}`);
+            toast('Purchase order unlinked');
+            InvoicesPage.view(invId);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Create PO: a new purchase order with this invoice set, linked when it
+    // is saved; the save comes back to the invoice.
+    createLinkedPO(invId) {
+        return PurchaseOrdersPage.showForm(null, { invoice_id: Number(invId) });
     },
 
     // A saved document's Attachments panel: an invoice's, and (#881) a

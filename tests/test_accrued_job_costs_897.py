@@ -691,7 +691,7 @@ def test_the_accrual_migration_is_its_own_step(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("d897a2c4e6f1").down_revision == "c894a1e7d2b3"
-    assert script.get_heads() == ["e904b7c3a1d5"]  # #904 is the head above it
+    assert script.get_heads() == ["e986b4d2a7c3"]  # #986 is the head above it
     command.upgrade(cfg, "c894a1e7d2b3")  # the step below it
     with sqlite3.connect(db) as conn:
         conn.execute(
