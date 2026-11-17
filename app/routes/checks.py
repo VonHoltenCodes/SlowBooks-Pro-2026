@@ -62,7 +62,18 @@ def vendor_address_fields(vendor) -> dict:
     lines = street + ([last] if last else [])
     if not lines:
         return {"payee_address": []}
-    return {"payee_address": [vendor.name, *lines] if vendor.name else lines}
+    name = vendor_payee(vendor)
+    return {"payee_address": [name, *lines] if name else lines}
+
+
+def vendor_payee(vendor) -> str:
+    """The name a check prints for a vendor (#1004): its company name when
+    one is set, else its name. A vendor's name is often the short form the
+    list sorts by (RILEYS), and the check must name the payee the bank
+    knows (RILEY'S JERKY)."""
+    if vendor is None:
+        return ""
+    return (getattr(vendor, "company", None) or "").strip() or (vendor.name or "")
 
 
 def register_check_data(db: Session, txn_id: int) -> dict:
@@ -122,8 +133,11 @@ def register_check_data(db: Session, txn_id: int) -> dict:
     # entry saved with a vendor and no payee text does not print a blank Pay
     # to line over the vendor's address (#733).
     payee = payees_for(db, [txn]).get(txn.id, "") or ""
-    if not payee and vendor is not None:
-        payee = vendor.name or ""
+    # an entry saved with a vendor and no payee text carries the vendor's
+    # name as its payee; the check prints the company name then (#1004). A
+    # payee typed differently on the entry is kept as typed.
+    if vendor is not None and (not payee or payee == (vendor.name or "")):
+        payee = vendor_payee(vendor)
     # the stub lists what the check paid: the category of each line, with
     # its memo when the line carries one of its own. A credit line is a
     # refund netted against the check (#387), shown as a negative amount so
@@ -162,7 +176,7 @@ def bill_payment_check_data(db: Session, bp: BillPayment) -> dict:
     each bill it paid on the stub, shared by the single and the batch print."""
     vendor = db.query(Vendor).filter(Vendor.id == bp.vendor_id).first()
     check_data = {
-        "payee": vendor.name if vendor else "Unknown",
+        "payee": vendor_payee(vendor) if vendor else "Unknown",
         "date": bp.date,
         "amount": bp.amount,
         "check_number": bp.check_number or "",
@@ -413,7 +427,7 @@ def unprinted_checks(
     _bank_account(db, bank_account_id)
     payments = unprinted_payments(db, bank_account_id)
     vendors = {
-        v.id: v.name
+        v.id: vendor_payee(v)
         for v in db.query(Vendor).filter(Vendor.id.in_({p.vendor_id for p in payments}))
     }
     return {
