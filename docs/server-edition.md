@@ -368,10 +368,10 @@ whoever reaches it, and the session cookie travels unencrypted.
   serving plain HTTP to the local network").
 - Comfortable for small teams (2–10 people). The database serializes
   writes; hundreds of concurrent users is not the design target. The server
-  keeps a pool of 40 database connections, one for each request it can work
-  on at once; a bigger team that sees requests queue can raise it with
-  `SLOWBOOKS_DB_POOL_SIZE=80` in the `.env` beside the other settings, then
-  stop and start the task.
+  keeps a pool of 40 database connections for each company it serves, one
+  for each request it can work on at once; a bigger team that sees requests
+  queue can raise it with `SLOWBOOKS_DB_POOL_SIZE=80` in the `.env` beside
+  the other settings, then stop and start the task. It never goes below 40.
 - The update badge appears in-app as usual: opening the app asks
   dl.slowbookspro.com for the latest version, which tells that host the
   install's IP address and version. Set `SLOWBOOKS_UPDATE_CHECK=0` in

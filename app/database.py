@@ -31,10 +31,15 @@ from app.config import DATABASE_URL
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 
 
-def _pool_size(default: int = 40) -> int:
+THREAD_POOL_SIZE = 40  # anyio's default limiter: the sync handlers run at once
+
+
+def _pool_size(default: int = THREAD_POOL_SIZE) -> int:
+    # never smaller than the thread pool (#966): a pool of 5 under 80
+    # requests at once stalled the whole server again
     raw = (os.environ.get("SLOWBOOKS_DB_POOL_SIZE") or "").strip()
     try:
-        return max(5, int(raw)) if raw else default
+        return max(THREAD_POOL_SIZE, int(raw)) if raw else default
     except ValueError:
         return default
 

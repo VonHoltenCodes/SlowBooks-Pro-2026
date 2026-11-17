@@ -43,9 +43,9 @@ def test_a_company_file_gets_a_pool_the_size_of_the_thread_pool(monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", "not a number")
     assert engine_kwargs(url)["pool_size"] == 40
     monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", "1")
-    assert engine_kwargs(url)["pool_size"] == 5
+    assert engine_kwargs(url)["pool_size"] == 40  # the floor is the thread pool (#966)
     pg = engine_kwargs("postgresql://u:p@host/books")
-    assert pg["pool_size"] == 5 and pg["max_overflow"] == 20
+    assert pg["pool_size"] == 40 and pg["max_overflow"] == 20
 
 
 def test_the_in_memory_database_takes_no_pool_size(monkeypatch):
