@@ -23,7 +23,7 @@ const IIFPage = {
             <div class="iif-sections">
                 <!-- Export Section -->
                 <div class="iif-section">
-                    <h3>&#9660; Export to IIF</h3>
+                    <h3>&#9660; Export to IIF<img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="From QuickBooks"></h3>
                     <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
                         Download Slowbooks data as .iif files for import into QuickBooks Desktop
                         via File &gt; Utilities &gt; Import &gt; IIF Files.
@@ -75,7 +75,7 @@ const IIFPage = {
 
                 <!-- Import Section -->
                 <div class="iif-section" data-write>
-                    <h3>&#9650; Import from IIF</h3>
+                    <h3>&#9650; Import from IIF<img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="From QuickBooks"></h3>
                     <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
                         Upload .iif files exported from QuickBooks Desktop
                         via File &gt; Utilities &gt; Export &gt; Lists to IIF Files. Transaction
@@ -116,7 +116,7 @@ const IIFPage = {
 
                 <!-- QuickBooks Report CSV import -->
                 <div class="iif-section" data-write>
-                    <h3>&#9635; Import from Report CSV</h3>
+                    <h3>&#9635; Import from Report CSV<img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="From QuickBooks"></h3>
                     <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
                         QuickBooks Desktop can't export transactions to IIF — export a detail
                         <strong>report</strong> to CSV instead and upload it here. The report type is

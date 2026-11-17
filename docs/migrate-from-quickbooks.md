@@ -1,5 +1,7 @@
 # Migrating from QuickBooks
 
+![A hare with a Q-shaped ear: the mark SlowBooks Pro puts on its From QuickBooks pages](img/hare-mark.png)
+
 SlowBooks imports QuickBooks data two ways, depending on which
 QuickBooks you're leaving:
 

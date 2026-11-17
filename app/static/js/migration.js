@@ -47,7 +47,8 @@ const MigrationPage = {
     // Reports page for a General Ledger the import does not read (#910).
     _hint(key) {
         if (key === 'qbo_export') {
-            return `In QuickBooks Online, click the gear → <strong>Export data</strong>; on the
+            // the hare mark on the From QuickBooks sections only (#979)
+            return `<img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="From QuickBooks">In QuickBooks Online, click the gear → <strong>Export data</strong>; on the
                     Reports tab set the date range to <strong>All dates</strong>, leave every
                     report and list switched on, and press Export to Excel. Upload the
                     <strong>zip</strong> it downloads as it is. Beside it, upload the
