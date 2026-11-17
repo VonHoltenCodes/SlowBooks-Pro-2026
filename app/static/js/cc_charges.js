@@ -44,8 +44,11 @@ const CCChargesPage = {
         ]);
         // Expense and cost-of-goods accounts (W-L18): a card buys materials too.
         const accounts = PurchaseAccounts.withBalanceSheet(allAccounts, ...keepIds);  // and the balance-sheet accounts (#766)
-        const cardOpts = cards.filter(a => a.bank_kind === 'credit_card').map(a =>
-            `<option value="${a.id}" ${a.account_number === '2100' ? 'selected' : ''}>${accountLabel(a)}</option>`
+        const cardList = cards.filter(a => a.bank_kind === 'credit_card');
+        // the card the last charge went on, for a statement's batch (#1011)
+        const startCard = CCChargesPage._cardStart(cardList, CCChargesPage._lastCard);
+        const cardOpts = cardList.map(a =>
+            `<option value="${a.id}" ${String(a.id) === startCard ? 'selected' : ''}>${accountLabel(a)}</option>`
         ).join('');
         const classGroup = await classFormGroupHtml();
         const jobGroup = await jobFormGroupHtml(null);
@@ -53,7 +56,7 @@ const CCChargesPage = {
         PendingFiles.reset();  // files attached before the first save (#796)
 
         openModal('Enter Credit Card Charge', `
-            <form onsubmit="CCChargesPage.save(event)">
+            <form onsubmit="CCChargesPage.save(event)" onkeydown="CCChargesPage._keys(event)">
                 <div class="form-grid">
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
@@ -75,8 +78,33 @@ const CCChargesPage = {
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Charge</button>
+                    <button type="submit" class="btn btn-primary" data-write data-save-new
+                        title="Save this charge and start the next one on the same card (Ctrl+Enter)" aria-keyshortcuts="Control+Enter">Save &amp; New</button>
                 </div>
             </form>`, { onClose: () => PendingFiles.discard() });
+    },
+
+    // The card a statement's charges go on, picked once for the batch
+    // (#1011): kept for the session, and the picker starts on it while it is
+    // still one of the active cards; else on 2100 as before, else the first.
+    _lastCard: null,
+    _cardStart(cards, last) {
+        const list = cards || [];
+        if (last != null && list.some(a => String(a.id) === String(last))) return String(last);
+        const usual = list.find(a => a.account_number === '2100');
+        return usual ? String(usual.id) : (list.length ? String(list[0].id) : '');
+    },
+
+    // Ctrl+Enter is Save & New (#1011), as on Quick Entry; a sign-in that
+    // can't save has the button hidden (data-write) and the keys do nothing.
+    _keys(e) {
+        if (!(e.ctrlKey && e.key === 'Enter') || e.altKey || e.metaKey || e.shiftKey) return;
+        const form = e.currentTarget;
+        const more = form && form.querySelector ? form.querySelector('[data-save-new]') : null;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!more || more.disabled || more.classList.contains('hidden')) return;
+        form.requestSubmit(more);
     },
 
     // Edit from a report line (#689): the form filled in with the charge
@@ -101,14 +129,22 @@ const CCChargesPage = {
         Replace.set(form, 'job_id', entry.job_id || '');
         if (spent.function) Replace.set(form, 'function', spent.function);
         Replace.mark(form, 'cc_charge', id);
+        // an edit keeps its own card and is one charge: no Save & New (#1011)
+        form.querySelector('[data-save-new]')?.remove();
     },
 
     async save(e) {
         e.preventDefault();
         const form = e.target;
-        if (!(await TxnWarn.ok(form))) return;
-        if (!(await ClassWarn.ok(form))) return;
+        const replacing = typeof Replace !== 'undefined' && Replace.replacing(form);
+        // Save & New (#1011): the same charge, then a blank form for the next
+        const andNew = !replacing && !!(e.submitter && e.submitter.hasAttribute && e.submitter.hasAttribute('data-save-new'));
+        // one save at a time: Ctrl+Enter pressed twice posts one charge
+        if (CCChargesPage._saving) return;
+        CCChargesPage._saving = true;
         try {
+            if (!(await TxnWarn.ok(form))) return;
+            if (!(await ClassWarn.ok(form))) return;
             const r = await API.post('/cc-charges' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), {
                 date: form.date.value,
                 payee: form.payee.value || null,
@@ -123,12 +159,27 @@ const CCChargesPage = {
                 pending_attachments: PendingFiles.ids(),
             });
             PendingFiles.saved();
-            if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Charge voided and replaced by charge #${r.transaction_id}`);
-            else toastPosted('Credit card charge recorded');
+            if (replacing) toastPosted(`Charge voided and replaced by charge #${r.transaction_id}`);
+            else {
+                toastPosted('Credit card charge recorded');
+                CCChargesPage._lastCard = form.card_account_id.value;
+            }
+            const date = form.date.value;
             closeModal();
-            App.navigate('#/cc-charges');
-        } catch (err) { toast(err.message, 'error'); }
+            await App.navigate('#/cc-charges');
+            if (andNew) {
+                // a blank form on the same card, the date kept
+                await CCChargesPage.showForm();
+                const box = document.querySelector('#modal-body form [name="date"]');
+                if (box && date) box.value = date;
+            }
+        } catch (err) {
+            toast(err.message, 'error');
+        } finally {
+            CCChargesPage._saving = false;
+        }
     },
+    _saving: false,
 
     // A charge's receipts (#796): the files attached when it was entered,
     // and any added since. A void charge keeps them.
