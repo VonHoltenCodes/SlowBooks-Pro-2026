@@ -353,3 +353,45 @@ def test_the_migration_adds_the_column_and_walks_back(tmp_path):
         cols = {r[1] for r in conn.execute("PRAGMA table_info(purchase_orders)")}
         assert "invoice_id" not in cols
         assert conn.execute("SELECT count(*) FROM purchase_orders").fetchone() == (1,)
+
+
+def test_a_sales_receipt_takes_no_link(client, db_session, seed_accounts):
+    # #1018: the window never offers a link on a sales receipt, so the API
+    # refuses one from either side with a sentence
+    from fastapi import HTTPException
+
+    from app.models.contacts import Customer
+    from app.models.invoices import Invoice
+    from app.services.invoice_po_links import invoice_to_fill
+
+    c = Customer(name="Walk-in", is_active=True)
+    db_session.add(c)
+    db_session.commit()
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": c.id,
+            "date": "2026-09-02",
+            "due_date": "2026-09-02",
+            "lines": [{"description": "Cable", "quantity": 1, "rate": 12.0}],
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    inv = db_session.get(Invoice, r.json()["id"])
+    inv.is_sales_receipt = True
+    db_session.commit()
+    try:
+        invoice_to_fill(db_session, inv.id)
+    except HTTPException as exc:
+        assert exc.status_code == 409
+        assert exc.detail["code"] == "sales_receipt"
+        assert exc.detail["message"] == (
+            f"Sales receipt {inv.invoice_number} is paid at the time of sale, so no "
+            "purchase order can be linked to it."
+        )
+    else:
+        raise AssertionError("a sales receipt took a link")
+    # an invoice still does
+    inv.is_sales_receipt = False
+    db_session.commit()
+    assert invoice_to_fill(db_session, inv.id).id == inv.id

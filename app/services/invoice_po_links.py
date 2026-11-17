@@ -66,6 +66,19 @@ def invoice_to_fill(db: Session, invoice_id: int) -> Invoice:
                 ),
             },
         )
+    if getattr(inv, "is_sales_receipt", False):
+        # paid at the time of sale: the window offers no link on one and
+        # draws no panel there, so the API refuses it too (#1018)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "sales_receipt",
+                "message": terms.text(
+                    f"Sales receipt {inv.invoice_number} is paid at the time of "
+                    "sale, so no purchase order can be linked to it."
+                ),
+            },
+        )
     return inv
 
 
