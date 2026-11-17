@@ -249,6 +249,8 @@ const PaymentsPage = {
         if ((parseFloat(p.unapplied) || 0) > 0 && $('#keep-credit')) $('#keep-credit').checked = true;
         PaymentsPage._updateAllocStatus();
         Replace.mark(form, 'payment', id);
+        // an edit is one payment: no Save & New (#1006)
+        form.querySelector('[data-save-new]')?.remove();
     },
     _giveBack: null,
 
@@ -282,7 +284,7 @@ const PaymentsPage = {
         const bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
 
         openModal('Record Payment', `
-            <form id="payment-form" onsubmit="PaymentsPage.save(event)">
+            <form id="payment-form" onsubmit="PaymentsPage.save(event)" onkeydown="PaymentsPage._keys(event)">
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
                         <select name="customer_id" required onchange="PaymentsPage.loadInvoices(this.value)">
@@ -317,6 +319,8 @@ const PaymentsPage = {
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Record Payment</button>
+                    <button type="submit" class="btn btn-primary" data-write data-save-new
+                        title="Record this payment and start the next one (Ctrl+Enter)" aria-keyshortcuts="Control+Enter">Save &amp; New</button>
                 </div>
             </form>`);
         // If we opened from the customer details flow, the customer is
@@ -881,8 +885,11 @@ const PaymentsPage = {
         // the payment already recorded instead of a second one (#292)
         if (PaymentsPage._saving) return;
         PaymentsPage._saving = true;
-        const button = form.querySelector ? form.querySelector('button[type="submit"]') : null;
-        if (button) button.disabled = true;
+        // Save & New (#1006): the same payment, then a blank form for the next
+        const andNew = !!(e.submitter && e.submitter.hasAttribute && e.submitter.hasAttribute('data-save-new'))
+            && !(typeof Replace !== 'undefined' && Replace.replacing(form));
+        const buttons = form.querySelectorAll ? [...form.querySelectorAll('button[type="submit"]')] : [];
+        buttons.forEach(b => { b.disabled = true; });
         if (!PaymentsPage._requestKey) PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
         let saved = null;
         try {
@@ -899,13 +906,41 @@ const PaymentsPage = {
             PaymentsPage._requestKey = null;
             if ((typeof Replace !== 'undefined' && Replace.replacing(form)) && saved) toastPosted(`Payment voided and replaced by payment #${saved.id}`);
             else toastPosted('Payment recorded');
-            App.refresh();
+            if (andNew) await PaymentsPage._newAfterSave(data.date);
+            else App.refresh();
         } catch (err) {
             toast(err.message, 'error');
         } finally {
             PaymentsPage._saving = false;
-            if (button) button.disabled = false;
+            buttons.forEach(b => { b.disabled = false; });
         }
+    },
+
+    // Ctrl+Enter is Save & New (#1006), as on Quick Entry; a sign-in that
+    // can't save has the button hidden (data-write) and the keys do nothing.
+    _keys(e) {
+        if (!(e.ctrlKey && e.key === 'Enter') || e.altKey || e.metaKey || e.shiftKey) return;
+        const form = e.currentTarget;
+        const more = form && form.querySelector ? form.querySelector('[data-save-new]') : null;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!more || more.disabled || more.classList.contains('hidden')) return;
+        form.requestSubmit(more);
+    },
+
+    // After Save & New: the page under redrawn as Record Payment's own
+    // refresh does, then a blank Record Payment over it with the date kept.
+    // A document under the form (an invoice opened over its list) is left
+    // as it is: its route would open it again over the new form.
+    async _newAfterSave(date) {
+        const { route, param } = App.matchRoute(App.parseHash(location.hash || '#/').path);
+        if (!App._dialogUnder && !(route && route.document && param !== null)) {
+            closeModal({ keepAddress: true });
+            await App.navigate(location.hash);
+        }
+        await PaymentsPage.showForm();
+        const box = $('#payment-form [name="date"]');
+        if (box && date) box.value = date;
     },
 };
 
