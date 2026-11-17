@@ -3776,7 +3776,7 @@ const SettingsPage = {
                     and TLS certificates are always verified.
                 </p>
             </fieldset>
-            <label class="form-field">
+            <label class="form-field" for="ai-settings-key">
                 <span>API Key / Shared Secret <span id="ai-settings-key-saved"${hasKey ? '' : ' class="hidden"'}><em class="ai-key-saved">(saved &#10003;)</em> <button type="button" class="btn btn-sm" id="ai-settings-key-remove" data-write data-admin title="Remove the stored key">Remove</button></span></span>
                 <input type="password" id="ai-settings-key" data-admin
                        placeholder="${hasKey ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32'}"

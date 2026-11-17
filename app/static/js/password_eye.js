@@ -39,6 +39,11 @@
     function attach(input) {
         if (!input || input.dataset.eye === '1' || input.hasAttribute('data-no-eye')) return null;
         input.dataset.eye = '1';
+        // shown text is typed as-is (#999): no auto-capitalising or
+        // correcting a password on macOS and iOS
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('autocorrect', 'off');
+        input.setAttribute('spellcheck', 'false');
         var wrap = document.createElement('span');
         wrap.className = 'pw-eye-wrap';
         var button = document.createElement('button');
@@ -48,7 +53,9 @@
         button.setAttribute('aria-label', 'Show password');
         button.setAttribute('title', 'Show password');
         button.innerHTML = EYE;
-        button.addEventListener('click', function () { toggle(input, button); });
+        // a click on the eye is the eye's alone (#996): inside a <label> it
+        // would otherwise count as a click on the label's control too
+        button.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggle(input, button); });
         // when the field is reset to hidden by the page (a dialog reopened),
         // the button follows
         input.addEventListener('pw-eye:hide', function () { if (input.type === 'text') toggle(input, button); });
