@@ -52,10 +52,20 @@
         // when the field is reset to hidden by the page (a dialog reopened),
         // the button follows
         input.addEventListener('pw-eye:hide', function () { if (input.type === 'text') toggle(input, button); });
+        // moving a focused field drops its focus (#988): the sign-in page
+        // and the closing-date prompt focus the field before the observer
+        // sees it, so note the focus and the caret and put them back
+        var hadFocus = document.activeElement === input;
+        var caret = null;
+        try { caret = hadFocus ? [input.selectionStart, input.selectionEnd] : null; } catch (e) { caret = null; }
         var parent = input.parentNode;
         parent.insertBefore(wrap, input);
         wrap.appendChild(input);
         wrap.appendChild(button);
+        if (hadFocus) {
+            input.focus();
+            if (caret && caret[0] !== null) { try { input.setSelectionRange(caret[0], caret[1]); } catch (e) { /* not a text field */ } }
+        }
         return button;
     }
 
