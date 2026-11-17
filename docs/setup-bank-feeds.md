@@ -117,6 +117,11 @@ sample transactions to play with. Disconnect afterward to clear it.
   take longer than that. Try the sync again; if it keeps happening, set
   `SLOWBOOKS_SIMPLEFIN_TIMEOUT=240` (seconds) in the `.env` beside the app's
   other settings and restart. The default is 120 seconds, and the floor is 10.
+- **"Could not reach the SimpleFIN bridge: the connection was not answered…"**
+  is a different thing: the bridge's address never answered the connection
+  at all (the time named is what was measured, not the setting). Check the
+  bridge address in Settings → Connections → SimpleFIN and that this
+  computer can reach the internet; raising the timeout does not help here.
 
 - **Setup tokens are single-use.** If a connect attempt fails and the
   token was consumed, generate a fresh token on the bridge site.

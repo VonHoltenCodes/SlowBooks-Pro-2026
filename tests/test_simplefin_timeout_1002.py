@@ -65,3 +65,34 @@ def test_the_guide_names_the_setting():
         "SLOWBOOKS_SIMPLEFIN_TIMEOUT=240" in guide
         and "did not answer within 120 seconds" in guide
     )
+
+
+def test_a_bridge_that_cannot_be_reached_says_so_without_the_setting():
+    # #1017: a connect timeout, or any timeout well inside the configured
+    # wait, names the measured time and not the setting
+    s = sf.timeout_sentence(httpx.ConnectTimeout("no answer"), 21.4, 120.0)
+    assert s.startswith(
+        "Could not reach the SimpleFIN bridge: the connection was not answered after 21 seconds"
+    )
+    assert sf.TIMEOUT_SETTING not in s
+    # a read timeout only fires after the configured wait: the slow-bridge
+    # sentence, which names the setting
+    s = sf.timeout_sentence(httpx.ReadTimeout("slow"), 119.2, 120.0)
+    assert (
+        s.startswith("SimpleFIN did not answer within 120 seconds")
+        and sf.TIMEOUT_SETTING in s
+    )
+    s = sf.timeout_sentence(httpx.ReadTimeout("slow"), 10.1, 10.0)
+    assert "within 10 seconds" in s
+
+
+def test_the_guide_tells_the_two_sentences_apart():
+    from pathlib import Path
+
+    guide = (
+        Path(__file__).resolve().parents[1] / "docs/setup-bank-feeds.md"
+    ).read_text(encoding="utf-8")
+    assert (
+        "the connection was not answered" in guide
+        and "raising the timeout does not help here" in guide
+    )
