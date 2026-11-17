@@ -112,6 +112,12 @@ sample transactions to play with. Disconnect afterward to clear it.
 
 ## Notes & troubleshooting
 
+- **"SimpleFIN did not answer within 120 seconds."** The bridge refreshes
+  every institution behind your token on one request, and a slow night can
+  take longer than that. Try the sync again; if it keeps happening, set
+  `SLOWBOOKS_SIMPLEFIN_TIMEOUT=240` (seconds) in the `.env` beside the app's
+  other settings and restart. The default is 120 seconds, and the floor is 10.
+
 - **Setup tokens are single-use.** If a connect attempt fails and the
   token was consumed, generate a fresh token on the bridge site.
 - **Desktop installs work fully** — the sync is outbound HTTPS polling;
