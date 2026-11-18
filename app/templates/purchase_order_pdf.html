@@ -4,6 +4,9 @@
     <title>Purchase Order</title>
 <style>
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
+    /* every page after the first names its document and page, in the top margin (#1035) */
+    @page { @top-center { content: {{ ('Purchase order ' ~ (po.po_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; } }
+    @page :first { @top-center { content: none; } }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
     .company-info { font-size: 9pt; color: #4a4a6a; }

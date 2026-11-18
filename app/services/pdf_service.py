@@ -226,6 +226,27 @@ _jinja_env.filters["tax_percent"] = _format_tax_percent
 _jinja_env.filters["fdate"] = _format_date
 
 
+def _css_string(value):
+    """A value as a quoted CSS string, for a document's running page header
+    (#1035). The value is user data (a document number). Autoescape would
+    write a quote as an HTML entity, which a <style> block prints as itself,
+    so the result is marked safe and quotes, backslashes, control characters
+    and < > & become CSS hex escapes instead: nothing can end the string or
+    the style block."""
+    from markupsafe import Markup
+
+    out = []
+    for ch in "" if value is None else str(value):
+        if ch in "\\\"<>&'" or ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append("\\%x " % ord(ch))
+        else:
+            out.append(ch)
+    return Markup('"' + "".join(out) + '"')
+
+
+_jinja_env.filters["css_string"] = _css_string
+
+
 def _format_pct_label(value):
     """A markup percent as it reads on a label: 8, 1.5, 10 — the stored value
     (8 = 8%) with any trailing zeros dropped (#551)."""
