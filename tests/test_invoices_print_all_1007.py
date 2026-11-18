@@ -179,14 +179,13 @@ def test_print_all_is_in_the_list_header_and_prints_the_shown_rows():
     assert f"PRINT_ALL_MAX: {MAX_INVOICES}," in JS
 
 
-def test_the_printed_footer_is_in_the_flow_at_each_invoices_end(client, three):
-    # #1025 (round 16, NEW-253): WebKit's print lays a fixed footer out once,
-    # partway down the last page; the print shell draws it in the flow
-    from app.routes._print import PRINT_STYLE
-
+def test_each_invoice_ends_with_its_own_footer_once(client, three):
+    # #1025 / #1030: one footer per document, last in its section, no shell
+    # style and no script move needed
     ids = [inv["id"] for inv in three]
     page = client.get(f"/api/invoices/print-preview?ids={ids[0]},{ids[1]}").text
-    assert PRINT_STYLE in page
     assert page.count('class="footer"') == 2
-    one = client.get(f"/api/invoices/{ids[0]}/print-preview").text
-    assert PRINT_STYLE in one and one.count('class="footer"') == 1
+    for sec in page.split('<section class="sb-print-doc">')[1:]:
+        body = sec.split("</section>")[0]
+        assert 'class="footer"' in body[-400:]
+    assert "sb-print-doc::after" not in page

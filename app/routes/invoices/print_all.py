@@ -34,10 +34,11 @@ TOO_MANY = (
 )
 
 # Each invoice in a section of its own; every section after the first starts
-# a new page. The totals box floats right, so a section closes its floats.
+# a new page. The totals box floats right; the footer, last in each section
+# with clear: both, closes its floats, so no clearing block of the section's
+# own can trail onto an empty sheet (#1030).
 _PAGE_STYLE = (
-    "<style>.sb-print-doc::after{content:'';display:block;clear:both}"
-    ".sb-print-doc+.sb-print-doc{page-break-before:always;break-before:page}"
+    "<style>.sb-print-doc+.sb-print-doc{page-break-before:always;break-before:page}"
     "</style>"
 )
 
