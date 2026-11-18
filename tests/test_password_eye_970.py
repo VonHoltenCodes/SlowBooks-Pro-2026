@@ -65,7 +65,11 @@ def test_enter_on_the_launchers_eye_does_not_unlock():
         l for l in src.splitlines() if "e.key === 'Enter'" in l and "unlock()" in l
     )
     assert "!e.target.closest('.pw-eye')" in line
-    assert "outline: 2px solid #8f6a1e" in src and "#cc9933; outline-offset" not in src
+    assert (
+        "outline: 2px solid #a37a29" in src
+        and "#cc9933; outline-offset" not in src
+        and "#8f6a1e; outline-offset" not in src
+    )
 
 
 def test_the_eyes_click_is_its_own_and_shown_text_is_typed_as_is():
