@@ -44,10 +44,6 @@ PRINT_SCRIPT = (
     "if(shell){window.addEventListener('pywebviewready',go);"
     "window.addEventListener('load',function(){setTimeout(go,1500);});}"
     "else{window.addEventListener('load',go);}"
-    # a document's footer comes first in its body for the PDF's margin box
-    # (#1028); the printed page draws it at the end of its document
-    "var fs=document.querySelectorAll('.footer');"
-    "for(var i=0;i<fs.length;i++){fs[i].parentNode.appendChild(fs[i]);}"
     "var bar=document.getElementById('sb-print-bar');"
     "if(bar&&document.body)document.body.insertBefore(bar,document.body.firstChild);"
     "var b=document.getElementById('sb-print-again');"
@@ -56,20 +52,11 @@ PRINT_SCRIPT = (
 )
 
 
-# The templates draw their footer `position: fixed; bottom: 0`, which the PDF
-# renderer and Chromium repeat on every page but WebKit's print lays out
-# once against the window, partway down the last page (#1025). The printed
-# page draws each document's footer in the flow at its end instead.
-PRINT_STYLE = "<style>.footer{position:static;clear:both;margin-top:24px}</style>"
-
-
 def print_html(html_str: str) -> str:
     """A document's HTML with the on-load print script the document
-    previews use, and the footer in the flow (#1025)."""
-    if "</head>" in html_str:
-        html_str = html_str.replace("</head>", PRINT_STYLE + "</head>", 1)
-    else:
-        html_str = PRINT_STYLE + html_str
+    previews use. The footer needs nothing from the shell: every
+    template draws it once, in the flow at the end, kept with the block
+    before it (#1025, #1028, #1030)."""
     if "</body>" in html_str:
         return html_str.replace("</body>", PRINT_SCRIPT + "</body>", 1)
     return html_str + PRINT_SCRIPT
