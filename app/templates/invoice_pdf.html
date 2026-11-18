@@ -40,11 +40,20 @@
     .amount-due-value { font-size: 14pt; font-weight: 700; color: #003366; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .amount-due-date { font-size: 8pt; color: #4a4a6a; white-space: nowrap; }
     table.line-items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
-    table.line-items th.r { text-align: right; }
-    table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    table.line-items tr:nth-child(even) { background: #f7f9fb; }
+    table.line-items > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.line-items > thead > tr > th.r { text-align: right; }
+    table.line-items > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.line-items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.line-items > tbody > tr:nth-child(even) { background: #f7f9fb; }
+    /* The last line row, the totals, the notes and the footer are one
+       unbreakable group of the line table (W-183, #1039): the totals never start a
+       page with no row above them, nor the notes without the totals, on
+       WeasyPrint's PDF and on Chromium's print alike (a row's own
+       break-after: avoid is not honoured by Chromium). */
+    table.line-items > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.line-items > tbody.doc-tail > tr:nth-child(even) { background: none; }
+    table.line-items > tbody.doc-tail > tr.doc-end > td { padding: 16px 0 0; border-bottom: 0; }
+    table.line-items > tbody.doc-tail > tr.alt { background: #f7f9fb; }
     .totals { margin-left: auto; width: 240px; break-inside: avoid; page-break-inside: avoid; } /* a block, not a float, so the footer's break-before: avoid binds to it (#1032); never broken inside (#1033) */
     .totals table { width: 100%; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
@@ -52,7 +61,7 @@
     .totals .label { font-weight: 700; color: #4a4a6a; }
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .totals td.tax-exempt { padding-top: 6px; font-size: 8.5pt; font-style: italic; color: #333; text-align: right; }
-    .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
+    .notes { clear: both; break-before: avoid; page-break-before: avoid; margin-top: 16px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
     .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
     .footer .invoice-footer { font-size: 8pt; color: #4a4a6a; margin-bottom: 2px; }
 </style>
@@ -162,8 +171,10 @@
     <table class="line-items">
         <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th><th class="r" style="width:80px;">Rate</th><th class="r" style="width:80px;">Amount</th></tr></thead>
         <tbody>
+        {% set rl = retainage_lines or [] %}
         {% for line in inv.lines %}
-            <tr>
+            {% if loop.last and not rl %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td>{{ line.description or '' }}{% if inv.tax_amount and not line.is_taxable and not nonprofit %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}</td>
                 <td class="r">{{ line.rate | rate(cur) }}</td>
@@ -173,16 +184,17 @@
         {# A pay application's invoice with no lines (#751, #815): the release,
            the retainage a lower percent gives back, or holds, named as its
            lines, so the table says what the money is for. #}
-        {% for row in retainage_lines or [] %}
-            <tr>
+        {% for row in rl %}
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if (loop.index + (inv.lines|length)) is even %} class="alt"{% endif %}>
                 <td>{{ row.description }}</td>
                 <td class="r">1</td>
                 <td class="r">{{ row.amount | currency(cur) }}</td>
                 <td class="r">{{ row.amount | currency(cur) }}</td>
             </tr>
         {% endfor %}
-        </tbody>
-    </table>
+        {% if not inv.lines and not rl %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="4">
 
     {% set lineless = (retainage_lines or []) | length > 0 %}
     <div class="totals">
@@ -249,5 +261,8 @@
 
     {# Settings -> Invoice footer, drawn once at the end of the document, after the totals (#1030). #}
     <div class="footer">{% if company.invoice_footer %}<div class="invoice-footer">{{ company.invoice_footer }}</div>{% endif %}Generated by Slowbooks Pro 2026</div>
+        </td></tr>
+        </tbody>
+    </table>
 </body>
 </html>
