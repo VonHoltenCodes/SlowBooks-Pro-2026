@@ -74,8 +74,8 @@ def invoice_to_fill(db: Session, invoice_id: int) -> Invoice:
             detail={
                 "code": "sales_receipt",
                 "message": terms.text(
-                    f"Sales receipt {inv.invoice_number} is paid at the time of "
-                    "sale, so no purchase order can be linked to it."
+                    f"Sales receipt {inv.invoice_number} carries no balance for "
+                    "a purchase order to fill, so none can be linked to it."
                 ),
             },
         )
