@@ -163,3 +163,73 @@ def test_a_sale_from_stock_on_hand_is_unchanged(db_session, seed_accounts):
     record_sale(db_session, it, Decimal("4"), "invoice", 6, txn_date=date(2026, 3, 2))
     assert _cogs(db_session, seed_accounts) - cogs_before == Decimal("16.00")
     assert _tied(db_session, it) == Decimal("24.00")
+
+
+def test_voiding_a_costed_sale_ahead_keeps_books_check_clean(db_session, seed_accounts):
+    # #1022 (round 16, W-179): two sold ahead at $0, then three costed at 10;
+    # voiding the three returns them at the sale's cost into a hole carried
+    # at the weighted average, and the pool's residue (W-60) posts under the
+    # void's source. The ledger stays tied, and Books Check's void row
+    # leaves the pool's revaluation out of the document's postings.
+    from app.services.books_check import books_check
+    from app.services.inventory_service import reverse_sale
+
+    it = _item(db_session, seed_accounts, cost="0")
+    record_sale(db_session, it, Decimal("2"), "invoice", 11, txn_date=date(2026, 3, 1))
+    it.cost = Decimal("10.00")
+    db_session.commit()
+    record_sale(db_session, it, Decimal("3"), "invoice", 12, txn_date=date(2026, 3, 2))
+    assert _tied(db_session, it) == Decimal("-30.00")
+    reverse_sale(
+        db_session,
+        it,
+        Decimal("3"),
+        "invoice_void",
+        12,
+        original_source_type="invoice",
+        original_source_id=12,
+        txn_date=date(2026, 3, 3),
+    )
+    assert _tied(db_session, it) is not None  # the ledger equals quantity x average
+    rows = {r["key"]: r for r in books_check(db_session, None)["rows"]}
+    assert rows["journal_voids"]["status"] == "pass", rows["journal_voids"]
+    # the receipt of the two settles the hole: cost of goods ends at 24 in all
+    record_purchase(
+        db_session,
+        it,
+        Decimal("2"),
+        Decimal("12.00"),
+        "bill",
+        12,
+        txn_date=date(2026, 3, 9),
+    )
+    assert _tied(db_session, it) == Decimal("0.00")
+    assert _cogs(db_session, seed_accounts) == Decimal("24.00")
+    rows = {r["key"]: r for r in books_check(db_session, None)["rows"]}
+    assert (
+        rows["journal_voids"]["status"] == "pass"
+        and rows["inventory"]["status"] == "pass"
+    )
+
+
+def test_voiding_a_costed_sale_ahead_with_no_zero_units_is_unchanged(
+    db_session, seed_accounts
+):
+    from app.services.inventory_service import reverse_sale
+
+    it = _item(db_session, seed_accounts, cost="10.00")
+    record_sale(db_session, it, Decimal("3"), "invoice", 13, txn_date=date(2026, 3, 2))
+    assert _tied(db_session, it) == Decimal("-30.00")
+    reverse_sale(
+        db_session,
+        it,
+        Decimal("3"),
+        "invoice_void",
+        13,
+        original_source_type="invoice",
+        original_source_id=13,
+        txn_date=date(2026, 3, 3),
+    )
+    db_session.refresh(it)
+    assert Decimal(str(it.quantity_on_hand)) == 0 and Decimal(str(it.avg_cost)) == 0
+    assert _tied(db_session, it) == Decimal("0.00")

@@ -136,8 +136,15 @@ def register_check_data(db: Session, txn_id: int) -> dict:
     # an entry saved with a vendor and no payee text carries the vendor's
     # name as its payee; the check prints the company name then (#1004). A
     # payee typed differently on the entry is kept as typed.
+    stored_payee = payee
     if vendor is not None and (not payee or payee == (vendor.name or "")):
         payee = vendor_payee(vendor)
+    # the names that are "the payee" and never print as a memo or a stub
+    # suffix (#1023): what prints, what the entry stored, the vendor's own
+    # name (an expense with no memo stores it as its descriptions)
+    payee_words = {
+        w for w in (payee, stored_payee, (vendor.name if vendor else "") or "") if w
+    }
     # the stub lists what the check paid: the category of each line, with
     # its memo when the line carries one of its own. A credit line is a
     # refund netted against the check (#387), shown as a negative amount so
@@ -153,7 +160,7 @@ def register_check_data(db: Session, txn_id: int) -> dict:
             continue
         name = ln.account.name if ln.account else ""
         memo = (ln.description or "").strip()
-        if memo and memo != payee and memo != name:
+        if memo and memo not in payee_words and memo != name:
             name = f"{name} — {memo}" if name else memo
         amount = debit if debit > 0 else -credit
         details.append({"description": name or "Payment", "amount": amount})
@@ -163,7 +170,7 @@ def register_check_data(db: Session, txn_id: int) -> dict:
         "date": txn.date,
         "amount": bank_line.credit,
         "check_number": txn.reference or "",
-        "memo": "" if memo == payee else memo,
+        "memo": "" if memo in payee_words else memo,
         "details": details,
         "bank_account": bank_line.account.name,
         "bank_account_id": bank_line.account.id,
