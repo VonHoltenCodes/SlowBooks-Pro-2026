@@ -44,6 +44,10 @@ PRINT_SCRIPT = (
     "if(shell){window.addEventListener('pywebviewready',go);"
     "window.addEventListener('load',function(){setTimeout(go,1500);});}"
     "else{window.addEventListener('load',go);}"
+    # a document's footer comes first in its body for the PDF's margin box
+    # (#1028); the printed page draws it at the end of its document
+    "var fs=document.querySelectorAll('.footer');"
+    "for(var i=0;i<fs.length;i++){fs[i].parentNode.appendChild(fs[i]);}"
     "var bar=document.getElementById('sb-print-bar');"
     "if(bar&&document.body)document.body.insertBefore(bar,document.body.firstChild);"
     "var b=document.getElementById('sb-print-again');"
