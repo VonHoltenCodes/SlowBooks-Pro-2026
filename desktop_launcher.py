@@ -698,7 +698,7 @@ PICKER_HTML = """<!DOCTYPE html>
   .pw-eye-wrap > input { width: 100%; padding-right: 34px; box-sizing: border-box; }
   .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #667; cursor: pointer; font-size: 15px; line-height: 1; }
   .pw-eye[aria-pressed="true"], .pw-eye:hover { color: #1a2b3c; }
-  .pw-eye:focus-visible { outline: 2px solid #8f6a1e; outline-offset: 1px; }
+  .pw-eye:focus-visible { outline: 2px solid #a37a29; outline-offset: 1px; }  /* the theme's --focus-ring (#1020) */
   h1 { font-size: 22px; margin: 0 0 4px; color: #1a2b3c; }
   .sub { color: #667; font-size: 13px; margin-bottom: 24px; }
   .company { background: #fff; border: 1px solid #d8dee4; border-radius: 8px;
