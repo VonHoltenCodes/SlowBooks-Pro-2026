@@ -55,6 +55,22 @@ def test_every_print_preview_sheet_has_its_pdf_at_pdf():
         assert paths[pdf] == paths[preview], f"{pdf} takes other path parameters"
 
 
+# A report's Print is the same on a Mac (#1040): every /print is drawn from
+# its /pdf, but for the sheets that have no PDF, which print as before.
+NO_PDF = {"/api/budgets/print", "/api/budgets/variance/print"}
+
+
+def test_every_reports_print_has_its_pdf_but_the_sheets_named_here():
+    paths = _get_paths()
+    prints = [p for p in paths if p.endswith("/print") and "/checks/" not in p]
+    assert len(prints) > 20
+    without = {p for p in prints if p[: -len("/print")] + "/pdf" not in paths}
+    assert without == NO_PDF
+    assert "/api/reports/customer-statement/{customer_id}/pdf" in paths
+    for path in set(prints) - without:
+        assert paths[path[: -len("/print")] + "/pdf"] == paths[path]
+
+
 # ---- the bridge -------------------------------------------------------------
 
 
@@ -132,7 +148,9 @@ def mac(monkeypatch):
     foundation = types.SimpleNamespace(
         NSData=types.SimpleNamespace(dataWithBytes_length_=lambda b, n: b)
     )
-    quartz = types.SimpleNamespace(PDFDocument=_Document, kPDFPrintPageScaleDownToFit=2)
+    quartz = types.SimpleNamespace(
+        PDFDocument=_Document, kPDFPrintPageScaleNone=0, kPDFPrintPageScaleDownToFit=2
+    )
     apphelper = types.SimpleNamespace(callAfter=lambda fn, *a: queued.append((fn, a)))
     tools = types.ModuleType("PyObjCTools")
     tools.AppHelper = apphelper
@@ -156,7 +174,8 @@ def test_a_mac_opens_the_panel_on_the_pdf_from_the_main_thread(mac):
     (doc,) = _Document.made
     assert doc.data == PDF
     info, mode, rotate = doc.printed
-    assert (info, mode, rotate) == ("the info", 2, True)
+    # at the PDF's own size (#1040), turned to fit the sheet
+    assert (info, mode, rotate) == ("the info", 0, True)
     assert doc.operation.title == "Invoice_1001.pdf"
     assert doc.operation.panel.options() == 1 | 8 | 4 | 16
     assert doc.operation.ran == 1
@@ -205,7 +224,7 @@ def test_the_shim_prints_a_documents_pdf_on_a_mac_before_anything_else():
     assert "api.print_document_pdf(" in SHIM
     # only a Mac, only a /print-preview sheet, the PDF beside it
     assert "IS_MAC" in SHIM and "navigator.platform" in SHIM
-    assert "sheet.path.replace(/\\/print-preview$/, '/pdf')" in SHIM
+    assert "sheet.path.replace(/\\/(print-preview|print)$/, '/pdf')" in SHIM
     assert "if (!IS_MAC || !api || !api.print_document_pdf) return false;" in SHIM
 
 
