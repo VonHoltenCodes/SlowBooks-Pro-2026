@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.users import ROLE_ACCOUNTANT, ROLE_READONLY, User
-from app.routes.invoices.print_all import MAX_INVOICES, TOO_MANY
+from app.routes.invoices.print_all import MAX_INVOICES, TOO_MANY, _PAGE_STYLE
 from app.services import auth as auth_service
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +58,44 @@ def test_three_invoices_print_as_one_preview_a_page_each(client, three):
     assert spots == sorted(spots)
     # the same print script as one invoice's preview
     assert 'id="sb-print-again"' in page and "window.print()" in page
+
+
+def test_the_same_run_is_one_pdf_for_a_mac_to_print(client, three):
+    """A Mac prints a document's PDF, Print all's too (#1030): the same
+    invoices, in the same order, each starting a page of its own."""
+    import io
+
+    pypdf = pytest.importorskip("pypdf")
+    ids = ",".join(str(inv["id"]) for inv in three)
+    r = client.get(f"/api/invoices/pdf?ids={ids}")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    first, last = three[0]["invoice_number"], three[-1]["invoice_number"]
+    assert f"Invoices_{first}_to_{last}.pdf" in r.headers["content-disposition"]
+    pages = [p.extract_text() for p in pypdf.PdfReader(io.BytesIO(r.content)).pages]
+    assert len(pages) == 3
+    for page, inv in zip(pages, three):
+        assert f"#{inv['invoice_number']}" in page
+    # the run's pages are headed "Page n of N" of the run after the first
+    assert "Page 1 of 3" not in pages[0]
+    assert "Page 2 of 3" in pages[1] and "Page 3 of 3" in pages[2]
+    r = client.get(f"/api/invoices/pdf?ids={three[0]['id']}")
+    assert f"Invoices_{first}.pdf" in r.headers["content-disposition"]
+
+
+def test_the_run_is_headed_page_n_of_n_not_the_first_invoice(client, three):
+    assert (
+        '@top-center{content:"Page " counter(page) " of " counter(pages)' in _PAGE_STYLE
+    )
+    assert "@page :first{@top-center{content:none}}" in _PAGE_STYLE
+    ids = ",".join(str(inv["id"]) for inv in three)
+    assert _PAGE_STYLE in client.get(f"/api/invoices/print-preview?ids={ids}").text
+
+
+def test_the_pdf_refuses_what_the_preview_refuses(client, three):
+    assert client.get("/api/invoices/pdf?ids=").status_code == 400
+    assert client.get("/api/invoices/pdf?ids=a,b").status_code == 400
+    assert client.get("/api/invoices/pdf?ids=999999").status_code == 404
 
 
 def test_the_order_asked_is_the_order_printed(client, three):
