@@ -3591,8 +3591,10 @@ def install_mac_print_panel() -> bool:
 
 def mac_print_pdf(data: bytes, title: str) -> None:
     """Queue a PDF for the Mac's print panel (#1030): PDFKit draws its pages
-    as they are, scaled down only if a page is larger than the printer's
-    imageable area, and the panel offers orientation, paper size and scale
+    as they are, at their own size (#1040: scaled down to the printer's
+    imageable area a letter page printed at about 96%, which would also
+    move a pre-printed deposit slip's figures; every document keeps half an
+    inch or more of margin), and the panel offers orientation, paper size and scale
     as the sheet's print does (install_mac_print_panel). AppKit works on
     the main thread alone and a js_api call arrives on another, so the
     panel is queued for the main thread and this returns at once; whatever
@@ -3611,7 +3613,7 @@ def mac_print_pdf(data: bytes, title: str) -> None:
                 raise ValueError("PDFKit could not read the PDF")
             info = AppKit.NSPrintInfo.sharedPrintInfo().copy()
             operation = document.printOperationForPrintInfo_scalingMode_autoRotate_(
-                info, Quartz.kPDFPrintPageScaleDownToFit, True
+                info, Quartz.kPDFPrintPageScaleNone, True
             )
             operation.setJobTitle_(title or "SlowBooks Pro 2026")
             panel = operation.printPanel()

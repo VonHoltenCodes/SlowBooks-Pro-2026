@@ -55,7 +55,8 @@
  *     the sheet's title, not the data: string an html= window has, and
  *     relative links and assets in the sheet resolve as in a browser.
  *   - On a Mac a document's Print (a /print-preview sheet: an invoice, an
- *     estimate, a bill, Print all) prints the document's PDF instead
+ *     estimate, a bill, Print all) and a report's Print (a /print sheet
+ *     with its PDF beside it, #1040) print the PDF instead
  *     (#1030): WebKit ignores the footer's keep-together rules, so a
  *     document ending near a sheet's foot printed one more sheet with only
  *     its footer, or nothing; WeasyPrint's PDF is right. The PDF is at the
@@ -309,15 +310,18 @@
     // rows ended near a sheet's foot printed one more sheet carrying only
     // its footer, or nothing (2.32.0 gate, NEW-255); the PDF, drawn by
     // WeasyPrint, keeps the footer with the block before it. Every
-    // /print-preview sheet has its PDF at /pdf with the same query. True
-    // when the panel opened; false and the sheet prints as before, which
-    // is also how Windows and Linux print (the bridge answers unsupported
-    // there, and the PDF is never fetched for them).
+    // /print-preview sheet has its PDF at /pdf with the same query, and so
+    // has every report's /print (#1040: a customer statement prints by a
+    // report's path, and still printed a blank sheet). A sheet with no PDF
+    // beside it (the Budgets sheets) answers no PDF and prints as before.
+    // True when the panel opened; false and the sheet prints as before,
+    // which is also how Windows and Linux print (the bridge answers
+    // unsupported there, and the PDF is never fetched for them).
     const IS_MAC = /Mac/.test(navigator.platform || '') || /Macintosh/.test(navigator.userAgent || '');
     function documentPdfUrl(url) {
         const sheet = printSheet(url);
-        if (!sheet || !/\/print-preview$/.test(sheet.path)) return null;
-        return sheet.path.replace(/\/print-preview$/, '/pdf') + (sheet.query ? '?' + sheet.query : '');
+        if (!sheet) return null;
+        return sheet.path.replace(/\/(print-preview|print)$/, '/pdf') + (sheet.query ? '?' + sheet.query : '');
     }
     async function printDocumentPdf(url) {
         const api = window.pywebview && window.pywebview.api;
