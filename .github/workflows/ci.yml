@@ -307,7 +307,8 @@ jobs:
           # 341 since the import column-length guard: tests/test_import_column_lengths.py
           # has one PostgreSQL-only test that skips without SLOWBOOKS_TEST_POSTGRES_URL.
           # 361 with the running page header renders (#1035, test_pdf_page_header_1035.py: six).
-          MAX_SKIPS: "361"
+          # 362 with Print all as one PDF (#1030, test_invoices_print_all_1007.py: one).
+          MAX_SKIPS: "362"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

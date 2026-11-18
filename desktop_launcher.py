@@ -1456,6 +1456,39 @@ class PickerApi:
             return {"success": False, "error": str(exc)}
         return {"success": True}
 
+    def print_document_pdf(self, title: str, base64_data: str) -> dict:
+        """Print a document's PDF, fetched and base64-encoded by the page,
+        through the Mac's print panel (#1030, 2.32.0 gate NEW-255).
+
+        On a Mac a document's Print prints its saved PDF, not the sheet:
+        WebKit ignores ``break-before: avoid`` and ``break-inside: avoid``,
+        so an invoice whose last rows ended near a sheet's foot printed one
+        more sheet carrying only its footer, or nothing, with no rule that
+        could stop it; the PDF, drawn by WeasyPrint, keeps the footer with
+        the block before it. The panel is the same one the sheet's print
+        opened, with orientation, paper size and scale (NEW-209). On Windows
+        and Linux the sheet prints itself as before (Chromium honours the
+        rules), and this answers ``unsupported`` so the page goes on to it."""
+        if sys.platform != "darwin":
+            return {
+                "success": False,
+                "unsupported": True,
+                "error": "The page prints itself on this system",
+            }
+        import base64
+
+        try:
+            data = base64.b64decode(base64_data)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        if data[:5] != b"%PDF-":
+            return {"success": False, "error": "That is not a PDF"}
+        try:
+            mac_print_pdf(data, str(title or ""))
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True}
+
     def open_external(self, url: str) -> dict:
         """Open a URL in the user's default browser (employee portal links —
         a separate cookie-based site that must NOT be rendered in a
@@ -3554,6 +3587,45 @@ def install_mac_print_panel() -> bool:
     print_webview._slowbooks = True
     BrowserView.print_webview = staticmethod(print_webview)
     return True
+
+
+def mac_print_pdf(data: bytes, title: str) -> None:
+    """Queue a PDF for the Mac's print panel (#1030): PDFKit draws its pages
+    as they are, scaled down only if a page is larger than the printer's
+    imageable area, and the panel offers orientation, paper size and scale
+    as the sheet's print does (install_mac_print_panel). AppKit works on
+    the main thread alone and a js_api call arrives on another, so the
+    panel is queued for the main thread and this returns at once; whatever
+    goes wrong there is written to the launcher's output, never raised
+    into pywebview's bridge thread."""
+    import AppKit
+    import Foundation
+    import Quartz
+    from PyObjCTools import AppHelper
+
+    def run():
+        try:
+            nsdata = Foundation.NSData.dataWithBytes_length_(data, len(data))
+            document = Quartz.PDFDocument.alloc().initWithData_(nsdata)
+            if document is None:
+                raise ValueError("PDFKit could not read the PDF")
+            info = AppKit.NSPrintInfo.sharedPrintInfo().copy()
+            operation = document.printOperationForPrintInfo_scalingMode_autoRotate_(
+                info, Quartz.kPDFPrintPageScaleDownToFit, True
+            )
+            operation.setJobTitle_(title or "SlowBooks Pro 2026")
+            panel = operation.printPanel()
+            panel.setOptions_(
+                panel.options()
+                | AppKit.NSPrintPanelShowsOrientation
+                | AppKit.NSPrintPanelShowsPaperSize
+                | AppKit.NSPrintPanelShowsScaling
+            )
+            operation.runOperation()
+        except Exception as exc:
+            print(f"Could not print the PDF: {exc}")
+
+    AppHelper.callAfter(run)
 
 
 def main() -> int:

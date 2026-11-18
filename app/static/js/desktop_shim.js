@@ -54,6 +54,14 @@
  *     minute. The print dialog's footer then prints that short address and
  *     the sheet's title, not the data: string an html= window has, and
  *     relative links and assets in the sheet resolve as in a browser.
+ *   - On a Mac a document's Print (a /print-preview sheet: an invoice, an
+ *     estimate, a bill, Print all) prints the document's PDF instead
+ *     (#1030): WebKit ignores the footer's keep-together rules, so a
+ *     document ending near a sheet's foot printed one more sheet with only
+ *     its footer, or nothing; WeasyPrint's PDF is right. The PDF is at the
+ *     sheet's address with /pdf for /print-preview, and
+ *     print_document_pdf() opens the Mac's print panel on it. Windows and
+ *     Linux print the sheet as before (Chromium honours the rules).
  *   - Any other HTML response, or a sheet whose address cannot be made, is
  *     handed to open_document_html(), which opens it in a new native
  *     window via pywebview's html= parameter.
@@ -296,7 +304,53 @@
         return !!(result && result.success);
     }
 
+    // On a Mac a document's Print prints its saved PDF (#1030): WebKit ignores
+    // break-before: avoid and break-inside: avoid, so a document whose last
+    // rows ended near a sheet's foot printed one more sheet carrying only
+    // its footer, or nothing (2.32.0 gate, NEW-255); the PDF, drawn by
+    // WeasyPrint, keeps the footer with the block before it. Every
+    // /print-preview sheet has its PDF at /pdf with the same query. True
+    // when the panel opened; false and the sheet prints as before, which
+    // is also how Windows and Linux print (the bridge answers unsupported
+    // there, and the PDF is never fetched for them).
+    const IS_MAC = /Mac/.test(navigator.platform || '') || /Macintosh/.test(navigator.userAgent || '');
+    function documentPdfUrl(url) {
+        const sheet = printSheet(url);
+        if (!sheet || !/\/print-preview$/.test(sheet.path)) return null;
+        return sheet.path.replace(/\/print-preview$/, '/pdf') + (sheet.query ? '?' + sheet.query : '');
+    }
+    async function printDocumentPdf(url) {
+        const api = window.pywebview && window.pywebview.api;
+        if (!IS_MAC || !api || !api.print_document_pdf) return false;
+        const pdfUrl = documentPdfUrl(url);
+        if (!pdfUrl) return false;
+        let response;
+        try {
+            response = await fetch(pdfUrl, {
+                credentials: 'same-origin',
+                headers: { 'X-Slowbooks-Desktop': '1' },
+            });
+        } catch (e) {
+            return false;
+        }
+        const type = (response.headers.get('Content-Type') || '').toLowerCase();
+        if (!response.ok || !type.includes('pdf')) return false;
+        const title = filenameFromDisposition(response.headers.get('Content-Disposition') || '', 'document.pdf');
+        let result;
+        try {
+            result = await api.print_document_pdf(title, arrayBufferToBase64(await response.arrayBuffer()));
+        } catch (e) {
+            return false;
+        }
+        if (result && result.success) return true;
+        if (result && result.error && !result.unsupported && typeof toast === 'function') {
+            toast('Could not print the PDF: ' + result.error, 'error');
+        }
+        return false;
+    }
+
     async function openSameOriginUrl(url) {
+        if (await printDocumentPdf(url)) return;
         if (await openPrintAddress(url)) return;
         let response;
         try {
