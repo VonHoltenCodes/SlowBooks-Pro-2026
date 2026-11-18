@@ -23,11 +23,20 @@
     .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
     .address-text { font-size: 9pt; color: #333; }
     table.line-items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
-    table.line-items th.r { text-align: right; }
-    table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    table.line-items tr:nth-child(even) { background: #f7f9fb; }
+    table.line-items > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.line-items > thead > tr > th.r { text-align: right; }
+    table.line-items > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.line-items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.line-items > tbody > tr:nth-child(even) { background: #f7f9fb; }
+    /* The last line row, the totals, the notes and the footer are one
+       unbreakable group of the line table (W-183, #1039): the totals never start a
+       page with no row above them, nor the notes without the totals, on
+       WeasyPrint's PDF and on Chromium's print alike (a row's own
+       break-after: avoid is not honoured by Chromium). */
+    table.line-items > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.line-items > tbody.doc-tail > tr:nth-child(even) { background: none; }
+    table.line-items > tbody.doc-tail > tr.doc-end > td { padding: 16px 0 0; border-bottom: 0; }
+    table.line-items > tbody.doc-tail > tr.alt { background: #f7f9fb; }
     {%- if terms.is_construction and presentation_style(est, company.estimate_style) == 'line_markup' %}
     /* a markup-per-line row prints whole on one page, its description wrapping (#774) */
     table.line-items.priced-lines tr { break-inside: avoid; page-break-inside: avoid; }
@@ -46,7 +55,7 @@
     .acceptance table { width: 100%; border-collapse: collapse; margin-top: 28px; }
     .acceptance td { width: 33%; padding: 0 12px 0 0; vertical-align: bottom; }
     .acceptance .sig-line { border-top: 1px solid #333; padding-top: 3px; font-size: 8pt; color: #4a4a6a; }
-    .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
+    .notes { clear: both; break-before: avoid; page-break-before: avoid; margin-top: 16px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
     .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
 </head>
@@ -113,14 +122,15 @@
         <thead><tr><th>Description</th><th class="r" style="width:80px;">Qty</th><th class="r" style="width:90px;">Amount</th></tr></thead>
         <tbody>
         {% for line in est.lines %}
-            <tr>
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td>{{ line.description or '' }}</td>
                 <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
                 <td class="r">{{ line.amount | currency }}</td>
             </tr>
         {% endfor %}
-        </tbody>
-    </table>
+        {% if not est.lines %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="3">
 
     <div class="totals keep">
         <table>
@@ -133,7 +143,10 @@
             <tr><td colspan="2" class="tax-exempt">{{ exempt_note }}</td></tr>
             {% endif %}
         </table>
-    </div>{% else %}
+    </div>
+        </td></tr>
+        </tbody>
+    </table>{% else %}
     {# Construction bid (#551): lines AT COST grouped by package with the
        section code in the description column, then allowances, alternates
        (marked-up price, accepted ones marked) and unit prices in their own
@@ -269,15 +282,16 @@
         <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th><th class="r" style="width:80px;">Rate</th><th class="r" style="width:80px;">Amount</th></tr></thead>
         <tbody>
         {% for line in est.lines %}
-            <tr>
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td>{{ line.description or '' }}{% if est.tax_amount and not line.is_taxable %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}</td>
                 <td class="r">{{ line.rate | rate }}</td>
                 <td class="r">{{ line.amount | currency }}</td>
             </tr>
         {% endfor %}
-        </tbody>
-    </table>
+        {% if not est.lines %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="4">
 
     <div class="totals">
         <table>
@@ -291,12 +305,22 @@
             {% endif %}
         </table>
     </div>
+    {% if est.notes %}
+    <div class="notes"><strong>Notes:</strong> {{ est.notes }}</div>
+    {% endif %}
+    <div class="footer">Generated by Slowbooks Pro 2026</div>
+        </td></tr>
+        </tbody>
+    </table>
     {% endif %}
 
+    {# A construction estimate ends with its terms and acceptance block; the notes and the footer follow those. #}
+    {% if terms.is_construction %}
     {% if est.notes %}
     <div class="notes"><strong>Notes:</strong> {{ est.notes }}</div>
     {% endif %}
 
     <div class="footer">Generated by Slowbooks Pro 2026</div>
+    {% endif %}
 </body>
 </html>
