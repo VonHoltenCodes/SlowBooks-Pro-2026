@@ -42,7 +42,7 @@
     table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
     table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     table.line-items tr:nth-child(even) { background: #f7f9fb; }
-    .totals { float: right; width: 240px; }
+    .totals { margin-left: auto; width: 240px; break-inside: avoid; page-break-inside: avoid; } /* a block, not a float, so the footer's break-before: avoid binds to it (#1032); never broken inside (#1033) */
     .totals table { width: 100%; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
     .totals td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
