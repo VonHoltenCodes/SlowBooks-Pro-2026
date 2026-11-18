@@ -47,6 +47,11 @@ from app.services.accounting import _q, create_journal_entry, quantize_to
 
 logger = logging.getLogger(__name__)
 
+# The phrase every residue entry carries in its description (#647, #1022):
+# the pool's own revaluation posted under a document's source, which Books
+# Check's void row leaves out of that document's postings.
+RESIDUE_MARK = " - Inventory set to quantity x average cost: "
+
 COST_Q = Decimal("0.0001")
 # The memo of a reversal piece that matched no sale posting (a legacy or
 # hand-made ledger): it names nothing, and must not count as pre-release
@@ -1181,8 +1186,7 @@ def _post_residue(
     txn = create_journal_entry(
         db,
         txn_date or _date.today(),
-        f"{memo or 'Inventory'} - Inventory set to quantity x average cost: "
-        f"{item.name}",
+        f"{memo or 'Inventory'}{RESIDUE_MARK}{item.name}",
         lines,
         source_type=source_type,
         source_id=source_id,

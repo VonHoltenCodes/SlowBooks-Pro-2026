@@ -1727,12 +1727,18 @@ def check_voided_live(db: Session, as_of: date, t) -> Check:
         net: dict[int, dict[int, Decimal]] = defaultdict(
             lambda: defaultdict(lambda: ZERO)
         )
+        # the inventory pool's residue, posted under a void's source when a
+        # sale's reversal fills a hole carried at another cost (#647/W-60),
+        # is the pool's revaluation, not the document's posting (#1022)
+        from app.services.inventory_service import RESIDUE_MARK
+
         for ln in (
             db.query(TransactionLine)
             .join(Transaction, TransactionLine.transaction_id == Transaction.id)
             .filter(
                 TransactionLine.transaction_id.in_(list(owner)),
                 Transaction.date <= as_of,
+                ~Transaction.description.contains(RESIDUE_MARK),
             )
         ):
             net[owner[ln.transaction_id]][ln.account_id] += _d(ln.debit) - _d(ln.credit)
