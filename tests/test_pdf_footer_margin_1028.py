@@ -99,3 +99,61 @@ def test_the_print_page_is_the_pdfs_html_with_the_footer_last(
     assert body.count('class="footer"') == 1
     assert body.index('class="footer"') > body.index("Line 3")
     assert "running(doc-footer)" not in page and "position: fixed" not in page
+
+
+def _long_invoice_with_notes(client, seed_customer, lines, tax_rate=0):
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-11-01",
+            "tax_rate": tax_rate,
+            "notes": "Net 30. Thank you for your business.",
+            "lines": [
+                {
+                    "description": f"Line {i}",
+                    "quantity": 1,
+                    "rate": 33,
+                    "is_taxable": True,
+                }
+                for i in range(1, lines + 1)
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+@pytest.mark.parametrize(
+    "lines,tax_rate", [(55, 0), (54, 0.0825), (55, 0.0825), (56, 0), (53, 0)]
+)
+def test_the_totals_box_never_breaks_across_pages(
+    client, seed_accounts, seed_customer, lines, tax_rate
+):
+    # #1033 (round 19, W-182): Subtotal on one page and Total on the next
+    inv = _long_invoice_with_notes(client, seed_customer, lines, tax_rate)
+    r = client.get(f"/api/invoices/{inv['id']}/pdf")
+    assert r.status_code == 200
+    pages = _rows_by_page(r.content)
+    where = {}
+    for n, rows in enumerate(pages, 1):
+        for _, t in rows:
+            for word in ("Subtotal", "Total", "Tax"):
+                if t.startswith(word) or t == word:
+                    where.setdefault(word, n)
+    assert where["Subtotal"] == where["Total"], (lines, tax_rate, where)
+    if tax_rate:
+        assert where["Tax"] == where["Total"], (lines, tax_rate, where)
+    # and the footer is still once, on the last page, with the notes
+    _assert_footer_once_at_the_end(r.content)
+
+
+def test_the_totals_box_is_a_block_not_a_float(client, seed_accounts, seed_customer):
+    # #1032 (round 19, W-181): Chromium's break-before: avoid on the footer
+    # binds to an in-flow block before it, never to a float
+    inv = _long_invoice(client, seed_customer, lines=3)
+    page = client.get(f"/api/invoices/{inv['id']}/print-preview").text
+    assert (
+        ".totals { margin-left: auto;" in page and ".totals { float: right" not in page
+    )
+    assert "break-inside: avoid" in page.split(".totals {")[1].split("}")[0]
