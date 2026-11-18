@@ -386,8 +386,8 @@ def test_a_sales_receipt_takes_no_link(client, db_session, seed_accounts):
         assert exc.status_code == 409
         assert exc.detail["code"] == "sales_receipt"
         assert exc.detail["message"] == (
-            f"Sales receipt {inv.invoice_number} is paid at the time of sale, so no "
-            "purchase order can be linked to it."
+            f"Sales receipt {inv.invoice_number} carries no balance for a purchase "
+            "order to fill, so none can be linked to it."
         )
     else:
         raise AssertionError("a sales receipt took a link")

@@ -52,9 +52,20 @@ PRINT_SCRIPT = (
 )
 
 
+# The templates draw their footer `position: fixed; bottom: 0`, which the PDF
+# renderer and Chromium repeat on every page but WebKit's print lays out
+# once against the window, partway down the last page (#1025). The printed
+# page draws each document's footer in the flow at its end instead.
+PRINT_STYLE = "<style>.footer{position:static;clear:both;margin-top:24px}</style>"
+
+
 def print_html(html_str: str) -> str:
     """A document's HTML with the on-load print script the document
-    previews use."""
+    previews use, and the footer in the flow (#1025)."""
+    if "</head>" in html_str:
+        html_str = html_str.replace("</head>", PRINT_STYLE + "</head>", 1)
+    else:
+        html_str = PRINT_STYLE + html_str
     if "</body>" in html_str:
         return html_str.replace("</body>", PRINT_SCRIPT + "</body>", 1)
     return html_str + PRINT_SCRIPT
