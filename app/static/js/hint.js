@@ -4,7 +4,7 @@
  * A form's teaching text ("Optional. Separate addresses with commas.") used
  * to sit in the open under its field: about sixty grey lines that teach once
  * and then make every page read as a wall. hint(text) puts one behind a small
- * button after the field's label instead, the tortoise's shell with its "i".
+ * button after the field's label instead, the whole tortoise with the "i" on its shell.
  * Errors, warnings and state lines are never hints; they stay where they are.
  *
  *   `<label for="cc">CC ${hint('Optional. Separate addresses with commas.', 'CC')}</label>`
@@ -27,7 +27,7 @@ function hint(text, about = '', id = '') {
     id = id || `hint-${++_hintSeq}`;
     const name = about ? `About ${about}` : 'About this field';
     const head = about ? `<strong class="hint-pop-title">${escapeHtml(about)}</strong>` : '';
-    return `<span class="hint-wrap"><button type="button" class="hint-icon" data-hint aria-label="${escapeHtml(name)}" aria-expanded="false" aria-controls="${id}" aria-describedby="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="17" alt="" aria-hidden="true"></button><span class="hint-pop" id="${id}" role="note" hidden><img class="hint-pop-mark" src="/static/img/tortoise-info.png" srcset="/static/img/tortoise-info@2x.png 2x" width="28" height="28" alt="" aria-hidden="true"><span class="hint-pop-body">${head}${text}</span></span></span>`;
+    return `<span class="hint-wrap"><button type="button" class="hint-icon" data-hint aria-label="${escapeHtml(name)}" aria-expanded="false" aria-controls="${id}" aria-describedby="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="22" alt="" aria-hidden="true"></button><span class="hint-pop" id="${id}" role="note" hidden><img class="hint-pop-mark" src="/static/img/tortoise-info.png" srcset="/static/img/tortoise-info@2x.png 2x" width="28" height="28" alt="" aria-hidden="true"><span class="hint-pop-body">${head}${text}</span></span></span>`;
 }
 
 const Hints = {
