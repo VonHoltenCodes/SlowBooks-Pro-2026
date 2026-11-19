@@ -292,12 +292,17 @@ const FastRack = {
 
     // ---- Settings -> My Preferences -> Fast Rack ---------------------------
 
+    // The editor's description, an entry of the My Preferences note (#977).
+    hintText() {
+        return 'The buttons in the top bar, in their order: up to ' + FastRack.MAX + '. '
+            + 'Kept with your sign-in. When the window is narrow they move into More, the last first.';
+    },
+
     editorHtml() {
         return '<div class="fast-rack-editor" id="settings-fast-rack" role="group" aria-labelledby="settings-h-fast-rack" data-readonly-ok>'
             + '<h4 id="settings-h-fast-rack" data-land-block>Fast Rack</h4>'
-            + '<p id="fr-hint" class="fr-hint">The buttons in the top bar, in their order: up to ' + FastRack.MAX + '. '
-            + 'Kept with your sign-in. When the window is narrow they move into More, the last first.</p>'
-            + '<ol class="fr-list" id="fr-list" aria-label="Fast Rack buttons"></ol>'
+            // what the rack is, in the My Preferences note (#977, hintText)
+            + '<ol class="fr-list" id="fr-list" aria-label="Fast Rack buttons" aria-describedby="fr-hint"></ol>'
             + '<p class="fr-count" id="fr-count" aria-live="polite"></p>'
             + '<div class="fr-add-row">'
             + '<label for="fr-add">Add a button</label> '

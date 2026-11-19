@@ -49,6 +49,8 @@ const ctx = {
 ctx.window = {};
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('app/static/js/app.js', 'utf8') + '\nthis.App = App;', ctx);
+// the section notes' helper (#977), loaded before settings.js as on the page
+vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);
 vm.runInContext(fs.readFileSync('app/static/js/settings.js', 'utf8') + '\nthis.SettingsPage = SettingsPage;', ctx);
 const { App, SettingsPage: S } = ctx;
 App.settings = { company_name: 'Harbor Light Bakery' }; // as the window opened

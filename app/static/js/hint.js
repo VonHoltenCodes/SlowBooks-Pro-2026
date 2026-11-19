@@ -96,3 +96,74 @@ const Hints = {
 };
 
 if (typeof document !== 'undefined' && document.addEventListener) Hints.init();
+
+/**
+ * One tortoise for a whole section (#977, Settings): a page whose fields
+ * each carry a line of teaching would grow a tortoise on every row, so a
+ * section heading gets one button whose note lists the section's fields,
+ * each name in bold and its description after it, in the page's order.
+ *
+ *   `<div class="settings-h-row"><h3 id="h">Closing Date</h3>${hintList('Closing Date', [
+ *       { text: 'Prevent modifications to transactions before this date.' },
+ *       { name: 'Password (optional)', id: 'closing-password-help', text: '…' },
+ *   ])}</div>`
+ *
+ * An entry with no name is the section's own lead and comes first. Each
+ * entry has its own id (the caller's, or one made here), and the field it
+ * describes points at it with aria-describedby, so a screen reader still
+ * reads a field's description at the field with the note closed. An entry
+ * marked hidden is left out until Hints.showEntry(id, true) (a field the
+ * page shows only on some choice); admin: true marks it data-admin, so
+ * App.adminPass hides it from everyone else. `text` is page markup, as for
+ * hint(); `name` is plain words and escaped here. The same Hints open the
+ * note: click, Enter or Space; Escape, a click elsewhere or Tab out close
+ * it; one at a time. The note scrolls on its own and takes focus (Tab), so
+ * a long list reads and scrolls from the keyboard. Nothing to list: ''.
+ */
+let _hintListSeq = 0;
+
+function hintList(about, entries) {
+    const items = (entries || []).filter(e => e && (e.text || e.id));
+    if (!items.length) return '';
+    const id = `hint-list-${++_hintListSeq}`;
+    const name = escapeHtml(`About ${about}`);
+    let lead = '';
+    let list = '';
+    items.forEach((e, i) => {
+        const eid = escapeHtml(e.id || `${id}-${i + 1}`);
+        const marks = (e.hidden ? ' hidden' : '') + (e.admin ? ' data-admin' : '');
+        if (!e.name) {
+            lead += `<p class="hint-list-lead" id="${eid}"${marks}>${e.text || ''}</p>`;
+        } else {
+            list += `<div class="hint-list-item"${marks}><dt>${escapeHtml(e.name)}</dt><dd id="${eid}">${e.text || ''}</dd></div>`;
+        }
+    });
+    return `<div class="hint-wrap hint-wrap--list"><button type="button" class="hint-icon" data-hint aria-label="${name}" aria-expanded="false" aria-controls="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="17" alt="" aria-hidden="true"></button>`
+        + `<div class="hint-pop hint-pop--list" id="${id}" role="note" aria-label="${name}" tabindex="0" hidden><img class="hint-pop-mark" src="/static/img/tortoise-info.png" srcset="/static/img/tortoise-info@2x.png 2x" width="28" height="28" alt="" aria-hidden="true">`
+        + `<div class="hint-pop-body"><strong class="hint-pop-title">${escapeHtml(about)}</strong>${lead}${list ? `<dl class="hint-list">${list}</dl>` : ''}</div></div></div>`;
+}
+
+// Show or leave out one entry of a section's note, as its field comes and
+// goes (the LLC's Taxed as, a provider's own fields).
+Hints.showEntry = function (id, on) {
+    const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById(id) : null;
+    if (!el) return;
+    const box = (el.closest && el.closest('.hint-list-item')) || el;
+    box.hidden = !on;
+};
+
+// A section's note is tall: one opened from a heading low in the window
+// opens upward when there is room above, and otherwise brings itself into
+// view, so the list never starts below the window's edge.
+const _hintOpenOne = Hints.open;
+Hints.open = function (button) {
+    _hintOpenOne(button);
+    const note = Hints._open === button ? Hints.note(button) : null;
+    if (!note || !note.classList || typeof note.classList.contains !== 'function' || !note.classList.contains('hint-pop--list')) return;
+    note.classList.remove('hint-pop--up');
+    if (typeof window === 'undefined' || !note.getBoundingClientRect || !button.getBoundingClientRect) return;
+    const box = note.getBoundingClientRect();
+    if (box.bottom <= window.innerHeight - 8) return;
+    if (button.getBoundingClientRect().top - 8 >= box.height + 4) note.classList.add('hint-pop--up');
+    else if (note.scrollIntoView) note.scrollIntoView({ block: 'nearest' });
+};

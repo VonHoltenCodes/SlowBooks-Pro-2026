@@ -2836,6 +2836,34 @@ tr.clickable { cursor: pointer; }
 .hint-pop-mark { flex: 0 0 auto; }
 .hint-pop-title { display: block; margin-bottom: 2px; }
 
+/* One tortoise per section (#977, Settings): hintList() in hint.js. Its
+   note lists the section's fields, each name in bold over its description.
+   Wider than a field's note, and never taller than 24rem: a long list
+   scrolls inside the note (which takes focus, so the keyboard scrolls it). */
+.hint-pop--list {
+    width: 30rem; max-width: 30rem; max-height: 24rem;
+    overflow-y: auto; overscroll-behavior: contain;
+}
+.hint-pop--list:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.hint-pop--list .hint-pop-body { min-width: 0; }
+.hint-pop--list .hint-pop-title { margin-bottom: 4px; font-size: 13px; }
+.hint-list-lead { margin: 0 0 8px; }
+.hint-list-lead[hidden], .hint-list-item[hidden] { display: none; }
+.hint-list { margin: 0; }
+.hint-list dt { font-weight: 700; margin: 0; }
+.hint-list dd { margin: 0 0 8px; }
+.hint-list-item:last-child dd { margin-bottom: 0; }
+.hint-list code { font-size: 11px; }
+/* opened from a heading low in the window: upward, above its button */
+.hint-pop--list.hint-pop--up { top: auto; bottom: calc(100% + 4px); }
+/* a section heading and its tortoise on one line; the rule under the row */
+.settings-h-row {
+    display: flex; align-items: center; gap: 2px;
+    margin-bottom: 12px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--panel-border);
+}
+.settings-section .settings-h-row > h3 { margin: 0; padding: 0; border: 0; }
+
 /* The hare mark (#979): on the From QuickBooks sections only, at the heading's
    right end, never in the chrome. */
 .hare-mark {

@@ -105,7 +105,10 @@ def test_settings_offers_it_on_the_desktop():
     ]
     assert "hidden" in section[:40]
     assert "Ask for the password each time SlowBooks Pro starts" in section
-    assert '<select id="ask-password-on-start" name="ask_password_on_start">' in section
+    assert (
+        '<select id="ask-password-on-start" name="ask_password_on_start"'
+        ' aria-describedby="ask-password-on-start-help">' in section
+    )
     # "No" unless the company chose "Yes"
     assert "${s.ask_password_on_start !== 'true' ? 'selected' : ''}>No:" in section
     loader = js[js.index("async loadSignInPref() {") :]
