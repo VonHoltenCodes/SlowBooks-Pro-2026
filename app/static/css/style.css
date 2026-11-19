@@ -2823,7 +2823,7 @@ tr.clickable { cursor: pointer; }
 .hint-pop {
     position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
     display: flex; gap: 8px; align-items: flex-start;
-    width: max-content; max-width: min(340px, 80vw);
+    width: max-content; max-width: 340px;
     padding: 8px 10px;
     background: var(--panel-bg); color: var(--text-primary);
     border: 1px solid var(--panel-border); border-radius: 4px;
