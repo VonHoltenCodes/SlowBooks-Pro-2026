@@ -1078,7 +1078,8 @@ def sales_by_item_sections(data: dict) -> list[dict]:
     return [
         {
             "title": "Sales by Item",
-            "period": f"{data['start_date']} — {data['end_date']}",
+            "period": f"{data['start_date']} — {data['end_date']}"
+            + (" (cash basis)" if data.get("basis") == "cash" else ""),
             "columns": columns,
             "rows": rows,
         }

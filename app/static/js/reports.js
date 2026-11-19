@@ -2326,8 +2326,11 @@ const ReportsPage = {
     },
 
     async incomeByCustomer(prefill) {
-        await ReportsPage.openPeriodModal(T("Income by Customer"), ReportsPage.defaultPeriod(), async (_period, range) => {
-            const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}`);
+        // the Basis switch the P&L has (#1062): on the cash basis a sale
+        // counts when it is paid, in the proportion paid
+        const basisOpts = ReportsPage._basisOpts(prefill);
+        await ReportsPage.openPeriodModal(T("Income by Customer"), ReportsPage.defaultPeriod(), async (_period, range, p) => {
+            const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}${ReportsPage._basisQs(p)}`);
             // Sales before tax, the tax beside it; Paid includes money not
             // yet applied to an invoice, and Balance is net of it.
             // A customer's name opens the customer's page (R9)
@@ -2350,12 +2353,12 @@ const ReportsPage = {
                 <td class="amount">${formatCurrency(data.total_balance)}</td>
             </tr>`;
             return `
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
-        }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null }, prefill });
+        }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null, ...basisOpts.params }, prefill, toolbar: basisOpts.toolbar });
     },
 
     // Past Customers (#436): a mailing list built from the books — one row
@@ -2524,7 +2527,9 @@ const ReportsPage = {
 
     async salesByItem(prefill) {
         prefill = prefill || {};
-        const params = { customer_id: prefill.customer_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null };
+        // the Basis switch the P&L has (#1062)
+        const basisOpts = ReportsPage._basisOpts(prefill);
+        const params = { customer_id: prefill.customer_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null, ...basisOpts.params };
         let customers = [], classes = [], jobs = [];
         try { customers = (await API.get('/customers?active_only=true&tree=1')).map(c => ({ ...c, name: customerLabel(c) })); } catch (e) { customers = []; }
         try { classes = await API.get('/classes?include_archived=true'); } catch (e) { classes = []; }
@@ -2532,9 +2537,11 @@ const ReportsPage = {
         const toolbar =
             ReportsPage._itemPicker('sbi-customer', T('Customer'), customers, params.customer_id, 'customer_id')
             + ReportsPage._itemPicker('sbi-class', T('Class'), classes, params.class_id, 'class_id')
-            + ReportsPage._itemPicker('sbi-job', T('Job'), jobs, params.job_id, 'job_id');
+            + ReportsPage._itemPicker('sbi-job', T('Job'), jobs, params.job_id, 'job_id')
+            + basisOpts.toolbar;
         await ReportsPage.openPeriodModal('Sales by Item', ReportsPage.defaultPeriod(), async (_period, range, p) => {
-            const qs = ReportsPage._itemQs(range, p, 'customer_id');
+            // the basis rides on the lines, the PDF and the CSV too
+            const qs = ReportsPage._itemQs(range, p, 'customer_id') + ReportsPage._basisQs(p);
             const data = await API.get(`/reports/sales-by-item?${qs}`);
             const money = (v) => v === null || v === undefined ? '—' : formatCurrency(v);
             const pct = (v) => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
@@ -2562,7 +2569,7 @@ const ReportsPage = {
                 <td class="amount"></td>
             </tr>`;
             return `${ReportsPage._exportButtons('sales-by-item', qs)}
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Click an item for the lines behind it.</p>
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. Click an item for the lines behind it.</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg price</th><th scope="col" class="amount">COGS</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Margin %</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="8" style="text-align:center; color:var(--gray-400);">No sales in this period</td></tr>'}</tbody>

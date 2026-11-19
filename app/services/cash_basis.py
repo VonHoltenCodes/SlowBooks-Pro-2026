@@ -159,6 +159,116 @@ def receivable_note(db: Session, as_of, basis: str) -> str | None:
     )
 
 
+# ---------------------------------------------------------------------------
+# What the cash basis recognized of the sales, for the sales reports (#1062)
+# ---------------------------------------------------------------------------
+
+
+def _standing_settlements():
+    """A select of every standing settlement entry of a customer's
+    invoices: a payment not voided, and an early-payment discount's credit
+    memo not voided. A voided payment's cash lines stay in its entry beside
+    their reversal (which names no invoice), so only these entries count."""
+    from sqlalchemy import union
+
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+
+    return union(
+        select(Payment.transaction_id).where(
+            Payment.is_voided.isnot(True), Payment.transaction_id.isnot(None)
+        ),
+        select(CreditMemo.transaction_id).where(
+            CreditMemo.discount_payment_id.isnot(None),
+            CreditMemo.status != CreditMemoStatus.VOID,
+            CreditMemo.transaction_id.isnot(None),
+        ),
+    )
+
+
+def recognized_sales(db: Session, start_date, end_date) -> dict[int, dict]:
+    """What the cash basis recognized of each invoice from `start_date` to
+    `end_date`: {invoice_id: {"income": Decimal, "tax": Decimal}}, signed
+    credit-positive. Read from the cash lines the invoice's payments (and
+    early-payment discounts) wrote, dated by their entry: the lines the
+    cash-basis Profit and Loss reads, so a sales report built on them
+    counts a sale when it is paid and in the proportion paid, and ties to
+    that P&L. `income` is the lines on income accounts, `tax` the lines on
+    Sales Tax Payable."""
+    from app.models.accounts import Account
+    from app.services.control_accounts import MissingControlAccount
+
+    try:
+        from app.services.accounting import get_sales_tax_account_id
+
+        tax_id = get_sales_tax_account_id(db)
+    except MissingControlAccount:
+        tax_id = None
+    rows = (
+        db.query(
+            TransactionLine.recognizes_invoice_id,
+            TransactionLine.account_id,
+            Account.account_type,
+            TransactionLine.debit,
+            TransactionLine.credit,
+        )
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(
+            TransactionLine.basis == BASIS_CASH,
+            TransactionLine.recognizes_invoice_id.isnot(None),
+            Transaction.date >= start_date,
+            Transaction.date <= end_date,
+            TransactionLine.transaction_id.in_(_standing_settlements()),
+        )
+        .execution_options(**reading(READ_ALL))
+    )
+    out: dict[int, dict] = {}
+    for invoice_id, account_id, account_type, debit, credit in rows:
+        amount = Decimal(str(credit or 0)) - Decimal(str(debit or 0))
+        if account_type == AccountType.INCOME:
+            key = "income"
+        elif tax_id is not None and account_id == tax_id:
+            key = "tax"
+        else:
+            continue
+        entry = out.setdefault(
+            invoice_id, {"income": Decimal("0"), "tax": Decimal("0")}
+        )
+        entry[key] += amount
+    return out
+
+
+def unapplied_cash_income(db: Session, start_date, end_date) -> dict[int, Decimal]:
+    """{customer_id: amount}: the Unapplied Cash Payment Income the cash
+    basis counts from `start_date` to `end_date`, by the customer whose
+    payment it is: money received and not yet applied to an invoice, less
+    what was applied later (the cash P&L's 4950 line)."""
+    from app.models.accounts import Account
+
+    number, _name, _type = UNAPPLIED_INCOME
+    rows = (
+        db.query(Payment.customer_id, TransactionLine.debit, TransactionLine.credit)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .join(Payment, Payment.transaction_id == Transaction.id)
+        .filter(
+            TransactionLine.basis == BASIS_CASH,
+            TransactionLine.recognizes_invoice_id.is_(None),
+            Account.account_number == number,
+            Account.account_type == AccountType.INCOME,
+            Payment.is_voided.isnot(True),
+            Transaction.date >= start_date,
+            Transaction.date <= end_date,
+        )
+        .execution_options(**reading(READ_ALL))
+    )
+    out: dict[int, Decimal] = {}
+    for customer_id, debit, credit in rows:
+        amount = Decimal(str(credit or 0)) - Decimal(str(debit or 0))
+        out[customer_id] = out.get(customer_id, Decimal("0")) + amount
+    return {k: v for k, v in out.items() if v != 0}
+
+
 def unapplied_income_id(db: Session) -> int:
     from app.services.accounting import ensure_account
 
