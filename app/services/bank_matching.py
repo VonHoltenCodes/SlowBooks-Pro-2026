@@ -215,11 +215,16 @@ def vendor_named(db: Session, name: str | None) -> Vendor | None:
 
 
 def _entry_vendor(
-    db: Session, bt: BankTransaction, payee: str | None, vendor_id: int | None
+    db: Session,
+    bt: BankTransaction,
+    payee: str | None,
+    vendor_id: int | None,
+    rule_vendor: bool = True,
 ) -> Vendor | None:
     """The vendor a feed line posts to (#491): the one asked for; else the
-    one named by the bank rule the statement line follows (#493); else the
-    vendor its payee names."""
+    one named by the bank rule the statement line follows (#493), unless
+    `rule_vendor` is False (money in whose rule names a customer, #1075);
+    else the vendor its payee names."""
     from app.services.bank_rules_engine import rule_for
 
     if vendor_id is not None:
@@ -227,7 +232,7 @@ def _entry_vendor(
         if not vendor:
             raise HTTPException(status_code=404, detail="Vendor not found")
         return vendor
-    rule = rule_for(db, bt.payee)
+    rule = rule_for(db, bt.payee) if rule_vendor else None
     if rule is not None and rule.vendor_id:
         vendor = db.query(Vendor).filter(Vendor.id == rule.vendor_id).first()
         if vendor is not None:
@@ -284,11 +289,28 @@ def add(
         class_id, job_id, vendor_id, customer_id, payee = _with_picks(
             db, bt, class_id, job_id, vendor_id, customer_id, payee
         )
+    # the customer and memo the line's bank rule gives it (#1075), where
+    # nothing was picked or typed; the customer only on money in, and there
+    # it stands in for the rule's vendor
+    rule_cust = rule_text = None
+    if not splits:
+        from app.services.bank_rules_engine import rule_customer, rule_for, rule_memo
+
+        rule = rule_for(db, bt.payee)
+        rule_cust = rule_customer(db, rule, bt.amount)
+        rule_text = rule_memo(rule)
+        if customer_id is None and rule_cust is not None:
+            customer_id = rule_cust.id
     # the memo typed on the row and kept on the line (#1049), where the
-    # caller sent none; a payout's split lines carry their own
-    memo = (memo or "").strip() or (None if splits else bt.pick_memo) or None
+    # caller sent none, then the rule's; a payout's split lines carry their
+    # own
+    memo = (
+        (memo or "").strip() or (None if splits else bt.pick_memo) or rule_text or None
+    )
     typed = (payee or "").strip() or None
-    vendor = _entry_vendor(db, bt, typed or bt.payee, vendor_id)
+    vendor = _entry_vendor(
+        db, bt, typed or bt.payee, vendor_id, rule_vendor=rule_cust is None
+    )
     customer = db.get(Customer, customer_id) if customer_id and not splits else None
     # the name picked, or the rule's vendor, is the entry's payee, so the
     # register, the entry and every list by name show it; the bank's own

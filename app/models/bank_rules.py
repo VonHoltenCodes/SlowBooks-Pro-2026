@@ -19,6 +19,10 @@ class BankRule(Base):
     # the class and job a matched line comes in with (#675); NULL = none
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    # the customer a matched money-in line is added for, beside the vendor
+    # for money out, and the memo it posts with (#1075); NULL = none
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    memo = Column(String(500), nullable=True)
     rule_type = Column(String(20), default="contains")  # contains, starts_with, exact
     priority = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)

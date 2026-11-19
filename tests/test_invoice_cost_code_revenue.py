@@ -305,8 +305,8 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == [
-        "f1049c2a7e5b"
-    ]  # the review line memo (#1049) is the head above it
+        "a1075c4d8e2f"
+    ]  # the bank rule's customer and memo (#1075) is the head above it
     assert script.get_revision("e1055c0de4a1").down_revision == "e986b4d2a7c3"
     command.upgrade(cfg, "e986b4d2a7c3")
     command.upgrade(cfg, "e1055c0de4a1")  # its own step (#770)
