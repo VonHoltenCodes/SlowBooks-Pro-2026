@@ -117,6 +117,31 @@ const ItemsPage = {
         return html;
     },
 
+    // The accounts of `types` (active, and the one the item already uses),
+    // then the balance-sheet accounts a bill line may post to (#1038):
+    // liabilities, assets and equity, never a bank or card account nor
+    // Accounts Receivable, Accounts Payable, Undeposited Funds or
+    // Inventory, whose figures the invoices, bills, deposits and items
+    // keep. PurchaseAccounts.isBalanceSheet is that one rule.
+    withOtherAccounts(accounts, types, keepId) {
+        const own = pickerAccounts(accounts, types, keepId);
+        const ids = new Set(own.map(a => Number(a.id)));
+        return own.concat((accounts || []).filter(a => !ids.has(Number(a.id))
+            && a.is_active !== false && PurchaseAccounts.isBalanceSheet(a)));
+    },
+    // The income accounts, then everything else under Other accounts, as
+    // the bill line's picker groups them.
+    incomeOptions(accounts, selectedId) {
+        const opt = a => `<option value="${a.id}" ${selectedId && a.id == selectedId ? 'selected' : ''}>`
+            + `${accountLabel(a)}</option>`;
+        const income = accounts.filter(a => a.account_type === 'income');
+        const rest = accounts.filter(a => a.account_type !== 'income');
+        let html = '';
+        if (income.length) html += `<optgroup label="${T('Income')}">${income.map(opt).join('')}</optgroup>`;
+        if (rest.length) html += `<optgroup label="Other accounts">${rest.map(opt).join('')}</optgroup>`;
+        return html;
+    },
+
     async showForm(id = null) {
         let item = { name:'', code:'', item_type:'service', description:'', rate:0, cost:0,
             income_account_id:'', expense_account_id:'', is_taxable: TaxDefault.on(),
@@ -130,8 +155,11 @@ const ItemsPage = {
         // and expense accounts too, and a business's 4400 In-Kind
         // Contributions (W-L13). The account an item already uses stays
         // listed, so saving the form never drops it.
-        const incomeAccts = pickerAccounts(accounts, ['income'], item.income_account_id);
-        const expenseAccts = pickerAccounts(accounts, ['expense','cogs'], item.expense_account_id);
+        // Both also offer, as Other accounts, the balance-sheet accounts a
+        // bill line offers (#1038): a security deposit invoiced through an
+        // item credits a liability, not income.
+        const incomeAccts = ItemsPage.withOtherAccounts(accounts, ['income'], item.income_account_id);
+        const expenseAccts = ItemsPage.withOtherAccounts(accounts, ['expense','cogs'], item.expense_account_id);
         const assetAccts = pickerAccounts(accounts, ['asset'], item.asset_account_id);
         const acctLabel = a => accountLabel(a);
 
@@ -164,7 +192,7 @@ const ItemsPage = {
                     <div class="form-group"><label>${T('Income')} Account</label>
                         <select name="income_account_id">
                             <option value="">-- None --</option>
-                            ${incomeAccts.map(a => `<option value="${a.id}" ${item.income_account_id==a.id?'selected':''}>${acctLabel(a)}</option>`).join('')}
+                            ${ItemsPage.incomeOptions(incomeAccts, item.income_account_id)}
                         </select></div>
                     <div class="form-group"><label>Expense or COGS Account</label>
                         <select name="expense_account_id">

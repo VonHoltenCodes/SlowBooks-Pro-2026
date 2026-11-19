@@ -122,8 +122,12 @@ def test_a_business_that_uses_4400_keeps_it(client, seed_accounts):
 
 
 def test_the_item_income_picker_offers_income_accounts_only():
+    # Income accounts only among the P&L accounts; the balance-sheet
+    # accounts follow under Other accounts (#1038,
+    # tests/js/item_other_accounts_1038.test.cjs).
     js = (JS / "items.js").read_text(encoding="utf-8")
-    assert "pickerAccounts(accounts, ['income'], item.income_account_id)" in js
+    assert "withOtherAccounts(accounts, ['income'], item.income_account_id)" in js
+    assert "const own = pickerAccounts(accounts, types, keepId);" in js
     assert "['income','cogs']" not in js
     utils = (JS / "utils.js").read_text(encoding="utf-8")
     assert "function pickerAccounts(" in utils
