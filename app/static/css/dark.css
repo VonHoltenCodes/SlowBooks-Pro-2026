@@ -96,8 +96,6 @@
     --focus-ring: var(--qb-gold);   /* the theme's own: 6.4:1 against the bar (style.css sets a light one) */
 }
 
-[data-theme="dark"] .topbar-brand { color: #e0e4ec; }
-[data-theme="dark"] .topbar-brand span { color: var(--qb-gold); }
 [data-theme="dark"] .tb-btn { color: var(--text-secondary); }
 [data-theme="dark"] #topbar .skip-link--bar:hover { background: rgba(255,255,255,0.08); border-color: #4a4e58; color: #e0e4ec; }
 [data-theme="dark"] .tb-btn:hover { background: rgba(255,255,255,0.08); border-color: #4a4e58; color: #e0e4ec; }
@@ -128,7 +126,6 @@
     --focus-halo: #080c14;   /* the keyboard's ring meets the sidebar's own dark: 9.1:1 */
 }
 
-[data-theme="dark"] .sidebar-header h1 { color: #e0e4ec; }
 [data-theme="dark"] .sidebar-edition { color: var(--qb-gold); }
 [data-theme="dark"] .nav-section { color: #7a8498; }
 [data-theme="dark"] .nav-link { color: #b0bcc8; }
