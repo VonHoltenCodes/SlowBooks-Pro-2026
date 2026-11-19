@@ -193,7 +193,10 @@ def test_the_page_has_the_boxes_the_bar_and_add_selected():
         and 'aria-label="Tick every line shown"' in panel
     )
     assert "BankingPage.addSelected(${feedId}, ${accountId})" in panel
-    assert panel.index(">Add selected<") < panel.index(">Add all categorised<")
+    # the buttons, not the words in the To review note (#977)
+    assert panel.index('">Add selected</button>') < panel.index(
+        '">Add all categorised</button>'
+    )
     assert "BankingPage._bulkBar(accountId)" in panel
     bar = JS[JS.index("    _bulkBar(accountId) {") :]
     bar = bar[: bar.index("\n    },\n")]

@@ -23,11 +23,8 @@ const IIFPage = {
             <div class="iif-sections">
                 <!-- Export Section -->
                 <div class="iif-section">
-                    <h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9660; Export to IIF</h3>
-                    <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
-                        Download Slowbooks data as .iif files for import into QuickBooks Desktop
-                        via File &gt; Utilities &gt; Import &gt; IIF Files.
-                    </p>
+                    <div class="iif-h-row"><h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9660; Export to IIF</h3>${hint(`Download Slowbooks data as .iif files for import into QuickBooks Desktop
+                        via File &gt; Utilities &gt; Import &gt; IIF Files.`, 'Export to IIF')}</div>
 
                     <div style="margin-bottom:10px;">
                         <button class="btn btn-primary" style="width:100%;" onclick="IIFPage.exportAll()">
@@ -75,15 +72,21 @@ const IIFPage = {
 
                 <!-- Import Section -->
                 <div class="iif-section" data-write>
-                    <h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9650; Import from IIF</h3>
-                    <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
-                        Upload .iif files exported from QuickBooks Desktop
+                    <div class="iif-h-row"><h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9650; Import from IIF</h3>${hintList('Import from IIF', [
+                        { text: `Upload .iif files exported from QuickBooks Desktop
                         via File &gt; Utilities &gt; Export &gt; Lists to IIF Files. Transaction
                         blocks come in too: invoices, payments, sales receipts, estimates, bills,
                         deposits, checks, card charges, transfers, bill payments (as journal
                         entries on the bank and Accounts Payable) and general journal entries.
-                        A block already here posts nothing twice.
-                    </p>
+                        A block already here posts nothing twice.` },
+                        // the two boxes a validated file may bring (_showValidationReport)
+                        { name: 'Change ALL-CAPS names', id: 'iif-retitle-names-help', hidden: true, text: `Customer, vendor and account names; item names are kept as typed, and
+                    names already in your books are not changed. A name that should stay
+                    in capitals may not, so look over the examples first.` },
+                        { name: 'Customer:Job names in this file', id: 'iif-sub-customers-help', hidden: true, text: `A property's tenants, say: each becomes a customer under its parent, with its own
+                    contact details, and can be made inactive on its own. Left unticked, each
+                    Customer:Job is a job under the customer.` },
+                    ])}</div>
                     <label style="display:flex; align-items:center; gap:6px; font-size:11px; margin-bottom:8px;">
                         <input type="checkbox" id="iif-adjusting">
                         This is an accountant's file: post its GENERAL JOURNAL blocks as adjusting entries
@@ -116,25 +119,17 @@ const IIFPage = {
 
                 <!-- QuickBooks Report CSV import -->
                 <div class="iif-section" data-write>
-                    <h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9635; Import from Report CSV</h3>
-                    <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
-                        QuickBooks Desktop can't export transactions to IIF — export a detail
-                        <strong>report</strong> to CSV instead and upload it here. The report type is
-                        detected automatically: <strong>Transaction Detail</strong> filtered to Sales
-                        Receipt or Invoice (a receipt imports as a paid sale + payment; an invoice with
-                        its lines, its Customer:Job and its number, open, partly paid or paid by the
-                        report's <strong>Open Balance</strong> column — add that column, or every
-                        invoice comes in open; upload again with it and the open ones here are marked
-                        paid), <strong>Deposit Detail</strong>, or <strong>Check Detail</strong> (both
-                        import as journal entries on your bank account), or <strong>Transaction Detail
-                        by Account</strong>, one year of dates per file (every transaction of every type
-                        as a journal entry; import the lists IIF first); or, for timesheets, <strong>Time by Job Detail</strong> (Reports > Jobs, Time &amp; Mileage; a Time by Name report grouped by job reads too), saved as CSV or Excel: every entry becomes an approved time entry under its employee, marked as QuickBooks' so no pay run picks it up. Keep each report's default columns, except
-                        the sales Transaction Detail and Transaction Detail by Account, which need <strong>Debit</strong> and <strong>Credit</strong> ticked (Customize Report &gt; Display; Amount may stay). From Excel, upload the .xlsx itself or File &gt; Save As &gt; CSV (Comma delimited). Safe to re-upload — what is already here is skipped.
-                        <strong>A categorized bank sheet</strong> (the Transaction Pro / SaasAnt layout: Bank Account, Transaction Date, Memo, Payee, Account, Amount) posts each row as the register entry it is, rows sharing the date, payee and memo as one split entry; payees not on the lists are added.
-                    </p>
-                    <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
-                        A bank or credit card <strong>statement</strong> (CSV, OFX, QFX) is not imported here: it goes in from the account itself, under <a href="#/banking">Banking</a> → the account → <strong>Import file</strong>.
-                    </p>
+                    <div class="iif-h-row"><h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9635; Import from Report CSV</h3>${hintList('Import from Report CSV', [
+                        // one paragraph a report (#977), the words as they were
+                        { text: `QuickBooks Desktop can't export transactions to IIF — export a detail <strong>report</strong> to CSV instead and upload it here. The report type is detected automatically:` },
+                        { text: `<strong>Transaction Detail</strong> filtered to Sales Receipt or Invoice (a receipt imports as a paid sale + payment; an invoice with its lines, its Customer:Job and its number, open, partly paid or paid by the report's <strong>Open Balance</strong> column — add that column, or every invoice comes in open; upload again with it and the open ones here are marked paid),` },
+                        { text: `<strong>Deposit Detail</strong>, or <strong>Check Detail</strong> (both import as journal entries on your bank account),` },
+                        { text: `or <strong>Transaction Detail by Account</strong>, one year of dates per file (every transaction of every type as a journal entry; import the lists IIF first);` },
+                        { text: `or, for timesheets, <strong>Time by Job Detail</strong> (Reports > Jobs, Time &amp; Mileage; a Time by Name report grouped by job reads too), saved as CSV or Excel: every entry becomes an approved time entry under its employee, marked as QuickBooks' so no pay run picks it up.` },
+                        { text: `Keep each report's default columns, except the sales Transaction Detail and Transaction Detail by Account, which need <strong>Debit</strong> and <strong>Credit</strong> ticked (Customize Report &gt; Display; Amount may stay). From Excel, upload the .xlsx itself or File &gt; Save As &gt; CSV (Comma delimited). Safe to re-upload — what is already here is skipped.` },
+                        { text: `<strong>A categorized bank sheet</strong> (the Transaction Pro / SaasAnt layout: Bank Account, Transaction Date, Memo, Payee, Account, Amount) posts each row as the register entry it is, rows sharing the date, payee and memo as one split entry; payees not on the lists are added.` },
+                        { text: `A bank or credit card <strong>statement</strong> (CSV, OFX, QFX) is not imported here: it goes in from the account itself, under <a href="#/banking">Banking</a> → the account → <strong>Import file</strong>.` },
+                    ])}</div>
                     <label style="display:flex; align-items:center; gap:6px; font-size:11px; margin-bottom:8px;">
                         <input type="checkbox" id="qbcsv-outflow-positive">
                         In this sheet money out is positive (the usual way round is money out negative)
@@ -354,8 +349,15 @@ const IIFPage = {
         IIFPage._errors.qbr = problems.map(p => p.text);
         // the answers name the file the list was made for
         if (IIFPage._qbReport) IIFPage._qbReport.sha = result.file_sha256 || '';
+        // #977: how the keyboard moves in each list, one entry a list shown,
+        // behind one tortoise on the heading; each list still names its own
+        const keys = hintList('Choose what to import', [
+            accounts.length ? { name: 'Accounts not in the chart', id: 'qbr-keys-hint-accounts', text: "In the list, the arrow keys move from row to row, and Tab goes on to the row's type and then out of the list." } : null,
+            replaces.length ? { name: 'Transactions that replace a partial entry', id: 'qbr-keys-hint-replaces', text: 'In the list, the arrow keys move from row to row and Tab leaves it.' } : null,
+            unbalanced.length ? { name: 'Transactions that do not balance', id: 'qbr-keys-hint', text: 'In the list, the arrow keys move from row to row and Tab leaves it.' } : null,
+        ]);
         let html = `<div class="iif-results qbr" id="qbr" role="region" aria-labelledby="qbr-title">
-            <h4 id="qbr-title">Choose what to import</h4>
+            <div class="iif-h-row iif-h-row--plain"><h4 id="qbr-title">Choose what to import</h4>${keys}</div>
             <p class="qbr-lead">Nothing is imported yet. ${IIFPage._count(ready, 'transaction')} ${ready === 1 ? 'is' : 'are'} ready${here ? `, and ${IIFPage._count(here, 'transaction')} already here ${here === 1 ? 'is' : 'are'} skipped` : ''}. The file also has the problems below: tick one to accept it, or leave it unticked to leave it out. Then press Import.</p>
             ${result.classes_text ? `<p class="qbr-lead">${escapeHtml(result.classes_text)}</p>` : ''}
             <div class="qbr-save"><button type="button" class="btn btn-sm btn-secondary" onclick="IIFPage.saveErrors('qbr')" title="Every problem in this list, as a text file">Save the list</button></div>`;
@@ -396,7 +398,7 @@ const IIFPage = {
             }).join('');
             html += `<section class="qbr-group" data-kind="missing_account" aria-labelledby="qbr-h-missing_account">
                 <h5 id="qbr-h-missing_account">${IIFPage._count(accounts.length, 'account')} not in the chart</h5>
-                <p class="qbr-note">${escapeHtml(notes.missing_account || '')} <span id="qbr-type-hint">An account is ticked once it has a type.</span> <span id="qbr-keys-hint-accounts">In the list, the arrow keys move from row to row, and Tab goes on to the row's type and then out of the list.</span></p>
+                <p class="qbr-note">${escapeHtml(notes.missing_account || '')} <span id="qbr-type-hint">An account is ticked once it has a type.</span></p>
                 ${IIFPage._bulk('missing_account', 'Accounts not in the chart')}
                 <div class="qbr-scroll qbr-roving"><table aria-describedby="qbr-keys-hint-accounts">
                     <thead><tr><th scope="col"><span class="visually-hidden">Make it</span></th><th scope="col">Account</th><th scope="col" class="amount">Transactions</th><th scope="col">Type</th></tr></thead>
@@ -427,7 +429,7 @@ const IIFPage = {
             }).join('');
             html += `<section class="qbr-group" data-kind="replaces" aria-labelledby="qbr-h-replaces">
                 <h5 id="qbr-h-replaces">${IIFPage._count(replaces.length, 'transaction')} that ${replaces.length === 1 ? 'replaces' : 'replace'} a partial entry in the books</h5>
-                <p class="qbr-note">${escapeHtml(notes.replaces || '')} <span id="qbr-keys-hint-replaces">In the list, the arrow keys move from row to row and Tab leaves it.</span></p>
+                <p class="qbr-note">${escapeHtml(notes.replaces || '')}</p>
                 ${IIFPage._bulk('replaces', 'Transactions that replace a partial entry')}
                 <div class="qbr-scroll qbr-roving"><table aria-describedby="qbr-keys-hint-replaces">
                     <thead><tr><th scope="col"><span class="visually-hidden">Replace</span></th><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Num</th><th scope="col">Name</th><th scope="col" class="amount">In this file</th><th scope="col">In the books now</th><th scope="col" class="amount">On Import Differences</th></tr></thead>
@@ -453,7 +455,7 @@ const IIFPage = {
             }).join('');
             html += `<section class="qbr-group" data-kind="unbalanced" aria-labelledby="qbr-h-unbalanced">
                 <h5 id="qbr-h-unbalanced">${IIFPage._count(unbalanced.length, 'transaction')} that ${unbalanced.length === 1 ? 'does' : 'do'} not balance</h5>
-                <p class="qbr-note">${escapeHtml(notes.unbalanced || '')} <span id="qbr-keys-hint">In the list, the arrow keys move from row to row and Tab leaves it.</span></p>
+                <p class="qbr-note">${escapeHtml(notes.unbalanced || '')}</p>
                 ${IIFPage._bulk('unbalanced', 'Transactions that do not balance')}
                 <div class="qbr-scroll qbr-roving"><table aria-describedby="qbr-keys-hint">
                     <thead><tr><th scope="col"><span class="visually-hidden">Import</span></th><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Num</th><th scope="col">Name</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Off by</th></tr></thead>
@@ -759,6 +761,7 @@ const IIFPage = {
         $('#iif-import-actions').style.display = '';
         $('#iif-import-btn').disabled = true;
         $('#iif-validation-result').innerHTML = '';
+        IIFPage._boxNotes(false, false);
         $('#iif-import-result').innerHTML = '';
     },
 
@@ -769,6 +772,7 @@ const IIFPage = {
         $('#iif-file-info').style.display = 'none';
         $('#iif-import-actions').style.display = 'none';
         $('#iif-validation-result').innerHTML = '';
+        IIFPage._boxNotes(false, false);
         $('#iif-import-result').innerHTML = '';
     },
 
@@ -855,12 +859,9 @@ const IIFPage = {
             const examples = (report.caps_name_examples || []).map(x =>
                 `<li>${escapeHtml(x.name)} &rarr; ${escapeHtml(x.becomes)}</li>`).join('');
             html += `<div class="iif-retitle">
-                <label><input type="checkbox" id="iif-retitle-names">
+                <label><input type="checkbox" id="iif-retitle-names" aria-describedby="iif-retitle-names-help">
                     Change ${n} ALL-CAPS name${n === 1 ? '' : 's'} to normal capitalization</label>
                 <ul>${examples}</ul>
-                <p>Customer, vendor and account names; item names are kept as typed, and
-                    names already in your books are not changed. A name that should stay
-                    in capitals may not, so look over the examples first.</p>
             </div>`;
         }
 
@@ -870,15 +871,20 @@ const IIFPage = {
         if (report.valid && report.customer_job_names > 0) {
             const n = report.customer_job_names;
             html += `<div class="iif-retitle">
-                <label><input type="checkbox" id="iif-sub-customers">
+                <label><input type="checkbox" id="iif-sub-customers" aria-describedby="iif-sub-customers-help">
                     The ${n} Customer:Job name${n === 1 ? '' : 's'} in this file ${n === 1 ? 'is a sub-customer' : 'are sub-customers'}, not job${n === 1 ? '' : 's'}</label>
-                <p>A property's tenants, say: each becomes a customer under its parent, with its own
-                    contact details, and can be made inactive on its own. Left unticked, each
-                    Customer:Job is a job under the customer.</p>
             </div>`;
         }
 
         $('#iif-validation-result').innerHTML = html;
+        IIFPage._boxNotes(report.valid && report.caps_names > 0, report.valid && report.customer_job_names > 0);
+    },
+
+    // The section note's entries for the two boxes come and go with them (#977)
+    _boxNotes(caps, sub) {
+        if (typeof Hints === 'undefined') return;
+        Hints.showEntry('iif-retitle-names-help', !!caps);
+        Hints.showEntry('iif-sub-customers-help', !!sub);
     },
 
     async importFile() {

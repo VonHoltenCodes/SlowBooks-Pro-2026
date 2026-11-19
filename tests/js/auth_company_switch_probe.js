@@ -86,7 +86,9 @@ async function scenario(name, companyAnswer, statuses) {
       },
     },
   };
+  ctx.escapeHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');  // utils.js's, for hint.js (#977)
   vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);  // hint(), hintList() (#977)
   vm.runInContext(SRC, ctx);
 
   await win.SlowbooksAuth.promptAuth();

@@ -1267,7 +1267,8 @@ def test_the_review_actions_say_when_the_dates_leave_the_entry_out(browser):
         )
         page.wait_for_function(GONE_FROM_REVIEW, arg=71)
 
-        page.click("text=Add all categorised")
+        # the button, not the words in the To review note (#977)
+        page.click("button:has-text('Add all categorised')")
         _toast_with(
             page,
             "Added 2. 2 of them are dated before the From date or after the To"

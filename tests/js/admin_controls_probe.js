@@ -464,7 +464,8 @@ async function migrate(role, late) {
   const link = sidebar.querySelector('a[data-page="migrate"]');
   return {
     text: page.textContent.replace(/\s+/g, ' ').trim(),
-    buttons: page.querySelectorAll('button, a.btn').filter(visible).map(b => b.textContent.trim()),
+    // a tortoise opens its note and asks the server nothing (#977)
+    buttons: page.querySelectorAll('button, a.btn').filter(b => !('data-hint' in b.attrs)).filter(visible).map(b => b.textContent.trim()),
     sidebar_link_shown: visible(link),
   };
 }

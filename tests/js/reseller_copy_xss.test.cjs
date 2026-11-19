@@ -50,6 +50,7 @@ async function renderVerify(value) {
         openModal: (_title, html) => { shown = html; },
     };
     vm.createContext(context);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), context);  // hint() (#977)
     vm.runInContext(
         fs.readFileSync(path.join(__dirname, '../../app/static/js/reseller_permits.js'), 'utf8')
         + '\nthis.ResellerPermitsPage = ResellerPermitsPage;',

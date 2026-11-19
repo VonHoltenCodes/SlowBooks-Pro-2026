@@ -95,7 +95,8 @@ def test_the_view_has_an_other_column():
     assert (
         "formatCurrency((s.state_other_employee || 0) + (s.garnishments || 0))" in view
     )
-    assert '<th scope="col" class="amount">Other</th>' in view
+    # the column head carries the tortoise whose note says what Other holds (#977)
+    assert '<th scope="col" class="amount">Other ${hint(`Other: state taxes' in view
     assert "formatCurrency(s.reimbursements || 0)" in view
 
 

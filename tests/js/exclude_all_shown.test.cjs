@@ -34,6 +34,7 @@ function load({ confirmAnswer = true, elements = {} } = {}) {
         path.join(__dirname, '../../app/static/js/banking.js'),
         'utf8'
     );
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), context);  // hint(), hintList() (#977)
     vm.runInContext(js + '\nthis.BankingPage = BankingPage;', context);
     const BP = context.BankingPage;
     BP._backToRegister = (id) => { calls.back.push(id); };
