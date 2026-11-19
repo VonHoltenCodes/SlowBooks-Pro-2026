@@ -135,6 +135,7 @@ function loadJobsSalesTax() {
     const end = src.indexOf('// Active customers only', start);
     const ctx = { escapeHtml: (v) => String(v), T: (w) => w };
     vm.createContext(ctx);
+    vm.runInContext(read('hint.js'), ctx);  // hint() (#977)
     vm.runInContext(`this.JobsPage = { ${src.slice(start, end)} };`, ctx);
     return ctx.JobsPage;
 }

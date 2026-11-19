@@ -1780,7 +1780,8 @@ const ReportsPage = {
         const set = (section, c) => `ReportsPage.openSetDrillDown(${args({ section }, null, c.start_date, c.end_date, null, null, 'profit-loss', scope)})`;
         return `${ReportsPage._exportButtons('profit-loss', qs)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, a column per ${noun}${params.exclude_adjusting ? ', adjusting entries left out' : ''}${data.basis === 'cash' ? ', cash basis' : ''}${data.hide_zero ? ', zero balances hidden' : ''}. Click an amount for the transactions behind it; the Total column is the ${escapeHtml(T('Profit & Loss'))} for the whole period.
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, a column per ${noun}${params.exclude_adjusting ? ', adjusting entries left out' : ''}${data.basis === 'cash' ? ', cash basis' : ''}${data.hide_zero ? ', zero balances hidden' : ''}.
+                ${hint(`Click an amount for the transactions behind it; the Total column is the ${escapeHtml(T('Profit & Loss'))} for the whole period.`, `${T('Profit & Loss')} by ${by === 'month' ? 'Month' : 'Quarter'}`)}
             </div>
             ${ReportsPage._basisNote(data)}
             ${ReportsPage._pivotGrid({
@@ -1889,7 +1890,7 @@ const ReportsPage = {
             data.hide_zero ? 'zero balances hidden' : '',
         ].filter(Boolean).join(' &middot; ');
         return `${ReportsPage._exportButtons('profit-loss-detail', qs)}
-            <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${scope ? ` &middot; ${scope}` : ''}${ReportsPage._basisWords(data)} &middot; ${data.line_count} ${data.line_count === 1 ? 'line' : 'lines'}. A line's type opens its document.</p>${ReportsPage._basisNote(data)}
+            <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${scope ? ` &middot; ${scope}` : ''}${ReportsPage._basisWords(data)} &middot; ${data.line_count} ${data.line_count === 1 ? 'line' : 'lines'}. ${hint("A line's type opens its document.", `${T('Profit & Loss')} Detail`)}</p>${ReportsPage._basisNote(data)}
             <div class="table-container"><table class="pl-detail">
                 <caption class="visually-hidden">${escapeHtml(`${T('Profit & Loss')} Detail`)}, ${escapeHtml(data.start_date)} to ${escapeHtml(data.end_date)}</caption>
                 <thead><tr><th scope="col">Type</th><th scope="col">Date</th><th scope="col">Num</th><th scope="col">Name</th><th scope="col">Memo</th><th scope="col">Split</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Balance</th></tr></thead>
@@ -2189,8 +2190,7 @@ const ReportsPage = {
             </tr>`).join('');
         const name = u.account_number ? `${escapeHtml(u.account_number)} ${escapeHtml(u.account_name)}` : escapeHtml(u.account_name);
         return `
-            <h3 style="margin:18px 0 6px; font-size:14px;">Use tax</h3>
-            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, each at the rate it was booked at (the setting today is ${SalesLines.taxPercent(u.rate)}%). Pay it as a check or bill to the tax agency on ${name}.</p>
+            <h3 style="margin:18px 0 6px; font-size:14px;">Use tax ${hint(`Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, each at the rate it was booked at (the setting today is ${SalesLines.taxPercent(u.rate)}%). Pay it as a check or bill to the tax agency on ${name}.`, 'Use tax')}</h3>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Vendor</th><th scope="col">${T('Job')}</th><th scope="col">Line</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Use tax</th></tr></thead>
                 <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No use tax accrued</td></tr>'}</tbody>
@@ -2210,8 +2210,7 @@ const ReportsPage = {
             </tr>`).join('');
         if (!rows) return '';
         return `
-            <h3 style="margin:18px 0 6px; font-size:14px;">Exempt sales</h3>
-            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Sales with no tax, by why: the kind of certificate the document carries from its ${T('job').toLowerCase()} when the whole sale is exempt, exempt with no certificate on file, or lines left untaxed on a taxed sale.</p>
+            <h3 style="margin:18px 0 6px; font-size:14px;">Exempt sales ${hint(`Sales with no tax, by why: the kind of certificate the document carries from its ${T('job').toLowerCase()} when the whole sale is exempt, exempt with no certificate on file, or lines left untaxed on a taxed sale.`, 'Exempt sales')}</h3>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Reason</th><th scope="col" class="amount">Sales</th></tr></thead>
                 <tbody>${rows}
@@ -2386,7 +2385,7 @@ const ReportsPage = {
         ReportsPage.setAddress('past-customers', ReportsPage._pastFilters);
         const f = ReportsPage._pastFilters;
         openModal(Terms.text('Past customers'), `
-            <p style="margin-bottom:10px; color:var(--gray-500); font-size:12px;">${Terms.text('A mailing list by service address and last job date. A customer marked Do not contact in their notes is flagged here and left out of the export.')}</p>
+            <div class="report-hint-row" style="margin-bottom:6px;">${hint(Terms.text('A mailing list by service address and last job date. A customer marked Do not contact in their notes is flagged here and left out of the export.'), Terms.text('Past customers'))}</div>
             <div class="form-grid" style="grid-template-columns: repeat(4, minmax(0,1fr)); gap:8px; margin-bottom:12px;">
                 <div class="form-group"><label for="pc-from">Last job from</label>
                     <input id="pc-from" type="date" value="${escapeHtml(f.last_job_from)}" onchange="ReportsPage.setPastParam('last_job_from', this.value)"></div>
@@ -2569,7 +2568,7 @@ const ReportsPage = {
                 <td class="amount"></td>
             </tr>`;
             return `${ReportsPage._exportButtons('sales-by-item', qs)}
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. Click an item for the lines behind it.</p>
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. ${hint('Click an item for the lines behind it.', 'Sales by Item')}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg price</th><th scope="col" class="amount">COGS</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Margin %</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="8" style="text-align:center; color:var(--gray-400);">No sales in this period</td></tr>'}</tbody>
@@ -2610,7 +2609,7 @@ const ReportsPage = {
                 <td class="amount"></td>
             </tr>`;
             return `${ReportsPage._exportButtons('purchases-by-item', qs)}
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Bills and vendor credits only. Click an item for the lines behind it.</p>
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Bills and vendor credits only. ${hint('Click an item for the lines behind it.', 'Purchases by Item')}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg cost</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No purchases in this period</td></tr>'}</tbody>
@@ -2906,7 +2905,7 @@ const ReportsPage = {
             const payeeText = String(prm.payee || '');
             const acctOpt = (a, selected) => `<option value="${a.id}"${String(a.id) === String(selected) ? ' selected' : ''}>${accountLabel(a, null, ' ')}${a.is_active === false ? ' (inactive)' : ''}</option>`;
             const picker = `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-                    <label for="rc-account" style="font-size:11px;">Lines on</label>
+                    <label for="rc-account" style="font-size:11px;">Lines on</label>${accountId ? '' : hint('Pick the account the lines are parked on: a holding account, or one chosen by mistake. Tick the lines to move, choose where they belong, preview the move, then post it as one change. Every moved line is listed in the result and in the audit log.', 'Lines on')}
                     <select id="rc-account" data-no-search style="max-width:300px;" onchange="ReportsPage.setParam('account_id', this.value)"><option value="">Choose an account…</option>${rc.lists.accounts.map(a => acctOpt(a, accountId)).join('')}</select>
                     <label for="rc-vendor" style="font-size:11px;">Vendor</label>
                     <select id="rc-vendor" data-no-search style="max-width:260px;" onchange="ReportsPage.setParam('vendor_id', this.value)"><option value="">All payees</option>${rc.lists.vendors.map(v => `<option value="${v.id}"${String(v.id) === vendorId ? ' selected' : ''}>${escapeHtml(v.name)}${v.is_active === false ? ' (inactive)' : ''}</option>`).join('')}</select>
@@ -2915,7 +2914,7 @@ const ReportsPage = {
                 </div>`;
             if (!accountId) {
                 rc.lines = [];
-                return `${picker}<p style="color:var(--gray-500);">Pick the account the lines are parked on: a holding account, or one chosen by mistake. Tick the lines to move, choose where they belong, preview the move, then post it as one change. Every moved line is listed in the result and in the audit log.</p>`;
+                return picker;
             }
             const data = await API.get(`/reclassify/lines?account_id=${accountId}&start_date=${range.start}&end_date=${range.end}${vendorId ? `&vendor_id=${vendorId}` : ''}${payeeText ? `&payee=${encodeURIComponent(payeeText)}` : ''}`);
             rc.lines = data.lines;
@@ -3634,7 +3633,8 @@ ReportsPage.profitLossByClass = async function (prefill) {
         const dates = { period, start_date: range.start, end_date: range.end };
         return `${ReportsPage._exportButtons('profit-loss-by-class', qs)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}. Click an amount for the transactions behind it, or a heading for that column's own report.
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}.
+                ${hint("Click an amount for the transactions behind it, or a heading for that column's own report.", T('P&L by Class'))}
             </div>${ReportsPage._basisNote(data)}
             ${ReportsPage._pivotGrid({
                 title: T('P&L by Class'),
@@ -3690,8 +3690,9 @@ ReportsPage.profitLossByJob = async function (prefill) {
         const jobUrl = (c) => `#/jobs/${c.job_id}?start_date=${range.start}&end_date=${range.end}&from=profit-loss-by-job`;
         return `${ReportsPage._exportButtons('profit-loss-by-job', qs)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}. Click an amount for the transactions behind it, or a heading for the ${escapeHtml(T('job'))}'s page on these dates.
-                ${Terms.text('"No job" holds untagged activity')} <em>and</em> ${Terms.text('the applied-cost credits behind Job Cost Entries, so its costs can be negative and the totals still match the P&L')}.
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}.
+                ${hint(`Click an amount for the transactions behind it, or a heading for the ${escapeHtml(T('job'))}'s page on these dates.
+                ${Terms.text('"No job" holds untagged activity')} <em>and</em> ${Terms.text('the applied-cost credits behind Job Cost Entries, so its costs can be negative and the totals still match the P&L')}.`, `${T('P&L')} by ${T('Job')}`)}
             </div>${ReportsPage._basisNote(data)}
             ${ReportsPage._pivotGrid({
                 title: `${T('P&L')} by ${T('Job')}`,
@@ -3887,6 +3888,8 @@ ReportsPage.fixedAssetReconciliation = async function () {
         <td class="amount">${formatCurrency(t.book_value)}</td>
     </tr>`).join('');
     openModal('Fixed Asset Reconciliation', `
+        <div class="report-hint-row" style="margin-bottom:6px;">${hint(`Compare against the mapped fixed-asset and accumulated-depreciation
+            GL accounts — differences mean unposted acquisitions or manual GL edits.`, 'Fixed Asset Reconciliation')}</div>
         <div class="table-container"><table>
             <thead><tr><th scope="col">Asset Type</th><th scope="col" class="amount">Assets</th><th scope="col" class="amount">Cost</th>
             <th scope="col" class="amount">Accum. Depr.</th><th scope="col" class="amount">Book Value</th></tr></thead>
@@ -3897,11 +3900,7 @@ ReportsPage.fixedAssetReconciliation = async function () {
                 <td class="amount">${formatCurrency(data.total_accumulated)}</td>
                 <td class="amount">${formatCurrency(data.total_book_value)}</td>
             </tr></tfoot>
-        </table></div>
-        <div style="font-size:11px; color:var(--gray-500); margin-top:8px;">
-            Compare against the mapped fixed-asset and accumulated-depreciation
-            GL accounts — differences mean unposted acquisitions or manual GL edits.
-        </div>`);
+        </table></div>`);
 };
 
 // Reconciliation Reports (#395): every completed bank reconciliation, by
@@ -4039,7 +4038,8 @@ ReportsPage.jobBudgetVsActual = async function (prefill) {
         </tr>`; }).join('');
         return `${ReportsPage._exportButtons('job-budget-vs-actual', `start_date=${range.start}&end_date=${range.end}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                Actuals for ${escapeHtml(range.start)} — ${escapeHtml(range.end)}; budgets and committed cost are job-to-date. Click a job to drill down.
+                Actuals for ${escapeHtml(range.start)} — ${escapeHtml(range.end)}; budgets and committed cost are job-to-date.
+                ${hint('Click a job to drill down.', T('Job Budget vs Actual'))}
             </div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th>
@@ -4135,7 +4135,8 @@ ReportsPage.wipSchedule = async function (prefill) {
         const warningsHtml = (data.warnings || []).filter(w => w !== entry.posted_warning).map(w => `<p class="report-warning" style="margin:8px 0 0; font-size:12px; color:var(--gray-600);">${escapeHtml(w)}</p>`).join('');
         return `${ReportsPage._exportButtons('wip-schedule', `as_of=${params.as_of_date}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                As of ${escapeHtml(data.as_of)} · cost-to-cost (percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. GP to date is earned less cost; backlog is the revised contract less earned. Basis shows whether billing is from approved pay applications or posted revenue.
+                As of ${escapeHtml(data.as_of)} · cost-to-cost
+                ${hint('(percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. GP to date is earned less cost; backlog is the revised contract less earned. Basis shows whether billing is from approved pay applications or posted revenue.', 'WIP Schedule')}
             </div>
             <div class="table-container table-container--sticky"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th>
@@ -4193,7 +4194,7 @@ ReportsPage.costToComplete = async function (prefill) {
             return head + tree + uncoded + total;
         }).join('');
         return `${ReportsPage._exportButtons('cost-to-complete', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Cost to complete is the remaining budget plus open commitments; projected final is actual + cost to complete.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint('Cost to complete is the remaining budget plus open commitments; projected final is actual + cost to complete.', 'Cost to Complete')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Cost code</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th>
                 <th scope="col" class="amount">Actual</th><th scope="col" class="amount">To complete</th><th scope="col" class="amount">Projected final</th>
@@ -4308,7 +4309,7 @@ ReportsPage.costToCompleteForecast = async function (prefill) {
             return head + (rows || '<tr><td colspan="7" style="color:var(--gray-400);">No budget or cost</td></tr>') + total;
         }).join('');
         return `${ReportsPage._exportButtons('cost-to-complete-forecast', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Leave an amount blank to use the default (budget less actual, never below zero). The WIP schedule uses actual plus this cost to complete as the job's estimated cost.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint("Leave an amount blank to use the default (budget less actual, never below zero). The WIP schedule uses actual plus this cost to complete as the job's estimated cost.", 'Cost-to-Complete Forecast')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Section</th><th scope="col">Cost type</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Actual</th>
                 <th scope="col" class="amount">Default</th><th scope="col" class="amount">Cost to complete</th><th scope="col" class="amount">Projected final</th></tr></thead>
@@ -4350,7 +4351,7 @@ ReportsPage.commitmentStatus = async function (prefill) {
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('commitment-status', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Committed is the pre-tax value; received is what delivery tickets dated by then brought in, at the line rates; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint('Committed is the pre-tax value; received is what delivery tickets dated by then brought in, at the line rates; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.', 'Commitment Status')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Commitment</th><th scope="col">Vendor</th><th scope="col">Type</th><th scope="col">Status</th>
                 <th scope="col" class="amount">Committed</th><th scope="col" class="amount">Received</th><th scope="col" class="amount">Billed to date</th><th scope="col" class="amount">Retainage held</th><th scope="col" class="amount">Remaining</th></tr></thead>
@@ -4380,7 +4381,7 @@ ReportsPage.fieldTicketLog = async function (prefill) {
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('field-ticket-log', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">T&amp;M tickets dated by ${escapeHtml(data.as_of)} that are not yet billed, at their bill rates. A signed ticket on a change order that is not yet approved counts as not billed; the change order is named. Status is today's.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">T&amp;M tickets dated by ${escapeHtml(data.as_of)} that are not yet billed, at their bill rates. Status is today's. ${hint('A signed ticket on a change order that is not yet approved counts as not billed; the change order is named.', 'Field Ticket Log')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Ticket</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Description</th>
                 <th scope="col">Signed by</th><th scope="col">Priced on</th><th scope="col" class="amount">Unsigned</th><th scope="col" class="amount">Signed, not billed</th></tr></thead>
@@ -4406,8 +4407,9 @@ ReportsPage.retainage = async function (prefill) {
             <td class="amount">${m(r.held)}</td><td class="amount">${m(r.released)}</td><td class="amount">${m(r.outstanding)}</td></tr>`).join('');
         const tie = data.filtered ? '' : `Balance Sheet 1150 ${m(data.books.receivable)}, 2050 ${m(data.books.payable)}.`;
         return `${ReportsPage._exportButtons('retainage', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Held less released is what is outstanding; the totals are the Balance Sheet's Retainage Receivable and Retainage Payable. ${tie}
-                A row named “Journal entries and other” is ledger balance no pay application or bill explains. Closed jobs are included.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${tie}
+                ${hint(`Held less released is what is outstanding; the totals are the Balance Sheet's Retainage Receivable and Retainage Payable.
+                A row named “Journal entries and other” is ledger balance no pay application or bill explains. Closed jobs are included.`, 'Retainage')}</div>
             <h4 style="margin:0 0 4px 0;">Owed to me (1150)</h4>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th><th scope="col" class="amount">Held by owner</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
@@ -4433,7 +4435,7 @@ ReportsPage.subCompliance = async function (prefill) {
             <td>${escapeHtml(r.detail)}</td><td>${escapeHtml(r.date)}</td><td class="amount">${r.amount === null ? '' : ReportsPage._money(r.amount)}</td></tr>`).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('compliance', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Certificates that expire within ${data.window_days} days, subs with no W-9 on file, and paid bills whose lien waiver is missing or still pending. Nothing here blocks a payment.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint(`Certificates that expire within ${data.window_days} days, subs with no W-9 on file, and paid bills whose lien waiver is missing or still pending. Nothing here blocks a payment.`, 'Sub Compliance')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Sub</th><th scope="col">Issue</th><th scope="col">Detail</th><th scope="col">Date</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${rows || '<tr><td colspan="5" style="color:var(--gray-400);">Every sub is in order.</td></tr>'}</tbody>
@@ -4466,10 +4468,10 @@ ReportsPage.givingStatements = function (prefill) {
     ReportsPage.setAddress('giving-statements', { year: chosen });
     const opts = [y, y - 1, y - 2].map(v => `<option value="${v}" ${v === chosen ? 'selected' : ''}>${v}</option>`).join('');
     openModal('Year-End Giving Statements', `
+        <div class="report-hint-row" style="margin-bottom:6px;">${hint(`Every ${T('customer')} with a gift in the year gets a statement: cash contributions with the deductible portion, non-cash gifts described without a value. ${T('Customers')} who opted out in their record are skipped when emailing.`, 'Year-End Giving Statements')}</div>
         <div class="form-grid">
             <div class="form-group"><label for="gs-year">Tax year</label><select id="gs-year" onchange="ReportsPage.setAddress('giving-statements', { year: this.value })">${opts}</select></div>
         </div>
-        <p style="font-size:12px;color:var(--gray-500);margin:8px 0;">Every ${T('customer')} with a gift in the year gets a statement: cash contributions with the deductible portion, non-cash gifts described without a value. ${T('Customers')} who opted out in their record are skipped when emailing.</p>
         <div id="gs-result" style="font-size:12px;margin:8px 0;"></div>
         <div class="form-actions">
             <button class="btn btn-secondary" onclick="window.open('/api/donors/giving-statements/pdf?year=' + $('#gs-year').value, '_blank')">Download all (PDF)</button>
@@ -4569,8 +4571,7 @@ ReportsPage.possibleDuplicates = async function (prefill) {
                 ? ` · ${data.dismissed_count} marked not a duplicate (shown)`
                 : ` · ${data.dismissed_count} marked not a duplicate, not shown`;
         return `${ReportsPage._exportButtons('possible-duplicates', qs)}
-            <p style="margin-bottom:12px; color:var(--gray-500);">${accountLabel({ account_number: data.account.number, name: data.account.name }, null, ' ')} · ${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)} · ${data.count} ${data.count === 1 ? 'group' : 'groups'}${hidden}</p>
-            <p style="margin-bottom:12px; font-size:12px; color:var(--gray-500);">Entries with the same amount on the same side and the same or a similar payee, at most ${data.window_days} days apart. Nothing here is voided unless you void it.</p>
+            <p style="margin-bottom:12px; color:var(--gray-500);">${accountLabel({ account_number: data.account.number, name: data.account.name }, null, ' ')} · ${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)} · ${data.count} ${data.count === 1 ? 'group' : 'groups'}${hidden} ${hint(`Entries with the same amount on the same side and the same or a similar payee, at most ${data.window_days} days apart. Nothing here is voided unless you void it.`, 'Possible Duplicates')}</p>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Date</th><th scope="col">Num</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Source</th><th scope="col">Reconciled</th><th scope="col" class="amount">Amount</th><th scope="col"></th></tr></thead>
                 <tbody>${groups || '<tr><td colspan="8" style="text-align:center; color:var(--gray-400);">No possible duplicates on this account in this period</td></tr>'}</tbody>
@@ -4909,7 +4910,7 @@ ReportsPage.estimateClosingRate = async function (prefill) {
                 ${foot}</table></div>`;
         const undated = t.undated ? ` ${t.undated} decided estimate${t.undated === 1 ? ' has' : 's have'} no decision date (decided before this report existed) and ${t.undated === 1 ? 'is' : 'are'} left out of the average.` : '';
         return `${ReportsPage._exportButtons('estimate-closing-rate', qs.toString())}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Estimates dated ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, by status today. Won is accepted or converted; the closing rate is won ÷ (won + lost), so open bids count neither way. ${data.before_tax ? 'Dollars are the estimates before sales tax (subtotal and markups).' : 'Dollars are the estimate totals, sales tax included.'} Days run from the first time the estimate was emailed (else its date) to the decision.${undated}</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Estimates dated ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, by status today. ${data.before_tax ? 'Dollars are the estimates before sales tax (subtotal and markups).' : 'Dollars are the estimate totals, sales tax included.'}${undated} ${hint('Won is accepted or converted; the closing rate is won ÷ (won + lost), so open bids count neither way. Days run from the first time the estimate was emailed (else its date) to the decision.', 'Estimate Closing Rate')}</div>
             <div style="display:flex; gap:24px; margin-bottom:6px; font-size:13px;">
                 <div><strong>${pct(t.closing_rate)}</strong> closing rate (${t.won_count} of ${t.won_count + t.lost_count} decided)</div>
                 <div><strong>${pct(t.closing_rate_amount)}</strong> by dollars</div>
