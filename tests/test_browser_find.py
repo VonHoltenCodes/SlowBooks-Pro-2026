@@ -149,17 +149,15 @@ def test_enter_shift_enter_ctrl_g_and_f3_step_through_the_matches(desk):
     assert page.evaluate(COUNT) == "6 of 6"
 
 
-def test_match_case(desk):
+def test_case_is_always_ignored_and_there_is_no_match_case(desk):
     page = desk
     page.evaluate("() => FindBar.open()")
     _find(page, "ACME")
     assert page.evaluate(COUNT) == "1 of 6"
-    page.click("[data-find='case']")
-    page.wait_for_function(
-        "() => document.getElementById('find-count').textContent === '1 of 1'"
-    )
-    assert page.evaluate(HITS)["current"] == ["ACME"]
-    assert page.get_attribute("[data-find='case']", "aria-pressed") == "true"
+    assert page.query_selector("[data-find='case']") is None
+    assert page.evaluate(
+        "() => [...document.querySelectorAll('#find-bar button')].map(b => b.dataset.find)"
+    ) == ["prev", "next", "close", "records"]
 
 
 def test_an_amount_is_found_however_it_is_written(desk):

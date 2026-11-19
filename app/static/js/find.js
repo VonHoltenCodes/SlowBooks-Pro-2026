@@ -15,10 +15,12 @@
  * text box, a text area or a drop-down counts too: on a bill or an invoice
  * most of what is on screen is in a field.
  *
- * How it matches: case and accents are ignored unless "Aa" is pressed,
- * and a run of spaces or a line break is one space. A query that reads as
- * an amount ignores $, the thousands commas and accounting parentheses on
- * both sides, so 1234.5 finds $1,234.50 and -200 finds (200.00).
+ * How it matches: case and accents are always ignored (a book's names,
+ * numbers and memos never differ by case alone, so there is no "match
+ * case" to turn on), and a run of spaces or a line break is one space. A
+ * query that reads as an amount ignores $, the thousands commas and
+ * accounting parentheses on both sides, so 1234.5 finds $1,234.50 and -200
+ * finds (200.00).
  *
  * How it shows: each match gets a tinted box laid over its text in a
  * layer of its own (#find-marks), the current one in a stronger colour, and
@@ -56,11 +58,9 @@
         '‐': '-', '‑': '-', '‒': '-', '–': '-', '—': '-', '−': '-',
     };
 
-    function foldChar(ch, caseSensitive) {
+    function foldChar(ch) {
         if (PLAIN[ch]) return PLAIN[ch];
-        let f = ch.normalize('NFD').replace(/[̀-ͯ]/g, '');
-        if (!caseSensitive) f = f.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-        return f;
+        return ch.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     }
 
     // A query that reads as an amount: an optional sign or parentheses, an
@@ -74,7 +74,6 @@
     // came from (starts[i], ends[i]: its source's offsets in `text`), so a
     // match in the folded text is a match in the original.
     function fold(text, opts) {
-        const caseSensitive = !!(opts && opts.caseSensitive);
         const numeric = !!(opts && opts.numeric);
         let out = '';
         const starts = [];
@@ -106,7 +105,7 @@
                     }
                 }
             }
-            emit(foldChar(ch, caseSensitive), i, next);
+            emit(foldChar(ch), i, next);
             i = next;
         }
         return { text: out, starts, ends };
@@ -118,10 +117,7 @@
     function findInChunks(chunks, query, opts) {
         const q = String(query || '').trim();
         if (!q) return [];
-        const o = {
-            caseSensitive: !!(opts && opts.caseSensitive),
-            numeric: opts && 'numeric' in opts ? !!opts.numeric : isNumericQuery(q),
-        };
+        const o = { numeric: opts && 'numeric' in opts ? !!opts.numeric : isNumericQuery(q) };
         const needle = fold(q, o).text;
         if (!needle.trim()) return [];
         const limit = (opts && opts.limit) || Infinity;
@@ -267,7 +263,6 @@
         _bar: null,
         _input: null,
         _open: false,
-        _caseSensitive: false,
         _matches: [],
         _index: -1,
         _over: false,
@@ -314,7 +309,6 @@
                         aria-label="Find on this screen" aria-describedby="find-count" autocomplete="off" spellcheck="false"
                         aria-keyshortcuts="${isMac() ? 'Meta' : 'Control'}+F">
                     <span id="find-count" class="find-count" role="status" aria-live="polite"></span>
-                    <button type="button" class="find-btn find-case" data-find="case" aria-pressed="false" title="Match case">Aa</button>
                     <button type="button" class="find-btn" data-find="prev" aria-label="Previous match" title="Previous match (Shift+Enter)">&#x2303;</button>
                     <button type="button" class="find-btn" data-find="next" aria-label="Next match" title="Next match (Enter)">&#x2304;</button>
                     <button type="button" class="find-btn" data-find="close" aria-label="Close find" title="Close (Esc)">&#x2715;</button>
@@ -337,13 +331,7 @@
                 const act = b.dataset.find;
                 if (act === 'close') return FindBar.close();
                 if (act === 'records') return FindBar.searchRecords();
-                if (act === 'case') {
-                    FindBar._caseSensitive = !FindBar._caseSensitive;
-                    b.setAttribute('aria-pressed', String(FindBar._caseSensitive));
-                    FindBar.search({ reveal: true });
-                } else {
-                    FindBar.step(act === 'prev' ? -1 : 1);
-                }
+                FindBar.step(act === 'prev' ? -1 : 1);
                 FindBar._input.focus();
             });
         },
@@ -451,10 +439,7 @@
             const q = FindBar._input.value.trim();
             let hits = [];
             if (q && FindBar._open) {
-                hits = findInChunks(collectChunks(FindBar.scope()), q, {
-                    caseSensitive: FindBar._caseSensitive,
-                    limit: MAX_MATCHES + 1,
-                });
+                hits = findInChunks(collectChunks(FindBar.scope()), q, { limit: MAX_MATCHES + 1 });
             }
             FindBar._over = hits.length > MAX_MATCHES;
             FindBar._matches = hits.slice(0, MAX_MATCHES).map(toMatch);

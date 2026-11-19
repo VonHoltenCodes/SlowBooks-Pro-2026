@@ -4151,8 +4151,6 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
 .find-btn:hover:not(:disabled) { border-color: var(--panel-border); color: var(--text-primary); }
 .find-btn:disabled { opacity: 0.45; cursor: default; }
 .find-btn:focus-visible, .find-records:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.find-case { font-weight: 700; }
-.find-case[aria-pressed="true"] { border-color: var(--input-focus); color: var(--text-primary); background: var(--primary-light); }
 .find-empty { margin-top: 6px; color: var(--text-secondary); }
 .find-empty[hidden] { display: none; }
 .find-records {

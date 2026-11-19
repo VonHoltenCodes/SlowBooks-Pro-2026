@@ -1,5 +1,5 @@
 // Find on this screen (find.js), the matching half, which touches no DOM:
-// case and accents ignored unless asked, a run of spaces one space, a
+// case and accents always ignored, a run of spaces one space, a
 // typographic quote or dash its plain form, and an amount found however
 // it is written ($, thousands commas, accounting parentheses). The bar
 // itself, on a real page and over a dialog, is tests/test_browser_find.py.
@@ -26,12 +26,12 @@ function found(texts, query, opts) {
     return Array.from(findInChunks(chunks, query, opts), h => h.chunk.text.slice(h.start, h.end));
 }
 
-test('case and accents are ignored, and "Aa" matches case', () => {
+test('case and accents are always ignored', () => {
     assert.deepEqual(found(['Acme Supply', 'ACME', 'acme'], 'acme'), ['Acme', 'ACME', 'acme']);
-    assert.deepEqual(found(['Café Olé', 'Cafe'], 'cafe'), ['Café', 'Cafe']);
-    assert.deepEqual(found(['Acme', 'ACME', 'acme'], 'Acme', { caseSensitive: true }), ['Acme']);
-    // accents are still ignored with case matched
-    assert.deepEqual(found(['Café', 'café'], 'Cafe', { caseSensitive: true }), ['Café']);
+    assert.deepEqual(found(['Acme', 'ACME', 'acme'], 'ACME'), ['Acme', 'ACME', 'acme']);
+    assert.deepEqual(found(['Café Olé', 'Cafe', 'CAFÉ'], 'cafe'), ['Café', 'Cafe', 'CAFÉ']);
+    // a dotted capital I folds to a plain i
+    assert.deepEqual(found(['\u0130stanbul'], 'istanbul'), ['\u0130stanbul']);
 });
 
 test('a run of spaces, a tab or a line break is one space', () => {
