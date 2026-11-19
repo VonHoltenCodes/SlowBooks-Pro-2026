@@ -26,6 +26,7 @@ from app.switchboard.protocol import (
 from app.switchboard.registry import (
     DESTRUCTIVE,
     KEYED_WRITE,
+    ONCE_WRITE,
     READ_ONLY,
     WRITE,
     Registry,
@@ -44,7 +45,17 @@ INSTRUCTIONS = (
     "(YYYY-MM-DD). The API enforces the token's role, the closing date and "
     "validation: a refusal is a sentence to pass on to the person, not a "
     "reason to retry. Every write is audited as token:<label>. Use one stable key "
-    "per payment so a retry can never book it twice; void instead of delete."
+    "per payment so a retry can never book it twice; void instead of delete. "
+    "Never invent a value for a record. A create with little on it comes back "
+    "with ask_first and the empty fields: ask the person for them before "
+    "calling again, and after a create say what left_blank lists."
+)
+
+_ASKS = (
+    " {what} with little on it is not created at first: the answer lists the "
+    "empty fields worth asking the user for (ask_first), and a second call "
+    "with asked_user creates it. A created record's answer lists what is "
+    "still empty in left_blank."
 )
 
 _DATA = (
@@ -211,9 +222,8 @@ def build_registry(client: ApiClient) -> Registry:
             "/api/invoices/{invoice_id}; a concrete path also works.",
         )
     )
-    # Writes, one tool per kind of change. Each can reach routes that
-    # change or reverse records (a POST can void, a PUT overwrites), so each
-    # carries destructiveHint; reads go through api_get.
+    # Writes, one tool per kind of change; like every write here they carry
+    # destructiveHint (registry.py says why); reads go through api_get.
     _REFUSED = (
         " The API decides what is allowed; a refusal comes back as its " "sentence."
     )
@@ -227,11 +237,19 @@ def build_registry(client: ApiClient) -> Registry:
             "the API's answer: create a record, or run an action such as a "
             "void, a match or an apply. Path and query parameters go in "
             "params by name, the record in body. A payment-recording "
-            "operation needs idempotency_key." + _REFUSED,
+            "operation needs idempotency_key."
+            + _REFUSED
+            + _ASKS.format(
+                what="A new customer, vendor, item, employee, account, invoice, "
+                "bill, estimate or purchase order"
+            ),
             path=_WRITE_PATH,
             params=_PARAMS,
             body="The request body, when the operation takes one.",
             idempotency_key="Required where describe_operation says so: " + _KEY,
+            asked_user="For a create of one of the records above: "
+            + tools.ASKED_USER[0].lower()
+            + tools.ASKED_USER[1:],
         )
     )
     add(
@@ -254,7 +272,7 @@ def build_registry(client: ApiClient) -> Registry:
             "delete_operation",
             "Delete through the API",
             operations.delete_operation,
-            {**DESTRUCTIVE, "idempotentHint": True},
+            ONCE_WRITE,
             "DELETE through one operation of " + _API + ", as the token, and "
             "return the API's answer: remove a record such as a customer, an "
             "item or a rule. Posted documents are voided with post_operation "
@@ -265,25 +283,30 @@ def build_registry(client: ApiClient) -> Registry:
     )
 
     # -- everyday writes -------------------------------------------------------
-    for name, title, fn, what in (
+    for name, title, fn, what, asks in (
         ("create_customer", "Create a customer", tools.create_customer,
-         "Create a customer. Required: name."),
+         "Create a customer. Required: name.", "A customer"),
         ("create_vendor", "Create a vendor", tools.create_vendor,
-         "Create a vendor. Required: name."),
+         "Create a vendor. Required: name.", "A vendor"),
         ("create_item", "Create an item", tools.create_item,
-         "Create an item. Required: name and item_type."),
+         "Create an item. Required: name and item_type.", "An item"),
         ("create_invoice", "Create an invoice", tools.create_invoice,
-         "Create an invoice. Required: customer_id, date and lines."),
+         "Create an invoice. Required: customer_id, date and lines.",
+         "An invoice"),
         ("create_bill", "Enter a bill", tools.create_bill,
-         "Enter a vendor's bill. Required: vendor_id, date and lines."),
+         "Enter a vendor's bill. Required: vendor_id, date and lines.",
+         "A bill"),
         ("create_expense", "Record an expense", tools.create_expense,
          ("Record a paid expense. Required: date, paid_from_account_id, and "
-          "either amount with expense_account_id or lines.")),
+          "either amount with expense_account_id or lines."), None),
         ("create_journal_entry", "Post a journal entry",
          tools.create_journal_entry,
          ("Post a manual journal entry. Required: date, description and "
-          "lines; debits must equal credits.")),
+          "lines; debits must equal credits."), None),
     ):  # fmt: skip
+        params = {"data": _DATA}
+        if asks:
+            params["asked_user"] = tools.ASKED_USER
         add(
             _tool(
                 name,
@@ -291,8 +314,8 @@ def build_registry(client: ApiClient) -> Registry:
                 fn,
                 WRITE,
                 what + " If the answer is lost, check with search before "
-                "trying again.",
-                data=_DATA,
+                "trying again." + (_ASKS.format(what=asks) if asks else ""),
+                **params,
             )
         )
     add(
@@ -326,7 +349,7 @@ def build_registry(client: ApiClient) -> Registry:
             "void_record",
             "Void a record",
             tools.void_record,
-            DESTRUCTIVE,
+            ONCE_WRITE,
             "Void an invoice, bill, expense, journal entry, payment or bill "
             "payment with a reversing entry. Nothing is deleted, but the record "
             "stops counting.",

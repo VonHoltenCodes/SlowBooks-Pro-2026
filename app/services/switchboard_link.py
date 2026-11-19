@@ -14,7 +14,9 @@
 #                 ten minutes, once), typed on the relay's sign-in page when
 #                 the assistant asks
 #   status()      what the panel says
-#   disconnect()  closes the line, unlinks at the relay, revokes the token
+#   disconnect()  closes the line, has the relay delete its record (or, out
+#                 of reach, says the relay name to send to support), revokes
+#                 the token
 #                 and deletes the file
 #
 # Off the books' critical path: the line is a daemon thread that dials out
@@ -357,6 +359,7 @@ def status() -> dict:
         "this_company": False,
         "company": "",
         "address": "",
+        "slug": "",
         "token_label": "",
         "terms": TERMS_URL,
         "privacy": PRIVACY_URL,
@@ -379,7 +382,12 @@ def status() -> dict:
         out["sentence"] = OTHER_COMPANY.format(name=record["company_name"])
         return out
     state, sentence = _line_state(record["device"])
-    out.update(state=state, sentence=sentence, address=mcp_address(record["relay"]))
+    out.update(
+        state=state,
+        sentence=sentence,
+        address=mcp_address(record["relay"]),
+        slug=record["slug"],
+    )
     return out
 
 
@@ -512,8 +520,12 @@ def new_code() -> dict:
 
 
 def disconnect(db) -> dict:
-    """Close the line, unlink at the relay, revoke the token, forget the
-    file. The file and the token go even when the relay cannot be told."""
+    """Close the line, have the relay delete its record of these books (POST
+    /v1/forget: the account and everything kept for it, when this is its
+    last computer), revoke the token, forget the file. The file and the
+    token go even when the relay cannot be reached; the answer then carries
+    the relay name and the sentence that says to send it to support (the
+    manual fallback: the operator deletes it by hand)."""
     from app.models.api_tokens import ApiToken
 
     try:
@@ -524,14 +536,33 @@ def disconnect(db) -> dict:
         # what cannot be read cannot be unlinked: forget it here
         stop()
         _forget()
-        return {"unlinked": False, "revoked": False}
+        return {
+            "unlinked": False,
+            "revoked": False,
+            "deleted": False,
+            "devices_left": 0,
+            "slug": "",
+            "sentence": "",
+        }
     stop()
-    told = False
+    told, deleted, left = False, False, 0
+    bearer = record["credential"]
     try:
-        status_code, _, _ = _relay_post(
-            record["relay"], account.UNLINK_PATH, None, bearer=record["credential"]
+        status_code, data, _ = _relay_post(
+            record["relay"], account.FORGET_PATH, None, bearer=bearer
         )
-        told = 200 <= status_code < 300 or status_code in (401, 404)
+        if status_code == 404:  # a relay from before /v1/forget
+            status_code, data, _ = _relay_post(
+                record["relay"], account.UNLINK_PATH, None, bearer=bearer
+            )
+            told = 200 <= status_code < 300 or status_code == 401
+        elif 200 <= status_code < 300:
+            told = True
+            deleted = isinstance(data, dict) and data.get("deleted") is True
+            n = data.get("devices_left") if isinstance(data, dict) else 0
+            left = n if isinstance(n, int) and not isinstance(n, bool) else 0
+        elif status_code == 401:
+            told = deleted = True  # the relay no longer knows this computer
     except SwitchboardError as exc:
         logger.warning("the relay was not told of the disconnect: %s", exc.sentence)
     revoked = False
@@ -541,4 +572,12 @@ def disconnect(db) -> dict:
         db.commit()
         revoked = True
     _forget()
-    return {"unlinked": told, "revoked": revoked}
+    done = account.Forgotten(True, told, deleted, left, record["slug"])
+    return {
+        "unlinked": told,
+        "revoked": revoked,
+        "deleted": deleted,
+        "devices_left": left,
+        "slug": record["slug"],
+        "sentence": done.sentence(),
+    }

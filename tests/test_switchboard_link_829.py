@@ -107,6 +107,23 @@ def test_the_blocks_own_markup_is_words_and_links_and_the_relay_panel():
     ) in caution
 
 
+def test_the_panel_says_an_assistant_asks_before_a_bare_create():
+    """Switchboard holds back a create with little on it until the assistant
+    has asked the person (the owner, 2026-11-19): said in the open under the
+    caution, and in the relay's help behind the tortoise."""
+    block = _block()
+    start = block.index('id="switchboard-relay-ask"')
+    said = _flat(block[start : block.index("</p>", start)])
+    assert (
+        "An assistant asks before it creates a record with little on it, and "
+        "says what it left blank."
+    ) in said
+    assert block.index('id="switchboard-relay-caution"') < start
+    helper = _flat(JS[JS.index("settings-claude-relay-help") :][:2000])
+    assert "the assistant is told to ask you for what is missing" in helper
+    assert "(it may not make anything up)" in helper
+
+
 def test_the_api_tokens_paragraph_says_a_bookkeeper_token_is_what_setup_asks_for():
     start = JS.index('id="settings-api-tokens"')
     para = _flat(JS[start : JS.index("</p>", start)])

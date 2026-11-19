@@ -8,6 +8,7 @@
 
 import difflib
 import re
+from dataclasses import dataclass
 
 from app.switchboard.client import (
     ApiClient,
@@ -305,29 +306,258 @@ def _keyed(client: ApiClient, path: str, data: dict, key: str):
     return _write(client, path, data, key=key)
 
 
-def create_customer(client: ApiClient, data: dict):
+# ---------------------------------------------------------------------------
+# Ask before a bare create (the owner, 2026-11-19: "if you don't ask you
+# don't get"). A create of one of the main records that carries only what
+# the API requires is not sent at first: the answer lists the empty fields
+# worth having, as the app's forms name them, for the assistant to ask the
+# person about. A second call with asked_user creates it; a record that
+# already fills at least half of its fields (rounded down, at least one) is
+# created at once. Every create's answer says, in left_blank, what is still
+# empty. The gate is here, in Switchboard, and nowhere in the API: the
+# app's screens, imports and API tokens used directly are unaffected.
+# ---------------------------------------------------------------------------
+
+_LINES = "@lines"  # every line has an item or a description
+
+
+@dataclass(frozen=True)
+class AskFirst:
+    record: str  # "a customer"
+    required: tuple  # the API's own required fields; one missing, it decides
+    fields: tuple  # (label, keys): given when any key has a value
+    route: str = ""
+
+    @property
+    def need(self) -> int:
+        return max(1, len(self.fields) // 2)
+
+
+_LINE_FIELD = ("An item or description on each line", (_LINES,))
+_TERMS = ("Terms or Due Date", ("terms", "due_date", "payment_term_id"))
+ASK_FIRST = {
+    "/api/customers": AskFirst(
+        "a customer",
+        ("name",),
+        (
+            ("Company", ("company",)),
+            ("Email", ("email",)),
+            ("Phone", ("phone", "mobile")),
+            ("Billing address", ("bill_address1", "bill_city", "bill_zip")),
+            ("Terms", ("terms",)),
+            ("Sales Tax (taxable or exempt)", ("is_taxable",)),
+        ),
+    ),
+    "/api/vendors": AskFirst(
+        "a vendor",
+        ("name",),
+        (
+            ("Email", ("email",)),
+            ("Phone", ("phone",)),
+            ("Address", ("address1", "city", "zip")),
+            ("Terms", ("terms",)),
+            ("Tax ID", ("tax_id",)),
+            ("1099 Vendor", ("is_1099_vendor",)),
+        ),
+    ),
+    "/api/items": AskFirst(
+        "an item",
+        ("name", "item_type"),
+        (
+            ("Description", ("description",)),
+            ("Rate (sell price)", ("rate",)),
+            ("Cost", ("cost",)),
+            ("Income Account", ("income_account_id",)),
+            ("Expense or COGS Account", ("expense_account_id",)),
+        ),
+    ),
+    "/api/employees": AskFirst(
+        "an employee",
+        ("first_name", "last_name"),
+        (
+            ("Email", ("email",)),
+            ("Address", ("address1", "city", "zip")),
+            ("Hire Date", ("hire_date",)),
+            ("Pay Type", ("pay_type",)),
+            ("Pay Rate", ("pay_rate",)),
+            ("Pay Frequency", ("pay_frequency",)),
+            ("Filing Status", ("filing_status",)),
+            ("Work State", ("work_state",)),
+        ),
+    ),
+    "/api/accounts": AskFirst(
+        "an account",
+        ("name", "account_type"),
+        (
+            ("Number", ("account_number",)),
+            ("Description", ("description",)),
+            ("Detail Type", ("detail_type",)),
+        ),
+    ),
+    "/api/invoices": AskFirst(
+        "an invoice",
+        ("customer_id", "date", "lines"),
+        (_TERMS, ("PO #", ("po_number",)), _LINE_FIELD),
+    ),
+    "/api/bills": AskFirst(
+        "a bill",
+        ("vendor_id", "date", "lines"),
+        (("Bill Number", ("bill_number", "ref_number")), _TERMS, _LINE_FIELD),
+    ),
+    "/api/estimates": AskFirst(
+        "an estimate",
+        ("customer_id", "date", "lines"),
+        (
+            ("Expiration Date", ("expiration_date",)),
+            ("Terms, inclusions and exclusions", ("terms",)),
+            _LINE_FIELD,
+        ),
+    ),
+    "/api/purchase-orders": AskFirst(
+        "a purchase order",
+        ("vendor_id", "date", "lines"),
+        (
+            ("Expected Date", ("expected_date",)),
+            ("Notes", ("notes",)),
+            _LINE_FIELD,
+        ),
+    ),
+}
+
+ASKED_USER = (
+    "True only after you asked the user for the empty fields an earlier "
+    "call listed (ask_first), or they said to create the record as it is. It "
+    "says you asked; it adds nothing to the record."
+)
+
+
+def _has(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True  # a number or true/false, sent on purpose
+
+
+def _lines_described(data: dict) -> bool:
+    lines = data.get("lines")
+    if not isinstance(lines, list) or not lines:
+        return False
+    return all(
+        isinstance(line, dict)
+        and (_has(line.get("item_id")) or _has(line.get("description")))
+        for line in lines
+    )
+
+
+def _given(data: dict, keys: tuple) -> bool:
+    if keys == (_LINES,):
+        return _lines_described(data)
+    return any(_has(data.get(k)) for k in keys)
+
+
+def left_blank(rule: AskFirst, data: dict) -> list:
+    """The labels of the rule's fields that data leaves empty."""
+    return [label for label, keys in rule.fields if not _given(data, keys)]
+
+
+def _field_names(keys: tuple) -> str:
+    if keys == (_LINES,):
+        return "lines[].item_id or lines[].description"
+    return " or ".join(keys)
+
+
+def body_fields(client: ApiClient, route: str):
+    """The field names POST route takes, from the app's own document; None
+    when the document does not say."""
+    try:
+        op = _spec(client).get("paths", {}).get(route, {}).get("post") or {}
+    except ApiError:
+        return None
+    body = (op.get("requestBody") or {}).get("content", {}).get("application/json")
+    schema = _resolve(client, (body or {}).get("schema") or {}, depth=2)
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    return set(props) if isinstance(props, dict) else None
+
+
+def ask_first(route: str, data, asked_user: bool, tool: str, known=None):
+    """The ask-first answer for a bare create, or None to send it. known is
+    the set of fields the route takes, when the app's document says."""
+    rule = ASK_FIRST.get(route)
+    if rule is None or asked_user is True or not isinstance(data, dict):
+        return None
+    if not all(_has(data.get(k)) for k in rule.required):
+        return None  # the API says what is missing, in its own words
+    if known is not None and set(data) - known:
+        return None  # nor would it take an unknown field: its 422 says so
+    empty = left_blank(rule, data)
+    if len(rule.fields) - len(empty) >= rule.need:
+        return None
+    labels = ", ".join(empty)
+    return {
+        "created": False,
+        "ask_first": True,
+        "record": rule.record.split(" ", 1)[1],
+        "empty": [
+            {"label": label, "field": _field_names(keys)}
+            for label, keys in rule.fields
+            if label in empty
+        ],
+        "next": (
+            f"Nothing was created yet: {rule.record} with this little on it "
+            f"may need checking first. Ask the user whether they have any of "
+            f"these: {labels}. Do not make any up. Then call {tool} again with "
+            f"what they gave and asked_user: true, or with asked_user: true "
+            f"alone if they want it created as it is."
+        ),
+    }
+
+
+def with_left_blank(route: str, data, answer):
+    """A create's answer with left_blank: the rule's fields still empty."""
+    rule = ASK_FIRST.get(route)
+    if rule is None or not isinstance(data, dict):
+        return answer
+    blank = left_blank(rule, data)
+    if isinstance(answer, dict):
+        return {**answer, "left_blank": blank}
+    return {"created": True, "answer": answer, "left_blank": blank}
+
+
+def _create(client: ApiClient, route: str, data, asked_user: bool, tool: str):
+    held = None
+    if not asked_user and route in ASK_FIRST:
+        held = ask_first(route, data, asked_user, tool, body_fields(client, route))
+    if held is not None:
+        return held
+    return with_left_blank(route, data, _write(client, route, data))
+
+
+def create_customer(client: ApiClient, data: dict, asked_user: bool = False):
     """Create a customer. Required: name. api_schema("/api/customers") has the rest."""
-    return _write(client, "/api/customers", data)
+    return _create(client, "/api/customers", data, asked_user, "create_customer")
 
 
-def create_vendor(client: ApiClient, data: dict):
+def create_vendor(client: ApiClient, data: dict, asked_user: bool = False):
     """Create a vendor. Required: name. api_schema("/api/vendors") has the rest."""
-    return _write(client, "/api/vendors", data)
+    return _create(client, "/api/vendors", data, asked_user, "create_vendor")
 
 
-def create_item(client: ApiClient, data: dict):
+def create_item(client: ApiClient, data: dict, asked_user: bool = False):
     """Create an item. Required: name, item_type. api_schema("/api/items") has the rest."""
-    return _write(client, "/api/items", data)
+    return _create(client, "/api/items", data, asked_user, "create_item")
 
 
-def create_invoice(client: ApiClient, data: dict):
+def create_invoice(client: ApiClient, data: dict, asked_user: bool = False):
     """Create an invoice. Required: customer_id, date, lines. api_schema("/api/invoices") has the rest."""
-    return _write(client, "/api/invoices", data)
+    return _create(client, "/api/invoices", data, asked_user, "create_invoice")
 
 
-def create_bill(client: ApiClient, data: dict):
+def create_bill(client: ApiClient, data: dict, asked_user: bool = False):
     """Create a bill. Required: vendor_id, date, lines. api_schema("/api/bills") has the rest."""
-    return _write(client, "/api/bills", data)
+    return _create(client, "/api/bills", data, asked_user, "create_bill")
 
 
 def create_expense(client: ApiClient, data: dict):
