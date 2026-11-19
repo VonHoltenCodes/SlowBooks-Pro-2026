@@ -14,7 +14,10 @@ function harness(result) {
   const el = () => ({ innerHTML: '', value: '', checked: false, files: [{ name: 'x.csv' }], style: {}, classList: { add() {}, remove() {} } });
   const $ = (sel) => (els[sel] = els[sel] || el());
   const ctx = {
-    console, setTimeout, Promise, URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
+    // the page revokes the saved file's URL 30 s later; an unref'd timer
+    // lets node exit when the probe is done instead of waiting it out
+    // (the test took 30 s for 0.2 s of work, #1095)
+    console, setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); if (t.unref) t.unref(); return t; }, Promise, URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
     Blob: class { constructor(parts) { this.text = parts.join(''); } },
     FormData: class { append() {} },
     Date,
