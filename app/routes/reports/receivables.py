@@ -238,11 +238,18 @@ def ar_aging_report(db: Session, as_of_date: date) -> dict:
     return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
 
 
+_BASIS_QUERY = Query(
+    default=None,
+    description="accrual or cash; omitted, the company's default report basis",
+)
+
+
 @router.get("/income-by-customer")
 def income_by_customer(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
 ):
     """Income by Customer: invoices dated in the period, in home currency.
 
@@ -250,13 +257,25 @@ def income_by_customer(
     state, not income — with the tax beside it (explore 2.17.3, W-L11).
     Paid includes money the customer paid in the period that is not
     applied to an invoice yet, and Balance is net of it, so
-    Sales + Tax − Paid = Balance (W-H9: $612.30 shown paid of $682.30)."""
+    Sales + Tax − Paid = Balance (W-H9: $612.30 shown paid of $682.30).
+
+    On the cash basis (the company default, or `basis=cash`, #1062) a sale
+    counts when it is paid and in the proportion paid, as on the cash
+    Profit and Loss: Sales and Sales Tax are what the period's payments
+    recognized of each invoice, read from their cash lines, and money not
+    yet applied to an invoice is income (Unapplied Cash Payment Income).
+    Paid is then what came in for those sales, and Balance what is still
+    owed on the invoices listed, less the money not yet applied."""
+    from app.services import cash_basis
     from app.services.contact_balances import home_amount, unapplied_payments
 
+    basis = cash_basis.resolve_basis(db, basis if isinstance(basis, str) else None)
     if not start_date:
         start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
+    if basis == "cash":
+        return _income_by_customer_cash(db, start_date, end_date)
 
     invoices = (
         db.query(Invoice)
@@ -303,6 +322,10 @@ def income_by_customer(
             r["total_paid"] += p.unapplied_home
             r["total_balance"] -= p.unapplied_home
 
+    return _income_by_customer_answer(by_customer, start_date, end_date, "accrual")
+
+
+def _income_by_customer_answer(by_customer: dict, start_date, end_date, basis: str):
     items = sorted(by_customer.values(), key=lambda x: x["total_sales"], reverse=True)
     money = ("total_sales", "total_tax", "total_paid", "total_balance")
     grand = {k: sum((i[k] for i in items), Decimal(0)) for k in money}
@@ -313,9 +336,63 @@ def income_by_customer(
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
+        "basis": basis,
         "items": items,
         **{k: float(v) for k, v in grand.items()},
     }
+
+
+def _income_row(by_customer: dict, cid, name) -> dict:
+    if cid not in by_customer:
+        by_customer[cid] = {
+            "customer_id": cid,
+            "customer_name": name,
+            "invoice_count": 0,
+            "total_sales": Decimal(0),
+            "total_tax": Decimal(0),
+            "total_paid": Decimal(0),
+            "total_balance": Decimal(0),
+        }
+    return by_customer[cid]
+
+
+def _income_by_customer_cash(db: Session, start_date: date, end_date: date) -> dict:
+    """Income by Customer on the cash basis (#1062): see income_by_customer."""
+    from app.services import cash_basis
+    from app.services.contact_balances import home_amount
+
+    recognized = cash_basis.recognized_sales(db, start_date, end_date)
+    by_customer: dict = {}
+    if recognized:
+        invoices = (
+            db.query(Invoice)
+            .options(joinedload(Invoice.customer))
+            .filter(Invoice.id.in_(list(recognized)))
+            .all()
+        )
+        for inv in invoices:
+            got = recognized[inv.id]
+            if got["income"] == 0 and got["tax"] == 0:
+                continue
+            name = inv.customer.full_name if inv.customer else "Unknown"
+            r = _income_row(by_customer, inv.customer_id, name)
+            r["invoice_count"] += 1
+            r["total_sales"] += got["income"]
+            r["total_tax"] += got["tax"]
+            r["total_paid"] += got["income"] + got["tax"]
+            r["total_balance"] += home_amount(inv.balance_due, inv.exchange_rate)
+    unapplied = cash_basis.unapplied_cash_income(db, start_date, end_date)
+    if unapplied:
+        names = {
+            c.id: c.full_name
+            for c in db.query(Customer).filter(Customer.id.in_(list(unapplied)))
+        }
+        for cid, amount in unapplied.items():
+            r = _income_row(by_customer, cid, names.get(cid, "Unknown"))
+            r["total_sales"] += amount
+            r["total_paid"] += amount
+            r["total_balance"] -= amount
+    return _income_by_customer_answer(by_customer, start_date, end_date, "cash")
 
 
 def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dict:
