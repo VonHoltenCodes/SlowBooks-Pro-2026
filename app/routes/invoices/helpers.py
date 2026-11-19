@@ -494,6 +494,9 @@ def _build_invoice_journal_lines(
                 "class_id": getattr(ld, "class_id", None),
                 "job_id": getattr(ld, "job_id", None),
                 "cost_code_id": getattr(ld, "cost_code_id", None),
+                # the revenue's own cost type (#1055); blank takes the
+                # code's in create_journal_entry. The account is the item's.
+                "cost_type": getattr(ld, "cost_type", None),
             }
         )
     if tax_amount and tax_amount > 0 and tax_account_id:

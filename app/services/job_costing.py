@@ -176,6 +176,20 @@ def line_cost_type(
     return None
 
 
+def refuse_unknown_line_costs(db: Session, lines) -> None:
+    """A sales line's cost code and cost type (#1055), checked before
+    anything is written: a code that is not on the chart, or a type the
+    cost_types table does not have, is refused with a 422 that names it.
+    Lines without them pass, as every sales line did before."""
+    for ln in lines:
+        code_id = getattr(ln, "cost_code_id", None)
+        if code_id is not None and db.get(CostCode, code_id) is None:
+            raise HTTPException(
+                status_code=422, detail=f"Cost code {code_id} was not found"
+            )
+        line_cost_type(db, code_id, getattr(ln, "cost_type", None))
+
+
 # ---------------------------------------------------------------------------
 # Cost-code tree
 # ---------------------------------------------------------------------------

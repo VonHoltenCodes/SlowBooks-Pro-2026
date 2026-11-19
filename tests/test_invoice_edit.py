@@ -871,10 +871,22 @@ def test_the_invoice_form_sends_each_lines_dimensions_back():
         assert f'{attr}="${{dim(line.{field})}}"' in row, attr
     save = js[js.index("async save(e, id)") :]
     save = save[: save.index("const data = {")]
-    # the cost code as stored; the job as stored too, unless it is another
-    # customer's (books from before the rule that a document carries its
-    # own customer's jobs, 2.22.0 NEW-36), which the save clears
-    assert "cost_code_id: row.dataset.costCodeId" in save
+    # the cost code and type (#1055) through the line's own cells in
+    # construction mode, else as stored; the job as stored too, unless it is
+    # another customer's (books from before the rule that a document carries
+    # its own customer's jobs, 2.22.0 NEW-36), which the save clears
+    assert "...InvoicesPage.lineCostFromRow(row, form)," in save
+    cost = js[js.index("lineCostFromRow(row, form) {") :]
+    cost = cost[: cost.index("\n    },")]
+    assert "cost_code_id: row.dataset.costCodeId" in cost
+    assert "SalesCost.fromRow(row, form)" in cost
+    utils = (Path(__file__).resolve().parents[1] / "app/static/js/utils.js").read_text(
+        encoding="utf-8"
+    )
+    shared = utils[utils.index("const SalesCost = {") :]
+    shared = shared[: shared.index("\n};")]
+    assert 'data-cost-code-id="${dim(line.cost_code_id)}"' in shared
+    assert "cost_code_id: row.dataset.costCodeId" in shared
     assert "job_id: JobPicker.ownJob(form, row.dataset.jobId" in save
     # the class goes through the line's own cell since 2.22 (#243): the
     # cell's choice where one is drawn, else the stored class as before

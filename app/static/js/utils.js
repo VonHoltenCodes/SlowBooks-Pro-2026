@@ -2301,6 +2301,61 @@ const CostTypes = {
 };
 
 // ---------------------------------------------------------------------------
+// Revenue by cost code (#1055) — the cost code and cost type on a SALES line
+// (invoice, sales receipt), so one item ("Project revenue") can be split per
+// code and type while the income account stays the item's. Drawn in
+// construction mode once the company has cost codes, and shown only while a
+// job is chosen (the header's, or one the line already carries); with no
+// job the line sends none. Outside construction the row keeps what a line
+// already carries (data-cost-code-id / data-cost-type), so an edit never
+// strips it.
+// ---------------------------------------------------------------------------
+const SalesCost = {
+    async load() {
+        if (typeof Terms === 'undefined' || !Terms.isConstruction()) return;
+        await Promise.all([CostCodes.load(), CostTypes.load()]);
+    },
+    on() { return typeof Terms !== 'undefined' && Terms.isConstruction() && CostCodes.any(); },
+    headHtml() {
+        if (!SalesCost.on()) return '';
+        return '<th scope="col" class="sales-cost-col" title="The cost code this revenue belongs to on the job reports">Cost Code</th>'
+            + '<th scope="col" class="sales-cost-col" title="Blank uses the cost code\'s own type">Cost Type</th>';
+    },
+    cellHtml(line) {
+        if (!SalesCost.on()) return '';
+        return `<td class="sales-cost-col"><select class="line-cost-code" aria-label="Line cost code">${CostCodes.optionsHtml(line.cost_code_id == null ? null : Number(line.cost_code_id))}</select></td>`
+            + `<td class="sales-cost-col"><select class="line-cost-type" aria-label="Line cost type">${CostTypes.optionsHtml(line.cost_type || null)}</select></td>`;
+    },
+    // the row's data attributes: what the line carries where no cell is drawn
+    dataAttrs(line) {
+        const dim = (v) => (v == null ? '' : escapeHtml(String(v)));
+        return `data-cost-code-id="${dim(line.cost_code_id)}" data-cost-type="${dim(line.cost_type)}"`;
+    },
+    _jobChosen(form, row) {
+        const header = form && form.job_id ? form.job_id.value : '';
+        return !!(header || (row && row.dataset.jobId));
+    },
+    // show the columns while a job is chosen on the form or a line
+    sync(form, tbody) {
+        if (!form || !SalesCost.on()) return;
+        const rows = tbody ? [...tbody.querySelectorAll('tr')] : [];
+        const shown = SalesCost._jobChosen(form, null) || rows.some(r => r.dataset.jobId);
+        form.querySelectorAll('.sales-cost-col').forEach(el => { el.hidden = !shown; });
+    },
+    // the line's cost code and type for the payload
+    fromRow(row, form) {
+        if (!SalesCost.on() || !row.querySelector('.line-cost-code')) {
+            return {
+                cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
+                cost_type: row.dataset.costType || null,
+            };
+        }
+        if (!SalesCost._jobChosen(form, row)) return { cost_code_id: null, cost_type: null };
+        return { cost_code_id: CostCodes.fromRow(row, 'line-cost-code'), cost_type: CostTypes.fromRow(row, 'line-cost-type') };
+    },
+};
+
+// ---------------------------------------------------------------------------
 // Trade packages — the bid packages a general contractor awards (#551), chosen
 // per LINE on a construction estimate. Same shape as CostCodes; shown in
 // construction mode only. Blank groups a line under "Unassigned".

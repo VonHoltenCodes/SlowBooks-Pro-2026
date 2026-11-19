@@ -19,6 +19,7 @@ from app.schemas.common import (
     check_line_fits,
     check_line_size,
     check_lines_fit,
+    clean_line_cost_type,
     validate_non_negative_line,
     quantity_text,
 )
@@ -60,9 +61,15 @@ class InvoiceLineCreate(StrictModel):
     job_id: Optional[int] = None
     class_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    # The revenue's cost type (#1055): one item split on the invoice per
+    # cost code and type. Blank takes the cost code's own type; the income
+    # account is the item's either way.
+    cost_type: Optional[str] = None
     # None = default from the item (its taxable flag) and the customer
     is_taxable: Optional[bool] = None
     line_order: int = 0
+
+    _cost_type = field_validator("cost_type")(clean_line_cost_type)
 
     @model_validator(mode="after")
     def _check_non_negative(self):
@@ -87,6 +94,7 @@ class InvoiceLineResponse(BaseModel):
     job_id: Optional[int] = None
     class_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    cost_type: Optional[str] = None
     is_taxable: bool = True
     line_order: int
 

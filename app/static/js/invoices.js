@@ -795,6 +795,8 @@ const InvoicesPage = {
         const classGroup = await classFormGroupHtml(inv.class_id);
         const jobGroup = await jobFormGroupHtml(inv.job_id, 'inv-customer-select');
         if (InvoicesPage.lineClasses()) await Nonprofit.loadFunds();
+        // construction: a line's cost code and type (#1055)
+        if (InvoicesPage.costCells()) await SalesCost.load();
         // Nonprofit: a pledge prints as one; program fees and rentals stay invoices
         const pledgeGroup = Terms.isNonprofit() ? `<div class="form-group"><label>Document</label><label style="font-weight:normal;"><input type="checkbox" name="is_pledge" ${(id ? inv.is_pledge : true) ? 'checked' : ''}> This is a pledge (prints as PLEDGE)</label></div>` : '';
         if (inv.lines.length === 0) inv.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
@@ -846,7 +848,7 @@ const InvoicesPage = {
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th scope="col">Item</th><th scope="col">Description</th>${InvoicesPage.lineClasses() ? Nonprofit.classHeadHtml() : ''}<th scope="col" class="col-qty">Qty</th>
+                        <th scope="col">Item</th><th scope="col">Description</th>${InvoicesPage.lineClasses() ? Nonprofit.classHeadHtml() : ''}${InvoicesPage.costCells() ? SalesCost.headHtml() : ''}<th scope="col" class="col-qty">Qty</th>
                         <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>
                     </tr></thead>
                     <tbody id="inv-lines">
@@ -941,6 +943,9 @@ const InvoicesPage = {
     // still renders where that helper is not loaded (the node probes build a
     // bare page from invoices.js alone), as it did before the cell existed.
     lineClasses() { return typeof Nonprofit !== 'undefined' && !!Nonprofit.classCellHtml; },
+    // The line's cost code and type cells (#1055), the shared helper in
+    // utils.js; a bare page without it keeps them on the row's attributes.
+    costCells() { return typeof SalesCost !== 'undefined'; },
     // A line's class for the payload: the cell's choice where one is drawn,
     // else the class the line already carries (data-class-id), so an edit
     // where no cell is drawn keeps a stored class.
@@ -949,21 +954,34 @@ const InvoicesPage = {
         return row.dataset.classId ? parseInt(row.dataset.classId) : null;
     },
 
+    // The line's cost code and type for the payload (#1055): the cells'
+    // choice while a job is chosen, else what the line already carries.
+    lineCostFromRow(row, form) {
+        if (InvoicesPage.costCells()) return SalesCost.fromRow(row, form);
+        return {
+            cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
+            cost_type: row.dataset.costType || null,
+        };
+    },
+
     // A line with a negative price is a discount a QuickBooks Online invoice
     // came in with (a discount item, or a negative line of its own): its
     // price box takes a negative number, so the invoice saves as it is.
     lineRowHtml(idx, line, items) {
-        // The form has no job / cost-code cells, but a line may carry them
-        // (job costing, the API). Keep them on the row so an edit sends them
-        // back instead of stripping them from the line and its posting. The
-        // class has a cell of its own (#243); the data attribute still holds
-        // a stored class where no cell is drawn.
+        // The form has no line job cell, but a line may carry one (job
+        // costing, the API). Keep it on the row so an edit sends it back
+        // instead of stripping it from the line and its posting. The class
+        // has a cell of its own (#243), and in construction mode the cost
+        // code and type do (#1055); the data attributes still hold them
+        // where no cell is drawn.
         const dim = (v) => (v == null ? '' : escapeHtml(String(v)));
-        return `<tr data-line="${idx}" data-job-id="${dim(line.job_id)}" data-class-id="${dim(line.class_id)}" data-cost-code-id="${dim(line.cost_code_id)}">
+        const costAttrs = InvoicesPage.costCells() ? SalesCost.dataAttrs(line) : `data-cost-code-id="${dim(line.cost_code_id)}" data-cost-type="${dim(line.cost_type)}"`;
+        return `<tr data-line="${idx}" data-job-id="${dim(line.job_id)}" data-class-id="${dim(line.class_id)}" ${costAttrs}>
             <td><select class="line-item" onchange="InvoicesPage.itemSelected(${idx})">
                 ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             ${InvoicesPage.lineClasses() ? Nonprofit.classCellHtml('line-class', line.class_id) : ''}
+            ${InvoicesPage.costCells() ? SalesCost.cellHtml(line) : ''}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="InvoicesPage.recalc()">${SalesLines.onHandHtml(line.item_id, items)}</td>
             <td><input class="line-rate money" type="number" step="0.0001" ${Number(line.rate) < 0 || items.some(i => i.is_discount && i.id == line.item_id) ? '' : 'min="0" '}value="${Number(line.rate) || 0}" oninput="InvoicesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="InvoicesPage.recalc()"></td>
@@ -995,6 +1013,8 @@ const InvoicesPage = {
 
     recalc() {
         TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'), $('#invoice-form'));
+        // the cost code and type show while a job is chosen (#1055)
+        if (InvoicesPage.costCells()) SalesCost.sync($('#invoice-form'), $('#inv-lines'));
         const cur = $('#invoice-form [name="currency"]')?.value;
         const rate = $('#invoice-form [name="tax_rate"]')?.value;
         const t = SalesLines.totals($('#inv-lines'), rate, cur);
@@ -1056,7 +1076,7 @@ const InvoicesPage = {
                 // save clears it (the server refuses one it is asked to keep)
                 job_id: JobPicker.ownJob(form, row.dataset.jobId ? parseInt(row.dataset.jobId) : null),
                 class_id: InvoicesPage.lineClassFromRow(row),
-                cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
+                ...InvoicesPage.lineCostFromRow(row, form),
                 line_order: i,
             });
         });
