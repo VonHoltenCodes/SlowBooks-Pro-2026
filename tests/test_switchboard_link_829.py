@@ -6,7 +6,11 @@ only words and links to it:
 - Settings → Connections has a "Claude and agents" block with the
   download (the releases page), the guide and the self-hosted door, saying
   what it does and that nothing is reachable from outside unless the user
-  sets the door up; the block is words and links, no control and no setting;
+  sets the door up; since #1087 it also holds Connect Claude, whose state
+  and buttons loadSwitchboard draws into #switchboard-relay (tests/
+  test_switchboard_connect_1087.py and tests/js/
+  settings_connect_claude_1087.test.cjs), so the block's own markup is
+  still words and links;
 - the API Tokens paragraph says a bookkeeper token is what `sbplive setup`
   asks for;
 - docs/features.md and the agent docs name it, with the links.
@@ -75,6 +79,9 @@ def test_the_block_links_the_download_the_guide_and_the_door_outside_the_app():
     block = _block()
     links = re.findall(r'<a href="([^"]+)"([^>]*)>([^<]+)</a>', block)
     assert [(h, t) for h, _, t in links] == [
+        # the relay's caution (#1087)
+        ("https://www.slowbookspro.com/terms/", "Terms"),
+        ("https://www.slowbookspro.com/privacy/", "Privacy"),
         (RELEASES, "Download SlowBooks Switchboard"),
         (GUIDE, "The guide"),
         (REMOTE, "Claude on the web: the self-hosted door"),
@@ -83,10 +90,21 @@ def test_the_block_links_the_download_the_guide_and_the_door_outside_the_app():
     assert all('target="_blank" rel="noopener"' in attrs for _, attrs, _ in links)
 
 
-def test_the_block_is_words_and_links_only():
+def test_the_blocks_own_markup_is_words_and_links_and_the_relay_panel():
     block = _block()
     for control in ("<input", "<select", "<button", "<textarea", "onclick", "name="):
         assert control not in block, control
+    # Connect Claude's buttons are drawn into this, for an administrator
+    assert '<div id="switchboard-relay" aria-live="polite"' in block
+    # the relay's caution is in the open, not behind the tortoise (#1087)
+    caution = _flat(
+        block[block.index('id="switchboard-relay-caution"') : block.index("</p>")]
+    )
+    assert (
+        "The relay is free and comes with no guarantee: it may be slow, change, "
+        "or stop, and it may not stay free without donations. Use it at your own "
+        "risk."
+    ) in caution
 
 
 def test_the_api_tokens_paragraph_says_a_bookkeeper_token_is_what_setup_asks_for():

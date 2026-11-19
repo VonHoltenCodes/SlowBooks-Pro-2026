@@ -317,7 +317,10 @@ jobs:
           # 389 with the bank feed browser modules (#1053, #1056: one each without playwright).
           # 390 with the heading's page-one row count (#1041, test_document_heading_1041.py: one).
           # 393 with the reports and construction tortoises (#977, test_browser_hints_977_reports.py: one module without playwright).
-          MAX_SKIPS: "393"
+          # 395 with Connect Claude (#1087): the vendored client's identity check
+          # (test_switchboard_vendored_1087.py, needs the source checkout) and
+          # the credential file's POSIX mode (test_switchboard_connect_1087.py).
+          MAX_SKIPS: "396"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

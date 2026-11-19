@@ -218,6 +218,25 @@ Cloudflare Tunnel ([the self-hosted door](https://github.com/VonHoltenCodes/Slow
 from outside unless you set it up. Settings → Connections → Claude and agents
 has the same links.
 
+**Connect Claude** (v2.32.0, #1087) does it with no second program: an
+administrator presses **Connect Claude** under Settings → Connections →
+Claude and agents, and this server links itself to the SlowBooks relay at
+`https://relay.sbplive.com`, makes a bookkeeper API token labelled
+`Claude (relay)` and holds the connection open itself. It dials out; no
+port is opened, and there is no account, email or password: linking keeps a
+random credential, with the token, in one file in the data folder readable
+by the server's user only. The panel shows the address to add as a
+connector in Claude or Grok, `https://relay.sbplive.com/mcp`, and a
+one-time sign-in code (ten minutes, once) to type on the relay's sign-in
+page. Disconnect closes the connection, unlinks and revokes the token. A
+non-administrator sees the state and nothing to press; no API token can
+reach it. The connection belongs to the company it was made in, and on a
+server serving several companies it stays up while that company is served.
+The relay is free and comes with no guarantee: it may be slow, change, or
+stop, and it may not stay free without donations. A relay that cannot be
+reached never holds the server's start or a request to the books; the
+panel says so and the server keeps trying.
+
 What a token can do:
 
 - Whatever its role allows: **bookkeeper** (daily books), **accountant**
