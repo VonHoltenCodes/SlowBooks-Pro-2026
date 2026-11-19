@@ -102,7 +102,15 @@ def test_an_account_in_use_elsewhere_names_where(client, db_session, seed_accoun
     """A reference that is not a posting — an item's income account. The old
     message said only 'referenced by other records', which does not tell the
     operator where to go and undo it."""
-    acct = _seeded_ordinary(db_session)
+    # a seeded income account: an item's account is never a bank account (#1038)
+    acct = (
+        db_session.query(Account)
+        .filter(Account.is_system.is_(True))
+        .filter(Account.account_number.notin_(list(control_accounts.CONTROL_ACCOUNTS)))
+        .filter(Account.account_type == "income")
+        .first()
+    )
+    assert acct is not None, "no seeded income account to test with"
     r = client.post(
         "/api/items",
         json={
