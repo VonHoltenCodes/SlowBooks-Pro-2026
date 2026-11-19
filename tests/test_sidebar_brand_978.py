@@ -1,7 +1,7 @@
 """One logo, in the sidebar (#978).
 
 The brand is once in the app: the designer's lockup (the turtle and
-"SlowBooks Pro", white lettering, a white keyline round the turtle for the
+"SlowBooks Pro", white lettering, the turtle as the designer drew it, for the
 dark ground) in the sidebar's brand block, with the version line under it
 as it was. The top bar's left end no longer repeats the name; it keeps the
 Hide sidebar control and Back, and leaves the room to the Fast Rack (#912).
@@ -40,9 +40,11 @@ def test_the_sidebar_brand_is_the_logo_with_its_name():
     assert 'aria-label="SlowBooks Pro"' in svg
     assert 'focusable="false"' in svg
     assert re.search(r'viewBox="[\d. ]+"', svg)
-    assert 'width="160"' in svg and 'height="48"' in svg
+    assert 'width="160"' in svg and 'height="46"' in svg
     # the designer's colours, on the sidebar's dark ground: green and gold
-    # turtle, white lettering and keyline, no navy lettering
+    # turtle, white lettering, no navy lettering, and no outline round the
+    # turtle (the owner's call: the outline is gone, contrast or no)
+    assert "evenodd" not in svg
     fills = set(re.findall(r'fill="(#[0-9a-f]+)"', svg))
     assert fills == {"#257321", "#c93", "#fff"}, fills
 
@@ -97,6 +99,6 @@ def test_the_logo_is_sized_in_px_not_viewport_units():
     """The Text size is a zoom: px scale with the sidebar; a viewport unit
     would not (tests/test_text_size*.py)."""
     rule = CSS.split(".sidebar-brand .sidebar-logo {")[1].split("}")[0]
-    assert "width: 160px" in rule and "height: 48px" in rule
+    assert "width: 160px" in rule and "height: 46px" in rule
     assert not re.search(r"\d(vw|vh|vmin|vmax)\b", rule)
     assert "--sidebar-width: 200px" in CSS  # 172px of room inside its padding

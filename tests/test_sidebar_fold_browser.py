@@ -257,9 +257,9 @@ def test_the_brand_is_the_logo_in_the_sidebar(browser, company, books, theme, si
         assert got["name"] == "SlowBooks Pro" and got["role"] == "img"
         assert page.get_by_role("heading", name="SlowBooks Pro").count() == 1
         logo, side = got["logo"], got["side"]
-        # 160 x 48 of the sidebar's 200 (scaled with it by the zoom)
+        # 160 x 46 of the sidebar's 200 (scaled with it by the zoom)
         assert abs(logo["width"] / side["width"] - 0.8) < 0.02, got
-        assert abs(logo["width"] / logo["height"] - 160 / 48) < 0.05, got
+        assert abs(logo["width"] / logo["height"] - 160 / 46) < 0.05, got
         assert side["left"] < logo["left"] and logo["right"] < side["right"], got
         assert logo["bottom"] <= got["edition"]["box"]["top"] + 0.5, got
         assert got["edition"]["text"].startswith("2026 EDITION · V"), got
