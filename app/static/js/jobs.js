@@ -444,7 +444,7 @@ const JobsPage = {
             if (open) {
                 for (const node of ty.codes) body += JobsPage.nodeHtml(node, 1);
                 const un = ty.uncoded;
-                if (un.lines.length || un.figures.actual || un.figures.committed) {
+                if (un.lines.length || un.figures.actual || un.figures.committed || un.figures.act_revenue || un.figures.est_revenue) {
                     const ukey = `uncoded:${ty.cost_type}`;
                     body += JobsPage.rowHtml(ukey, 1, '<em>No cost code</em>', un.figures, JobsPage._showLines.has(ukey), false, 'uncoded', un.lines.length);
                     if (JobsPage._showLines.has(ukey)) body += JobsPage.linesHtml(un.lines, 2);
@@ -466,6 +466,14 @@ const JobsPage = {
             body += `<tr title="Cost posted before the period: projected final cost is the whole job's"><td style="padding-left:8px"><em>Cost before ${escapeHtml(tree.start_date || '')}</em></td>
                 <td></td><td></td><td></td><td></td><td></td><td class="amount">${JobsPage.money(before)}</td>
                 <td class="amount">${JobsPage.money(-before)}</td><td></td><td></td><td></td></tr>`;
+        }
+        // revenue with no cost code and no cost type (#1066): a row of its
+        // own, so the revenue columns foot to the Total row
+        const ur = tree.unassigned_revenue;
+        if (ur && (ur.lines.length || ur.figures.est_revenue || ur.figures.act_revenue)) {
+            const rkey = 'revenue:uncoded';
+            body += JobsPage.rowHtml(rkey, 0, '<em>Revenue with no cost code</em>', ur.figures, JobsPage._showLines.has(rkey), false, 'uncoded', ur.lines.length);
+            if (JobsPage._showLines.has(rkey)) body += JobsPage.linesHtml(ur.lines, 1);
         }
         const jl = tree.job_level_budget;
         if (jl.original || jl.changes || jl.est_revenue) {
@@ -499,8 +507,8 @@ const JobsPage = {
             ${JobsPage.revenueSectionsHtml(tree.revenue_sections)}`;
     },
 
-    // A contractor's revenue by section, beside the section's cost: a pay
-    // application's revenue has no cost type, so the tree above is cost only.
+    // A contractor's revenue by section, beside the section's cost, the
+    // billed markups spread over the sections their budget went to.
     revenueSectionsHtml(rows) {
         if (!rows || !rows.length) return '';
         const m = JobsPage.money;

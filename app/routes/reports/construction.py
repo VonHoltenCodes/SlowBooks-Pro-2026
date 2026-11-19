@@ -1683,6 +1683,23 @@ def _cost_tree_rows(tree: dict, opened=None) -> list[dict]:
                 "figures": _uncommitted_figures(before),
             }
         )
+    ur = tree.get("unassigned_revenue")
+    if ur and (
+        ur["lines"] or ur["figures"]["est_revenue"] or ur["figures"]["act_revenue"]
+    ):
+        # revenue with no cost code and no cost type (#1066): a row of its
+        # own, so the revenue columns foot to the Total row
+        rows.append(
+            {
+                "kind": "revenue_uncoded",
+                "cost_type": "",
+                "code": "",
+                "name": "Revenue with no cost code",
+                "label": "Revenue with no cost code",
+                "depth": 0,
+                "figures": ur["figures"],
+            }
+        )
     jl = tree["job_level_budget"]
     if jl["original"] or jl["changes"] or jl["est_revenue"]:
         rows.append(
@@ -1704,8 +1721,8 @@ _COST_TREE_NOTE = (
     "for the period."
 )
 
-# A contractor's revenue by section, beside the section's cost (the tree's
-# type branches carry cost only: a pay application's revenue has no type).
+# A contractor's revenue by section, beside the section's cost, with the
+# billed markups spread over the sections their budget went to.
 _REVENUE_SECTION_COLUMNS = [
     {"key": "budget", "label": "Budget", "kind": "money"},
     {"key": "actual", "label": "Actual cost", "kind": "money"},
