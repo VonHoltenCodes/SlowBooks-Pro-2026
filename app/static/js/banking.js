@@ -1691,6 +1691,7 @@ const BankingPage = {
         BankingPage._reviewLines = Object.fromEntries(review.map(t => [t.id, t]));
         const rows = review.map(t => `
             <tr data-review-line="${t.id}">
+                <td><input type="checkbox" class="review-tick" data-review-tick="${t.id}" data-write aria-label="Tick the line of ${formatDate(t.date)}, ${escapeHtml(t.payee || t.description || 'no payee')}, ${formatCurrency(t.amount)}" onchange="BankingPage.tickChanged()"></td>
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(t.description || '')}</div></td>
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)'}">${formatCurrency(t.amount)}</td>
@@ -1712,15 +1713,18 @@ const BankingPage = {
         return `<div class="card" id="reg-review" data-review-panel tabindex="-1" role="region" aria-label="To review" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
+                    <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.addSelected(${feedId}, ${accountId})" title="Add the ticked lines, with what the bar above the list sets on them">Add selected</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
                     <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.excludeAll(${feedId}, ${accountId})" aria-label="Exclude all shown: ${review.length} statement line${review.length === 1 ? '' : 's'}" title="Set aside every line in this list; Show excluded, under the list, has each one with Restore">Exclude all shown</button>
                 </span>
             </div>
+            ${BankingPage._bulkBar(accountId)}
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
+                <thead><tr><th scope="col"><input type="checkbox" id="review-tick-all" data-write aria-label="Tick every line shown" onchange="BankingPage.tickAll(this)"></th><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
                 What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} and the memo chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                Tick lines to set a category, ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}or name on all of them from the bar above the list; <strong>Add selected</strong> sets what the bar holds on them and adds them.
                 <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
@@ -1783,7 +1787,7 @@ const BankingPage = {
     // and the heading says so where the hand goes; the kind label stays.
     _fillReviewCats() {
         const usable = BankingPage._reviewAccounts || [];
-        document.querySelectorAll('select.review-cat').forEach(sel => {
+        document.querySelectorAll('select.review-cat, select.review-bulk-cat').forEach(sel => {
             const current = sel.value || sel.dataset.current;
             const opt = (a) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
             const transfers = usable.filter(a => a.bank_kind);
@@ -1859,6 +1863,132 @@ const BankingPage = {
         return `<td><div style="display:grid; gap:2px;">${html}</div></td>`;
     },
 
+    // The bar above the To review list (#1053): what it holds is set on
+    // every ticked line, by Set on ticked or by Add selected before it
+    // adds them. A box left at its blank choice changes nothing. Money-out
+    // lines take the vendor, money-in lines the customer.
+    _bulkBar(accountId) {
+        const small = 'font-size:11px; padding:2px 4px; width:150px;';
+        let html = `<select id="bulk-cat" class="review-bulk-cat" data-write aria-label="Category for the ticked lines" style="${small}"><option value="">Pick a category…</option></select>`;
+        if (BankingPage._lineClassShown()) {
+            const opts = BankingPage._classes_().filter(c => !c.is_archived)
+                .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+            html += `<select id="bulk-class" data-write data-no-search aria-label="${T('Class')} for the ticked lines" style="${small}"><option value="">${T('Class')}…</option>${opts}</select>`;
+        }
+        const jobs = BankingPage._jobs || [];
+        if (jobs.length) {
+            const opts = jobs.map(j => `<option value="${j.id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            html += `<select id="bulk-job" data-write data-no-search aria-label="${T('Job')} for the ticked lines" style="${small}"><option value="">${T('Job')}…</option>${opts}</select>`;
+        }
+        html += `<input type="text" id="bulk-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor for the ticked money-out lines" placeholder="Vendor (money out)" style="${small}">`;
+        const custs = (BankingPage._customers || [])
+            .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
+        html += `<select id="bulk-customer" data-write aria-label="${T('Customer')} for the ticked money-in lines" style="${small}"><option value="">${T('Customer')} (money in)…</option>${custs}</select>`;
+        return `<div class="review-bulk" role="group" aria-labelledby="review-bulk-label" data-write style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; font-size:11px;">
+                <span id="review-bulk-label">For the ticked lines (<span id="review-ticked" aria-live="polite">none ticked</span>):</span>
+                ${html}
+                <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.applyToTicked()">Set on ticked</button>
+            </div>`;
+    },
+
+    _tickedIds() {
+        return [...document.querySelectorAll('input.review-tick:checked')]
+            .map(b => parseInt(b.dataset.reviewTick, 10)).filter(Number.isFinite);
+    },
+
+    // the count beside the bar, and the header box ticked, clear or mixed
+    tickChanged() {
+        const boxes = [...document.querySelectorAll('input.review-tick')];
+        const n = boxes.filter(b => b.checked).length;
+        const out = document.getElementById('review-ticked');
+        if (out) out.textContent = n ? `${n} ticked` : 'none ticked';
+        const all = document.getElementById('review-tick-all');
+        if (all) {
+            all.checked = n > 0 && n === boxes.length;
+            all.indeterminate = n > 0 && n < boxes.length;
+        }
+    },
+
+    tickAll(box) {
+        document.querySelectorAll('input.review-tick').forEach(b => { b.checked = box.checked; });
+        BankingPage.tickChanged();
+    },
+
+    // Set what the bar holds on each ticked line, kept on the line as a pick
+    // on the row is (setCategory, setPicks). Returns how many lines changed,
+    // or null when nothing is ticked.
+    async applyToTicked({ quiet = false } = {}) {
+        const ids = BankingPage._tickedIds();
+        if (!ids.length) { toast('Tick the lines first: the box at the start of each row.', 'error'); return null; }
+        const val = (id) => { const el = document.getElementById(id); return el && el.value ? el.value.trim() : ''; };
+        const cat = val('bulk-cat'), cls = val('bulk-class'), job = val('bulk-job');
+        const vendor = val('bulk-vendor'), customer = val('bulk-customer');
+        if (!(cat || cls || job || vendor || customer)) {
+            if (!quiet) toast('Choose a category, class, job or name in the bar to set on the ticked lines.', 'error');
+            return 0;
+        }
+        const lines = BankingPage._reviewLines || {};
+        const saves = [];
+        let changed = 0;
+        for (const id of ids) {
+            const t = lines[id];
+            if (!t) continue;
+            const moneyIn = parseFloat(t.amount) > 0;
+            let picks = false;
+            const set = (elId, value) => {
+                const el = document.getElementById(elId);
+                if (!el || !value) return false;
+                if (el.tagName === 'SELECT' && !el.querySelector(`option[value="${CSS.escape(value)}"]`)) return false;
+                el.value = value;
+                return true;
+            };
+            if (cat) {
+                const sel = document.getElementById(`cat-${id}`);
+                if (sel) {
+                    if (!sel.querySelector(`option[value="${CSS.escape(cat)}"]`)) {
+                        const src = document.querySelector(`#bulk-cat option[value="${CSS.escape(cat)}"]`);
+                        if (src) sel.appendChild(src.cloneNode(true));
+                    }
+                    sel.value = cat;
+                    saves.push(BankingPage.setCategory(id, sel));
+                }
+            }
+            picks = set(`rv-class-${id}`, cls) || picks;
+            if (moneyIn) picks = set(`rv-customer-${id}`, customer) || picks;
+            else picks = set(`rv-vendor-${id}`, vendor) || picks;
+            picks = set(`rv-job-${id}`, job) || picks;
+            if (picks) saves.push(BankingPage.setPicks(id));
+            if (cat || picks) changed += 1;
+        }
+        await Promise.allSettled(saves);
+        if (!quiet) toast(`Set on ${changed} ticked line${changed === 1 ? '' : 's'}`);
+        return changed;
+    },
+
+    // Add selected (#1053): the ticked lines, after the bar's choices are
+    // set on them, each with its own row's picks; a line that cannot post
+    // (no category yet) is named in the toast, not passed over.
+    async addSelected(feedId, accountId) {
+        const ids = BankingPage._tickedIds();
+        if (!ids.length) { toast('Tick the lines to add first: the box at the start of each row.', 'error'); return; }
+        try {
+            await BankingPage.applyToTicked({ quiet: true });
+            await Promise.allSettled([...BankingPage._pendingCategories]);
+            const lines = BankingPage._reviewLines || {};
+            const picked = ids.map(id => ({ id, ...BankingPage._reviewPicks(id) }))
+                .filter(p => Object.keys(p).length > 1);
+            const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`, { line_ids: ids, lines: picked });
+            const skipped = new Set(r.skipped.map(x => x.id));
+            const outside = BankingPage._outsideFilterAll(ids.filter(id => !skipped.has(id) && lines[id]).map(id => String(lines[id].date || '')));
+            const said = `Added ${r.added} of ${ids.length} ticked${r.skipped.length ? `; not added ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`;
+            toast(outside ? `${said}. ${outside}` : said, r.added ? undefined : 'error');
+            BankingPage._backToRegister(accountId);
+            const typed = Object.fromEntries(picked.filter(p => p.payee).map(p => [p.id, p.payee]));
+            BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id])
+                .filter(Boolean).map(t => (typed[t.id] ? { ...t, payee: typed[t.id] } : t)));
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     // What a review row chose besides its category, as the add call takes it.
     _reviewPicks(lineId) {
         const val = (id) => { const el = document.getElementById(id); return el && el.value ? el.value : ''; };
@@ -1916,6 +2046,7 @@ const BankingPage = {
         const hadFocus = row.contains(document.activeElement);
         row.remove();
         if (BankingPage._reviewLines) delete BankingPage._reviewLines[lineId];
+        BankingPage.tickChanged();
         if (hadFocus && next) {
             const add = next.querySelector('button.btn-primary');
             if (add) add.focus();

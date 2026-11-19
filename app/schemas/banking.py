@@ -269,6 +269,10 @@ class FeedAddAll(StrictModel):
     listed posts with its category alone, as before."""
 
     lines: list[FeedLinePicks] = []
+    # Add selected (#1053): only these lines, each reported if it cannot
+    # post (no category, already in the books); left out, every line that
+    # has a category, as before
+    line_ids: Optional[list[int]] = Field(default=None, max_length=10000)
 
 
 class FeedExcludeAll(StrictModel):

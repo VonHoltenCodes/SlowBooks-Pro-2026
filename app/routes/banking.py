@@ -658,7 +658,7 @@ def feed_add_all(
             "payee": p.payee or None,
             "memo": (p.memo or "").strip() or None,
         }
-    out = m.add_all(db, ba, picks)
+    out = m.add_all(db, ba, picks, only=data.line_ids if data else None)
     db.commit()
     return out
 

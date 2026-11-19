@@ -553,23 +553,55 @@ def restore(bt: BankTransaction) -> BankTransaction:
     return bt
 
 
-def add_all(db: Session, bank_account: BankAccount, picks: dict | None = None) -> dict:
+def add_all(
+    db: Session,
+    bank_account: BankAccount,
+    picks: dict | None = None,
+    only: list[int] | None = None,
+) -> dict:
     """Add every unmatched line that already carries a category (from a
     rule or the user). Lines that cannot post are reported, not fatal.
     `picks` ({line id: {"class_id", "job_id", "vendor_id", "customer_id",
-    "payee"}}, #671) is what each review row chose besides its category."""
+    "payee", "memo"}}, #671) is what each review row chose besides its
+    category. With `only` (Add selected, #1053) just those lines are
+    added; one of them with no category, or no longer waiting, is reported
+    with the reason instead of being passed over in silence."""
     picks = picks or {}
-    rows = (
-        db.query(BankTransaction)
-        .filter(
-            BankTransaction.bank_account_id == bank_account.id,
+    q = db.query(BankTransaction).filter(
+        BankTransaction.bank_account_id == bank_account.id
+    )
+    if only is None:
+        q = q.filter(
             BankTransaction.match_status == "unmatched",
             BankTransaction.category_account_id.isnot(None),
         )
-        .order_by(BankTransaction.date, BankTransaction.id)
-        .all()
-    )
+    else:
+        q = q.filter(BankTransaction.id.in_(only or [-1]))
+    rows = q.order_by(BankTransaction.date, BankTransaction.id).all()
     added, skipped, no_vendor = 0, [], []
+    if only is not None:
+        found = {bt.id for bt in rows}
+        skipped += [
+            {"id": i, "reason": "That line is not on this feed's To review list"}
+            for i in dict.fromkeys(only)
+            if i not in found
+        ]
+        waiting = []
+        for bt in rows:
+            if bt.transaction_line_id or bt.match_status in ("added", "auto", "manual"):
+                skipped.append(
+                    {"id": bt.id, "reason": "That line is already in the books"}
+                )
+            elif bt.match_status != "unmatched":
+                skipped.append(
+                    {
+                        "id": bt.id,
+                        "reason": "That line is excluded; restore it to add it",
+                    }
+                )
+            else:
+                waiting.append(bt)
+        rows = waiting
     for bt in rows:
         try:
             with db.begin_nested():
