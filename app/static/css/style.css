@@ -2807,7 +2807,7 @@ tr.clickable { cursor: pointer; }
 }
 
 /* Helper text behind the tortoise (#977): hint() in hint.js. The button is
-   the tortoise's shell with its "i", after a field's label; its note opens
+   the whole tortoise with the "i" on its shell, after a field's label; its note opens
    under it. 24px square, the smallest target the keyboard and touch sweeps
    accept, with the mark centred in it. */
 .hint-wrap { position: relative; display: inline-block; vertical-align: middle; line-height: 1; }

@@ -52,7 +52,7 @@ test('the button names its field, and its text is in the page though hidden', ()
     assert.ok(html.includes(`aria-describedby="${id}"`));
     assert.ok(html.includes(`<span class="hint-pop" id="${id}" role="note" hidden>`));
     assert.ok(html.includes('<strong class="hint-pop-title">CC</strong>Optional. Separate addresses with commas.'));
-    // the shell with its "i" on the button, the whole tortoise heading the note
+    // the whole tortoise on the button and, larger, heading the note
     assert.ok(html.includes('src="/static/img/tortoise-hint.png"') && html.includes('src="/static/img/tortoise-info.png"'));
     assert.equal((html.match(/alt="" aria-hidden="true"/g) || []).length, 2);
 });
