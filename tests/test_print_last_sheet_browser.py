@@ -91,7 +91,7 @@ def test_chromium_prints_long_notes_and_a_long_last_line_whole(
 def test_chromium_prints_a_construction_estimates_total_with_a_row_and_the_acceptance(
     client, seed_accounts, seed_customer, chromium, layout
 ):
-    """#1046, on Chromium's print: both construction layouts, 20-70 lines."""
+    """#1046, on Chromium's print: both construction layouts, the lengths the gate found."""
     from tests import test_pdf_last_page_1045_1046 as t
 
     t._construction(client)

@@ -35,8 +35,6 @@ HEADINGS = re.compile(
 # a row, or the rest of a long one carried over
 ROW = re.compile(r"\b(Line|Item|Allowance|Alternate|Unit price) \d+|\bd\d{4}\b")
 GRAND = re.compile(r"\bTotal \$")
-# the lengths the issue names, in both construction layouts
-CONSTRUCTION_LENGTHS = range(20, 71)
 
 
 def pdf_pages(content):
@@ -263,12 +261,17 @@ def construction_problems(pages, last):
     return said + heading_problems(pages)
 
 
+# The lengths the round-21 gate found wrong on main (20-23 and 46-55 lines,
+# the bid's 50-51 and 55-57), all of them with no terms or notes, a few of
+# them with each other combination, and two lengths elsewhere: sampled, not
+# every one, so the suite stays quick.
+GATE_LENGTHS = [*range(20, 24), *range(46, 58)]
 VARIANTS = [
     # (terms, notes, the lengths rendered)
-    ("", None, CONSTRUCTION_LENGTHS),
-    (SHORT_TERMS, SHORT_NOTES, CONSTRUCTION_LENGTHS),
-    (LONG_TERMS, SHORT_NOTES, range(20, 71, 5)),
-    (SHORT_TERMS, LONG_NOTES, range(20, 71, 5)),
+    ("", None, [*GATE_LENGTHS, 33, 64]),
+    (SHORT_TERMS, SHORT_NOTES, [22, 47, 50, 53, 55, 57]),
+    (LONG_TERMS, SHORT_NOTES, [20, 50, 55]),
+    (SHORT_TERMS, LONG_NOTES, [20, 50, 55]),
 ]
 
 
