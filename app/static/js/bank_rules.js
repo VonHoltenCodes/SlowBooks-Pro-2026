@@ -7,15 +7,12 @@ const BankRulesPage = {
         const rules = await API.get('/bank-rules');
         let html = `
             <div class="page-header">
-                <h2>Bank Rules</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Bank Rules</h2>${hint('Rules auto-match imported bank transactions by payee name. Higher priority rules are checked first.', 'Bank Rules')}</div>
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="BankRulesPage.showForm()">+ New Rule</button>
                     <button class="btn btn-secondary" onclick="BankRulesPage.applyAll()">Apply Rules Now</button>
                 </div>
-            </div>
-            <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">
-                Rules auto-match imported bank transactions by payee name. Higher priority rules are checked first.
-            </p>`;
+            </div>`;
 
         if (rules.length === 0) {
             html += '<div class="empty-state"><p>No bank rules yet. Create one to auto-categorize transactions.</p></div>';
@@ -114,9 +111,8 @@ const BankRulesPage = {
                 <div class="form-grid">
                     <div class="form-group"><label>Rule Name *</label>
                         <input name="name" required value="${escapeHtml(rule.name)}"></div>
-                    <div class="form-group"><label>Payee Pattern *</label>
+                    <div class="form-group"><label>Payee Pattern *${prefill && prefill.from ? ` ${hint(`From ${escapeHtml(prefill.from)}: the pattern is its payee, matched by Contains in any case. A shorter pattern catches other spellings, and a very short one ("CO") catches too much.`, 'Payee Pattern')}` : ''}</label>
                         <input name="pattern" required value="${escapeHtml(rule.pattern)}" placeholder="e.g. AMZN or Amazon"></div>
-                    ${prefill && prefill.from ? `<div class="form-group full-width form-hint" style="font-size:11px; color:var(--gray-500);">From ${escapeHtml(prefill.from)}: the pattern is its payee, matched by Contains in any case. A shorter pattern catches other spellings, and a very short one ("CO") catches too much.</div>` : ''}
                     <div class="form-group"><label>Match Type</label>
                         <select name="rule_type">
                             <option value="contains" ${rule.rule_type==='contains'?'selected':''}>Contains</option>
@@ -125,17 +121,14 @@ const BankRulesPage = {
                         </select></div>
                     <div class="form-group"><label>Category Account</label>
                         ${AccountQuickAdd.picker(`<select name="account_id" id="rule-account"><option value="">-- None --</option>${acctOpts}</select>`, 'bank-rule')}</div>
-                    <div class="form-group"><label for="bank-rule-vendor">Vendor</label>
-                        <select id="bank-rule-vendor" name="vendor_id" aria-describedby="bank-rule-vendor-hint"><option value="">-- None --</option>${vendorOpts}</select>
-                        <div id="bank-rule-vendor-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">A line this rule matches is added for this vendor. The vendor's own name matches too.</div></div>
-                    <div class="form-group"><label for="bank-rule-customer">${T('Customer')}</label>
-                        <select id="bank-rule-customer" name="customer_id" aria-describedby="bank-rule-customer-hint"><option value="">-- None --</option>${customerOpts}</select>
-                        <div id="bank-rule-customer-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">A deposit this rule matches is added for this customer. Money out takes the vendor.</div></div>
+                    <div class="form-group"><label for="bank-rule-vendor">Vendor ${hint("A line this rule matches is added for this vendor. The vendor's own name matches too.", 'Vendor', 'bank-rule-vendor-hint')}</label>
+                        <select id="bank-rule-vendor" name="vendor_id" aria-describedby="bank-rule-vendor-hint"><option value="">-- None --</option>${vendorOpts}</select></div>
+                    <div class="form-group"><label for="bank-rule-customer">${T('Customer')} ${hint('A deposit this rule matches is added for this customer. Money out takes the vendor.', T('Customer'), 'bank-rule-customer-hint')}</label>
+                        <select id="bank-rule-customer" name="customer_id" aria-describedby="bank-rule-customer-hint"><option value="">-- None --</option>${customerOpts}</select></div>
                     ${classGroup}
                     ${jobGroup}
-                    <div class="form-group full-width"><label for="bank-rule-memo">Memo</label>
-                        <input id="bank-rule-memo" name="memo" maxlength="500" autocomplete="off" value="${escapeHtml(rule.memo || '')}" aria-describedby="bank-rule-memo-hint">
-                        <div id="bank-rule-memo-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">The memo a line this rule matches is added with, unless one is typed on the line.</div></div>
+                    <div class="form-group full-width"><label for="bank-rule-memo">Memo ${hint('The memo a line this rule matches is added with, unless one is typed on the line.', 'Memo', 'bank-rule-memo-hint')}</label>
+                        <input id="bank-rule-memo" name="memo" maxlength="500" autocomplete="off" value="${escapeHtml(rule.memo || '')}" aria-describedby="bank-rule-memo-hint"></div>
                     <div class="form-group"><label>Priority</label>
                         <input name="priority" type="number" value="${rule.priority}" title="Higher = checked first"></div>
                     <div class="form-group"><label>Active</label>

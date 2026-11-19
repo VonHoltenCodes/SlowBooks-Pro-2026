@@ -19,6 +19,7 @@ const ctx = {
   // construction mode is flipped per-scenario below
   Terms: { isConstruction: () => construction, isNonprofit: () => false },
   T: (s) => s,
+  hint: (text) => `<span class="hint-pop" hidden>${text}</span>`,
   countryOptions: () => '<option>US</option>',
   openModal: (_title, html) => { modalHtml = html; },
   API: {
