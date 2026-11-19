@@ -71,7 +71,15 @@ const ScanHelper = {
         if (!btn || !input) return;
         const s = await this.status();
         if (!s.available) {
+            // The dialog may already have opened on Scan, its first control:
+            // the status answers after openModal placed focus. A disabled
+            // button cannot hold focus, which fell to the page, so Enter
+            // Bill, Expense and Sales Receipt opened with focus nowhere on a
+            // computer without Tesseract. Focus goes where the dialog would
+            // have put it with Scan already disabled: the first field.
+            const hadFocus = document.activeElement === btn;
             btn.disabled = true;
+            if (hadFocus && typeof _modalLanding === 'function') focusFor(_modalLanding(), _byKeyboard());
             btn.title = "Tesseract OCR isn't installed — see Settings for install instructions.";
             const statusEl = $('#scan-status');
             if (statusEl) statusEl.textContent = "Scanning disabled — Tesseract isn't installed (see Settings).";

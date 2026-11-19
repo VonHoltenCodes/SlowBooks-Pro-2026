@@ -44,12 +44,15 @@ def _account(company, number):
 
 
 def _journal(company, amount="1000.00"):
+    # The accrual is credited to 2010 Accrued Job Costs: since #897 a hand
+    # journal entry may not put a line on Accounts Payable, whose balance is
+    # the open bills'.
     return {
         "date": SEPT[0],
-        "description": "Accrued September rent",
+        "description": "Accrued September insurance",
         "lines": [
             {"account_id": _account(company, "6300"), "debit": amount, "credit": "0"},
-            {"account_id": _account(company, "2000"), "debit": "0", "credit": amount},
+            {"account_id": _account(company, "2010"), "debit": "0", "credit": amount},
         ],
     }
 
