@@ -1227,10 +1227,12 @@ function openModal(title, html, opts) {
     // says its title (macOS gate NEW-32: the journal entry, job cost and
     // deposit views opened on Void).
     // A form's own skip link (skipLinkHtml) is the first stop for Tab and
-    // a screen reader, not where a dialog opens: the first field is.
+    // a screen reader, not where a dialog opens: the first field is. Nor a
+    // field's tortoise (hint(), [data-hint], #977): it opens on the field's
+    // help, not on the help's button; it stays in the Tab order.
     setTimeout(() => {
         const stops = _tabStops($('#modal-body'), null);
-        const first = stops.find(el => !el.matches('.skip-link')) || stops[0];
+        const first = stops.find(el => !el.matches('.skip-link, [data-hint]')) || stops.find(el => !el.matches('[data-hint]'));
         const target = first && !first.matches('[data-destructive]') ? first : modal;
         focusFor(target, _byKeyboard());
     }, 0);

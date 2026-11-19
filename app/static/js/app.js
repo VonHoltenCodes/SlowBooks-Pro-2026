@@ -1864,7 +1864,7 @@ const App = {
     showChartImport() {
         openModal('Import Chart of Accounts', `
             <form onsubmit="App.previewChartImport(event)">
-                <div class="form-group"><label>File</label>${hint(`
+                <div class="form-group"><label for="chart-import-file">File ${hint(`
                     A CSV in the columns the export writes (Number, Name, Type, optional Parent and
                     Description), any spreadsheet with those headers, or hledger's account list
                     (<code>hledger accounts</code>, <code>accounts --types</code>, or
@@ -1872,8 +1872,8 @@ const App = {
                     name and renamed to the file's names; the control accounts the software posts to by
                     number are kept and renamed, never duplicated.
                     <a href="/static/downloads/chart-of-accounts-template.csv" download>Download a template</a>
-                    with the columns and a few example rows.`, 'File')}
-                    <input type="file" name="file" accept=".csv,.txt,.journal" required></div>
+                    with the columns and a few example rows.`, 'File')}</label>
+                    <input type="file" id="chart-import-file" name="file" accept=".csv,.txt,.journal" required></div>
                 <div class="form-group">
                     <label style="display:flex; gap:8px; align-items:flex-start; font-weight:normal;">
                         <input type="checkbox" name="replace" style="margin-top:2px;">

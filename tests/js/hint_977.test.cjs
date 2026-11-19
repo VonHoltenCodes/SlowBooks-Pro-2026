@@ -11,9 +11,10 @@ function load() {
     const listeners = {};
     const nodes = {};
     const context = {
-        window: { innerWidth: 1200 },
+        window: { innerWidth: 1200, innerHeight: 800, addEventListener() {}, removeEventListener() {} },
         document: {
             addEventListener: (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); },
+            removeEventListener: (name, fn) => { listeners[name] = (listeners[name] || []).filter((f) => f !== fn); if (!listeners[name].length) delete listeners[name]; },
             getElementById: (id) => nodes[id] || null,
         },
         escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
@@ -31,7 +32,10 @@ function pair(env, id, right = 300) {
     const note = {
         hidden: true,
         classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), has: (c) => classes.has(c) },
-        getBoundingClientRect: () => ({ right }),
+        style: {},
+        // a note 340 wide, at 0,0 when placed there; its button sits where `right` puts it
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 60, right: 340, bottom: 60 }),
+        setAttribute() {},
     };
     const wrap = { contains: (el) => el === button || el === note };
     const button = {
@@ -39,6 +43,7 @@ function pair(env, id, right = 300) {
         setAttribute: (k, v) => { attrs[k] = v; },
         closest: (sel) => (sel === '[data-hint]' ? button : sel === '.hint-wrap' ? wrap : null),
         focus() { button.focused = true; },
+        getBoundingClientRect: () => ({ left: right - 340, right: right - 316, top: 100, bottom: 124 }),
     };
     env.nodes[id] = note;
     return { button, note, attrs, wrap };
@@ -123,16 +128,23 @@ test('Tab out closes it; focus moving within it does not', () => {
     assert.equal(one.note.hidden, true);
 });
 
-test('a note that would run off the right edge opens leftward', () => {
+test('a note near the right edge is moved in to stay inside the window', () => {
+    // the placement itself is tested in hint_placement_977.test.cjs
     const env = load();
     const edge = pair(env, 'hint-a', 1300);
     env.listeners.click[0]({ target: edge.button, preventDefault() {} });
-    assert.equal(edge.note.classList.has('hint-pop--right'), true);
+    assert.equal(edge.note.hidden, false);
+    assert.equal(edge.note.style.left, `${1200 - 8 - 340}px`);
 });
 
 test('nothing opens on hover: only click, keydown and focusout are listened for', () => {
     const env = load();
     assert.deepEqual(Object.keys(env.listeners).sort(), ['click', 'focusout', 'keydown']);
+    // an open note also follows a scroll (to place itself again), never a hover
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    assert.deepEqual(Object.keys(env.listeners).sort(), ['click', 'focusout', 'keydown', 'scroll']);
+    assert.ok(!Object.keys(env.listeners).some((k) => /mouse|pointer|hover/.test(k)));
 });
 
 test('a hint can carry the id a field already names with aria-describedby', () => {

@@ -2089,9 +2089,8 @@ const SettingsPage = {
     showInvite() {
         openModal('Invite your accountant', `
             <form onsubmit="SettingsPage.sendInvite(event)">
-                <div style="margin-bottom:6px;">${hint('The sign-in gets a one-time password, shown once; the person chooses their own at the first sign-in. Leave the end date empty for a sign-in with no end.', 'Invitation')}</div>
                 <div class="form-grid">
-                    <div class="form-group"><label>Username *</label><input name="username" required autocomplete="off"></div>
+                    <div class="form-group"><label>Username * ${hint('The sign-in gets a one-time password, shown once; the person chooses their own at the first sign-in. Leave the end date empty for a sign-in with no end.', 'Invitation')}</label><input name="username" required autocomplete="off"></div>
                     <div class="form-group"><label>Display name</label><input name="display_name" autocomplete="off"></div>
                     <div class="form-group"><label>Role</label>
                         <select name="role" data-no-search>

@@ -466,7 +466,7 @@ const ItemsPage = {
                         </select>
                     </div>
                     <div class="form-group">
-                        <label id="adjust-qty-label">Quantity to add *</label> ${hint('Enter a quantity to see the resulting balance.', 'Quantity')}
+                        <label for="adjust-qty"><span id="adjust-qty-label">Quantity to add *</span> ${hint('Enter a quantity to see the resulting balance.', 'Quantity')}</label>
                         <input name="quantity" id="adjust-qty" type="number" step="1" min="0" required>
                     </div>
                     <div class="form-group" id="adjust-cost-wrap">
