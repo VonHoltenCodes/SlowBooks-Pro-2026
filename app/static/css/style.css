@@ -427,26 +427,8 @@ body {
     margin-right: 6px;
 }
 
-.topbar-brand {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--qb-navy);
-    margin-right: 16px;
-    letter-spacing: -0.02em;
-    white-space: nowrap;
-    user-select: none;
-}
-
-/* The brand's year, the clock and the status bar sit on the toolbar and
-   status bar gradients, which are darker than the page: muted text there
-   read 2.57-2.66:1. They take the secondary text colour, as they already
-   do in dark theme (macOS gate's contrast sweep, 2.18.0). */
-.topbar-brand span {
-    font-weight: 400;
-    color: var(--text-secondary);
-    font-size: 10px;
-    margin-left: 4px;
-}
+/* The top bar names nothing at its left end (#978): the brand is once in
+   the app, in the sidebar, and the room goes to the Fast Rack. */
 
 .tb-sep {
     width: 1px;
@@ -574,12 +556,11 @@ body {
    the last first (topbar_fit.js, "TOP BAR — folding" below). */
 /* Below 1410 the bar tightens (2.31.5 round 2, W-105: with the Hide
    sidebar control the bar ran 38 px past a 1366 window and 8 px past
-   Windows' 1264 default under WebView2's wider fonts; the clock and the
-   brand's year go first, then the spacing) */
+   Windows' 1264 default under WebView2's wider fonts; the clock goes
+   first (and the brand's year did, before #978 took the brand out of the
+   bar), then the spacing) */
 @media (max-width: 1409px) {  /* round 3, W-107: at 1400-1403 the clock and year came back 1-4 px too soon; it fits from 1404 */
     #topbar-clock { display: none; }
-    .topbar-brand span { display: none; }
-    .topbar-brand { margin-right: 6px; }
     #topbar .tb-sep { margin: 0 2px; }
     #topbar .tb-btn { padding-left: 6px; padding-right: 6px; }
 }
@@ -590,7 +571,7 @@ body {
  * sign-in name takes room no window width knows of. topbar_fit.js measures
  * the bar and, while it is wider than the window, takes one step at a
  * time: tb-fold-1, then the Fast Rack's buttons one by one (fr-folded, the
- * last first), then tb-fold-who, tb-fold-brand and tb-fold-theme. Each puts
+ * last first), then tb-fold-who and tb-fold-theme. Each puts
  * something away, and More (in the bar from the first button folded) lists
  * all of it. Sign Out, Back and the search box
  * never fold, so nothing is past the window's edge and the page never
@@ -606,9 +587,7 @@ body {
     max-width: 16em;
     min-width: 0;
 }
-#topbar.tb-fold-1 #topbar-clock,
-#topbar.tb-fold-1 .topbar-brand span { display: none; }
-#topbar.tb-fold-1 .topbar-brand { margin-right: 6px; }
+#topbar.tb-fold-1 #topbar-clock { display: none; }
 #topbar.tb-fold-1 .tb-sep { margin: 0 2px; }
 #topbar.tb-fold-1 .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
 #topbar.tb-fold-1 .topbar-right { gap: 4px; }
@@ -620,7 +599,6 @@ body {
 #topbar.tb-fold-who #user-chip,
 #topbar.tb-fold-who #about-btn,
 #topbar.tb-fold-who #support-btn { display: none; }
-#topbar.tb-fold-brand .topbar-brand { display: none; }
 #topbar.tb-fold-theme #theme-toggle { display: none; }
 #topbar .tb-more[hidden],
 #topbar .tb-more-menu[hidden] { display: none; }
@@ -729,12 +707,18 @@ body {
     background: rgba(0,0,0,0.15);
 }
 
-.sidebar-header h1 {
-    font-size: 15px;
-    font-weight: 700;
-    color: #ffffff;
-    letter-spacing: -0.03em;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+/* The brand, once in the app (#978): the lockup, 160 x 48 CSS px in the
+   sidebar's 172px of room. In px like the rest of the frame, so the Text
+   size (a zoom) scales it with the sidebar and it always fits. */
+.sidebar-brand {
+    margin: 0;
+    line-height: 0;
+}
+.sidebar-brand .sidebar-logo {
+    display: block;
+    width: 160px;
+    max-width: 100%;
+    height: 46px;
 }
 
 .sidebar-edition {
@@ -795,7 +779,10 @@ body {
 /* The toggle is a glyph, not a word: it takes the bar's button height and
    no more width than the glyph needs, so the five quick-entry buttons keep
    fitting a 1366 window (the bar's budget above). */
-#topbar .tb-btn.tb-sidebar-toggle { padding-left: 4px; padding-right: 4px; margin: 0; font-size: 13px; line-height: 1; }
+/* With the brand out of the bar (#978), Back comes next: 10px between them
+   keeps each one's ring and halo (2px out, 2px of gold, the halo beyond)
+   off the other's border. */
+#topbar .tb-btn.tb-sidebar-toggle { padding-left: 4px; padding-right: 4px; margin: 0 10px 0 0; font-size: 13px; line-height: 1; }
 .tb-btn.tb-sidebar-toggle[aria-pressed="true"] { background: rgba(0,0,0,0.08); border-color: var(--text-secondary); }
 
 .nav-link {
@@ -989,7 +976,7 @@ body {
     align-items: center;
     padding: 0 12px;
     font-size: 10px;
-    color: var(--text-secondary);   /* see .topbar-brand span */
+    color: var(--text-secondary);   /* on the bar gradient muted text read 2.57-2.66:1 (2.18.0) */
     flex-shrink: 0;
     gap: 16px;
 }
