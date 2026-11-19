@@ -316,7 +316,8 @@ jobs:
           # 387 with the job cost PDFs (#1052, #1066: two).
           # 389 with the bank feed browser modules (#1053, #1056: one each without playwright).
           # 390 with the heading's page-one row count (#1041, test_document_heading_1041.py: one).
-          MAX_SKIPS: "392"
+          # 393 with the reports and construction tortoises (#977, test_browser_hints_977_reports.py: one module without playwright).
+          MAX_SKIPS: "393"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

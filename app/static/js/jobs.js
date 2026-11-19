@@ -92,7 +92,7 @@ const JobsPage = {
                 <select id="job-filter-status" aria-label="Status" onchange="JobsPage.setFilter('status', this.value)">
                     <option value="">All statuses</option>${statusOpts}</select>
                 ${ActiveLists.pickerHtml('jobs')}
-                <span style="font-size:11px; color:var(--gray-500);">${Terms.text('Job-to-date figures from posted lines. Click a job to drill down.')}</span>
+                <span style="font-size:11px; color:var(--gray-500);">${Terms.text('Job-to-date figures from posted lines.')} ${hint(Terms.text('Click a job to drill down.'), T('Jobs'))}</span>
             </div>
             <div id="jobs-table">${JobsPage._tableHtml()}</div>`;
     },
@@ -493,7 +493,7 @@ const JobsPage = {
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:11px;color:var(--text-muted)">
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(true)">Expand all</button>
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(false)">Collapse all</button>
-                <span>Click a type or code to open it; click the line count to see the posted lines; click a line to open its document.</span>
+                ${hint('Click a type or code to open it; click the line count to see the posted lines; click a line to open its document.', JobsPage.TAB_LABELS.costs)}
                 <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
                     <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text)" title="Leave out a cost code with no budget, no committed cost, no actual cost and no revenue; the totals are the same">
                         <input type="checkbox" id="job-hide-zero" ${JobsPage._hideZero ? 'checked' : ''} onchange="JobsPage.setHideZero(this.checked)">
@@ -657,7 +657,7 @@ const JobsPage = {
                 <span>Seed from an estimate:</span>
                 <select id="budget-estimate"><option value="">Pick an estimate…</option>${estOpts}</select>
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.seedBudget()">Load estimate lines as budget</button>
-                <span style="color:var(--text-muted);font-size:11px">Cost = qty × unit cost (or the line amount when no cost is entered); revenue = the line amount. Rows you edit here become manual and survive re-seeding.</span>
+                ${hint('Cost = qty × unit cost (or the line amount when no cost is entered); revenue = the line amount. Rows you edit here become manual and survive re-seeding.', 'Load estimate lines as budget')}
             </div>
             <div class="table-container"><table class="data-table" style="font-size:12px">
                 <thead><tr><th scope="col">Cost code</th><th scope="col">Budget cost</th><th scope="col">Est. revenue</th><th scope="col">Source</th></tr></thead>
@@ -1153,8 +1153,7 @@ const JobsPage = {
             `<option value="${c.id}" ${String(co.commitment_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.number)} · ${escapeHtml(c.vendor_name || '')}</option>`)).join('');
         const lineRows = (co.lines || []).map((l, i) => JobsPage.coLineRowHtml(l, i)).join('');
         return `<form id="co-form" data-write onsubmit="JobsPage.coSave(event, ${co.id || 'null'})">
-            <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">${co.id ? `Change order ${escapeHtml(co.number || '')}` : 'New change order'}</h4>
-            ${co.allowance_return ? '<p style="font-size:12px;color:var(--text-muted)">This change order returns an allowance\'s unspent amount to the owner: it takes the amount off the contract with no markup. Change its amount, title or date; funding and markup are fixed.</p>' : ''}
+            <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">${co.id ? `Change order ${escapeHtml(co.number || '')}` : 'New change order'}${co.allowance_return ? ` ${hint('This change order returns an allowance\'s unspent amount to the owner: it takes the amount off the contract with no markup. Change its amount, title or date; funding and markup are fixed.', co.id ? `Change order ${co.number || ''}` : 'New change order')}` : ''}</h4>
             <div class="form-grid">
                 <div class="form-group"><label>Title</label><input id="co-title" ${d} maxlength="200" value="${escapeHtml(co.title || '')}"></div>
                 <div class="form-group"><label>Kind</label><select id="co-kind" ${d || (co.id ? 'disabled' : '')}>${kindOpts}</select></div>
@@ -1343,9 +1342,8 @@ const JobsPage = {
             ? `<div style="font-size:11px;color:var(--text-danger)">${escapeHtml(co.number || 'This change order')} is dated ${ageDays} days ago, so it takes effect then unless you choose the day the owner signed.</div>` : '';
         openModal('Approve change order', `<form id="co-approve-form" onsubmit="JobsPage.coApproveSubmit(event, ${id})">
             <p>Approving ${escapeHtml(co.number || 'this change order')} updates the contract, budget and commitment.</p>
-            <div class="form-group"><label for="co-approved-on">Takes effect on</label>
-                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}"${co.date ? ` min="${escapeHtml(co.date)}"` : ''}>
-                <div style="font-size:11px;color:var(--text-muted)">The date the owner signed. Reports, WIP and pay applications read the change order from this day. It cannot be before the change order's own date or the contract date.</div>${oldNote}</div>
+            <div class="form-group"><label for="co-approved-on">Takes effect on ${hint("The date the owner signed. Reports, WIP and pay applications read the change order from this day. It cannot be before the change order's own date or the contract date.", 'Takes effect on')}</label>
+                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}"${co.date ? ` min="${escapeHtml(co.date)}"` : ''}>${oldNote}</div>
             <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Approve</button></div>
         </form>`);
@@ -1376,9 +1374,8 @@ const JobsPage = {
         const contractDate = ((JobsPage._contract && JobsPage._contract.contract) || {}).contract_date || '';
         openModal('Return unspent allowance', `<form id="co-return-form" onsubmit="JobsPage.coReturnAllowanceSubmit(event, ${sovLineId})">
             <p>Return the ${formatCurrency(remaining)} left on this allowance to the owner. This makes a draft change order for minus that amount, with no markup.</p>
-            <div class="form-group"><label for="co-return-date">Change order date</label>
-                <input id="co-return-date" type="date" required value="${iso}"${contractDate ? ` min="${escapeHtml(contractDate)}"` : ''}>
-                <div style="font-size:11px;color:var(--text-muted)">Approving it cannot take effect before this date, so use the day the allowance closed out (for a month-end return, a date in that month). It cannot be before the contract date or in a closed period.</div></div>
+            <div class="form-group"><label for="co-return-date">Change order date ${hint('Approving it cannot take effect before this date, so use the day the allowance closed out (for a month-end return, a date in that month). It cannot be before the contract date or in a closed period.', 'Change order date')}</label>
+                <input id="co-return-date" type="date" required value="${iso}"${contractDate ? ` min="${escapeHtml(contractDate)}"` : ''}></div>
             <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Make change order</button></div>
         </form>`);
@@ -1924,7 +1921,7 @@ const JobsPage = {
         </tr>`).join('');
         return `
             ${unposted.length ? `<div style="margin-bottom:8px"><button class="btn btn-sm btn-primary" onclick="JobsPage.postTime([${unposted.map(e => e.id).join(',')}])">Post ${unposted.length} approved entr${unposted.length === 1 ? 'y' : 'ies'} to this job</button>
-                <span style="font-size:11px;color:var(--text-muted)">Labor posts at the employee's loaded cost rate with burden as its own line.</span></div>` : ''}
+                ${hint("Labor posts at the employee's loaded cost rate with burden as its own line.", JobsPage.TAB_LABELS.time)}</div>` : ''}
             <div class="table-container"><table class="data-table" style="font-size:12px">
                 <thead><tr><th scope="col">Date</th><th scope="col">Employee</th><th scope="col">Cost code</th><th scope="col" class="amount">Reg</th><th scope="col" class="amount">OT</th><th scope="col" class="amount">DT</th><th scope="col">Status</th><th scope="col">${T('Job')} cost</th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
@@ -2015,7 +2012,7 @@ const JobsPage = {
                 <option value="false" ${exempt ? 'selected' : ''}>Exempt</option>
             </select></div>
             <fieldset class="job-exempt-certificate form-group" style="grid-column:1/-1; border:1px solid var(--gray-200); padding:8px 10px; ${exempt ? '' : 'display:none;'}">
-                <legend style="font-size:12px;">Exemption certificate</legend>
+                <legend style="font-size:12px;">Exemption certificate ${hint(`Printed under the totals of this ${T('job').toLowerCase()}'s exempt estimates and ${T('invoices').toLowerCase()}. Each document keeps the certificate it was made with.`, 'Exemption certificate')}</legend>
                 <div class="form-grid">
                     <div class="form-group"><label>Certificate number *</label>
                         <input name="exempt_certificate_number" maxlength="50" ${need} value="${escapeHtml(job.exempt_certificate_number || '')}"></div>
@@ -2026,7 +2023,6 @@ const JobsPage = {
                     <div class="form-group"><label>Expires</label>
                         <input name="exempt_certificate_expires" type="date" ${exempt ? '' : 'disabled'} value="${job.exempt_certificate_expires || ''}"></div>
                 </div>
-                <div class="hint">Printed under the totals of this ${T('job').toLowerCase()}'s exempt estimates and ${T('invoices').toLowerCase()}. Each document keeps the certificate it was made with.</div>
             </fieldset>`;
     },
 

@@ -205,6 +205,11 @@ STAY = [
         "Support emails, including any logs you attach, are stored in our private project tracker (Basecamp).",
     ),
     ("support.js", "Found a security issue? Report it through"),
+    # a caution, not teaching: read the message before it leaves
+    (
+        "support.js",
+        "Redaction is best-effort — please read the message before you send it.",
+    ),
     ("ocr_canvas.js", "Drag a box, then tap a field:"),
     ("utils.js", "Enter or = puts it in"),
 ]
