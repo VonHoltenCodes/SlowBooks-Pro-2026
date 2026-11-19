@@ -7,11 +7,18 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: c0ab2c3ee0f1b3dbec50e44a0f619543fe1bca8d (main, 2026-11-19,
-  "sbplive/serve-http-module": serve-http's runner in its own module, an
-  explicit TLS 1.2 minimum; it carries "relay/line-concurrency", which
-  stopped the line dropping with 1006 when one TLS socket was read and
-  written from two threads at once)
+- Commit: cb1e1bb2ebba484413f78a9e7f18b83acc964f4c (main, 2026-11-19,
+  "sbplive/annotations": every tool that writes the books is marked
+  destructive, and a server failure with nothing usable to say is one
+  clear sentence, never its body). It carries "relay/steady-line" and
+  "sbplive/ask-first" (a create with
+  little on it is held back until the assistant asked the person; every
+  create's answer says what was left blank) and the steadier line (a ping
+  every 15 s, a silent line given up after 35 s, and "replay": a request
+  the relay sends again after a drop is answered from what was kept and
+  never run twice). Before it: c0ab2c3 (serve-http's runner in its own
+  module, an explicit TLS 1.2 minimum, and the line read and written from
+  one thread at a time)
 - Standard library only; nothing is added to the requirements.
 
 ## The files
@@ -25,17 +32,17 @@ The modules `line.py` imports, directly or through `server.py` (and
 | `account.py` | 544 |
 | `client.py` | 223 |
 | `config.py` | 205 |
-| `line.py` | 973 |
+| `line.py` | 1019 |
 | `logs.py` | 78 |
-| `operations.py` | 628 |
+| `operations.py` | 649 |
 | `protocol.py` | 389 |
-| `registry.py` | 359 |
+| `registry.py` | 401 |
 | `remote.py` | 682 |
-| `server.py` | 558 |
+| `server.py` | 581 |
 | `store.py` | 170 |
-| `tools.py` | 382 |
+| `tools.py` | 612 |
 | `ws.py` | 589 |
-| 14 files | 5796 |
+| 14 files | 6158 |
 
 Not copied: the self-hosted HTTP door's runner (`serve_http.py`, which
 shows its connector secret on first run), the OAuth door (`oauth*.py`,

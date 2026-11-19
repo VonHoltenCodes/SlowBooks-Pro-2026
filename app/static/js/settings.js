@@ -968,8 +968,10 @@ const SettingsPage = {
                         no port is opened, and there is no account, email or password. Add the address below as a connector
                         in Claude or Grok, and type a sign-in code from here when it asks, so only someone at the books can
                         approve a connection. The assistant can do only what the token's role allows, and every change it
-                        makes is in the audit log as <code>token:&lt;label&gt;</code>. On the desktop the connection is up
-                        only while SlowBooks Pro is open. Disconnect ends it and revokes the token.` },
+                        makes is in the audit log as <code>token:&lt;label&gt;</code>. Before it creates a ${T('customer')}, vendor, item,
+                        employee, account or document with little on it, the assistant is told to ask you for what is missing
+                        (it may not make anything up), and after a create it is told what was left blank. On the desktop the
+                        connection is up only while SlowBooks Pro is open. Disconnect ends it and revokes the token.` },
                         { id: 'settings-switchboard-help', text: `SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
@@ -988,6 +990,7 @@ const SettingsPage = {
                         <a href="https://www.slowbookspro.com/terms/" target="_blank" rel="noopener">Terms</a>
                         &middot;
                         <a href="https://www.slowbookspro.com/privacy/" target="_blank" rel="noopener">Privacy</a></p>
+                    <p id="switchboard-relay-ask" style="font-size:11px; margin:8px 0;">An assistant asks before it creates a record with little on it, and says what it left blank.</p>
                     <div style="font-size:11px;">
                         <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
                         &middot;
