@@ -4592,6 +4592,54 @@ ACTIVE = """() => { const a = document.activeElement;
              ring: a.matches(':focus-visible') }; }"""
 
 
+def test_a_form_whose_scan_is_off_still_opens_on_its_first_field(
+    browser, company, books
+):
+    """Enter Bill, Expense and Sales Receipt open on Scan Receipt, their
+    first control, and the OCR status answers after that: on a computer
+    without Tesseract, wire() then disabled the focused button and focus
+    fell to the page, so the form opened with focus nowhere. The status is
+    held until the dialog has placed focus, as a slow answer does, and the
+    form must end on its first field, where it would have opened with Scan
+    already off."""
+    page, handled = _open(browser, company)
+    held = []
+    page.route("**/api/ocr/status", lambda route: held.append(route))
+    try:
+        for route, call, ready in (
+            ("#/bills", "BillsPage.showForm()", "#bill-lines tr"),
+            ("#/expenses", "ExpensesPage.showForm()", "#expense-lines tr"),
+            ("#/sales-receipts", "SalesReceiptsPage.showForm()", "#sr-lines tr"),
+        ):
+            _visit(page, handled, route)
+            page.evaluate("() => { ScanHelper._status = null; }")
+            held.clear()
+            page.evaluate(f"async () => {{ await {call}; }}")
+            page.wait_for_function(MODAL_SHOWN, timeout=5000)
+            page.wait_for_selector(ready)
+            page.wait_for_function(
+                "() => document.activeElement && document.activeElement.id === 'scan-btn'",
+                timeout=5000,
+            )
+            assert len(held) == 1, (route, len(held))
+            held[0].fulfill(
+                json={"available": False, "version": None, "languages": None}
+            )
+            page.wait_for_function(
+                "() => document.getElementById('scan-btn').disabled", timeout=5000
+            )
+            settle(page, handled)
+            at = page.evaluate(ACTIVE)
+            assert at["tag"] != "body" and at["id"] != "scan-btn", (route, at)
+            assert page.evaluate("() => document.activeElement === _modalLanding()"), (
+                route,
+                at,
+            )
+            page.evaluate("() => closeModal()")
+    finally:
+        page.close()
+
+
 def test_the_long_forms_skip_to_their_lines_and_the_chart_to_its_filter(
     browser, company, books
 ):

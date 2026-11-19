@@ -249,7 +249,7 @@ def test_edit_keeps_every_saved_lines_account_in_the_picker(
         page.close()
 
 
-def test_a_new_expenses_picker_lists_only_active_expense_and_cogs_accounts(
+def test_a_new_expenses_picker_lists_only_active_purchase_accounts(
     browser, company, client, mortgage
 ):
     a = mortgage["a"]
@@ -271,14 +271,32 @@ def test_a_new_expenses_picker_lists_only_active_expense_and_cogs_accounts(
             )
         )
         accounts = client.get("/api/accounts").json()
+
+        def balance_sheet(x):
+            # what #766 added under Other accounts: an asset, liability or
+            # equity account that is not a bank or card account, a control
+            # asset (A/R, Undeposited Funds, Inventory) or A/P
+            return (
+                x["account_type"] in ("asset", "liability", "equity")
+                and not x.get("bank_kind")
+                and not (x["account_type"] == "asset" and x.get("is_control"))
+                and x.get("detail_type")
+                not in ("accounts_receivable", "accounts_payable")
+            )
+
         expected = {
             str(x["id"])
             for x in accounts
-            if x["account_type"] in ("expense", "cogs") and x["is_active"]
+            if x["is_active"]
+            and (x["account_type"] in ("expense", "cogs") or balance_sheet(x))
         }
         assert offered == expected
-        for n in ("2400", "1010", "6950"):
+        # the edited expense's inactive late-fee account and its bank do not
+        # carry over; the loan (2400) is offered to every new expense since
+        # #766, as a balance-sheet account a payment can split onto
+        for n in ("1010", "6950"):
             assert str(a[n]) not in offered
+        assert str(a["2400"]) in offered
         assert str(a["6300"]) in offered
     finally:
         page.close()

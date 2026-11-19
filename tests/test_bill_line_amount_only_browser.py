@@ -45,7 +45,7 @@ def _type(page, row, box, text):
     first digit of an amount priced the line (reviewer, #401)."""
     loc = page.locator(f"#bill-lines tr:nth-child({row}) .{box}")
     loc.focus()
-    loc.press("Control+a")
+    loc.press("ControlOrMeta+a")
     loc.press("Delete")
     if text:
         loc.press_sequentially(text)
