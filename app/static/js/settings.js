@@ -1091,7 +1091,7 @@ const SettingsPage = {
                 <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-payment-terms">
                     <div class="settings-h-row"><h3 id="settings-h-payment-terms">Payment Terms</h3>${hintList('Payment Terms', [
                         { id: 'settings-payment-terms-help', text: `The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
-                        the date; a date-driven term is due on a day of the month. Either can offer an early-payment discount, which Receive Payments and Pay Bills
+                        the date; a date-driven term is due on a day of the month; an end-of-month term is due a number of days after the last day of the month the document is dated in ("Net 75 EOM"). Any can offer an early-payment discount, which Receive Payments and Pay Bills
                         suggest until its date passes. Each ${T('invoice')} or bill keeps the term it was saved under; a term on one keeps its rule, so make it inactive and add a new one to change it.
                         A term added later never reaches what was saved before it: saving one again with exactly the same terms leaves it as it was, and picking any other terms (even the same words in other case) ties it to the term they name. A date-driven term is due on its next day of the month, or the one a month later when the document is dated fewer than the given number of days before that day.` },
                     ])}</div>
@@ -3430,9 +3430,13 @@ const SettingsPage = {
                         <select id="pt-kind" name="kind" onchange="SettingsPage.paymentTermKind(this.value)">
                             <option value="standard" ${v.kind === 'standard' ? 'selected' : ''}>Standard: due in a number of days</option>
                             <option value="date_driven" ${v.kind === 'date_driven' ? 'selected' : ''}>Date-driven: due on a day of the month</option>
+                            <option value="end_of_month" ${v.kind === 'end_of_month' ? 'selected' : ''}>End of month: due a number of days after the month ends</option>
                         </select></div>
                     <div class="form-group" data-kind="standard"><label for="pt-net-days">Due in (days)</label>
                         <input id="pt-net-days" name="net_days" type="number" min="0" max="3650" step="1" value="${val(v.net_days)}"></div>
+                    <div class="form-group" data-kind="end_of_month"><label for="pt-eom-days">Due (days) after the end of the month ${hint(`Counted from the last day of the month the ${T('invoice')} or bill is dated in, whatever day of the month that is: 75 here is "Net 75 EOM". 0 is due on the last day of the month.`, 'Days after the end of the month')}</label>
+                        <input id="pt-eom-days" name="eom_days" type="number" min="0" max="3650" step="1" value="${val(v.kind === 'end_of_month' ? v.net_days : 30)}" oninput="SettingsPage.paymentTermExample()"></div>
+                    <p class="form-group full-width" data-kind="end_of_month" id="pt-eom-example" aria-live="polite" style="margin:0; font-size:12px; color:var(--text-muted);"></p>
                     <div class="form-group" data-kind="date_driven"><label for="pt-due-day">Due on day of the month</label>
                         <input id="pt-due-day" name="due_day" type="number" min="1" max="31" step="1" value="${val(v.due_day)}"></div>
                     <div class="form-group" data-kind="date_driven"><label for="pt-cutoff">Next month's when dated fewer than (days) before it</label>
@@ -3441,6 +3445,8 @@ const SettingsPage = {
                         <input id="pt-discount" name="discount_percent" type="number" min="0" max="99.99" step="0.01" value="${val(v.discount_percent)}" placeholder="none"></div>
                     <div class="form-group" data-kind="standard"><label for="pt-discount-days">if paid within (days)</label>
                         <input id="pt-discount-days" name="discount_days" type="number" min="0" max="3650" step="1" value="${val(v.discount_days)}"></div>
+                    <div class="form-group" data-kind="end_of_month"><label for="pt-eom-discount-days">if paid within (days) after the end of the month</label>
+                        <input id="pt-eom-discount-days" name="eom_discount_days" type="number" min="0" max="3650" step="1" value="${val(v.kind === 'end_of_month' ? v.discount_days : '')}"></div>
                     <div class="form-group" data-kind="date_driven"><label for="pt-discount-day">if paid by day of the month</label>
                         <input id="pt-discount-day" name="discount_day" type="number" min="1" max="31" step="1" value="${val(v.discount_day)}"></div>
                 </div>
@@ -3457,6 +3463,25 @@ const SettingsPage = {
         document.querySelectorAll('#payment-term-editor [data-kind]').forEach(g => {
             g.hidden = g.dataset.kind !== kind;
         });
+        if (kind === 'end_of_month') SettingsPage.paymentTermExample();
+    },
+
+    // The end-of-month kind's example (#1091): today's date and the due date
+    // the server's parser gives "Net N EOM" from it (the same rule as the
+    // term), so the form never computes a due date of its own.
+    async paymentTermExample() {
+        const el = document.getElementById('pt-eom-example');
+        const input = document.getElementById('pt-eom-days');
+        if (!el || !input) return;
+        const days = input.value === '' ? NaN : Number(input.value);
+        if (!Number.isInteger(days) || days < 0 || days > 3650) { el.textContent = ''; return; }
+        const today = todayISO();
+        const asked = input.value;
+        const d = await PaymentTerms.dates(today, `Net ${days} EOM`);
+        if (input.value !== asked) return;  // a later keystroke answers instead
+        el.textContent = d && d.due_date
+            ? `For example, a document dated ${formatDate(today)} is due ${formatDate(d.due_date)}.`
+            : '';
     },
 
     async savePaymentTerm(e, id) {
@@ -3464,16 +3489,18 @@ const SettingsPage = {
         const form = e.target;
         const kind = form.kind.value;
         const num = name => (form[name].value === '' ? null : Number(form[name].value));
+        const eom = kind === 'end_of_month';
         const pct = form.discount_percent.value === '' ? null : form.discount_percent.value;
         // the other kind's fields go as null, so the server checks one rule
         const data = {
             name: form.name.value.trim(),
             kind,
-            net_days: kind === 'standard' ? num('net_days') : null,
+            net_days: kind === 'standard' ? num('net_days') : eom ? num('eom_days') : null,
             due_day: kind === 'date_driven' ? num('due_day') : null,
             cutoff_days: kind === 'date_driven' ? (num('cutoff_days') || 0) : 0,
             discount_percent: pct,
-            discount_days: kind === 'standard' && pct !== null ? num('discount_days') : null,
+            discount_days: pct === null ? null
+                : kind === 'standard' ? num('discount_days') : eom ? num('eom_discount_days') : null,
             discount_day: kind === 'date_driven' && pct !== null ? num('discount_day') : null,
         };
         try {
