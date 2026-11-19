@@ -231,6 +231,14 @@ try:  # noqa: SIM105
     WEASYPRINT_AVAILABLE = True
 except Exception:
     WEASYPRINT_AVAILABLE = False
+    # Never try the import a second time in this process. When the package
+    # is installed but pango is not, a retry re-opens gobject against a glib
+    # that kept the first attempt's state, and the worker segfaults (see
+    # _NATIVE_LOAD_FAILURE in app/services/pdf_service.py). None here makes
+    # every later `import weasyprint` — importorskip, a test's own import,
+    # pdf_service — raise ImportError at once, which skips like any other
+    # missing-library error below.
+    sys.modules["weasyprint"] = None
 
 
 def _is_missing_native_stack(exc: BaseException) -> bool:
