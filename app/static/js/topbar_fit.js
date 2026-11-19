@@ -13,18 +13,17 @@
  *
  * The bar starts whole and, while it is wider than the window, folds one
  * step at a time (style.css "TOP BAR — folding"):
- *   1. the clock and the brand's year go, the spacing tightens
- *      (tb-fold-1);
+ *   1. the clock goes, the spacing tightens (tb-fold-1);
  *   2. the Fast Rack's buttons (#912; fast_rack.js) move into More one at a
  *      time, the last on the rack first (fr-folded on the button), so the
  *      ones a person put first stay longest; as many steps as the rack has
  *      buttons, none when it has none;
  *   3. the sign-in name, About and Contact support move into More
  *      (tb-fold-who);
- *   4. the wordmark goes (the sidebar shows it) (tb-fold-brand);
- *   5. the theme switch moves into More (tb-fold-theme).
+ *   4. the theme switch moves into More (tb-fold-theme).
+ * (The bar has no wordmark to fold since #978: the brand is in the sidebar.)
  * The bar's data-fold is the number of steps taken (1, then 1 + each rack
- * button folded, then the three after). More is in the bar from the first
+ * button folded, then the two after). More is in the bar from the first
  * thing it holds; it lists, when opened, every control the bar has folded
  * away, the rack's by their names in the rack's order, and the name signed
  * in, so nothing the bar offers is ever out of reach, and last
@@ -65,8 +64,8 @@
         });
     }
 
-    // 1 tightens, one step per rack button, then the three after it
-    function steps() { return 1 + rackButtons().length + 3; }
+    // 1 tightens, one step per rack button, then the two after it
+    function steps() { return 1 + rackButtons().length + 2; }
 
     function setLevel(n) {
         var buttons = rackButtons();
@@ -76,8 +75,7 @@
         buttons.forEach(function (b, i) { b.classList.toggle('fr-folded', i >= r - gone); });
         if (rack) rack.classList.toggle('fr-all-folded', r > 0 && gone === r);
         bar.classList.toggle('tb-fold-who', n >= r + 2);
-        bar.classList.toggle('tb-fold-brand', n >= r + 3);
-        bar.classList.toggle('tb-fold-theme', n >= r + 4);
+        bar.classList.toggle('tb-fold-theme', n >= r + 3);
         more.hidden = n < 2;
     }
 

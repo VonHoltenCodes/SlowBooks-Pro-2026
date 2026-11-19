@@ -42,7 +42,6 @@ FOCUSED = """() => {
         box: box(a),
         bar: box(bar),
         others: ['sidebar-toggle', 'back-btn'].map(id => document.getElementById(id))
-            .concat([document.querySelector('#topbar .topbar-brand')])
             .filter(el => el && el.offsetWidth > 0)
             .map(el => ({ id: el.id || el.className, box: box(el) })),
         ring: getComputedStyle(document.getElementById('back-btn')).getPropertyValue('--focus-ring').trim(),
