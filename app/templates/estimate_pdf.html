@@ -113,25 +113,51 @@
         {% endif %}
     </div>
 
-    {% if terms.is_construction %}{% if presentation_style(est, company.estimate_style) == 'line_markup' %}
-    {# Markup per line (#774): the owner sees what each line costs them —
-       description, quantity with its unit, amount — and the totals. No rate,
-       no cost code, no cost and no markup. The commercial bid below prints as
-       it always has. #}
-    <table class="line-items priced-lines">
-        <thead><tr><th>Description</th><th class="r" style="width:80px;">Qty</th><th class="r" style="width:90px;">Amount</th></tr></thead>
-        <tbody>
+    {% if terms.is_construction %}
+    {#- The last row, the totals and the acceptance block are one unbreakable
+        group of the last table on the page (#1046): the totals never start a
+        page with no row above them, and the acceptance block, which names the
+        Total above it, is always on the Total's page. Short terms sit between
+        the totals and the acceptance, short notes and the footer after it, all
+        in the group; long terms follow the group, after the acceptance, and
+        long notes follow as a block of their own (#1045). #}
+    {%- set line_markup = presentation_style(est, company.estimate_style) == 'line_markup' %}
+    {%- set long_terms = (est.terms or '')|length > 600 or (est.terms or '').count('\n') > 10 %}
+    {%- set long_notes = (est.notes or '')|length > 1000 %}
+    {%- set loose = long_terms or long_notes %}
+    {%- if not line_markup %}
+    {% set totals = estimate_totals(est) %}
+    {# Markup rows off (#show_markup_rows): the markups ride inside each
+       package's and allowance's price, and one subtotal stands in for the rows. #}
+    {% set spread = not est.show_markup_rows %}
+    {% set prices = spread_markup_prices(est, totals.markup_total) if spread else none %}
+    {# Each package's lines: base lines and accepted alternates. #}
+    {% set groups = [] %}
+    {% for pkg in totals.by_package %}
+        {% set pkg_lines = [] %}
         {% for line in est.lines %}
-            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
-            <tr{% if loop.index is even %} class="alt"{% endif %}>
-                <td>{{ line.description or '' }}</td>
-                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
-                <td class="r">{{ line.amount | currency }}</td>
-            </tr>
+            {% set kind = line.line_kind or 'base' %}
+            {% if line.trade_package_id == pkg.package_id and (kind == 'base' or (kind == 'alternate' and line.alternate_accepted)) %}
+                {% set _ = pkg_lines.append(line) %}
+            {% endif %}
         {% endfor %}
-        {% if not est.lines %}</tbody><tbody class="doc-tail">{% endif %}
-        <tr class="doc-end"><td colspan="3">
-
+        {% if pkg_lines %}{% set _ = groups.append((pkg, pkg_lines)) %}{% endif %}
+    {% endfor %}
+    {% set allowances = [] %}
+    {% for line in est.lines %}{% if (line.line_kind or 'base') == 'allowance' %}{% set _ = allowances.append(line) %}{% endif %}{% endfor %}
+    {# An accepted alternate is already in the scope table — at cost, tagged as
+       an alternate, its markups in the markup rows (or spread into its
+       package's price) — so the Alternates block offers only the ones the
+       customer has not taken yet, at their marked-up price. #}
+    {% set pending_alts = totals.alternates | rejectattr('accepted') | list %}
+    {# The group closes the last table the bid prints. #}
+    {% set last_table = 'unit' if totals.unit_prices else ('alt' if pending_alts else ('allow' if allowances else 'pkg')) %}
+    {% set last_rows = totals.unit_prices or pending_alts or allowances or ((groups|last)[1] if groups else []) %}
+    {%- else %}
+    {% set last_rows = est.lines %}
+    {%- endif %}
+    {%- set long_last = last_rows and ((last_rows|last).description or '')|length > 600 %}
+    {% set totals_box %}{% if line_markup %}
     <div class="totals keep">
         <table>
             <tr><td class="label">Subtotal</td><td class="r">{{ est.subtotal | currency }}</td></tr>
@@ -143,95 +169,7 @@
             <tr><td colspan="2" class="tax-exempt">{{ exempt_note }}</td></tr>
             {% endif %}
         </table>
-    </div>
-        </td></tr>
-        </tbody>
-    </table>{% else %}
-    {# Construction bid (#551): lines AT COST grouped by package with the
-       section code in the description column, then allowances, alternates
-       (marked-up price, accepted ones marked) and unit prices in their own
-       blocks. The totals foot Subtotal, then one row per non-zero markup
-       (General conditions, Insurance, Fee, Bond), then the pre-tax Bid total,
-       Tax (when charged) and Total. Grouping is by package id, so a package
-       literally named "Unassigned" never merges with the no-package bucket. #}
-    {% set totals = estimate_totals(est) %}
-    {# Markup rows off (#show_markup_rows): the markups ride inside each
-       package's and allowance's price, and one subtotal stands in for the rows. #}
-    {% set spread = not est.show_markup_rows %}
-    {% set prices = spread_markup_prices(est, totals.markup_total) if spread else none %}
-    <table class="line-items">
-        <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th>{% if not spread %}<th class="r" style="width:80px;">Rate</th>{% endif %}<th class="r" style="width:80px;">Amount</th></tr></thead>
-        <tbody>
-        {% for pkg in totals.by_package %}
-            {% set pkg_lines = [] %}
-            {% for line in est.lines %}
-                {% set kind = line.line_kind or 'base' %}
-                {% if line.trade_package_id == pkg.package_id and (kind == 'base' or (kind == 'alternate' and line.alternate_accepted)) %}
-                    {% set _ = pkg_lines.append(line) %}
-                {% endif %}
-            {% endfor %}
-            {% if pkg_lines %}
-            {# Lines with no package print with no heading (the internal screens
-               keep "Unassigned"); spread, their price stands on the one line or
-               on an unlabelled row under them. #}
-            {% set bare = pkg.package_id is none %}
-            {% if not bare %}<tr><td colspan="{{ 2 if spread else 3 }}" style="background:#eef3f8; font-weight:700; color:#003366;">{{ pkg.package_name }}</td><td class="r" style="background:#eef3f8; font-weight:700; color:#003366;">{% if spread %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td></tr>{% endif %}
-            {% for line in pkg_lines %}
-            <tr>
-                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description or '' }}{% if (line.line_kind or 'base') == 'alternate' %}<span class="alt-tag">{{ 'Deduct' if line.amount < 0 else 'Add' }} alternate, accepted</span>{% endif %}</td>
-                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
-                {% if not spread %}<td class="r">{{ line.rate | rate }}</td>{% endif %}
-                <td class="r">{% if not spread %}{{ line.amount | currency }}{% elif bare and pkg_lines | length == 1 %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td>
-            </tr>
-            {% endfor %}
-            {% if bare and spread and pkg_lines | length > 1 %}
-            <tr><td colspan="2"></td><td class="r" style="font-weight:700;">{{ prices.packages[pkg.package_id] | currency }}</td></tr>
-            {% endif %}
-            {% endif %}
-        {% endfor %}
-        </tbody>
-    </table>
-
-    {% set allowances = [] %}
-    {% for line in est.lines %}{% if (line.line_kind or 'base') == 'allowance' %}{% set _ = allowances.append(line) %}{% endif %}{% endfor %}
-    {% if allowances %}
-    <table class="line-items">
-        <thead><tr><th>Allowances</th><th class="r" style="width:80px;">Amount</th></tr></thead>
-        <tbody>
-        {% for line in allowances %}
-            <tr><td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description or '' }}</td><td class="r">{{ (prices.allowances[line.id] if spread else line.amount) | currency }}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% endif %}
-
-    {# An accepted alternate is already in the scope table above — at cost,
-       tagged as an alternate, its markups in the markup rows (or spread into
-       its package's price) — so the Alternates block offers only the ones the
-       customer has not taken yet, at their marked-up price. #}
-    {% set pending_alts = totals.alternates | rejectattr('accepted') | list %}
-    {% if pending_alts %}
-    <table class="line-items">
-        <thead><tr><th>Alternates</th><th class="r" style="width:100px;">Add / Deduct</th></tr></thead>
-        <tbody>
-        {% for alt in pending_alts %}
-            <tr><td>{{ alt.description or '' }}</td><td class="r">{{ alt.amount | currency }}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% endif %}
-
-    {% if totals.unit_prices %}
-    <table class="line-items">
-        <thead><tr><th>Unit prices</th><th class="r" style="width:60px;">Unit</th><th class="r" style="width:80px;">Rate</th></tr></thead>
-        <tbody>
-        {% for up in totals.unit_prices %}
-            <tr><td>{{ up.description or '' }}</td><td class="r">{{ up.unit or '' }}</td><td class="r">{{ up.rate | rate }}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% endif %}
-
+    </div>{% else %}
     {# The totals block stays together: a page break never strands Total. #}
     <div class="totals keep">
         <table>
@@ -261,28 +199,160 @@
             <tr><td colspan="2" class="tax-exempt">{{ exempt_note }}</td></tr>
             {% endif %}
         </table>
-    </div>{% endif %}
-
-    {% if est.terms %}
-    <div class="terms-block"><strong>Terms, inclusions and exclusions</strong>
-{{ est.terms }}</div>
+    </div>{% endif %}{% endset %}
+    {% set terms_block %}<div class="terms-block"><strong>Terms, inclusions and exclusions</strong>
+{{ est.terms }}</div>{% endset %}
+    {% set notes_block %}<div class="notes"><strong>Notes:</strong> {{ est.notes }}</div>{% endset %}
+    {% set footer_block %}<div class="footer">Generated by Slowbooks Pro 2026</div>{% endset %}
+    {% set tail %}
+    {{ totals_box }}
+    {% if est.terms and not long_terms %}
+    {{ terms_block }}
     {% endif %}
 
     <div class="acceptance">
         <div class="address-label">Acceptance</div>
-        <div>By signing below the owner accepts this bid at the Total above.</div>
+        <div>By signing below the owner accepts this bid at the Total above{% if long_terms %}, on the terms below{% endif %}.</div>
         <table><tr>
             <td><div class="sig-line">Owner signature</div></td>
             <td><div class="sig-line">Printed name</div></td>
             <td><div class="sig-line">Date</div></td>
         </tr></table>
     </div>
+    {% if not loose %}
+    {% if est.notes %}
+    {{ notes_block }}
+    {% endif %}
+    {{ footer_block }}
+    {% endif %}
+    {% endset %}
+    {% if line_markup %}
+    {# Markup per line (#774): the owner sees what each line costs them —
+       description, quantity with its unit, amount — and the totals. No rate,
+       no cost code, no cost and no markup. The commercial bid below prints as
+       it always has. #}
+    <table class="line-items priced-lines">
+        <thead><tr><th>Description</th><th class="r" style="width:80px;">Qty</th><th class="r" style="width:90px;">Amount</th></tr></thead>
+        <tbody>
+        {% for line in est.lines %}
+            {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if loop.index is even %} class="alt"{% endif %}>
+                <td>{{ line.description or '' }}</td>
+                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+                <td class="r">{{ line.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        {% if not est.lines or long_last %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="3">{{ tail }}</td></tr>
+        </tbody>
+    </table>{% else %}
+    {# Construction bid (#551): lines AT COST grouped by package with the
+       section code in the description column, then allowances, alternates
+       (marked-up price, accepted ones marked) and unit prices in their own
+       blocks. The totals foot Subtotal, then one row per non-zero markup
+       (General conditions, Insurance, Fee, Bond), then the pre-tax Bid total,
+       Tax (when charged) and Total. Grouping is by package id, so a package
+       literally named "Unassigned" never merges with the no-package bucket. #}
+    <table class="line-items">
+        <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th>{% if not spread %}<th class="r" style="width:80px;">Rate</th>{% endif %}<th class="r" style="width:80px;">Amount</th></tr></thead>
+        <tbody>
+        {% for pkg, pkg_lines in groups %}
+            {# Lines with no package print with no heading (the internal screens
+               keep "Unassigned"); spread, their price stands on the one line or
+               on an unlabelled row under them. #}
+            {% set bare = pkg.package_id is none %}
+            {# the group takes the last package's last line, and its heading when that is its only line #}
+            {% set tail_here = last_table == 'pkg' and loop.last and not long_last %}
+            {% if tail_here and not bare and pkg_lines | length == 1 %}</tbody><tbody class="doc-tail">{% endif %}
+            {% if not bare %}<tr><td colspan="{{ 2 if spread else 3 }}" style="background:#eef3f8; font-weight:700; color:#003366;">{{ pkg.package_name }}</td><td class="r" style="background:#eef3f8; font-weight:700; color:#003366;">{% if spread %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td></tr>{% endif %}
+            {% for line in pkg_lines %}
+            {% if tail_here and loop.last and (bare or pkg_lines | length > 1) %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr>
+                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description or '' }}{% if (line.line_kind or 'base') == 'alternate' %}<span class="alt-tag">{{ 'Deduct' if line.amount < 0 else 'Add' }} alternate, accepted</span>{% endif %}</td>
+                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+                {% if not spread %}<td class="r">{{ line.rate | rate }}</td>{% endif %}
+                <td class="r">{% if not spread %}{{ line.amount | currency }}{% elif bare and pkg_lines | length == 1 %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {% if bare and spread and pkg_lines | length > 1 %}
+            <tr><td colspan="2"></td><td class="r" style="font-weight:700;">{{ prices.packages[pkg.package_id] | currency }}</td></tr>
+            {% endif %}
+        {% endfor %}
+        {% if last_table == 'pkg' %}
+        {% if not groups or long_last %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="{{ 3 if spread else 4 }}">{{ tail }}</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+
+    {% if allowances %}
+    <table class="line-items">
+        <thead><tr><th>Allowances</th><th class="r" style="width:80px;">Amount</th></tr></thead>
+        <tbody>
+        {% for line in allowances %}
+            {% if last_table == 'allow' and loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr><td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description or '' }}</td><td class="r">{{ (prices.allowances[line.id] if spread else line.amount) | currency }}</td></tr>
+        {% endfor %}
+        {% if last_table == 'allow' %}
+        {% if long_last %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="2">{{ tail }}</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if pending_alts %}
+    <table class="line-items">
+        <thead><tr><th>Alternates</th><th class="r" style="width:100px;">Add / Deduct</th></tr></thead>
+        <tbody>
+        {% for alt in pending_alts %}
+            {% if last_table == 'alt' and loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr><td>{{ alt.description or '' }}</td><td class="r">{{ alt.amount | currency }}</td></tr>
+        {% endfor %}
+        {% if last_table == 'alt' %}
+        {% if long_last %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="2">{{ tail }}</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if totals.unit_prices %}
+    <table class="line-items">
+        <thead><tr><th>Unit prices</th><th class="r" style="width:60px;">Unit</th><th class="r" style="width:80px;">Rate</th></tr></thead>
+        <tbody>
+        {% for up in totals.unit_prices %}
+            {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr><td>{{ up.description or '' }}</td><td class="r">{{ up.unit or '' }}</td><td class="r">{{ up.rate | rate }}</td></tr>
+        {% endfor %}
+        {% if long_last %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="3">{{ tail }}</td></tr>
+        </tbody>
+    </table>
+    {% endif %}{% endif %}
+
+    {# What is long follows the group: the terms after the acceptance, then the notes and the footer. #}
+    {% if long_terms %}
+    {{ terms_block }}
+    {% endif %}
+    {% if loose %}
+    {% if est.notes %}
+    {{ notes_block }}
+    {% endif %}
+    {{ footer_block }}
+    {% endif %}
     {% else %}
     <table class="line-items">
         <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th><th class="r" style="width:80px;">Rate</th><th class="r" style="width:80px;">Amount</th></tr></thead>
         <tbody>
+        {#- What is short stays in the last group (#1045): a last line with a long
+           description is not bound to the totals, and long notes follow the
+           table as a block of their own, free to break, with no column
+           headings over them. #}
+        {%- set long_last = est.lines and ((est.lines|last).description or '')|length > 600 %}
+        {%- set long_notes = (est.notes or '')|length > 1000 %}
         {% for line in est.lines %}
-            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
+            {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td>{{ line.description or '' }}{% if est.tax_amount and not line.is_taxable %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}</td>
@@ -290,7 +360,7 @@
                 <td class="r">{{ line.amount | currency }}</td>
             </tr>
         {% endfor %}
-        {% if not est.lines %}</tbody><tbody class="doc-tail">{% endif %}
+        {% if not est.lines or long_last %}</tbody><tbody class="doc-tail">{% endif %}
         <tr class="doc-end"><td colspan="4">
 
     <div class="totals">
@@ -305,22 +375,19 @@
             {% endif %}
         </table>
     </div>
-    {% if est.notes %}
+    {% if est.notes and not long_notes %}
     <div class="notes"><strong>Notes:</strong> {{ est.notes }}</div>
     {% endif %}
+    {% if not long_notes %}
     <div class="footer">Generated by Slowbooks Pro 2026</div>
+    {% endif %}
         </td></tr>
         </tbody>
     </table>
-    {% endif %}
-
-    {# A construction estimate ends with its terms and acceptance block; the notes and the footer follow those. #}
-    {% if terms.is_construction %}
-    {% if est.notes %}
+    {% if long_notes %}
     <div class="notes"><strong>Notes:</strong> {{ est.notes }}</div>
-    {% endif %}
-
     <div class="footer">Generated by Slowbooks Pro 2026</div>
+    {% endif %}
     {% endif %}
 </body>
 </html>

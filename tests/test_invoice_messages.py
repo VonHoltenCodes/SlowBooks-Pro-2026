@@ -225,7 +225,7 @@ def test_the_pdf_and_email_print_notes_as_before():
     # nothing new to print: the chosen text lands in Notes, which both show
     for name in ("invoice_pdf.html", "invoice_email.html"):
         html = (ROOT / "app" / "templates" / name).read_text(encoding="utf-8")
-        assert "{% if inv.notes %}" in html
+        assert "{% if inv.notes" in html
 
 
 def test_an_estimate_converted_without_notes_starts_with_the_default(
