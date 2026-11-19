@@ -135,20 +135,29 @@ def test_the_alt_shortcuts_compare_the_keys_position_and_cmd_k_finds():
 
 
 def test_ctrl_f_finds_only_in_the_desktop_window():
-    """#695: the desktop app has no find bar, so Ctrl+F (⌘F) is its search
-    there; in a browser it stays the browser's find in page."""
+    """#695: the desktop app has no find bar of its own, so Ctrl+F (⌘F)
+    opens Find on this screen there (find.js); in a browser it stays the
+    browser's find in page. The record search keeps Ctrl+K and /."""
     app = _src("app.js")
     keys = app[app.index("// Keyboard shortcuts.") :]
     keys = keys[: keys.index("// Close search dropdown")]
+    assert "if (window.FindBar && App.inDesktopShell()) {" in keys
     assert (
-        "const desktopFind = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F') && App.inDesktopShell();"
+        "if (FindBar.isFindKey(e)) { e.preventDefault(); FindBar.open(); return; }"
         in keys
     )
-    assert "|| desktopFind ||" in keys
+    assert "desktopFind" not in app
+    find = _src("find.js")
+    assert (
+        "return (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F');"
+        in find
+    )
     shim = _src("desktop_shim.js")
     assert "inShell: inDesktopShell," in shim
     assert "window.SlowbooksDesktop.inShell()" in app
-    assert "...(App.inDesktopShell() ? [`${mod}+F`] : [])" in app
+    assert "search.setAttribute('aria-keyshortcuts', `${mod}+K /`);" in app
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    assert html.index("/static/js/find.js") < html.index("/static/js/app.js")
 
 
 # ── NEW-30 ────────────────────────────────────────────────────────────────

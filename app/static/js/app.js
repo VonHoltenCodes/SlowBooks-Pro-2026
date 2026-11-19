@@ -271,18 +271,18 @@ const App = {
         if (typeof n === 'number' && n < App._nShown) history.forward(); else history.back();
     },
     isMac() { return typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform || ''); },
-    // The desktop window (desktop_shim.js), where Ctrl+F (⌘F) is the app's
-    // search; in a browser it stays the browser's find in page (#695).
+    // The desktop window (desktop_shim.js), where Ctrl+F (⌘F) opens Find
+    // on this screen (find.js); in a browser it stays the browser's find
+    // in page (#695).
     inDesktopShell() { return !!(window.SlowbooksDesktop && window.SlowbooksDesktop.inShell && window.SlowbooksDesktop.inShell()); },
-    // The search box names its keys to a screen reader: Ctrl+K (⌘K) and /,
-    // and Ctrl+F (⌘F) in the desktop window. Again once pywebview is ready,
-    // which on a Mac is after the page has drawn.
+    // The search box names its keys to a screen reader: Ctrl+K (⌘K) and /.
+    // Ctrl+F (⌘F) was one in the desktop window until the window had a
+    // find bar of its own; the bar's box names it now.
     labelSearchKeys() {
         const search = $('#global-search');
         if (!search) return;
         const mod = App.isMac() ? 'Meta' : 'Control';
-        const keys = [`${mod}+K`, ...(App.inDesktopShell() ? [`${mod}+F`] : []), '/'];
-        search.setAttribute('aria-keyshortcuts', keys.join(' '));
+        search.setAttribute('aria-keyshortcuts', `${mod}+K /`);
     },
     // What a toolbar button says about its shortcut: the hover reads
     // "Enter Bill (Alt+B)" — "(⌥B)" on a Mac, where Alt is Option — and a
@@ -3152,23 +3152,31 @@ const App = {
             // Escape: close modal (not the Escape that closes a date
             // field's calendar: utils.js escapeLeavesPicker, NEW-33)
             if (e.key === 'Escape' && !escapeLeavesPicker(e)) { closeModal(); }
+            // Ctrl+F (⌘F) in the desktop window, which has no find bar of
+            // its own: Find on this screen (find.js), over a dialog too,
+            // where it finds in the dialog. In a browser it is the
+            // browser's find in page, left alone (#695). Ctrl+G (⌘G) and
+            // F3, with Shift for back, step through the matches while the
+            // bar is open; its own keys (Escape, Enter) stay in the bar.
+            if (window.FindBar && App.inDesktopShell()) {
+                if (FindBar.isFindKey(e)) { e.preventDefault(); FindBar.open(); return; }
+                const step = FindBar.isOpen() ? FindBar.stepKey(e) : 0;
+                if (step) { e.preventDefault(); FindBar.enter(step); return; }
+            }
             // Ctrl+K (⌘K on a Mac, which did nothing: NEW-41) or /: focus
             // search (when not in an input). Not while a dialog is open: it
             // is modal, the search lies under its overlay, and its hits
             // opened behind the dialog where they could be neither read nor
             // clicked (macOS gate NEW-45). Close the dialog, then search.
-            // Ctrl+F (⌘F) too in the desktop window, which has no find bar
-            // for it to open (#695); in a browser it is the browser's.
-            const desktopFind = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F') && App.inDesktopShell();
-            if (((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') || desktopFind || (e.key === '/' && !e.target.closest('input,textarea,select'))) {
+            if (((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') || (e.key === '/' && !e.target.closest('input,textarea,select'))) {
                 const overlay = $('#modal-overlay');
-                if (overlay && !overlay.classList.contains('hidden')) { if (e.key === 'k' || desktopFind) e.preventDefault(); return; }
+                if (overlay && !overlay.classList.contains('hidden')) { if (e.key === 'k') e.preventDefault(); return; }
                 const search = $('#global-search');
                 if (search) { search.focus(); e.preventDefault(); }
             }
         });
 
-        // the search box's keys, once the desktop window says it is one
+        // the search box's keys, once the desktop window is ready
         window.addEventListener('pywebviewready', () => App.labelSearchKeys());
 
         // Close search dropdown on click outside

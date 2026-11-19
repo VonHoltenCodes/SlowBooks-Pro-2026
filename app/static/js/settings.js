@@ -968,8 +968,13 @@ const SettingsPage = {
                         no port is opened, and there is no account, email or password. Add the address below as a connector
                         in Claude or Grok, and type a sign-in code from here when it asks, so only someone at the books can
                         approve a connection. The assistant can do only what the token's role allows, and every change it
-                        makes is in the audit log as <code>token:&lt;label&gt;</code>. On the desktop the connection is up
-                        only while SlowBooks Pro is open. Disconnect ends it and revokes the token.` },
+                        makes is in the audit log as <code>token:&lt;label&gt;</code>. Before it creates a ${T('customer')}, vendor, item,
+                        employee, account or document with little on it, the assistant is told to ask you for what is missing
+                        (it may not make anything up), and after a create it is told what was left blank. On the desktop the
+                        connection is up only while SlowBooks Pro is open. Disconnect ends it, revokes the token and has the
+                        relay delete its record of these books. The <strong>relay name</strong> shown while connected is how
+                        that record is known: if Disconnect cannot reach the relay, send the name to
+                        support@slowbookspro.com and the record is removed by hand.` },
                         { id: 'settings-switchboard-help', text: `SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
@@ -988,6 +993,7 @@ const SettingsPage = {
                         <a href="https://www.slowbookspro.com/terms/" target="_blank" rel="noopener">Terms</a>
                         &middot;
                         <a href="https://www.slowbookspro.com/privacy/" target="_blank" rel="noopener">Privacy</a></p>
+                    <p id="switchboard-relay-ask" style="font-size:11px; margin:8px 0;">An assistant asks before it creates a record with little on it, and says what it left blank.</p>
                     <div style="font-size:11px;">
                         <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
                         &middot;
@@ -2653,7 +2659,9 @@ const SettingsPage = {
     },
 
     // ---- Connect Claude (#1087) ------------------------------------------
-    _claude: { status: null, code: null, error: '', timer: null },
+    // fallback: { slug, sentence } after a Disconnect that could not reach
+    // the relay, kept here (the link file is gone) until it is dismissed
+    _claude: { status: null, code: null, error: '', timer: null, fallback: null },
 
     // The state in words: what the panel says, for any role.
     claudeStateWords(st) {
@@ -2676,7 +2684,7 @@ const SettingsPage = {
     // The panel: words for everyone, an administrator's buttons (data-admin,
     // so the bookkeeper sweep knows them as the administrator's). `error` is
     // a refusal or failure to show (the server's own sentence).
-    switchboardHtml(st, code, error) {
+    switchboardHtml(st, code, error, fallback) {
         st = st || {};
         const admin = !!st.can_manage;
         const words = SettingsPage.claudeStateWords(st);
@@ -2687,6 +2695,16 @@ const SettingsPage = {
             + '</div>';
         if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
         if (error) html += `<div id="claude-relay-error" role="alert" style="margin-top:4px; color:var(--text-danger);">${escapeHtml(error)}</div>`;
+        if (fallback && fallback.slug) {
+            // Disconnect could not reach the relay: the name to send to support
+            html += '<div id="claude-relay-fallback" role="alert" style="margin-top:8px;">'
+                + `<div>${escapeHtml(fallback.sentence || '')}</div>`
+                + '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:6px;">'
+                + copyLineHtml('claude-relay-fallback-name', 'Relay name', fallback.slug, 'SettingsPage.copyClaudeFallbackName()')
+                + '</div>'
+                + '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>'
+                + '</div>';
+        }
         if (!admin) return html;
         if (!st.linked) {
             html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin onclick="SettingsPage.connectClaude()">Connect Claude</button></div>';
@@ -2696,6 +2714,7 @@ const SettingsPage = {
         if (st.address) {
             html += '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
                 + copyLineHtml('claude-relay-address', 'Connector address', st.address, 'SettingsPage.copyClaudeAddress()')
+                + (st.slug ? copyLineHtml('claude-relay-name', 'Relay name', st.slug, 'SettingsPage.copyClaudeRelayName()') : '')
                 + '</div>';
         }
         if (code && code.code) {
@@ -2713,7 +2732,7 @@ const SettingsPage = {
         const el = $('#switchboard-relay');
         if (!el) return;
         const c = SettingsPage._claude;
-        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error);
+        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error, c.fallback);
         // while the line is coming up or the relay is away, the words follow
         // it: asked again in a few seconds, while the panel is on the page
         const state = c.status && c.status.state;
@@ -2771,14 +2790,36 @@ const SettingsPage = {
         await copyToClipboard(st.address || '', 'Address', $('#claude-relay-address'));
     },
 
+    async copyClaudeRelayName() {
+        const st = SettingsPage._claude.status || {};
+        await copyToClipboard(st.slug || '', 'Relay name', $('#claude-relay-name'));
+    },
+
+    async copyClaudeFallbackName() {
+        const f = SettingsPage._claude.fallback || {};
+        await copyToClipboard(f.slug || '', 'Relay name', $('#claude-relay-fallback-name'));
+    },
+
+    dismissClaudeFallback() {
+        SettingsPage._claude.fallback = null;
+        SettingsPage._drawSwitchboard();
+    },
+
     async disconnectClaude() {
-        if (!confirm('Disconnect Claude? The connection ends, the relay forgets this computer, and the token "'
+        if (!confirm('Disconnect Claude? The connection ends, the relay deletes its record of these books, and the token "'
             + ((SettingsPage._claude.status || {}).token_label || 'Claude (relay)') + '" is revoked.')) return;
         try {
             const r = await API.post('/switchboard/disconnect');
-            toast(r && r.unlinked === false
-                ? 'Claude is disconnected and the token revoked. The relay could not be told, but it can no longer reach these books.'
-                : 'Claude is disconnected.');
+            if (r && r.unlinked === false && r.slug) {
+                // the relay was out of reach: keep its name on the panel
+                SettingsPage._claude.fallback = { slug: r.slug, sentence: r.sentence || '' };
+                toast('Claude is disconnected and the token revoked. The relay was out of reach: see the relay name below.');
+            } else {
+                SettingsPage._claude.fallback = null;
+                toast(r && r.deleted
+                    ? 'Claude is disconnected, and the relay deleted its record of these books.'
+                    : 'Claude is disconnected.');
+            }
             SettingsPage._claude.code = null;
             SettingsPage._claude.error = '';
         } catch (err) {

@@ -592,8 +592,29 @@ def post_operation(
     params: dict | None = None,
     body=None,
     idempotency_key: str | None = None,
+    asked_user: bool = False,
 ):
-    """POST to one API operation: create a record or run an action."""
+    """POST to one API operation: create a record or run an action. A create
+    of one of the main records asks first when it is bare (tools.ASK_FIRST)."""
+    template = None
+    if isinstance(path, str) and path.startswith("/"):
+        try:
+            template = lookup(client, "post", path)[1]
+        except ValueError:
+            template = None  # _send says what is wrong
+    if template in tools.ASK_FIRST:
+        held = tools.ask_first(
+            template,
+            body,
+            asked_user,
+            "post_operation",
+            None if asked_user else tools.body_fields(client, template),
+        )
+        if held is not None:
+            build_request(client, "post", path, params, body, idempotency_key)
+            return held
+        answer = _send(client, "post", path, params, body, idempotency_key)
+        return tools.with_left_blank(template, body, answer)
     return _send(client, "post", path, params, body, idempotency_key)
 
 

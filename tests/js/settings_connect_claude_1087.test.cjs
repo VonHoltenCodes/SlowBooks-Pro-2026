@@ -15,6 +15,7 @@ function fixture(answers = {}) {
     const panel = { innerHTML: '' };
     const sent = [];
     const toasts = [];
+    const confirms = [];
     const context = {
         API: {
             get: async p => { sent.push(['GET', p]); return answers[p]; },
@@ -34,7 +35,7 @@ function fixture(answers = {}) {
         copyLineHtml: (id, label, value, handler) => `<code id="${id}">${value}</code><button type="button" onclick="${handler}">Copy</button>`,
         copyToClipboard: async () => true,
         toast: (m, kind) => toasts.push([m, kind]),
-        confirm: () => true,
+        confirm: m => { confirms.push(m); return true; },
         document: { getElementById: () => null },
         setTimeout() {},
         Date,
@@ -42,7 +43,7 @@ function fixture(answers = {}) {
     vm.createContext(context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/settings.js'), 'utf8') + '\nthis.page = SettingsPage;', context);
     context.page._claude = { status: null, code: null, error: '', timer: null };
-    return { page: context.page, panel, sent, toasts };
+    return { page: context.page, panel, sent, toasts, confirms };
 }
 
 const buttons = html => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(m => m[1]);
@@ -122,4 +123,43 @@ test('Disconnect asks first, then draws the panel again', async () => {
     await f.page.disconnectClaude();
     assert.deepEqual(f.sent.slice(-2), [['POST', '/switchboard/disconnect'], ['GET', '/switchboard/status']]);
     assert.equal(f.toasts.at(-1)[0], 'Claude is disconnected.');
+});
+
+// Disconnect deletes the relay's record; the relay name is shown while
+// connected, and kept on the panel when Disconnect could not reach the relay.
+test('connected: the relay name with Copy', async () => {
+    const f = fixture({ '/switchboard/status': { ...CONNECTED, slug: 'ztnqj8djvg' } });
+    await f.page.loadSwitchboard();
+    assert.match(f.panel.innerHTML, /<code id="claude-relay-name">ztnqj8djvg<\/code>/);
+    assert.match(f.panel.innerHTML, /onclick="SettingsPage\.copyClaudeRelayName\(\)"/);
+});
+
+test('disconnect: the confirm says the relay record is deleted', async () => {
+    const f = fixture({
+        '/switchboard/status': CONNECTED,
+        'POST /switchboard/disconnect': { unlinked: true, revoked: true, deleted: true, devices_left: 0, slug: 'ztnqj8djvg', sentence: 'x' },
+    });
+    f.page._claude.status = CONNECTED;
+    await f.page.disconnectClaude();
+    assert.match(f.confirms[0], /the relay deletes its record of these books/);
+    assert.ok(f.toasts.some(([m]) => /the relay deleted its record of these books/.test(m)));
+    assert.equal(f.page._claude.fallback, null);
+});
+
+test('disconnect with the relay out of reach: the fallback and the name stay until dismissed', async () => {
+    const sentence = 'This computer is unlinked here, but the relay could not be reached, so it still holds a record under relay name ztnqj8djvg. Send that name to support@slowbookspro.com to have it removed.';
+    const f = fixture({
+        '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true },
+        'POST /switchboard/disconnect': { unlinked: false, revoked: true, deleted: false, devices_left: 0, slug: 'ztnqj8djvg', sentence },
+    });
+    await f.page.disconnectClaude();
+    const html = f.panel.innerHTML;
+    assert.match(html, /id="claude-relay-fallback" role="alert"/);
+    assert.ok(html.includes('support@slowbookspro.com'));
+    assert.match(html, /<code id="claude-relay-fallback-name">ztnqj8djvg<\/code>/);
+    assert.ok(buttons(html).includes('Dismiss'));
+    await f.page.loadSwitchboard();  // asked again: still there
+    assert.match(f.panel.innerHTML, /claude-relay-fallback-name/);
+    f.page.dismissClaudeFallback();
+    assert.doesNotMatch(f.panel.innerHTML, /claude-relay-fallback/);
 });

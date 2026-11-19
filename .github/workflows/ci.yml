@@ -221,7 +221,10 @@ jobs:
   test-browser:
     name: Browser tests ${{ matrix.shard }} of ${{ strategy.job-total }} (Playwright)
     runs-on: ubuntu-24.04
-    needs: lint
+    # Not after lint, unlike the other test jobs: the keyboard sweep
+    # (tests/test_browser_keyboard.py, about ten minutes, one module that is
+    # never split) is the longest single piece of the run, so it starts at
+    # once; a lint failure still fails the run.
     env:
       PLAYWRIGHT_VERSION: "1.60.0"
     strategy:
@@ -606,8 +609,10 @@ jobs:
           # 395 with Connect Claude (#1087): the vendored client's identity check
           # (test_switchboard_vendored_1087.py, needs the source checkout) and
           # the credential file's POSIX mode (test_switchboard_connect_1087.py).
-          # 396 with the shards (#1095), unchanged: the sum of the shards' counts.
-          MAX_SKIPS: "396"
+          # 398 with Find on this screen (#1092): its Chromium and WebKit modules
+          # (test_browser_find.py, test_browser_find_webkit.py: one each without playwright).
+          # 398 with the shards (#1095), unchanged: the sum of the shards' counts.
+          MAX_SKIPS: "398"
         run: |
           total=0
           for f in shards/*/skips.txt; do
