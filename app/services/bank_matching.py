@@ -277,8 +277,15 @@ def add(
         class_id, job_id, vendor_id, customer_id, payee = _with_picks(
             db, bt, class_id, job_id, vendor_id, customer_id, payee
         )
-    payee = payee or bt.payee
-    vendor = _entry_vendor(db, bt, payee, vendor_id)
+    typed = (payee or "").strip() or None
+    vendor = _entry_vendor(db, bt, typed or bt.payee, vendor_id)
+    customer = db.get(Customer, customer_id) if customer_id and not splits else None
+    # the name picked, or the rule's vendor, is the entry's payee, so the
+    # register, the entry and every list by name show it; the bank's own
+    # words stay on the entry as its memo
+    payee = entry_payee(bt, typed, vendor, customer)
+    if not memo and payee != bt.payee:
+        memo = bt.description or bt.payee
     if not splits and (class_id is None or job_id is None):
         # the class and job the statement line's rule names (#675), where
         # the caller named none; a split's lines carry their own
@@ -320,6 +327,20 @@ def add(
     # the entry has them now; the line is out of To review (#904)
     clear_picks(bt)
     return bt
+
+
+def entry_payee(bt: BankTransaction, typed, vendor, customer) -> str | None:
+    """The payee a feed line posts with: a name typed for it; else, money
+    in, the customer picked and then the vendor, money out the vendor (the
+    one picked, the rule's or the one the bank text names) and then the
+    customer; else the bank's text, as before."""
+    if typed:
+        return typed
+    names = [customer, vendor] if _q(bt.amount) > 0 else [vendor, customer]
+    for party in names:
+        if party is not None and (party.name or "").strip():
+            return party.name.strip()
+    return bt.payee
 
 
 # The review row's picks kept on a statement line (#904): the request
