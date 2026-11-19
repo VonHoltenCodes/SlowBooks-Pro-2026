@@ -4280,7 +4280,9 @@ SettingsPage._findWords = function () {
 // A section matches when every word typed is in its headings or in the
 // names of its fields.
 SettingsPage._matches = function (section, words) {
-    const text = [...section.querySelectorAll('h3, h4, label, legend')].map(el => el.textContent)
+    // the notes behind the tortoises too (#977): a description that moved
+    // off the page is still something to find its setting by
+    const text = [...section.querySelectorAll('h3, h4, label, legend, .hint-pop')].map(el => el.textContent)
         // not the tortoises' "About ..." (#977): every section has one
         .concat([...section.querySelectorAll('[aria-label]:not([data-hint]):not(.hint-pop)')].map(el => el.getAttribute('aria-label')))
         .join(' ').toLowerCase().replace(/\s+/g, ' ');

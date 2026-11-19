@@ -626,3 +626,17 @@ def test_the_dialogs_lines_are_behind_their_fields_own_tortoise():
         "cc-import-csv-help",
     ):
         assert entry in ids, entry
+
+
+def test_find_a_setting_reads_the_notes_behind_the_tortoises():
+    """A description that moved off the page still finds its setting: the
+    search reads each section's notes with its headings and labels, and
+    still not the tortoises' own "About ..." names."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "app/static/js/settings.js").read_text(
+        encoding="utf-8"
+    )
+    body = src[src.index("SettingsPage._matches = function") :][:700]
+    assert "querySelectorAll('h3, h4, label, legend, .hint-pop')" in body
+    assert "[aria-label]:not([data-hint]):not(.hint-pop)" in body
