@@ -413,13 +413,19 @@ def _statement_line(db: Session, txn_id: int) -> BankTransaction:
 
 
 @router.get("/transactions/{txn_id}/candidates")
-def statement_candidates(txn_id: int, db: Session = Depends(get_db)):
-    """Ledger lines this statement line could be matched to."""
+def statement_candidates(txn_id: int, days: str = "30", db: Session = Depends(get_db)):
+    """Ledger lines this statement line could be matched to: within 30
+    days of its date, or `days` 90, 365 or all (#1050)."""
     from app.services import bank_matching as m
 
+    if days not in m.MATCH_RANGES:
+        raise HTTPException(
+            status_code=422,
+            detail="Pick a range of 30 days, 90 days, a year or all dates",
+        )
     bt = _statement_line(db, txn_id)
     acct = m._feed_account(db, bt)
-    return m.candidate_lines(db, acct.id, bt.amount, bt.date)
+    return m.candidate_lines(db, acct.id, bt.amount, bt.date, m.MATCH_RANGES[days])
 
 
 @router.post("/transactions/{txn_id}/match", response_model=BankTransactionResponse)

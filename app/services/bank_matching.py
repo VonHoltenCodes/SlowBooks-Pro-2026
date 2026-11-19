@@ -30,6 +30,9 @@ from app.services.entry_text import BANK_ENTRY_HEADER, header_text
 
 AUTO_WINDOW_DAYS = 5
 CANDIDATE_WINDOW_DAYS = 30
+# the ranges Match offers (#1050): days either side of the line's date,
+# "all" for any date
+MATCH_RANGES = {"30": 30, "90": 90, "365": 365, "all": None}
 
 
 def _feed_account(db: Session, bt: BankTransaction) -> Account:
@@ -52,12 +55,13 @@ def candidate_lines(
     account_id: int,
     amount: Decimal,
     on_date: date,
-    window_days: int = CANDIDATE_WINDOW_DAYS,
+    window_days: int | None = CANDIDATE_WINDOW_DAYS,
     exclude_line_ids=frozenset(),
 ) -> list[dict]:
     """Unlinked, unreconciled ledger lines on `account_id` with exactly this
-    amount on the statement's side, within the window, nearest date first.
-    Voided postings and their reversals never qualify."""
+    amount on the statement's side, within the window (None: any date,
+    #1050), nearest date first. Voided postings and their reversals never
+    qualify."""
     amount = _q(amount)
     side = TransactionLine.debit if amount > 0 else TransactionLine.credit
     linked = exists().where(BankTransaction.transaction_line_id == TransactionLine.id)
@@ -69,9 +73,12 @@ def candidate_lines(
         .filter(TransactionLine.reconciliation_id.is_(None))
         .filter(~linked)
         .filter(~Transaction.source_type.like("%\\_void", escape="\\"))
-        .filter(Transaction.date >= on_date - timedelta(days=window_days))
-        .filter(Transaction.date <= on_date + timedelta(days=window_days))
     )
+    if window_days is not None:
+        q = q.filter(
+            Transaction.date >= on_date - timedelta(days=window_days),
+            Transaction.date <= on_date + timedelta(days=window_days),
+        )
     rows = [(tl, txn) for tl, txn in q.all() if tl.id not in exclude_line_ids]
     if not rows:
         return []

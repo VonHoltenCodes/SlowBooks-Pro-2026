@@ -2172,9 +2172,28 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    async showMatch(lineId, accountId) {
+    // Match's date range (#1050): 30 days either side of the line by
+    // default, or 90 days, a year or all dates; the choice is kept for the
+    // sitting (this tab), so the next line opens with it.
+    MATCH_RANGES: [['30', '30 days'], ['90', '90 days'], ['365', 'A year'], ['all', 'All dates']],
+    _matchRange() {
+        let kept = BankingPage._matchDays;
+        if (!kept) { try { kept = sessionStorage.getItem('sb.matchDays'); } catch (e) { kept = null; } }
+        return BankingPage.MATCH_RANGES.some(([v]) => v === kept) ? kept : '30';
+    },
+    _keepMatchRange(value) {
+        BankingPage._matchDays = value;
+        try { sessionStorage.setItem('sb.matchDays', value); } catch (e) { /* kept in memory for the sitting */ }
+    },
+    async matchRangeChanged(sel, lineId, accountId) {
+        BankingPage._keepMatchRange(sel.value);
+        await BankingPage.showMatch(lineId, accountId, { refocus: true });
+    },
+
+    async showMatch(lineId, accountId, { refocus = false } = {}) {
         try {
-            const cands = await API.get(`/banking/transactions/${lineId}/candidates`);
+            const days = BankingPage._matchRange();
+            const cands = await API.get(`/banking/transactions/${lineId}/candidates?days=${days}`);
             // each posting's date, for Matched to say one the dates leave out
             BankingPage._matchDates = Object.fromEntries(cands.map(c => [c.line_id, c.date]));
             const rows = cands.map(c => `<tr>
@@ -2182,11 +2201,18 @@ const BankingPage = {
                 <td>${escapeHtml(c.payee || c.description || '')}</td>
                 <td>${escapeHtml(c.reference || '')}</td>
                 <td style="font-size:10px;">${escapeHtml(sourceWord(c.source_type, c.source_kind))}</td>
-                <td><button class="btn btn-sm btn-primary" onclick="BankingPage.matchLine(${lineId}, ${c.line_id}, ${accountId})">Match</button></td>
+                <td><button class="btn btn-sm btn-primary" onclick="BankingPage.matchLine(${lineId}, ${c.line_id}, ${accountId})" aria-label="Match to ${escapeHtml(c.payee || c.description || 'this posting')}, ${formatDate(c.date)}">Match</button></td>
             </tr>`).join('');
-            openModal('Match to a posting', rows
+            const range = BankingPage.MATCH_RANGES.find(([v]) => v === days)[1];
+            const within = days === 'all' ? 'on any date' : `within ${range.toLowerCase()} of this line`;
+            const opts = BankingPage.MATCH_RANGES.map(([v, label]) => `<option value="${v}"${v === days ? ' selected' : ''}>${label}</option>`).join('');
+            const bar = `<div style="margin-bottom:8px; font-size:12px;"><label for="match-range">Look for postings</label>
+                <select id="match-range" data-readonly-ok onchange="BankingPage.matchRangeChanged(this, ${lineId}, ${accountId})" style="margin-left:6px;">${opts}</select>
+                <span style="color:var(--gray-500); margin-left:6px;">either side of the line's date</span></div>`;
+            openModal('Match to a posting', bar + (rows
                 ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Payee / description</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col"></th></tr></thead><tbody>${rows}</tbody></table></div>`
-                : `<p>Nothing in the books has this amount within 30 days. Use <strong>Add</strong> to post it.</p>`);
+                : `<p>Nothing in the books has this amount ${within}. Look further back, or use <strong>Add</strong> to post it.</p>`));
+            if (refocus) { const sel = document.getElementById('match-range'); if (sel) sel.focus(); }
         } catch (err) { toast(err.message, 'error'); }
     },
 
