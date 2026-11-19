@@ -79,6 +79,7 @@ from app.routes import accountants_copy as accountants_copy_routes
 from app.routes import reclassify as reclassify_routes
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
+from app.routes import switchboard as switchboard_routes
 from app.routes import classes as classes_routes
 from app.routes import jobs as jobs_routes
 from app.routes import preferences as preferences_routes
@@ -736,9 +737,15 @@ async def lifespan(app: FastAPI):
     from app.services import scheduler as _scheduler
 
     _auto_enter = _scheduler.start()
+    # Connect Claude (#1087): a kept link opens its line in a thread of its
+    # own once the app is up; the relay being down never holds the start.
+    from app.services import switchboard_link as _claude_line
+
+    _claude_line.start_in_background()
     try:
         yield
     finally:
+        _claude_line.stop()
         await _scheduler.stop(_auto_enter)
 
 
@@ -1205,6 +1212,9 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/invoice-messages",
     # The terms list is company setup too (#664): kept under Settings.
     "/api/payment-terms",
+    # Connect Claude (#1087): linking to the relay makes a token, so it is
+    # an administrator's like the tokens themselves; the status is a read.
+    "/api/switchboard",
 )
 # HR and payroll are admin functions, reads included: pay stubs, W-2s and
 # 941s, NACHA files, benefit elections, garnishments and onboarding
@@ -1486,6 +1496,14 @@ async def _require_session(request: Request, call_next):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "API tokens cannot manage users or tokens"},
+            )
+        # The Claude connection (#1087) is a signed-in person's: the
+        # assistant holding its token must not mint itself sign-in codes
+        # or end its own connection, nor read its state.
+        if path.startswith("/api/switchboard"):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "An API token cannot reach the Claude connection."},
             )
         # Restoring a backup replaces the whole company: a signed-in
         # administrator's, never a token's, whatever its role (#434).
@@ -1814,6 +1832,7 @@ app.include_router(simplefin.router)
 app.include_router(mercury.router)
 app.include_router(users_routes.router)
 app.include_router(api_tokens_routes.router)
+app.include_router(switchboard_routes.router)
 app.include_router(tax.router)
 app.include_router(backups.router)
 app.include_router(company_file_routes.router)

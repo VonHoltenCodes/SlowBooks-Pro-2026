@@ -486,6 +486,7 @@ const SettingsPage = {
             SettingsPage.loadApiTokens();
             SettingsPage.loadSignInPref();
             SettingsPage.loadOcrStatus();
+            SettingsPage.loadSwitchboard();
             SettingsPage.loadOcrEnginePref();
             SettingsPage.loadPostSoundPref();
             SettingsPage.loadMyPreferences();
@@ -953,11 +954,22 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <!-- SlowBooks Switchboard (#829): words and links only. The
-                     program is its own public repository; nothing of it runs
-                     inside SlowBooks Pro, and this block has no setting. -->
+                <!-- SlowBooks Switchboard (#829) and Connect Claude (#1087): the
+                     line to the SlowBooks relay is held by SlowBooks Pro itself
+                     (app/services/switchboard_link.py); loadSwitchboard draws its
+                     state and an administrator's buttons into #switchboard-relay.
+                     The local program's download and guide stay for Claude
+                     Desktop and Claude Code. -->
                 <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
                     <div class="settings-h-row"><h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>${hintList('Claude and agents', [
+                        { id: 'settings-claude-relay-help', text: `Connect Claude lets Claude on the web, the desktop or a phone, and Grok,
+                        work this company's books through the SlowBooks relay, with nothing else to install. SlowBooks Pro
+                        makes a <strong>bookkeeper API token</strong> for the connection and dials out to the relay itself:
+                        no port is opened, and there is no account, email or password. Add the address below as a connector
+                        in Claude or Grok, and type a sign-in code from here when it asks, so only someone at the books can
+                        approve a connection. The assistant can do only what the token's role allows, and every change it
+                        makes is in the audit log as <code>token:&lt;label&gt;</code>. On the desktop the connection is up
+                        only while SlowBooks Pro is open. Disconnect ends it and revokes the token.` },
                         { id: 'settings-switchboard-help', text: `SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
@@ -971,6 +983,11 @@ const SettingsPage = {
                         computer unless you set that door up. What Claude reads from the books goes to Claude,
                         as with any agent.` },
                     ])}</div>
+                    <div id="switchboard-relay" aria-live="polite" style="font-size:12px;">Checking…</div>
+                    <p id="switchboard-relay-caution" style="font-size:11px; margin:8px 0;">The relay is free and comes with no guarantee: it may be slow, change, or stop, and it may not stay free without donations. Use it at your own risk.
+                        <a href="https://www.slowbookspro.com/terms/" target="_blank" rel="noopener">Terms</a>
+                        &middot;
+                        <a href="https://www.slowbookspro.com/privacy/" target="_blank" rel="noopener">Privacy</a></p>
                     <div style="font-size:11px;">
                         <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
                         &middot;
@@ -2633,6 +2650,140 @@ const SettingsPage = {
             const settings = await API.get('/settings');
             if (settings.ocr_engine) sel.value = settings.ocr_engine;
         } catch (e) { /* leave the default selected */ }
+    },
+
+    // ---- Connect Claude (#1087) ------------------------------------------
+    _claude: { status: null, code: null, error: '', timer: null },
+
+    // The state in words: what the panel says, for any role.
+    claudeStateWords(st) {
+        const state = (st && st.state) || 'not_connected';
+        if (state === 'connected') return 'Connected';
+        if (state === 'connecting') return 'Connecting…';
+        if (state === 'unreachable') return 'The relay cannot be reached';
+        return 'Not connected';
+    },
+
+    // The code's life in words: ten minutes, and until when on this clock.
+    claudeCodeLife(expires) {
+        const until = expires ? new Date(expires) : null;
+        const when = until && !isNaN(until.getTime())
+            ? ` (until ${until.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`
+            : '';
+        return `It works once, for ten minutes${when}. Type it on the relay's sign-in page when Claude or Grok asks.`;
+    },
+
+    // The panel: words for everyone, an administrator's buttons. `error` is
+    // a refusal or failure to show (the server's own sentence).
+    switchboardHtml(st, code, error) {
+        st = st || {};
+        const admin = !!st.can_manage;
+        const words = SettingsPage.claudeStateWords(st);
+        const colour = st.state === 'connected' ? 'var(--text-success)'
+            : (st.state === 'unreachable' ? 'var(--text-warning)' : 'var(--text-muted)');
+        let html = `<div><span style="color:var(--text-muted);">Status:</span> <strong id="claude-relay-state" style="color:${colour};">${escapeHtml(words)}</strong>`
+            + (st.linked && st.company && st.this_company ? ` <span style="color:var(--text-muted);">&middot; Company: ${escapeHtml(st.company)}</span>` : '')
+            + '</div>';
+        if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
+        if (error) html += `<div id="claude-relay-error" role="alert" style="margin-top:4px; color:var(--text-danger);">${escapeHtml(error)}</div>`;
+        if (!admin) return html;
+        if (!st.linked) {
+            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" onclick="SettingsPage.connectClaude()">Connect Claude</button></div>';
+            return html;
+        }
+        if (!st.this_company && st.state !== 'damaged') return html;
+        if (st.address) {
+            html += '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
+                + copyLineHtml('claude-relay-address', 'Connector address', st.address, 'SettingsPage.copyClaudeAddress()')
+                + '</div>';
+        }
+        if (code && code.code) {
+            html += '<div id="claude-relay-code-box" style="margin-top:8px;">'
+                + `<div><span style="color:var(--text-muted);">Sign-in code:</span> <code id="claude-relay-code" style="font-family:var(--font-mono); font-size:14px; user-select:all;">${escapeHtml(code.code)}</code></div>`
+                + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div></div>`;
+        }
+        html += '<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
+        if (st.this_company) html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-code" onclick="SettingsPage.claudeCode()">Show a sign-in code</button>';
+        html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>';
+        return html;
+    },
+
+    _drawSwitchboard() {
+        const el = $('#switchboard-relay');
+        if (!el) return;
+        const c = SettingsPage._claude;
+        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error);
+        // while the line is coming up or the relay is away, the words follow
+        // it: asked again in a few seconds, while the panel is on the page
+        const state = c.status && c.status.state;
+        if ((state === 'connecting' || state === 'unreachable') && !c.timer) {
+            c.timer = setTimeout(() => {
+                c.timer = null;
+                if (document.getElementById('switchboard-relay')) SettingsPage.loadSwitchboard();
+            }, 3000);
+        }
+    },
+
+    async loadSwitchboard() {
+        const el = $('#switchboard-relay');
+        if (!el) return;
+        try {
+            SettingsPage._claude.status = await API.get('/switchboard/status');
+            SettingsPage._claude.error = '';
+        } catch (e) {
+            SettingsPage._claude.status = null;
+            SettingsPage._claude.error = 'Could not read the Claude connection.';
+        }
+        SettingsPage._drawSwitchboard();
+    },
+
+    async connectClaude() {
+        const button = $('#claude-connect');
+        if (button) { button.disabled = true; button.textContent = 'Connecting…'; }
+        try {
+            SettingsPage._claude.status = await API.post('/switchboard/connect');
+            SettingsPage._claude.code = null;
+            SettingsPage._claude.error = '';
+            toast('Claude is connected. Add the address in Claude, then show a sign-in code.');
+        } catch (err) {
+            // a relay that cannot be reached says so where the button was
+            SettingsPage._claude.status = Object.assign({}, SettingsPage._claude.status || {},
+                err.status === 502 ? { state: 'unreachable' } : {});
+            SettingsPage._claude.error = err.message;
+        }
+        SettingsPage._drawSwitchboard();
+    },
+
+    async claudeCode() {
+        try {
+            SettingsPage._claude.code = await API.post('/switchboard/code');
+            SettingsPage._claude.error = '';
+        } catch (err) {
+            SettingsPage._claude.code = null;
+            SettingsPage._claude.error = err.message;
+        }
+        SettingsPage._drawSwitchboard();
+    },
+
+    async copyClaudeAddress() {
+        const st = SettingsPage._claude.status || {};
+        await copyToClipboard(st.address || '', 'Address', $('#claude-relay-address'));
+    },
+
+    async disconnectClaude() {
+        if (!confirm('Disconnect Claude? The connection ends, the relay forgets this computer, and the token "'
+            + ((SettingsPage._claude.status || {}).token_label || 'Claude (relay)') + '" is revoked.')) return;
+        try {
+            const r = await API.post('/switchboard/disconnect');
+            toast(r && r.unlinked === false
+                ? 'Claude is disconnected and the token revoked. The relay could not be told, but it can no longer reach these books.'
+                : 'Claude is disconnected.');
+            SettingsPage._claude.code = null;
+            SettingsPage._claude.error = '';
+        } catch (err) {
+            SettingsPage._claude.error = err.message;
+        }
+        await SettingsPage.loadSwitchboard();
     },
 
     async loadOcrStatus() {
