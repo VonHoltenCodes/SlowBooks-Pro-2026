@@ -435,11 +435,11 @@ const CustomersPage = {
         const parentHtml = `
                 <h3 id="cust-parent-heading" style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Sub-customer</h3>
                 <div class="form-grid" role="group" aria-labelledby="cust-parent-heading">
-                    <div class="form-group"><label for="cust-parent-select">Sub-customer of</label>
+                    <div class="form-group"><label for="cust-parent-select">Sub-customer of${hasSubs ? '' : ` ${hint('A tenant under a property, say: the sub-customer is invoiced and paid on its own, can be made inactive on its own, and rolls up to its parent.', 'Sub-customer')}`}</label>
                         <select name="parent_customer_id" id="cust-parent-select" ${hasSubs ? 'disabled' : ''} onchange="CustomersPage._parentChanged(this.value)">
                             <option value="">None: a customer of its own</option>${parentOpts}
                         </select>
-                        ${hasSubs ? `<div class="form-hint">This customer has ${c.sub_count} sub-customer${c.sub_count === 1 ? '' : 's'} of its own, so it cannot sit under another.</div>` : '<div class="form-hint">A tenant under a property, say: the sub-customer is invoiced and paid on its own, can be made inactive on its own, and rolls up to its parent.</div>'}</div>
+                        ${hasSubs ? `<div class="form-hint">This customer has ${c.sub_count} sub-customer${c.sub_count === 1 ? '' : 's'} of its own, so it cannot sit under another.</div>` : ''}</div>
                     <div class="form-group"><label>Billing</label>
                         <label style="font-weight:normal;"><input type="checkbox" name="bill_with_parent" id="cust-bill-with-parent" ${c.bill_with_parent ? 'checked' : ''} ${c.parent_customer_id && !hasSubs ? '' : 'disabled'}>
                             ${Terms.text("Bill with parent: invoices to this sub-customer are billed to the parent, go on the parent's statement and A/R Aging row, and are paid by the parent's payments")}</label></div>

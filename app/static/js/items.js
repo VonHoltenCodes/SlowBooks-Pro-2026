@@ -204,12 +204,10 @@ const ItemsPage = {
                         Taxable</label></div>
                     <div class="form-group full-width" id="neg-price-group" style="${canDiscount ? '' : 'display:none;'}"><label>
                         <input type="checkbox" name="allows_negative_price" id="neg-price-chk" ${item.allows_negative_price ? 'checked' : ''}>
-                        Discount or concession: may carry a negative price</label>
-                        <div style="font-size:10px; color:var(--text-muted);">A line on this item can be entered at a negative price on an invoice or sales receipt, and the amount comes off the item's income account. Every other item's price stays at zero or more; a refund belongs on a credit memo.</div></div>
+                        Discount or concession: may carry a negative price ${hint("A line on this item can be entered at a negative price on an invoice or sales receipt, and the amount comes off the item's income account. Every other item's price stays at zero or more; a refund belongs on a credit memo.", 'Discount or concession')}</label></div>
                     ${id ? `<div class="form-group"><label>
                         <input type="checkbox" name="is_active" ${item.is_active !== false ? 'checked' : ''}>
-                        Active</label>
-                        <div style="font-size:10px; color:var(--text-muted);">An inactive item stays on the documents that use it but is left out of every item picker.</div></div>` : ''}
+                        Active ${hint('An inactive item stays on the documents that use it but is left out of every item picker.', 'Active')}</label></div>` : ''}
                 </div>
 
                 <fieldset id="inv-fieldset" style="margin-top:16px; padding:10px 14px; border:1px solid var(--panel-border); border-radius:4px; ${trackable ? '' : 'display:none;'}">
@@ -217,11 +215,8 @@ const ItemsPage = {
                     <div class="form-group">
                         <label>
                             <input type="checkbox" name="track_inventory" id="track-inv-chk" ${item.track_inventory?'checked':''}>
-                            Track inventory for this item
+                            Track inventory for this item ${hint('Posting an invoice or bill that uses this item will adjust quantity on hand and post to the asset account below.', 'Track inventory')}
                         </label>
-                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                            Posting an invoice or bill that uses this item will adjust quantity on hand and post to the asset account below.
-                        </div>
                     </div>
                     <div id="inv-detail-grid" class="form-grid" style="${showInv ? '' : 'display:none;'}">
                         <div class="form-group"><label>Quantity on Hand
@@ -244,7 +239,7 @@ const ItemsPage = {
                                 <option value="">-- Default (Inventory 1300) --</option>
                                 ${assetAccts.map(a => `<option value="${a.id}" ${item.asset_account_id==a.id?'selected':''}>${acctLabel(a)}</option>`).join('')}
                             </select></div>
-                        ${id ? `<div class="form-group"><label>Avg Cost <span style="font-size:10px;color:var(--text-muted)">(weighted, computed from movements)</span></label>
+                        ${id ? `<div class="form-group"><label>Avg Cost ${hint('Weighted, computed from movements.', 'Avg Cost')}</label>
                             <div style="padding:8px 10px; border:1px solid var(--panel-border); border-radius:4px; background:transparent; color:var(--text-primary); font-variant-numeric:tabular-nums;">${formatCurrency(item.avg_cost || 0)}</div></div>` : ''}
                     </div>
                 </fieldset>
@@ -471,7 +466,7 @@ const ItemsPage = {
                         </select>
                     </div>
                     <div class="form-group">
-                        <label id="adjust-qty-label">Quantity to add *</label>
+                        <label id="adjust-qty-label">Quantity to add *</label> ${hint('Enter a quantity to see the resulting balance.', 'Quantity')}
                         <input name="quantity" id="adjust-qty" type="number" step="1" min="0" required>
                     </div>
                     <div class="form-group" id="adjust-cost-wrap">
@@ -487,8 +482,7 @@ const ItemsPage = {
                     </div>
                     <div class="form-group full-width" id="adjust-preview"
                          style="font-size:12px; color:var(--text-muted); padding:8px 10px;
-                                background:var(--gray-100,#f7f7fa); border-radius:4px;">
-                        Enter a quantity to see the resulting balance.
+                                background:var(--gray-100,#f7f7fa); border-radius:4px; display:none;">
                     </div>
                 </div>
                 <div class="form-actions">
@@ -519,6 +513,7 @@ const ItemsPage = {
             else if (mode === 'remove') { delta = -qty; newQty = currentQty - qty; }
             else { delta = qty - currentQty; newQty = qty; }
             const sign = delta >= 0 ? '+' : '';
+            preview.style.display = '';
             preview.innerHTML =
                 `Delta: <strong>${sign}${delta.toLocaleString()}</strong>` +
                 ` &nbsp;&middot;&nbsp; New on-hand: <strong>${newQty.toLocaleString()}</strong>`;
@@ -617,7 +612,7 @@ const ItemsPage = {
                 </table></div>
                 <div style="margin:8px 0;">
                     <button type="button" class="btn btn-sm btn-secondary" onclick="ItemsPage.addAdjustLine()">+ Add line</button>
-                    <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">A unit cost applies to stock added; left blank, the item's average cost is used.</span>
+                    ${hint("A unit cost applies to stock added; left blank, the item's average cost is used.", 'Unit cost')}
                 </div>
                 <div id="adjust-many-problems" role="alert" style="font-size:12px; color:var(--text-danger);"></div>
                 <div class="form-actions">

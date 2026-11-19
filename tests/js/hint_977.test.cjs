@@ -134,3 +134,32 @@ test('nothing opens on hover: only click, keydown and focusout are listened for'
     const env = load();
     assert.deepEqual(Object.keys(env.listeners).sort(), ['click', 'focusout', 'keydown']);
 });
+
+test('a hint can carry the id a field already names with aria-describedby', () => {
+    const { context } = load();
+    const html = context.hint('A line this rule matches is added for this vendor.', 'Vendor', 'bank-rule-vendor-hint');
+    assert.ok(html.includes('<span class="hint-pop" id="bank-rule-vendor-hint" role="note" hidden>'));
+    assert.ok(html.includes('aria-controls="bank-rule-vendor-hint" aria-describedby="bank-rule-vendor-hint"'));
+    // without one the ids still count on, and never repeat a named one
+    const a = context.hint('One.');
+    const b = context.hint('Two.', '', '');
+    assert.match(a, /id="hint-\d+"/);
+    assert.notEqual(/id="(hint-\d+)"/.exec(a)[1], /id="(hint-\d+)"/.exec(b)[1]);
+});
+
+test('setText swaps a note body and keeps the field name at its head', () => {
+    const env = load();
+    const head = { cls: 'hint-pop-title' };
+    const body = {
+        children: [head],
+        querySelector: (sel) => (sel === '.hint-pop-title' ? head : null),
+        set textContent(t) { body.children = [t]; },
+        get firstChild() { return body.children[0]; },
+        insertBefore(node, ref) { body.children.splice(body.children.indexOf(ref), 0, node); },
+    };
+    env.nodes['vendor-bank-rule-hint'] = { querySelector: (sel) => (sel === '.hint-pop-body' ? body : null) };
+    env.context.Hints.setText('vendor-bank-rule-hint', 'Choose the default account first.');
+    assert.deepEqual(body.children, [head, 'Choose the default account first.']);
+    // an id not on the page is no error
+    env.context.Hints.setText('nowhere', 'x');
+});

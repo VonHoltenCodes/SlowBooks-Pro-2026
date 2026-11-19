@@ -355,7 +355,7 @@ const ClassesPage = {
             </div>
             <p id="class-net-note" style="font-size:11px; color:var(--gray-500); margin:0 0 10px;">
                 ${formatDate(d.start_date)} — ${formatDate(d.end_date)} · ${T('Net Income')} <strong>${ClassesPage.money(d.net_income)}</strong>, ${escapeHtml(share)}
-                (the ${T('P&L by Class')} column for this ${T('class').toLowerCase()}; every ${T('class').toLowerCase()} together is the ${T('Profit & Loss')}).
+                ${hint(`The ${T('P&L by Class')} column for this ${T('class').toLowerCase()}; every ${T('class').toLowerCase()} together is the ${T('Profit & Loss')}.`, T('Net Income'))}
             </p>
             <div style="display:grid;grid-template-columns:${fund ? '2fr 1fr' : '1fr'};gap:16px;align-items:start;">
                 <div>
@@ -427,7 +427,7 @@ const ClassesPage = {
             </tr></tfoot>
         </table></div>
         <p id="class-transactions-note" style="font-size:11px; color:var(--gray-500); margin-top:6px;">
-            ${formatDate(s.start)} — ${formatDate(s.end)} · every account, balance-sheet lines included. The income, cost and expense lines net to <strong>${formatCurrency(d.net_income)}</strong>, this ${T('class').toLowerCase()}'s ${T('Net Income').toLowerCase()}. A line opens its document.
+            ${formatDate(s.start)} — ${formatDate(s.end)} · The income, cost and expense lines net to <strong>${formatCurrency(d.net_income)}</strong>, this ${T('class').toLowerCase()}'s ${T('Net Income').toLowerCase()}. ${hint('Every account, balance-sheet lines included. A line opens its document.', 'Lines')}
         </p>`;
     },
 };

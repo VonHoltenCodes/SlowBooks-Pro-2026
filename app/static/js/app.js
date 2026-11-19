@@ -1434,9 +1434,9 @@ const App = {
         try { preview = await API.get('/accounts/unused-seeded'); } catch (err) { toast(err.message, 'error'); return; }
         const rows = preview.removable.map(a => `<li>${accountLabel(a, null, ' ')}</li>`).join('');
         const kept = preview.kept.map(a => `<li>${accountLabel(a, null, ' ')} <span style="color:var(--gray-500);">— ${escapeHtml(a.reason)}</span></li>`).join('');
+        const about = hint('Every new company starts with a seeded chart of accounts. When a real chart is imported the seeded accounts stay beside it. These seeded accounts have never been used and can go now; any with postings, sub-accounts, a register or a job in the settings stay.', 'Seeded accounts');
         openModal('Remove unused seeded accounts', `
-            <p style="font-size:12px; margin-bottom:8px;">Every new company starts with a seeded chart of accounts. When a real chart is imported the seeded accounts stay beside it. These seeded accounts have never been used and can go now; any with postings, sub-accounts, a register or a job in the settings stay.</p>
-            ${preview.removable.length ? `<p style="font-size:12px; margin-bottom:4px;"><strong>${preview.removable.length} to remove:</strong></p><ul style="font-size:12px; columns:2; margin:0 0 8px 16px;">${rows}</ul>` : '<p style="font-size:12px;">Nothing to remove: every seeded account is in use or already gone.</p>'}
+            ${preview.removable.length ? `<p style="font-size:12px; margin-bottom:4px;"><strong>${preview.removable.length} to remove:</strong> ${about}</p><ul style="font-size:12px; columns:2; margin:0 0 8px 16px;">${rows}</ul>` : `<p style="font-size:12px;">Nothing to remove: every seeded account is in use or already gone. ${about}</p>`}
             ${preview.kept.length ? `<details style="font-size:11px; margin-bottom:8px;"><summary>${preview.kept.length} seeded account(s) stay</summary><ul style="margin:4px 0 0 16px;">${kept}</ul></details>` : ''}
             <div class="form-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1590,7 +1590,7 @@ const App = {
         let html = `
             ${skipLinkHtml('#accounts-filter', 'Skip to the account filter')}
             <div class="page-header">
-                <h2 id="accounts-heading">Chart of Accounts</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2 id="accounts-heading">Chart of Accounts</h2>${hint("An account's name opens its register: the bank register for a bank or card account, this year's transactions for the rest.", 'Chart of Accounts')}</div>
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                     <input type="search" id="accounts-filter" aria-label="Filter accounts" placeholder="Filter by number or name" value="${escapeHtml(App._accountsFilter)}" style="width:200px;" oninput="App.filterAccounts(this.value)">
                     <span id="accounts-filter-note" role="status" style="font-size:11px; color:var(--gray-500);"></span>
@@ -1600,7 +1600,6 @@ const App = {
                     <button class="btn btn-primary" onclick="App.showAccountForm()">New Account</button>
                 </div>
             </div>
-            <p style="font-size:11px; color:var(--gray-500); margin:-4px 0 8px;">An account's name opens its register: the bank register for a bank or card account, this year's transactions for the rest.</p>
             <nav aria-labelledby="accounts-heading"><div class="table-container"><table>
                 <thead><tr>${numbers ? '<th scope="col" style="width:80px;">Number</th>' : ''}<th scope="col">Name</th><th scope="col" style="width:160px;">Type</th><th scope="col" class="amount" style="width:100px;">Balance</th><th scope="col" style="width:190px;">Actions</th></tr></thead>
                 <tbody>`;
@@ -1696,16 +1695,14 @@ const App = {
                             title="Optional. Digits, like 6150; a sub-account can use 6150.1 or 6150-01."></div>
                     <div class="form-group"><label>Name *</label>
                         <input name="name" required value="${escapeHtml(acct.name)}"></div>
-                    <div class="form-group"><label>Type *</label>
+                    <div class="form-group"><label>Type * ${hint("A bank or card account gets a register. A sub-account shares its parent's detail type, except under a bank, card, or a 1100 or 2000 parent, where it is set on its own.", 'Type', 'account-type-hint')}</label>
                         <select name="detail_type" data-was="${escapeHtml(acct.detail_type || '')}" aria-describedby="account-type-hint" onchange="App.accountTypeChanged()"${locked ? ' disabled' : ''}>
                             ${picker}
-                        </select>
-                        <span id="account-type-hint" class="hint">A bank or card account gets a register. A sub-account shares its parent's detail type, except under a bank, card, or a 1100 or 2000 parent, where it is set on its own.</span></div>
-                    <div class="form-group"><label for="account-parent">Sub-account of</label>
+                        </select></div>
+                    <div class="form-group"><label for="account-parent">Sub-account of ${hint(App._accountStandsAlone(acct) ? 'The books post to it, so it stays a top-level account.' : 'Accounts of the same type. A sub-account is listed under its parent.', 'Sub-account', 'account-parent-hint')}</label>
                         <select name="parent_id" id="account-parent" data-was="${acct.parent_id == null ? '' : Number(acct.parent_id)}" aria-describedby="account-parent-hint" onchange="App.accountParentChanged()">
                             ${App._accountParentOptions(acct.parent_id)}
                         </select>
-                        <span id="account-parent-hint" class="hint">${App._accountStandsAlone(acct) ? 'The books post to it, so it stays a top-level account.' : 'Accounts of the same type. A sub-account is listed under its parent.'}</span>
                         <span id="account-parent-status" class="hint" role="status"></span></div>
                     <div class="form-group full-width"><label>Description</label>
                         <textarea name="description">${escapeHtml(acct.description || '')}</textarea></div>
@@ -1865,7 +1862,7 @@ const App = {
     showChartImport() {
         openModal('Import Chart of Accounts', `
             <form onsubmit="App.previewChartImport(event)">
-                <p class="hint" style="margin-bottom:10px;">
+                <div class="form-group"><label>File</label>${hint(`
                     A CSV in the columns the export writes (Number, Name, Type, optional Parent and
                     Description), any spreadsheet with those headers, or hledger's account list
                     (<code>hledger accounts</code>, <code>accounts --types</code>, or
@@ -1873,9 +1870,7 @@ const App = {
                     name and renamed to the file's names; the control accounts the software posts to by
                     number are kept and renamed, never duplicated.
                     <a href="/static/downloads/chart-of-accounts-template.csv" download>Download a template</a>
-                    with the columns and a few example rows.
-                </p>
-                <div class="form-group"><label>File</label>
+                    with the columns and a few example rows.`, 'File')}
                     <input type="file" name="file" accept=".csv,.txt,.journal" required></div>
                 <div class="form-group">
                     <label style="display:flex; gap:8px; align-items:flex-start; font-weight:normal;">
