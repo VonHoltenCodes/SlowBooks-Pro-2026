@@ -176,7 +176,9 @@ Tab.*
 | Alt+H | Dashboard |
 | Alt+D | Toggle dark mode |
 | `[` outside a field | Hide or show the sidebar (v2.31.5) |
-| Ctrl+K (⌘K on a Mac), or `/` outside a field; in the desktop app Ctrl+F (⌘F) too (in a browser Ctrl+F stays the browser's find in page) | Search |
+| Ctrl+K (⌘K on a Mac), or `/` outside a field | Search |
+| Ctrl+F (⌘F on a Mac), in the desktop app (in a browser Ctrl+F stays the browser's find in page) | Find on this screen (#1092) |
+| Enter / Shift+Enter, Ctrl+G (⌘G) or F3 / Shift+F3, with Find open | Next / previous match |
 | Ctrl+S | Save the open form |
 | Ctrl+Enter | Submit Quick Entry |
 | Escape | Close the dialog (in a date field: leave the field first) |
@@ -193,6 +195,14 @@ six work as the table says. Ctrl+K (⌘K) finds from anywhere, the search
 box included. The toolbar button each one stands for carries the
 shortcut: the hover reads "Enter Bill (Alt+B)" — "(⌥B)" on a Mac — and
 a screen reader hears it (v2.22.2).
+
+Find on this screen (#1092) is a labelled search region. Its box names
+its key (`aria-keyshortcuts`), the "3 of 17" count is a polite status a
+screen reader reads as it changes, Tab stays among the bar's controls,
+and Escape closes the bar alone, focus going back where it was. A match
+is marked by a tinted box over its text and a field that matches by an
+outline, the current one stronger in both themes; the page's own text
+and colours are left as they are.
 
 ## What we know is still open
 
