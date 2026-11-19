@@ -48,6 +48,7 @@ function journal({ accountant = false, post } = {}) {
         location: { hash: '#/journal' },
         T: (w) => w,
         Terms: { text: (w) => w },
+        hint: (text) => `<span class="hint-pop" hidden>${text}</span>`,
         escapeHtml: (v) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`),
         accountLabel: (a) => a.name,
         todayISO: () => '2026-11-12',

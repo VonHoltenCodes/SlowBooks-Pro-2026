@@ -444,18 +444,16 @@ const JournalPage = {
                     <div class="form-group full-width">
                         <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
                             <input type="checkbox" name="is_adjusting" ${App.isAccountant && App.isAccountant() ? 'checked' : ''}>
-                            Adjusting entry
+                            Adjusting entry ${hint("An accountant's correction to the books: marked on the entry, listed by the Adjusting Journal Entries report, and left out of a statement on request.", 'Adjusting entry')}
                         </label>
-                        <div class="hint">An accountant's correction to the books: marked on the entry, listed by the Adjusting Journal Entries report, and left out of a statement on request.</div>
                     </div>
                     <div class="form-group">
-                        <label for="je-basis">Basis</label>
+                        <label for="je-basis">Basis ${hint(Terms.text('Accrual only: counts on accrual reports, e.g. an opening A/R balance. Cash only: counts on cash reports.'), 'Basis')}</label>
                         <select id="je-basis" name="basis" data-no-search>
                             <option value="both" selected>Both</option>
                             <option value="accrual">Accrual only</option>
                             <option value="cash">Cash only</option>
                         </select>
-                        <div class="hint">${Terms.text('Accrual only: counts on accrual reports, e.g. an opening A/R balance. Cash only: counts on cash reports.')}</div>
                     </div>
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Lines</h3>

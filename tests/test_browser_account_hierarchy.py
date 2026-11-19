@@ -111,7 +111,8 @@ def test_the_chart_nests_sub_accounts_and_the_form_picks_a_parent(
         assert page.get_by_label("Sub-account of").count() == 1
         hint = page.get_attribute("#account-parent", "aria-describedby")
         assert hint == "account-parent-hint"
-        assert page.get_attribute("#account-parent-hint", "role") is None
+        # the note behind the tortoise (#977), not a live region
+        assert page.get_attribute("#account-parent-hint", "role") == "note"
         assert page.get_attribute("#account-parent-status", "role") == "status"
 
         # a type round trip: Other Expense lets Travel go, Expense brings it

@@ -20,9 +20,11 @@ let _hintSeq = 0;
 // `text` is page markup (a hint may carry <strong> or a link): the caller
 // escapes what a user typed, as with any template. `about` is the field's
 // own name, shown in bold at the head of the note and read as the button's
-// name ("About CC"); with none the button is "About this field".
-function hint(text, about = '') {
-    const id = `hint-${++_hintSeq}`;
+// name ("About CC"); with none the button is "About this field". `id` names
+// the note when a field already points at it with aria-describedby (a hidden
+// note still describes its field); with none it is hint-N.
+function hint(text, about = '', id = '') {
+    id = id || `hint-${++_hintSeq}`;
     const name = about ? `About ${about}` : 'About this field';
     const head = about ? `<strong class="hint-pop-title">${escapeHtml(about)}</strong>` : '';
     return `<span class="hint-wrap"><button type="button" class="hint-icon" data-hint aria-label="${escapeHtml(name)}" aria-expanded="false" aria-controls="${id}" aria-describedby="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="17" alt="" aria-hidden="true"></button><span class="hint-pop" id="${id}" role="note" hidden><img class="hint-pop-mark" src="/static/img/tortoise-info.png" srcset="/static/img/tortoise-info@2x.png 2x" width="28" height="28" alt="" aria-hidden="true"><span class="hint-pop-body">${head}${text}</span></span></span>`;
@@ -32,6 +34,17 @@ const Hints = {
     _open: null,   // the button whose note is open
 
     note(button) { return document.getElementById(button.getAttribute('aria-controls')); },
+
+    // A hint whose text follows a choice on the form: swap the body's words
+    // and keep the field name at its head. `text` is plain text.
+    setText(id, text) {
+        const note = document.getElementById(id);
+        const body = note && note.querySelector('.hint-pop-body');
+        if (!body) return;
+        const head = body.querySelector('.hint-pop-title');
+        body.textContent = text;
+        if (head) body.insertBefore(head, body.firstChild);
+    },
 
     open(button) {
         if (Hints._open && Hints._open !== button) Hints.close();
