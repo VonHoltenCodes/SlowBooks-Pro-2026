@@ -51,12 +51,13 @@ const Hints = {
         const note = Hints.note(button);
         if (!note) return;
         note.hidden = false;
-        note.classList.remove('hint-pop--right');
         button.setAttribute('aria-expanded', 'true');
         Hints._open = button;
-        // a note that would run off the right edge opens leftward instead
-        const box = note.getBoundingClientRect && note.getBoundingClientRect();
-        if (box && typeof window !== 'undefined' && box.right > window.innerWidth - 8) note.classList.add('hint-pop--right');
+        Hints.position(button);
+        // the note is placed against the window, so it follows its button
+        // as the page or a dialog scrolls, and as the window changes size
+        if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('resize', Hints.onMove);
+        if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('scroll', Hints.onMove, true);
     },
 
     close() {
@@ -66,6 +67,8 @@ const Hints = {
         if (note) note.hidden = true;
         button.setAttribute('aria-expanded', 'false');
         Hints._open = null;
+        if (typeof window !== 'undefined' && window.removeEventListener) window.removeEventListener('resize', Hints.onMove);
+        if (typeof document !== 'undefined' && document.removeEventListener) document.removeEventListener('scroll', Hints.onMove, true);
     },
 
     toggle(button) {
@@ -165,18 +168,106 @@ Hints.showEntry = function (id, on) {
     box.hidden = !on;
 };
 
-// A section's note is tall: one opened from a heading low in the window
-// opens upward when there is room above, and otherwise brings itself into
-// view, so the list never starts below the window's edge.
-const _hintOpenOne = Hints.open;
-Hints.open = function (button) {
-    _hintOpenOne(button);
-    const note = Hints._open === button ? Hints.note(button) : null;
-    if (!note || !note.classList || typeof note.classList.contains !== 'function' || !note.classList.contains('hint-pop--list')) return;
-    note.classList.remove('hint-pop--up');
-    if (typeof window === 'undefined' || !note.getBoundingClientRect || !button.getBoundingClientRect) return;
-    const box = note.getBoundingClientRect();
-    if (box.bottom <= window.innerHeight - 8) return;
-    if (button.getBoundingClientRect().top - 8 >= box.height + 4) note.classList.add('hint-pop--up');
-    else if (note.scrollIntoView) note.scrollIntoView({ block: 'nearest' });
+/*
+ * Where an open note goes (#977 review). A note sat under its button inside
+ * the button's own box, so a dialog's edge or a table's scroll box cut it
+ * off (the "flip left" looked only at the window). It is now placed against
+ * the window (position: fixed, from the button's place on screen), so no
+ * box around it clips it, and kept wholly inside the window, 8px clear of
+ * every edge:
+ *   - across: lined up with its button, moved in from an edge it would cross;
+ *   - down: under the button's field row (the label and the field under it,
+ *     so the note does not cover the field it describes) when there is room,
+ *     else above the button, else under the button itself; a note taller
+ *     than either side (a section's long list) takes the roomier side and
+ *     scrolls inside the height it has.
+ * Where a box around it re-anchors fixed placement (a transform or filter
+ * on an ancestor), the note's measured place at 0,0 is the offset taken off.
+ * A scroll or a change of window size places it again; once its button is
+ * scrolled out of sight the note closes.
+ */
+const HINT_EDGE = 8;  // clear of the window's edges
+const HINT_GAP = 4;   // between the button (or its field) and the note
+
+// btn: the button's rect; size: the note's {width, height}; win: the
+// window's {width, height}; row: the rect of the field row the note should
+// leave in view, or null. Returns { left, top, side, maxHeight }.
+Hints.place = function (btn, size, win, row) {
+    const width = Math.min(size.width, win.width - 2 * HINT_EDGE);
+    const left = Math.max(HINT_EDGE, Math.min(btn.left - 2, win.width - HINT_EDGE - width));
+    const underRow = (row ? Math.max(row.bottom, btn.bottom) : btn.bottom) + HINT_GAP;
+    const underButton = btn.bottom + HINT_GAP;
+    const aboveButton = btn.top - HINT_GAP;  // the note's bottom edge
+    const roomBelow = win.height - HINT_EDGE - underRow;
+    const roomAbove = aboveButton - HINT_EDGE;
+    if (size.height <= roomBelow) return { left, top: underRow, side: 'below', maxHeight: null };
+    if (size.height <= roomAbove) return { left, top: aboveButton - size.height, side: 'above', maxHeight: null };
+    if (size.height <= win.height - HINT_EDGE - underButton) return { left, top: underButton, side: 'below', maxHeight: null };
+    // taller than either side: the roomier one, the note scrolling within it
+    const belowRoom = win.height - HINT_EDGE - underButton;
+    if (belowRoom >= roomAbove) return { left, top: underButton, side: 'below', maxHeight: Math.max(0, belowRoom) };
+    return { left, top: HINT_EDGE, side: 'above', maxHeight: Math.max(0, roomAbove) };
+};
+
+// The field row a button's note should leave in view: the form group the
+// button's label heads (its label and the field under it), or the field a
+// label names; a heading's or a column head's button has none.
+Hints.rowOf = function (button) {
+    const group = button.closest && button.closest('.form-group');
+    if (group && group.getBoundingClientRect) {
+        const r = group.getBoundingClientRect();
+        if (r.height > 0 && r.height <= 120) return r;
+    }
+    const label = button.closest && button.closest('label');
+    const field = label && label.control;
+    if (field && field.getBoundingClientRect) {
+        const r = field.getBoundingClientRect();
+        if (r.height > 0) return r;
+    }
+    return null;
+};
+
+// Whether the button is still in sight: inside the window and inside every
+// scrolling box around it.
+Hints.inSight = function (button) {
+    if (typeof window === 'undefined' || !button.getBoundingClientRect) return true;
+    const b = button.getBoundingClientRect();
+    const across = (r) => b.bottom > r.top && b.top < r.bottom && b.right > r.left && b.left < r.right;
+    if (!across({ top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth })) return false;
+    if (typeof getComputedStyle !== 'function') return true;
+    for (let p = button.parentElement; p && p !== document.body; p = p.parentElement) {
+        const s = getComputedStyle(p);
+        if (/(auto|scroll|hidden|clip)/.test(s.overflowX + s.overflowY) && !across(p.getBoundingClientRect())) return false;
+    }
+    return true;
+};
+
+Hints.position = function (button) {
+    const note = Hints.note(button);
+    if (!note || !note.style || !note.getBoundingClientRect || !button.getBoundingClientRect || typeof window === 'undefined') return;
+    note.style.left = '0px';
+    note.style.top = '0px';
+    note.style.maxHeight = '';
+    note.style.overflowY = '';
+    // where 0,0 lands: the window's corner, unless a box around re-anchors it
+    const origin = note.getBoundingClientRect();
+    const p = Hints.place(button.getBoundingClientRect(), { width: origin.width, height: origin.height },
+        { width: window.innerWidth, height: window.innerHeight }, Hints.rowOf(button));
+    note.style.left = `${Math.round(p.left - origin.left)}px`;
+    note.style.top = `${Math.round(p.top - origin.top)}px`;
+    if (p.maxHeight !== null) {
+        note.style.maxHeight = `${Math.floor(p.maxHeight)}px`;
+        note.style.overflowY = 'auto';
+    }
+    if (note.setAttribute) note.setAttribute('data-side', p.side);
+};
+
+// A scroll (not the note's own, a long list scrolling) or a new window size
+Hints.onMove = function (e) {
+    const button = Hints._open;
+    if (!button) return;
+    const note = Hints.note(button);
+    if (e && e.type === 'scroll' && note && e.target && note.contains && note.contains(e.target)) return;
+    if (!Hints.inSight(button)) { Hints.close(); return; }
+    Hints.position(button);
 };

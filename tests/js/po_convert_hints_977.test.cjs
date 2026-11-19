@@ -1,5 +1,6 @@
 // #977: the "Turn into a bill" dialog's three teaching lines sit behind the
-// tortoise: the vendor's terms on Bill date, the tax on Account, the
+// tortoise: where each line is recorded (and the vendor's terms) on the
+// Lines heading over the table, the tax on Account, the
 // retainage on Retainage. Each shows only when it did before. Drives the real
 // PurchaseOrdersPage.convertToBill and the real hint().
 const assert = require('node:assert/strict');
@@ -43,10 +44,13 @@ const note = (html, about) => {
     return m && m[1];
 };
 
-test('the terms line is the Bill date tortoise, not a paragraph', async () => {
+test('the lines line is the tortoise on the Lines heading above the table, not on Bill date', async () => {
     const html = await dialog({ construction: false, tax: 0, retainage: 0 });
-    assert.match(html, /<label for="po-conv-date">Bill date <span class="hint-wrap">/);
-    assert.equal(note(html, 'Bill date'), "Choose where each line is recorded. The bill takes Steel &amp; Co's terms (Net 15) from the date below.");
+    // it tells where each line is recorded: it heads the lines, outside the table's scroll box
+    assert.match(html, /<label for="po-conv-date">Bill date<\/label>/);
+    assert.match(html, /<h3 [^>]*>Lines <span class="hint-wrap">[\s\S]*?<\/h3>\s*<div class="table-container">/);
+    assert.equal(note(html, 'Lines'), "Choose where each line is recorded. The bill takes Steel &amp; Co's terms (Net 15) from the date above.");
+    assert.equal(note(html, 'Bill date'), null);
     assert.doesNotMatch(html, /<p[^>]*>Choose where/);
     assert.equal(note(html, 'Tax on this order'), null);
     assert.equal(note(html, 'Retainage'), null);
