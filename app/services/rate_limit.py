@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Rate limiter (Phase 9.7)
+# SlowBooks Pro 2026 — Rate limiter (Phase 9.7)
 #
 # Shared slowapi Limiter instance. Lives in its own module so
 # app.routes.analytics and app.main can both import it without creating

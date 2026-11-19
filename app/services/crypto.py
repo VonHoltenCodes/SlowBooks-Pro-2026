@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Secrets encryption helpers
+# SlowBooks Pro 2026 — Secrets encryption helpers
 #
 # 2003-era accounting software famously "encrypted" secrets with trivial
 # XOR obfuscation. This is the modern replacement: Fernet symmetric

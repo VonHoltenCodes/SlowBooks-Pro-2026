@@ -4,7 +4,7 @@
 # stopped the container (2.31.3).
 set -eo pipefail
 
-echo "Slowbooks Pro 2026 — Starting up..."
+echo "SlowBooks Pro 2026 — Starting up..."
 
 # Wait for PostgreSQL (max 30 seconds)
 echo "Waiting for PostgreSQL..."
@@ -46,7 +46,7 @@ if [ -z "${SKIP_BOOT_SELFCHECK:-}" ] && python -c "import pytest" 2>/dev/null; t
     fi
 fi
 
-echo "Starting Slowbooks Pro 2026 on port ${APP_PORT:-3001}..."
+echo "Starting SlowBooks Pro 2026 on port ${APP_PORT:-3001}..."
 
 # Reverse-proxy client-IP trust needs no flag here: uvicorn reads
 # FORWARDED_ALLOW_IPS from the environment on its own (default 127.0.0.1, so

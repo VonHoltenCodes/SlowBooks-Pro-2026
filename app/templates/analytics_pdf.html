@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Slowbooks Analytics — {{ period.name|upper }}</title>
+    <title>SlowBooks Analytics — {{ period.name|upper }}</title>
     <style>
         @page {
             size: {{ 'A4' if paper_size == 'a4' else 'letter' }};
             margin: 0.75in 0.6in;
             @bottom-center {
-                content: "Slowbooks Pro 2026 · Page " counter(page) " of " counter(pages);
+                content: "SlowBooks Pro 2026 · Page " counter(page) " of " counter(pages);
                 font-family: "Helvetica Neue", Arial, sans-serif;
                 font-size: 8pt;
                 color: #888;
@@ -71,7 +71,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5pt;
         }
-        /* Slowbooks Pro 2026 wordmark — text-based, no asset required */
+        /* SlowBooks Pro 2026 wordmark — text-based, no asset required */
         .sb-brand {
             display: inline-block;
             padding: 3pt 7pt;

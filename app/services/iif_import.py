@@ -1,5 +1,5 @@
 # ============================================================================
-# IIF Import Service — Parse Intuit Interchange Format files into Slowbooks
+# IIF Import Service — Parse Intuit Interchange Format files into SlowBooks
 #
 # Handles IIF files exported from QuickBooks 2003 Pro (and compatible versions).
 # The parser is forgiving: it skips unknown sections, tolerates missing fields,
@@ -291,7 +291,7 @@ def _parse_decimal(s: str) -> Decimal:
         return Decimal("0")
 
 
-# Well-known IIF account names mapped to standard Slowbooks account numbers.
+# Well-known IIF account names mapped to standard SlowBooks account numbers.
 # Used as fallback when name-based lookup fails during import.
 _WELL_KNOWN_ACCOUNTS = {
     "accounts receivable": "1100",
@@ -477,7 +477,7 @@ def import_classes(db: Session, rows: list) -> dict:
 
 
 def import_accounts(db: Session, rows: list) -> dict:
-    """Import account rows from IIF into Slowbooks.
+    """Import account rows from IIF into SlowBooks.
 
     Handles colon-separated parent:child names by creating parents first.
     Skips accounts that already exist (matched by name or account_number).
@@ -2559,7 +2559,7 @@ def _import_all(
     posted_by: str = None,
     sub_customers: bool = False,
 ) -> dict:
-    """Import an entire IIF file into Slowbooks.
+    """Import an entire IIF file into SlowBooks.
 
     Processes in dependency order: classes -> accounts -> customers ->
     vendors -> items -> transactions.

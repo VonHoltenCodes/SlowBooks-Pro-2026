@@ -1,13 +1,13 @@
 # Installation Guide
 
-Ways to run Slowbooks Pro 2026.
+Ways to run SlowBooks Pro 2026.
 
 ---
 
 ## Option 0: Windows installer
 
 **Recommended for Windows users.** No Docker, no WSL2, no command line —
-Slowbooks Pro runs as a normal desktop app in its own window (no browser
+SlowBooks Pro runs as a normal desktop app in its own window (no browser
 tab). The installer is digitally signed, so Windows shows a verified
 publisher instead of a SmartScreen warning.
 

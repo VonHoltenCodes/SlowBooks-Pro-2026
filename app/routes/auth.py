@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Auth routes
+# SlowBooks Pro 2026 — Auth routes
 #
 #   GET  /api/auth/status  → {setup_needed, authenticated, multi_user, desktop, user?}
 #   POST /api/auth/setup   → first-time password set (409 if already set)
@@ -248,7 +248,7 @@ def _auth_status(request: Request, db: Session) -> dict:
             .all()
         ]
     # Whose books these are. The sign-in screen names them (with several
-    # companies on one machine, "Unlock Slowbooks" did not say whose
+    # companies on one machine, "Unlock SlowBooks" did not say whose
     # password it wanted — explore 2.17.3, macbase1 F2), and first-run setup
     # prefills the name, so setup neither re-asks for the name typed in the
     # New Company dialog (F3) nor silently renames a file that already holds

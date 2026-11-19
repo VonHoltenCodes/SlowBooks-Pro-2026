@@ -1,4 +1,4 @@
-"""Connect Claude from Settings (#1087).
+"""Connect to AI assistant from Settings (#1087; "Connect Claude" before 2.32.0).
 
 SlowBooks Pro links itself to the SlowBooks relay, makes a bookkeeper API
 token for the connection and holds the line to the relay itself, with
@@ -356,9 +356,13 @@ def test_connect_links_makes_the_token_and_opens_the_line(relay, client, db_sess
     assert line.hello["mcp"] is True and line.hello["http"] is False
     st = client.get("/api/switchboard/status").json()
     assert st["address"] == relay.url + "/mcp"
-    assert st["this_company"] is True and st["token_label"] == "Claude (relay)"
+    assert st["this_company"] is True and st["token_label"] == "AI assistant (relay)"
     assert st["company"]
-    row = db_session.query(ApiToken).filter(ApiToken.label == "Claude (relay)").one()
+    row = (
+        db_session.query(ApiToken)
+        .filter(ApiToken.label == "AI assistant (relay)")
+        .one()
+    )
     assert row.role == "bookkeeper" and row.is_active
     # neither the credential nor the token is in an answer
     kept = json.loads(link.link_path().read_text())
@@ -397,7 +401,7 @@ def test_claude_works_the_books_through_the_line_as_the_token(relay, client):
     assert result.get("isError") is not True, result
     # the request reached the app under the token: "last used" is stamped
     tokens = client.get("/api/tokens").json()
-    mine = next(t for t in tokens if t["label"] == "Claude (relay)")
+    mine = next(t for t in tokens if t["label"] == "AI assistant (relay)")
     assert mine["last_used_at"] is not None
 
 
@@ -428,14 +432,18 @@ def test_disconnect_closes_unlinks_revokes_and_forgets(relay, client, db_session
     assert ("POST", "/v1/forget") in relay.paths()
     assert relay.calls[-1][2] == relay.credential
     db_session.expire_all()
-    row = db_session.query(ApiToken).filter(ApiToken.label == "Claude (relay)").one()
+    row = (
+        db_session.query(ApiToken)
+        .filter(ApiToken.label == "AI assistant (relay)")
+        .one()
+    )
     assert row.is_active is False
     assert not link.link_path().exists()
     assert client.get("/api/switchboard/status").json()["state"] == "not_connected"
     # connecting again makes a new token: a revoked one stays revoked
     _connected(relay, client)
     assert client.get("/api/switchboard/status").json()["token_label"] == (
-        "Claude (relay) 2"
+        "AI assistant (relay) 2"
     )
 
 

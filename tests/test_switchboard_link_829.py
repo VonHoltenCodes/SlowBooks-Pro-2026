@@ -3,10 +3,10 @@
 Switchboard (`sbplive`) is its own public repository; the product carries
 only words and links to it:
 
-- Settings → Connections has a "Claude and agents" block with the
+- Settings → Connections has a "AI assistants" block with the
   download (the releases page), the guide and the self-hosted door, saying
   what it does and that nothing is reachable from outside unless the user
-  sets the door up; since #1087 it also holds Connect Claude, whose state
+  sets the door up; since #1087 it also holds Connect to AI assistant, whose state
   and buttons loadSwitchboard draws into #switchboard-relay (tests/
   test_switchboard_connect_1087.py and tests/js/
   settings_connect_claude_1087.test.cjs), so the block's own markup is
@@ -45,7 +45,7 @@ def test_the_connections_block_is_in_the_connections_group_with_its_heading():
     assert 'aria-labelledby="settings-h-claude-agents"' in block
     assert (
         '<h3 id="settings-h-claude-agents">'
-        "Claude and agents: SlowBooks Switchboard (sbplive)</h3>"
+        "AI assistants: SlowBooks Switchboard (sbplive)</h3>"
     ) in block
     # between AI Insights and Receipt Scanning
     assert (
@@ -53,6 +53,19 @@ def test_the_connections_block_is_in_the_connections_group_with_its_heading():
         < JS.index('id="settings-switchboard"')
         < JS.index('id="settings-ocr"')
     )
+
+
+def test_find_a_setting_reaches_the_block_by_any_assistant_word():
+    """Find a setting matches a section's headings and its tortoises' notes
+    (settings.js _matches): the block is found by "Claude", "Grok",
+    "assistant" and "AI", whichever word a person thinks of."""
+    block = _block()
+    heading = re.search(r"<h3[^>]*>(.*?)</h3>", block).group(1)
+    notes = " ".join(re.findall(r"text: `(.*?)`", block, re.S))
+    text = _flat(heading + " " + notes).lower()
+    for word in ("claude", "grok", "assistant", "ai assistant"):
+        assert word in text, word
+    assert "Connect to AI assistant" in notes
 
 
 def test_the_block_says_what_it_does_and_what_stays_on_this_computer():
@@ -94,7 +107,7 @@ def test_the_blocks_own_markup_is_words_and_links_and_the_relay_panel():
     block = _block()
     for control in ("<input", "<select", "<button", "<textarea", "onclick", "name="):
         assert control not in block, control
-    # Connect Claude's buttons are drawn into this, for an administrator
+    # Connect to AI assistant's buttons are drawn into this, for an administrator
     assert '<div id="switchboard-relay" aria-live="polite"' in block
     # the relay's caution is in the open, not behind the tortoise (#1087)
     caution = _flat(
@@ -136,7 +149,7 @@ def test_the_api_tokens_paragraph_says_a_bookkeeper_token_is_what_setup_asks_for
 
 def test_features_md_names_switchboard_as_the_way_an_agent_works_the_books():
     doc = _flat((ROOT / "docs/features.md").read_text(encoding="utf-8"))
-    assert "### Claude and agents: SlowBooks Switchboard (sbplive)" in doc
+    assert "### AI assistants: SlowBooks Switchboard (sbplive)" in doc
     assert "is the way Claude Desktop, Claude Code and any other agent" in doc
     assert "a **bookkeeper token** is what `sbplive setup` asks for" in doc
     assert "An AI agent works the books through **SlowBooks Switchboard**" in doc

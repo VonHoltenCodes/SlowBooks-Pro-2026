@@ -1,5 +1,5 @@
 """
-Seed Slowbooks with mock data from IRS Publication 583 (Rev. December 2024):
+Seed SlowBooks with mock data from IRS Publication 583 (Rev. December 2024):
 Henry Brown's Auto Body Shop, in the database this checkout runs on.
 
 The data and the logic live in app/seed/irs_sample.py, which Companies ->

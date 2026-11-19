@@ -287,7 +287,7 @@ def test_preprinted_slips_print_no_labels_no_micr_and_no_bank_digits(
         "Received from",
         "Acme Diner",
         "SLIP-7",
-        "Slowbooks",
+        "SlowBooks",
         "$",
     ):
         assert label not in text, label

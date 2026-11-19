@@ -23,12 +23,12 @@ MOVED = [
     (
         "auth.js",
         "Just enough to get you in. You can configure everything else later.",
-        '"Set up Slowbooks Pro 2026"',
+        '"Set up SlowBooks Pro 2026"',
     ),
     (
         "auth.js",
         '"You can add your address, phone, tax ID, payment defaults, " +',
-        '"Set up Slowbooks Pro 2026"',
+        '"Set up SlowBooks Pro 2026"',
     ),
     (
         "auth.js",

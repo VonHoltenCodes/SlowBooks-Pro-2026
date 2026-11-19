@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * Slowbooks Pro 2026 — Analytics SPA Page (Phase 9, inline integration)
+ * SlowBooks Pro 2026 — Analytics SPA Page (Phase 9, inline integration)
  *
  * Lives inside the main SPA shell as a hash-routed page (#/analytics),
  * following the same conventions as reports.js / bills.js / banking.js:

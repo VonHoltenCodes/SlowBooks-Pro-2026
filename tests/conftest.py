@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — pytest configuration
+# SlowBooks Pro 2026 — pytest configuration
 #
 # One in-memory SQLite database for the whole run, built once; each test
 # runs inside a transaction on it that is rolled back at the end (issue

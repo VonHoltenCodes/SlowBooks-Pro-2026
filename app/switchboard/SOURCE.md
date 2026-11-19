@@ -1,6 +1,6 @@
 # app/switchboard: SlowBooks Switchboard's line client, vendored
 
-Connect Claude (Settings, Connections, #1087) holds the line to the
+Connect to AI assistant (Settings, Connections, #1087; was "Connect Claude") holds the line to the
 SlowBooks relay with SlowBooks Switchboard's own client, so the product
 ships it instead of asking for a second program. The client is written
 and tested in SlowBooks Switchboard's private source repository, package

@@ -1,5 +1,5 @@
 # ============================================================================
-# Connect Claude (#1087): Settings, Connections, Claude and agents.
+# Connect to AI assistant (#1087): Settings, Connections, AI assistants.
 #
 #   GET  /api/switchboard/status      any signed-in person: the state
 #   POST /api/switchboard/connect     an administrator: link, token, line
@@ -31,7 +31,7 @@ def _require_admin(request: Request) -> None:
     if not _is_admin(request):
         raise HTTPException(
             status_code=403,
-            detail="Connecting Claude is an administrator's.",
+            detail="Connecting an AI assistant is an administrator's.",
         )
 
 

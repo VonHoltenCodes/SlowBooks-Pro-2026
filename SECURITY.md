@@ -8,7 +8,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Slowbooks Pro, please report it responsibly:
+If you discover a security vulnerability in SlowBooks Pro, please report it responsibly:
 
 1. **Do NOT open a public issue** for security vulnerabilities
 2. Use GitHub's [private vulnerability reporting](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/security/advisories/new) to submit a report
@@ -29,7 +29,7 @@ If you discover a security vulnerability in Slowbooks Pro, please report it resp
 
 ## Scope
 
-This policy applies to the Slowbooks Pro 2026 codebase. Security issues in third-party dependencies should be reported to those projects directly (though we appreciate a heads-up).
+This policy applies to the SlowBooks Pro 2026 codebase. Security issues in third-party dependencies should be reported to those projects directly (though we appreciate a heads-up).
 
 ## Security measures in place
 
@@ -92,7 +92,7 @@ release that fixed them. Thank you to the reporters.
 
 ## Known considerations
 
-- Slowbooks is designed to run on a **local network or single machine** — session auth provides single-user protection but is not a substitute for network-level security on the public internet. Run behind a TLS-terminating reverse proxy for external access
+- SlowBooks is designed to run on a **local network or single machine** — session auth provides single-user protection but is not a substitute for network-level security on the public internet. Run behind a TLS-terminating reverse proxy for external access
 - OAuth tokens (Stripe, QBO) are stored in the database — secure your database access accordingly
 - SMTP passwords are stored in the settings table — same as above
 - The session secret is auto-generated to `.slowbooks-session.key` on first run — do not commit this file

@@ -939,10 +939,10 @@ const SettingsPage = {
                         { name: 'Provider', id: 'ai-settings-hint', hidden: true, text: '' },
                         { name: 'Cloudflare Worker Gateway', id: 'ai-worker-help', hidden: true, text: `Deploy <code>cloudflare/worker.js</code> in your own
                     Cloudflare account — the real AI credentials live inside
-                    Cloudflare as a Worker secret, not in Slowbooks' database.
-                    Slowbooks only holds the shared Bearer token. See
+                    Cloudflare as a Worker secret, not in SlowBooks' database.
+                    SlowBooks only holds the shared Bearer token. See
                     <code>cloudflare/README.md</code> for the 5-minute setup.` },
-                        { name: 'Custom OpenAI-Compatible Endpoint', id: 'ai-endpoint-help', hidden: true, text: `Point Slowbooks at any OpenAI-compatible chat API on the
+                        { name: 'Custom OpenAI-Compatible Endpoint', id: 'ai-endpoint-help', hidden: true, text: `Point SlowBooks at any OpenAI-compatible chat API on the
                     public internet — another vendor's <code>/v1</code> base URL,
                     or a gateway you host. <code>/chat/completions</code> is
                     appended automatically if you don't include it. A model on
@@ -954,15 +954,15 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <!-- SlowBooks Switchboard (#829) and Connect Claude (#1087): the
+                <!-- SlowBooks Switchboard (#829) and Connect to AI assistant (#1087): the
                      line to the SlowBooks relay is held by SlowBooks Pro itself
                      (app/services/switchboard_link.py); loadSwitchboard draws its
                      state and an administrator's buttons into #switchboard-relay.
                      The local program's download and guide stay for Claude
                      Desktop and Claude Code. -->
                 <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
-                    <div class="settings-h-row"><h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>${hintList('Claude and agents', [
-                        { id: 'settings-claude-relay-help', text: `Connect Claude lets Claude on the web, the desktop or a phone, and Grok,
+                    <div class="settings-h-row"><h3 id="settings-h-claude-agents">AI assistants: SlowBooks Switchboard (sbplive)</h3>${hintList('AI assistants', [
+                        { id: 'settings-claude-relay-help', text: `Connect to AI assistant lets an AI assistant, such as Claude on the web, the desktop or a phone, or Grok,
                         work this company's books through the SlowBooks relay, with nothing else to install. SlowBooks Pro
                         makes a <strong>bookkeeper API token</strong> for the connection and dials out to the relay itself:
                         no port is opened, and there is no account, email or password. Add the address below as a connector
@@ -1385,8 +1385,8 @@ const SettingsPage = {
                         or <em>import</em> (the migration imports). A revoked token
                         stays revoked: make a new one instead. A bookkeeper token is
                         what <code>sbplive setup</code> asks for, to let Claude work
-                        the books through SlowBooks Switchboard (Connections, Claude
-                        and agents); make a read-only one for an agent that only reports.` },
+                        the books through SlowBooks Switchboard (Connections, AI
+                        assistants); make a read-only one for an agent that only reports.` },
                     ])}</div>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
@@ -2658,7 +2658,7 @@ const SettingsPage = {
         } catch (e) { /* leave the default selected */ }
     },
 
-    // ---- Connect Claude (#1087) ------------------------------------------
+    // ---- Connect to AI assistant (#1087) --------------------------------
     // fallback: { slug, sentence } after a Disconnect that could not reach
     // the relay, kept here (the link file is gone) until it is dismissed
     _claude: { status: null, code: null, error: '', timer: null, fallback: null },
@@ -2706,7 +2706,7 @@ const SettingsPage = {
         }
         if (!admin) return html;
         if (!st.linked) {
-            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" onclick="SettingsPage.connectClaude()">Connect Claude</button></div>';
+            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" onclick="SettingsPage.connectClaude()">Connect to AI assistant</button></div>';
             return html;
         }
         if (!st.this_company && st.state !== 'damaged') return html;
@@ -2751,7 +2751,7 @@ const SettingsPage = {
             SettingsPage._claude.error = '';
         } catch (e) {
             SettingsPage._claude.status = null;
-            SettingsPage._claude.error = 'Could not read the Claude connection.';
+            SettingsPage._claude.error = 'Could not read the AI assistant connection.';
         }
         SettingsPage._drawSwitchboard();
     },
@@ -2763,7 +2763,7 @@ const SettingsPage = {
             SettingsPage._claude.status = await API.post('/switchboard/connect');
             SettingsPage._claude.code = null;
             SettingsPage._claude.error = '';
-            toast('Claude is connected. Add the address in Claude, then show a sign-in code.');
+            toast('The AI assistant is connected. Add the address in Claude or Grok, then show a sign-in code.');
         } catch (err) {
             // a relay that cannot be reached says so where the button was
             SettingsPage._claude.status = Object.assign({}, SettingsPage._claude.status || {},
@@ -2805,19 +2805,19 @@ const SettingsPage = {
     },
 
     async disconnectClaude() {
-        if (!confirm('Disconnect Claude? The connection ends, the relay deletes its record of these books, and the token "'
-            + ((SettingsPage._claude.status || {}).token_label || 'Claude (relay)') + '" is revoked.')) return;
+        if (!confirm('Disconnect the AI assistant? The connection ends, the relay deletes its record of these books, and the token "'
+            + ((SettingsPage._claude.status || {}).token_label || 'AI assistant (relay)') + '" is revoked.')) return;
         try {
             const r = await API.post('/switchboard/disconnect');
             if (r && r.unlinked === false && r.slug) {
                 // the relay was out of reach: keep its name on the panel
                 SettingsPage._claude.fallback = { slug: r.slug, sentence: r.sentence || '' };
-                toast('Claude is disconnected and the token revoked. The relay was out of reach: see the relay name below.');
+                toast('The AI assistant is disconnected and the token revoked. The relay was out of reach: see the relay name below.');
             } else {
                 SettingsPage._claude.fallback = null;
                 toast(r && r.deleted
-                    ? 'Claude is disconnected, and the relay deleted its record of these books.'
-                    : 'Claude is disconnected.');
+                    ? 'The AI assistant is disconnected, and the relay deleted its record of these books.'
+                    : 'The AI assistant is disconnected.');
             }
             SettingsPage._claude.code = null;
             SettingsPage._claude.error = '';

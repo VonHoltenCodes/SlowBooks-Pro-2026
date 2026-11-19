@@ -1,12 +1,13 @@
 # ============================================================================
-# Connect Claude from Settings (#1087): SlowBooks Pro holds the line to the
+# Connect to AI assistant from Settings (#1087; "Connect Claude" until
+# 2.32.0's rename): SlowBooks Pro holds the line to the
 # SlowBooks relay itself, with SlowBooks Switchboard's own line client
 # (app/switchboard, vendored), so Claude on the web or a phone, and Grok,
 # can work the books with no second program and no tunnel.
 #
 #   connect()     links this install to the relay (no account: no email, no
 #                 password; the relay answers a random device credential),
-#                 makes a bookkeeper API token "Claude (relay)" the way
+#                 makes a bookkeeper API token "AI assistant (relay)" the way
 #                 Settings, API Tokens makes one, keeps both in one file in
 #                 the data folder readable by this user only, and opens the
 #                 line in a background thread
@@ -56,22 +57,25 @@ MCP_PATH = "/mcp"
 TERMS_URL = "https://www.slowbookspro.com/terms/"
 PRIVACY_URL = "https://www.slowbookspro.com/privacy/"
 LINK_FILE = "claude-relay.json"
-TOKEN_LABEL = "Claude (relay)"
+TOKEN_LABEL = "AI assistant (relay)"
 DEVICE_NAME = "SlowBooks Pro"
 # Under the relay's 110 seconds for a tool call, so the answer is the app's.
 API_TIMEOUT = 100.0
 # The line client's timings; the tests shorten them.
 TIMINGS = line_client.DEFAULT_TIMINGS
 
-NOT_LINKED = "Claude is not connected. An administrator can press Connect Claude."
+NOT_LINKED = (
+    "No AI assistant is connected. An administrator can press Connect to AI "
+    "assistant."
+)
 OTHER_COMPANY = (
-    "Claude is connected to {name}, not to this company. Open {name} to "
+    "The AI assistant is connected to {name}, not to this company. Open {name} to "
     "show a sign-in code or to disconnect it."
 )
-ALREADY = "Claude is already connected to this company."
+ALREADY = "An AI assistant is already connected to this company."
 UNREACHABLE = "SlowBooks Pro keeps trying on its own; the books work as before."
 DAMAGED = (
-    "The Claude connection kept in the data folder cannot be read. "
+    "The AI assistant connection kept in the data folder cannot be read. "
     "Disconnect, then connect again."
 )
 
@@ -197,7 +201,8 @@ def _load() -> dict | None:
     if os.name != "nt" and os.stat(path).st_mode & 0o077:
         raise SwitchboardError(
             409,
-            "The Claude connection kept in the data folder can be read by other "
+            "The AI assistant connection kept in the data folder can be read by "
+            "other "
             "users of this computer. Disconnect, then connect again.",
             unreadable=True,
         )
@@ -256,7 +261,7 @@ def _make_line(record: dict):
         mcp=mcp,
         app_version=app_version,
         # Claude's door on; the browser door (people's browsers through
-        # the relay) stays off: Connect Claude is for the assistant.
+        # the relay) stays off: Connect to AI assistant is for the assistant.
         switches={"mcp": True, "http": False},
         timings=TIMINGS,
     )
