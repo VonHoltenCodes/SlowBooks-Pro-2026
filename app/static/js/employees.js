@@ -476,7 +476,7 @@ const EmployeesPage = {
         // a page with outbound links. The actual portal claim flow swaps the
         // token for an HttpOnly cookie on first hit, so the exposure window
         // is one request. Still worth the heads-up in the mailto body.
-        const subject = encodeURIComponent('Your Slowbooks employee portal link');
+        const subject = encodeURIComponent('Your SlowBooks employee portal link');
         const body = encodeURIComponent(
             'Hi,\n\nUse the link below to access your pay stubs, W-4, and ' +
             'time-off requests:\n\n' + url + '\n\nThe link is personal — please ' +

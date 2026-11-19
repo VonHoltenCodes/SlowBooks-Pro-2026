@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — AI Insights service (Phase 9.5)
+# SlowBooks Pro 2026 — AI Insights service (Phase 9.5)
 #
 # Runs the analytics dashboard through an LLM and returns a structured
 # "3 observations / 3 risks / 3 recommendations" report. Six providers
@@ -72,7 +72,7 @@ def validate_worker_url(url: str) -> str:
       * **SSRF**: hostnames that resolve to (or literally *are*) loopback,
         link-local, private, multicast, unspecified, or reserved ranges
         are rejected. So is `localhost` and friends. A compromised
-        Slowbooks install can't be pointed at `http://127.0.0.1:5000/admin`
+        SlowBooks install can't be pointed at `http://127.0.0.1:5000/admin`
         or the AWS metadata service at `169.254.169.254`.
       * **Credential leakage**: embedded userinfo (`https://user:pw@host`)
         is rejected — we never want a password fragment flowing through
@@ -340,7 +340,7 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         docs_url="https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/tree/main/cloudflare",
         free_tier_hint=(
             "Deploy cloudflare/worker.js in your own CF account — "
-            "real API credentials stay in Cloudflare, Slowbooks only "
+            "real API credentials stay in Cloudflare, SlowBooks only "
             "holds a shared secret"
         ),
         needs_worker_url=True,
@@ -365,7 +365,7 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         wire_format="openai",
         docs_url="",
         free_tier_hint=(
-            "Point Slowbooks at any OpenAI-compatible chat endpoint on the "
+            "Point SlowBooks at any OpenAI-compatible chat endpoint on the "
             "public internet. Paste the base URL (e.g. https://api.example.com/v1) — "
             "/chat/completions is appended automatically. HTTPS only; "
             "localhost, LAN and other private addresses are refused (SSRF guard), "
@@ -691,7 +691,7 @@ def build_request(
 
     if provider_key == "cloudflare_worker":
         # Self-hosted CF Worker (see cloudflare/worker.js). The user runs
-        # their own Worker in their own Cloudflare account; Slowbooks only
+        # their own Worker in their own Cloudflare account; SlowBooks only
         # holds the shared Bearer secret. URL is validated aggressively by
         # validate_worker_url() to prevent MITM / SSRF / scheme confusion.
         if not worker_url:

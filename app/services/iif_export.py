@@ -1513,7 +1513,7 @@ def export_journal_entries(
 
 
 def export_all(db: Session) -> str:
-    """Export all Slowbooks data as a single IIF file.
+    """Export all SlowBooks data as a single IIF file.
 
     Order matters — QB2003 imports lists before transactions,
     and accounts must exist before items can reference them.

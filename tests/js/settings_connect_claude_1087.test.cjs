@@ -1,5 +1,5 @@
-// Connect Claude in Settings, Connections (#1087): the panel's states. The
-// words are for everyone; an administrator gets the buttons: Connect Claude
+// Connect to AI assistant in Settings, Connections (#1087): the panel's states. The
+// words are for everyone; an administrator gets the buttons: Connect to AI assistant
 // when not connected; the connector address with Copy, Show a sign-in code
 // and Disconnect when connected here; nothing to press for a connection
 // made in another company. The code shows with its ten-minute life. A
@@ -50,13 +50,13 @@ const buttons = html => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].ma
 const state = html => (html.match(/id="claude-relay-state"[^>]*>([^<]*)</) || [])[1];
 
 const ADDRESS = 'https://relay.sbplive.com/mcp';
-const CONNECTED = { state: 'connected', linked: true, this_company: true, company: 'Larkspur Supply', address: ADDRESS, token_label: 'Claude (relay)', can_manage: true };
+const CONNECTED = { state: 'connected', linked: true, this_company: true, company: 'Larkspur Supply', address: ADDRESS, token_label: 'AI assistant (relay)', can_manage: true };
 
-test('not connected: the words, and Connect Claude for an administrator only', async () => {
+test('not connected: the words, and Connect to AI assistant for an administrator only', async () => {
     const f = fixture({ '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true } });
     await f.page.loadSwitchboard();
     assert.equal(state(f.panel.innerHTML), 'Not connected');
-    assert.deepEqual(buttons(f.panel.innerHTML), ['Connect Claude']);
+    assert.deepEqual(buttons(f.panel.innerHTML), ['Connect to AI assistant']);
     const g = fixture({ '/switchboard/status': { state: 'not_connected', linked: false, can_manage: false } });
     await g.page.loadSwitchboard();
     assert.equal(state(g.panel.innerHTML), 'Not connected');
@@ -110,10 +110,10 @@ test('the relay cannot be reached: said in words', async () => {
 });
 
 test('a connection made in another company: whose it is, nothing to press', async () => {
-    const f = fixture({ '/switchboard/status': { state: 'not_connected', linked: true, this_company: false, company: 'Larkspur Supply', address: '', can_manage: true, sentence: 'Claude is connected to Larkspur Supply, not to this company.' } });
+    const f = fixture({ '/switchboard/status': { state: 'not_connected', linked: true, this_company: false, company: 'Larkspur Supply', address: '', can_manage: true, sentence: 'The AI assistant is connected to Larkspur Supply, not to this company.' } });
     await f.page.loadSwitchboard();
     assert.equal(state(f.panel.innerHTML), 'Not connected');
-    assert.ok(f.panel.innerHTML.includes('Claude is connected to Larkspur Supply'));
+    assert.ok(f.panel.innerHTML.includes('The AI assistant is connected to Larkspur Supply'));
     assert.deepEqual(buttons(f.panel.innerHTML), []);
 });
 
@@ -122,7 +122,7 @@ test('Disconnect asks first, then draws the panel again', async () => {
     await f.page.loadSwitchboard();
     await f.page.disconnectClaude();
     assert.deepEqual(f.sent.slice(-2), [['POST', '/switchboard/disconnect'], ['GET', '/switchboard/status']]);
-    assert.equal(f.toasts.at(-1)[0], 'Claude is disconnected.');
+    assert.equal(f.toasts.at(-1)[0], 'The AI assistant is disconnected.');
 });
 
 // Disconnect deletes the relay's record; the relay name is shown while

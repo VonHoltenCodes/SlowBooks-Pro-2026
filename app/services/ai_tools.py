@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — AI Query Tools (Phase 9.5b — tool-calling LLM support)
+# SlowBooks Pro 2026 — AI Query Tools (Phase 9.5b — tool-calling LLM support)
 #
 # Sixteen read-only tools that an LLM can call to answer business questions:
 #   "How much did I spend at Jack in the Box in 2025?"

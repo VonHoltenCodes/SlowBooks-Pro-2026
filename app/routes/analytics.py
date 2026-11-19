@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Analytics API
+# SlowBooks Pro 2026 — Analytics API
 # Built 2026-04-14; integrated 2026-04-15; enhanced 2026-04-15 (Phase 1).
 #
 # Read-only endpoints powered by AnalyticsEngine. Every endpoint accepts a
@@ -256,7 +256,7 @@ def export_csv(
     # Branded header — written as comment-style rows above the data table.
     # Excel/Sheets will treat them as text rows above the headerline. The
     # _csv_safe wrapping prevents formula-injection on company_name.
-    writer.writerow(["# Slowbooks Pro 2026 — Analytics Snapshot"])
+    writer.writerow(["# SlowBooks Pro 2026 — Analytics Snapshot"])
     writer.writerow([f"# Company: {_csv_safe(company_name)}"])
     writer.writerow([f"# Period: {label} ({s.isoformat()} to {e.isoformat()})"])
     writer.writerow([f"# Generated: {datetime.now(timezone.utc).isoformat()}"])

@@ -2815,7 +2815,7 @@ const App = {
         const companyEl = $('#status-company');
         if (companyEl) companyEl.textContent = `Company: ${name}`;
         // the window / tab title and the topbar brand say whose books these are
-        document.title = `${name} — Slowbooks Pro 2026`;
+        document.title = `${name} — SlowBooks Pro 2026`;
         const brand = $('#topbar-company');
         if (brand) brand.textContent = name;
     },

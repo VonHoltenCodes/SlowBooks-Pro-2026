@@ -1,6 +1,6 @@
 """A new company's first run (explore 2.17.3: skytech M18, macbase1 F1-F3).
 
-A company created in the New Company dialog opened on "Unlock Slowbooks —
+A company created in the New Company dialog opened on "Unlock SlowBooks —
 enter your password" although it had no password (/api/auth/status said
 setup_needed: true); the way on was a small link, or typing any password to
 be bounced. The unlock screen never said whose password it wanted, setup

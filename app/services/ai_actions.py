@@ -1,5 +1,5 @@
 """
-Slowbooks Pro 2026 — Predefined AI analysis actions
+SlowBooks Pro 2026 — Predefined AI analysis actions
 
 A curated set of "analyze X" actions exposed in the Analytics dropdown.
 Each action:

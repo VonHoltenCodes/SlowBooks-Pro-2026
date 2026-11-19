@@ -300,7 +300,7 @@ MOVED = {
     81: ("business", "Deploy cloudflare/worker.js in your own Cloudflare account"),
     82: (
         "business",
-        "Point Slowbooks at any OpenAI-compatible chat API on the public internet",
+        "Point SlowBooks at any OpenAI-compatible chat API on the public internet",
     ),
     84: (
         "business",

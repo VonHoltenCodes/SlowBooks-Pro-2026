@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Analytics Engine
+# SlowBooks Pro 2026 — Analytics Engine
 # Built 2026-04-14; integrated 2026-04-15.
 #
 # Net-new for 2026 — QuickBooks 2003's "Company Snapshot" was a handful of

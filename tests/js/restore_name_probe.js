@@ -24,7 +24,7 @@ const ctx = {
   location: { hash: '#/settings' },
   history: { pushState() {}, replaceState() {} },
   document: {
-    title: 'Harbor Light Bakery — Slowbooks Pro 2026',
+    title: 'Harbor Light Bakery — SlowBooks Pro 2026',
     addEventListener() {},
     getElementById: () => null,
     querySelectorAll: () => [],

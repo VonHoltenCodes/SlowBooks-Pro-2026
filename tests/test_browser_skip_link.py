@@ -1,7 +1,7 @@
 """The skip link's home in the top bar (2.31.8), in a real browser.
 
 "Skip to main content" showed, on the keyboard's focus, as a large blue
-box at the window's top left, over the menu button, the Slowbooks Pro
+box at the window's top left, over the menu button, the SlowBooks Pro
 wordmark and Back. It is now a small icon button at the start of the top
 bar, always there and quiet, styled like the bar's other controls: named
 "Skip to main content" with a tooltip saying so, still the first Tab stop on

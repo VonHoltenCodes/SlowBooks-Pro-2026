@@ -1,4 +1,4 @@
-# Slowbooks Pro 2026 — Cloudflare Worker AI Gateway
+# SlowBooks Pro 2026 — Cloudflare Worker AI Gateway
 #
 # Per-installation deploy config. Each LAN owner gets their own Worker,
 # their own secret, their own quota.
@@ -25,7 +25,7 @@ compatibility_date = "2026-04-01"
 binding = "AI"
 
 # Secrets (set via `wrangler secret put`, NOT committed here):
-#   AUTH_TOKEN — shared-secret string Slowbooks sends as Bearer token.
+#   AUTH_TOKEN — shared-secret string SlowBooks sends as Bearer token.
 #                Generate with: openssl rand -hex 32
 #                REQUIRED. Set it before deploying: wrangler secret put AUTH_TOKEN
 

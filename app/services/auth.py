@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Authentication
+# SlowBooks Pro 2026 — Authentication
 #
 # Passwords hashed with argon2id, sessions via Starlette SessionMiddleware
 # (signed cookie). Two shapes, one code path:

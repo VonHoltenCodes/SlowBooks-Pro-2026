@@ -9,7 +9,7 @@ See [setup-stripe.md](setup-stripe.md) and [setup-paypal.md](setup-paypal.md) fo
 ## Prerequisites
 
 - A Square account ([squareup.com](https://squareup.com))
-- Slowbooks Pro running and accessible
+- SlowBooks Pro running and accessible
 
 ---
 
@@ -19,7 +19,7 @@ See [setup-stripe.md](setup-stripe.md) and [setup-paypal.md](setup-paypal.md) fo
 2. Create an application (e.g. "SlowBooks")
 3. On the app's **Credentials** page, with **Sandbox** selected at the top, copy the **Sandbox Access Token**; on its **Locations** page, copy a sandbox **Location ID**
 
-## Step 2: Configure Slowbooks
+## Step 2: Configure SlowBooks
 
 1. Open **Settings → Connections → Online Payments → Square** (an administrator's setting)
 2. Set **Square Payments** to Enabled and **Environment** to `Sandbox`
@@ -33,12 +33,12 @@ Skip this on desktop installs — webhooks can't reach `127.0.0.1`; payments rec
 1. In the Developer Console: your app → **Webhooks → Subscriptions → Add subscription**
 2. URL: `https://your-server/api/payments/square/webhook` (HTTPS; Square refuses plain HTTP)
 3. Choose an API version and subscribe to **payment.updated**
-4. Copy the subscription's **Signature Key** into Slowbooks
-5. **Important:** paste the exact same URL into Slowbooks' **Webhook Notification URL** field — Square signs each delivery over that exact URL string, so verification fails if they differ (e.g. behind a proxy).
+4. Copy the subscription's **Signature Key** into SlowBooks
+5. **Important:** paste the exact same URL into SlowBooks' **Webhook Notification URL** field — Square signs each delivery over that exact URL string, so verification fails if they differ (e.g. behind a proxy).
 
 ## Step 4: Test in sandbox
 
-1. In Slowbooks, open an unpaid invoice → **Copy Payment Link** → open in a private window
+1. In SlowBooks, open an unpaid invoice → **Copy Payment Link** → open in a private window
 2. Click **Pay $…** (or **Pay with Square**) and pay with the sandbox test card `4111 1111 1111 1111`, CVV `111`, any future expiry and a valid ZIP such as `94103` (a USD sandbox payment needs a real-looking postal code; CVV `911` forces a decline)
 3. On return you should see "Payment received — thank you!"
 4. Verify: invoice Paid, payment row (method `square`), journal entry posted

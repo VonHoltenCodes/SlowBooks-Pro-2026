@@ -151,7 +151,7 @@
     // prompt, and the only way anywhere else was to quit the app.
     const logout = document.getElementById('logout-btn');
     if (logout) logout.addEventListener('click', async () => {
-        if (!confirm('Sign out of Slowbooks?')) return;
+        if (!confirm('Sign out of SlowBooks?')) return;
         try {
             await API.post('/auth/logout', {});
         } catch (_err) {
