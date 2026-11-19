@@ -1078,9 +1078,8 @@ const BillsPage = {
                     <tbody>${billRows}</tbody>
                 </table></div>
                 <div class="form-group" id="pay-discount-account-row" hidden style="margin-top:8px; max-width:360px;">
-                    <label for="pay-discount-account">Discount account</label>
-                    <select id="pay-discount-account" data-no-search>${PaymentTerms.discountAccountOptions(allAccounts, 'purchases')}</select>
-                    <div class="hint">Where the discounts we take post, as a vendor credit applied to each bill.</div></div>
+                    <label for="pay-discount-account">Discount account ${hint('Where the discounts we take post, as a vendor credit applied to each bill.', 'Discount account')}</label>
+                    <select id="pay-discount-account" data-no-search>${PaymentTerms.discountAccountOptions(allAccounts, 'purchases')}</select></div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Pay Selected Bills</button>

@@ -544,10 +544,9 @@ const InvoicesPage = {
                 <label for="inv-show-logo">
                     <input id="inv-show-logo" type="checkbox" data-admin ${enabled ? 'checked' : ''} ${canChange ? '' : 'disabled'} onchange="InvoicesPage.setLogoOption(this)">
                     Show company logo on invoices
+                    ${canChange ? hint('Applies to all invoices: PDF, Print, and emailed attachments. Changes save immediately.', 'Show company logo on invoices') : ''}
                 </label>
-                <div class="invoice-logo-help">${canChange
-                    ? 'Applies to all invoices: PDF, Print, and emailed attachments. Changes save immediately.'
-                    : 'Applies to all invoices. Only an administrator can change this, in Settings.'}</div>
+                ${canChange ? '' : '<div class="invoice-logo-help">Applies to all invoices. Only an administrator can change this, in Settings.</div>'}
                 <div class="invoice-logo-status" role="status" aria-live="polite"></div>
             </div>
         </div>`;
@@ -656,13 +655,13 @@ const InvoicesPage = {
                 <div class="form-grid">
                     <div class="form-group full-width"><label>Recipient Email *</label>
                         <input name="recipient" type="email" required value="${escapeHtml(email)}"></div>
-                    <div class="form-group"><label>CC <span class="form-hint">Optional. Separate addresses with commas.</span></label>
+                    <div class="form-group"><label>CC ${hint('Optional. Separate addresses with commas.', 'CC')}</label>
                         <input name="cc" placeholder="office@example.com"></div>
-                    <div class="form-group"><label>BCC <span class="form-hint">Optional. Hidden from the recipient.</span></label>
+                    <div class="form-group"><label>BCC ${hint('Optional. Hidden from the recipient.', 'BCC')}</label>
                         <input name="bcc" placeholder="books@example.com"></div>
                     <div class="form-group full-width"><label>Subject</label>
                         <input name="subject" placeholder="Loading from your template…"></div>
-                    <div class="form-group full-width"><label>Message <span class="form-hint">Appears at the top of the email. Leave it blank to send your template as it is.</span></label>
+                    <div class="form-group full-width"><label>Message ${hint('Appears at the top of the email. Leave it blank to send your template as it is.', 'Message')}</label>
                         <textarea name="message" oninput="InvoicesPage.queueEmailPreview(${id})"></textarea></div>
                 </div>
                 <details style="margin-top:4px;" open>

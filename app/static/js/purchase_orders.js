@@ -486,21 +486,18 @@ const PurchaseOrdersPage = {
                 <td class="amount">${formatCurrency(l.amount)}</td>${partial ? `<td class="amount">${formatCurrency(l.billed_amount)}</td>` : ''}${amtCols}<td>${cell}</td></tr>`;
         }).join('');
         const taxNote = Number(po.tax_amount)
-            ? `<p class="form-hint">The ${formatCurrency(po.tax_amount)} of tax on this order is part of what these goods cost: it is added to each line's account, not to Sales Tax Payable.</p>`
+            ? ' ' + hint(`The ${formatCurrency(po.tax_amount)} of tax on this order is part of what these goods cost: it is added to each line's account, not to Sales Tax Payable.`, 'Tax on this order')
             : '';
         const retNote = partial && Number(po.retainage_pct)
-            ? `<p class="form-hint">${po.retainage_pct}% retainage is held back on this bill and posted to Retainage Payable.</p>`
+            ? ' ' + hint(`${po.retainage_pct}% retainage is held back on this bill and posted to Retainage Payable.`, 'Retainage')
             : '';
         openModal(`Turn ${po.po_number} into a bill`, `
-            <p style="margin-bottom:8px;">Choose where each line is recorded. The bill takes ${escapeHtml(vendor.name)}'s terms (${escapeHtml(vendor.terms || 'Net 30')}) from the date below.</p>
-            <div class="form-group" style="max-width:200px;"><label for="po-conv-date">Bill date</label>
+            <div class="form-group" style="max-width:200px;"><label for="po-conv-date">Bill date ${hint(`Choose where each line is recorded. The bill takes ${escapeHtml(vendor.name)}'s terms (${escapeHtml(vendor.terms || 'Net 30')}) from the date below.`, 'Bill date')}</label>
                 <input type="date" id="po-conv-date" value="${todayISO()}"></div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Line</th>${receiving ? '<th scope="col" class="amount">Ordered</th><th scope="col" class="amount">Received</th>' : ''}<th scope="col" class="amount">Scheduled</th>${partial ? '<th scope="col" class="amount">Previous</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">This period</th><th scope="col" class="amount">Retainage</th>' : ''}<th scope="col">Account</th></tr></thead>
+                <thead><tr><th scope="col">Line</th>${receiving ? '<th scope="col" class="amount">Ordered</th><th scope="col" class="amount">Received</th>' : ''}<th scope="col" class="amount">Scheduled</th>${partial ? '<th scope="col" class="amount">Previous</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">This period</th><th scope="col" class="amount">Retainage' + retNote + '</th>' : ''}<th scope="col">Account${taxNote}</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
-            ${taxNote}
-            ${retNote}
             <div class="form-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="PurchaseOrdersPage.doConvert(${po.id})">Create Bill</button>

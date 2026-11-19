@@ -409,10 +409,9 @@ const PaymentsPage = {
         html += `</tbody></table></div>
             <div style="margin-top:6px;"><button type="button" class="btn btn-sm btn-secondary" onclick="PaymentsPage._autoApply()">Apply oldest first</button></div>
             <div class="form-group" id="discount-account-row" hidden style="margin-top:8px; max-width:360px;">
-                <label for="discount-account">Discount account</label>
+                <label for="discount-account">Discount account ${hint(`Where the discounts the ${T('customer')} took post, as a credit memo applied to each ${T('invoice')}.`, 'Discount account')}</label>
                 <select id="discount-account" data-no-search>${PaymentTerms.discountAccountOptions(PaymentsPage._accounts || [], 'sales')}</select>
-                ${PaymentTerms.createDiscountAccountHtml(PaymentsPage._accounts || [], 'sales', 'discount-account')}
-                <div class="hint">Where the discounts the ${T('customer')} took post, as a credit memo applied to each ${T('invoice')}.</div></div>
+                ${PaymentTerms.createDiscountAccountHtml(PaymentsPage._accounts || [], 'sales', 'discount-account')}</div>
             <div id="alloc-status" style="margin-top:8px; padding:8px 10px; border-radius:4px;
                 background:var(--gray-100); font-size:13px;"></div>`;
         $('#payment-invoices').innerHTML = html;
@@ -441,10 +440,9 @@ const PaymentsPage = {
         return `<div class="form-grid" style="margin-bottom:8px;">
                 <div class="form-group"><label>Currency</label>
                     <select name="pay_currency" onchange="PaymentsPage.setCurrency(this.value)">${opts}</select></div>
-                ${PaymentsPage._isForeign() ? `<div class="form-group"><label>Exchange rate on the payment date (${escapeHtml(PaymentsPage._home)} per ${cur})</label>
+                ${PaymentsPage._isForeign() ? `<div class="form-group"><label>Exchange rate on the payment date (${escapeHtml(PaymentsPage._home)} per ${cur}) ${hint(`Enter the amount received in ${cur}. The rate converts it for the books; a difference from the invoices' own rates posts as an exchange gain or loss.`, 'Exchange rate')}</label>
                     <input name="pay_exchange_rate" type="number" step="0.00000001" min="0" required></div>` : ''}
-            </div>
-            ${PaymentsPage._isForeign() ? `<p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">Enter the amount received in ${cur}. The rate converts it for the books; a difference from the invoices' own rates posts as an exchange gain or loss.</p>` : ''}`;
+            </div>`;
     },
 
     setCurrency(code) {

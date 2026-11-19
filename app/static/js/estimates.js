@@ -152,14 +152,14 @@ const EstimatesPage = {
         // the markup rows below are the GC's view; the owner's PDF can spread
         // them into the package prices instead (the form's "Show markup rows")
         const hiddenNote = est.show_markup_rows === false
-            ? '<div style="margin-top:8px;color:var(--gray-500);font-size:12px;">On the owner\'s PDF the markup rows are hidden: each package\'s price carries its share and one subtotal is printed.</div>' : '';
+            ? ' ' + hint('On the owner\'s PDF the markup rows are hidden: each package\'s price carries its share and one subtotal is printed.', 'Markup rows') : '';
         return `<div class="table-container"><table>
                 <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${groupsHtml}</tbody>
             </table></div>
-            ${allowBlock}${altBlock}${upBlock}${hiddenNote}
+            ${allowBlock}${altBlock}${upBlock}
             <div class="invoice-totals">
-                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(t.subtotal)}</span></div>
+                <div class="total-row"><span class="label">Subtotal${hiddenNote}</span><span class="value">${formatCurrency(t.subtotal)}</span></div>
                 ${mRow('General conditions', t.gc_pct, t.gc)}
                 ${mRow('Insurance', t.insurance_pct, t.insurance)}
                 ${mRow('Fee', t.fee_pct, t.fee)}
@@ -205,13 +205,13 @@ const EstimatesPage = {
                 <div class="form-grid">
                     <div class="form-group full-width"><label>Recipient Email *</label>
                         <input name="recipient" type="email" required value="${escapeHtml(email)}"></div>
-                    <div class="form-group"><label>CC <span class="form-hint">Optional. Separate addresses with commas.</span></label>
+                    <div class="form-group"><label>CC ${hint('Optional. Separate addresses with commas.', 'CC')}</label>
                         <input name="cc" placeholder="office@example.com"></div>
-                    <div class="form-group"><label>BCC <span class="form-hint">Optional. Hidden from the recipient.</span></label>
+                    <div class="form-group"><label>BCC ${hint('Optional. Hidden from the recipient.', 'BCC')}</label>
                         <input name="bcc" placeholder="books@example.com"></div>
                     <div class="form-group full-width"><label>Subject</label>
                         <input name="subject" placeholder="Estimate #${escapeHtml(est.estimate_number)}"></div>
-                    <div class="form-group full-width"><label>Message <span class="form-hint">Appears at the top of the email, above the attached PDF.</span></label>
+                    <div class="form-group full-width"><label>Message ${hint('Appears at the top of the email, above the attached PDF.', 'Message')}</label>
                         <textarea name="message"></textarea></div>
                 </div>
                 <div class="form-actions">
@@ -440,8 +440,7 @@ const EstimatesPage = {
                 ${f('bond_pct', est.bond_pct, 'Bond')}
             </div>
             <label style="display:block; margin-top:6px;"><input type="checkbox" name="markup_allowances" ${est.markup_allowances ? 'checked' : ''} onchange="EstimatesPage.recalc()"> Apply the markups to allowances too (off by default)</label>
-            <label style="display:block; margin-top:6px;"><input type="checkbox" name="show_markup_rows" ${est.show_markup_rows === false ? '' : 'checked'}> Show the markup rows on the owner's bid</label>
-            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Off, the owner's PDF spreads the markups into each package's price and prints one subtotal. The totals here do not change.</div>`;
+            <label style="display:block; margin-top:6px;"><input type="checkbox" name="show_markup_rows" ${est.show_markup_rows === false ? '' : 'checked'}> Show the markup rows on the owner's bid ${hint("Off, the owner's PDF spreads the markups into each package's price and prints one subtotal. The totals here do not change.", 'Show the markup rows')}</label>`;
     },
 
     // The terms / inclusions / exclusions the owner's PDF prints above the
@@ -625,7 +624,7 @@ const EstimatesPage = {
         const alt = $('#est-bid-alternates');
         if (alt) alt.innerHTML = t.alternates.length
             ? '<strong>Alternates</strong> <span style="color:var(--gray-500)">(add / deduct)</span>' + t.alternates.map(a =>
-                `<div><label><input type="checkbox" ${a.accepted ? 'checked' : ''} onchange="EstimatesPage.toggleAlternate(${a.idx}, this.checked)"> ${escapeHtml(a.desc || '(alternate)')} — ${formatCurrency(a.amount)}${a.accepted ? ' <span style="color:var(--gray-500)">(taken, at cost; markups in the rows above)</span>' : ''}</label></div>`).join('')
+                `<div><label><input type="checkbox" ${a.accepted ? 'checked' : ''} onchange="EstimatesPage.toggleAlternate(${a.idx}, this.checked)"> ${escapeHtml(a.desc || '(alternate)')} — ${formatCurrency(a.amount)}${a.accepted ? ' ' + hint('(taken, at cost; markups in the rows above)', a.desc || '(alternate)') : ''}</label></div>`).join('')
             : '';
         const up = $('#est-bid-unitprices');
         if (up) up.innerHTML = t.unitPrices.length

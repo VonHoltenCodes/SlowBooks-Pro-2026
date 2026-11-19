@@ -2359,10 +2359,8 @@ const App = {
                 <h2>Quick Entry Mode</h2>
                 <div style="font-size:10px; color:var(--text-muted);">
                     Batch invoice entry — for entering paper invoices quickly
+                    ${hint('Enter invoice details and press <strong>Save &amp; Next</strong> (or Ctrl+Enter) to save and immediately start a new invoice.', 'Quick Entry Mode')}
                 </div>
-            </div>
-            <div class="quick-entry-info" style="background:var(--primary-light); padding:8px 12px; margin-bottom:12px; border:1px solid var(--qb-gold); font-size:11px;">
-                Enter invoice details and press <strong>Save & Next</strong> (or Ctrl+Enter) to save and immediately start a new invoice.
             </div>
             <form id="qe-form" onsubmit="App.saveQuickEntry(event)">
                 <div class="form-grid">

@@ -196,12 +196,11 @@ const SalesReceiptsPage = {
                             oninput="SalesReceiptsPage.recalc()"></div>
                     ${Terms.isNonprofit() ? `
                     <div class="form-group full-width" style="border-top:1px solid var(--gray-200); padding-top:8px; margin-top:4px;">
-                        <label>Goods or services provided in exchange?</label>
+                        <label>Goods or services provided in exchange? ${hint('Leave blank for a pure gift. The receipt states the deductible portion (IRS Pub. 1771).', 'Goods or services provided in exchange')}</label>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">
                             <input name="fair_value_amount" class="money" type="number" step="0.01" min="0" placeholder="Fair value ($)" style="width:140px;">
                             <input name="fair_value_description" maxlength="200" placeholder="e.g. gala dinner" style="flex:1; min-width:180px;">
                         </div>
-                        <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Leave blank for a pure gift. The receipt states the deductible portion (IRS Pub. 1771).</div>
                     </div>` : ''}
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>

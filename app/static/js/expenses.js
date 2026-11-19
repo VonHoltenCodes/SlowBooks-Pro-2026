@@ -21,8 +21,7 @@ const ExpensesPage = {
             </div>`;
 
         if (expenses.length === 0) {
-            html += `<div class="empty-state"><p>No expenses recorded yet</p>
-                <p style="font-size:12px; color:var(--gray-600);">Enter a receipt you've already paid — by card, cash, or check. Scan it to fill the form.</p></div>`;
+            html += `<div class="empty-state"><p>No expenses recorded yet ${hint("Enter a receipt you've already paid — by card, cash, or check. Scan it to fill the form.", 'Expenses')}</p></div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr><th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Expense Account</th><th scope="col">Paid From</th><th scope="col">Reference</th>
