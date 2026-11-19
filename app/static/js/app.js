@@ -2332,8 +2332,11 @@ const App = {
             API.get('/items?active_only=true'),
             API.get('/settings'),
             PaymentTerms.load(),
+            // the company's classes, for the line Class cell (#1051)
+            App.qeLineClasses() ? Nonprofit.loadFunds() : null,
         ]);
         App._qeCustomers = customers;
+        App._qeClassId = null;
         App._qeItems = items;
         App._qeLineCount = 1;
         // Sales tax as on the New Invoice form (#802): the company's rate to
@@ -2389,7 +2392,7 @@ const App = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Sales Tax</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th>${App.qeLineClasses() ? Nonprofit.classHeadHtml() : ''}<th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Sales Tax</th></tr></thead>
                     <tbody id="qe-lines">${App._qeLineHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="App.qeAddLine()">+ Add Line</button>
@@ -2488,6 +2491,19 @@ const App = {
     },
 
     _qeLineCount: 1,
+    // A Class on each line (#1051), drawn where the company has a class of
+    // its own (Nonprofit.lineClassShown, the invoice form's rule). Quick
+    // Entry has no header class, so the empty choice is "No class". A new
+    // line, and the next invoice's first line, start with the class of the
+    // line above: the last one chosen.
+    _qeClassId: null,
+    qeLineClasses() { return typeof Nonprofit !== 'undefined' && !!Nonprofit.classCellHtml; },
+    qeLastClass() {
+        const rows = $$('#qe-lines tr');
+        const last = rows[rows.length - 1];
+        return last && App.qeLineClasses() ? Nonprofit.fundFromRow(last, 'line-class') : null;
+    },
+
     // One Quick Entry line. Its Tax box starts as a new invoice line's does
     // (TaxDefault) and follows the item picked; the last cell shows the tax
     // the line will be charged (#802).
@@ -2499,6 +2515,7 @@ const App = {
             <tr data-qeline="${idx}">
                 <td><select class="line-item" onchange="App.qeItemSelected(${idx})">${ItemQuickAdd.options(App._qeItems)}</select></td>
                 <td><input class="line-desc" value=""></td>
+                ${App.qeLineClasses() ? Nonprofit.classCellNoHeaderHtml('line-class', App._qeClassId) : ''}
                 <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
                 <td><input class="line-rate money" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>
                 <td class="col-amount line-amount">$0.00</td>
@@ -2508,6 +2525,7 @@ const App = {
     },
 
     qeAddLine() {
+        App._qeClassId = App.qeLastClass();
         const idx = App._qeLineCount++;
         $('#qe-lines').insertAdjacentHTML('beforeend', App._qeLineHtml(idx));
         App.qeRecalc();
@@ -2568,6 +2586,7 @@ const App = {
                     description: row.querySelector('.line-desc')?.value || '',
                     quantity: qty, rate: rate, line_order: i,
                     is_taxable: box ? box.checked : null,
+                    class_id: App.qeLineClasses() ? Nonprofit.fundFromRow(row, 'line-class') : null,
                 });
             }
         });
@@ -2609,6 +2628,7 @@ const App = {
             toast(`${T('Invoice')} #${inv.invoice_number} created`);
             // Reset form for next entry; the tax rate stays as typed
             form.po_number.value = '';
+            App._qeClassId = App.qeLastClass();
             $('#qe-lines').innerHTML = App._qeLineHtml(0);
             App._qeLineCount = 1;
             App.qeRecalc();

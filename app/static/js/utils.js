@@ -2047,6 +2047,12 @@ const Nonprofit = {
             .map(f => `<option value="${f.id}" ${fundSelected === f.id ? 'selected' : ''}>${escapeHtml(f.name)}${f.is_archived ? ' (archived)' : ''}</option>`).join('');
         return `<td><select class="${cls}-fund" data-no-search><option value="">Same as header</option>${funds}</select></td>`;
     },
+    // The same cell where the form has no header class to fall back on
+    // (Quick Entry, #1051): the empty choice is "No class".
+    classCellNoHeaderHtml(cls, fundSelected) {
+        return Nonprofit.classCellHtml(cls, fundSelected)
+            .replace('<option value="">Same as header</option>', '<option value="">No class</option>');
+    },
     headHtml() { return Nonprofit.classHeadHtml() + (Nonprofit.enabled() ? `<th scope="col">Function</th>` : ''); },
     cellHtml(cls, selected, fundSelected) {
         const split = Nonprofit.enabled() && (Nonprofit._rules || []).length ? ` <button type="button" class="btn btn-sm btn-secondary np-split" title="Split this line by an allocation rule" onclick="Nonprofit.splitRow(this)">Split</button>` : '';
