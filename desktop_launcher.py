@@ -3589,6 +3589,17 @@ def install_mac_print_panel() -> bool:
     return True
 
 
+def _pdf_is_landscape(document, quartz) -> bool:
+    """Whether a PDFKit document's first page is wider than tall. Anything
+    unexpected reads as portrait, the panel's own start."""
+    try:
+        page = document.pageAtIndex_(0)
+        size = page.boundsForBox_(quartz.kPDFDisplayBoxMediaBox).size
+        return size.width > size.height
+    except Exception:
+        return False
+
+
 def mac_print_pdf(data: bytes, title: str) -> None:
     """Queue a PDF for the Mac's print panel (#1030): PDFKit draws its pages
     as they are, at their own size (#1040: scaled down to the printer's
@@ -3612,6 +3623,11 @@ def mac_print_pdf(data: bytes, title: str) -> None:
             if document is None:
                 raise ValueError("PDFKit could not read the PDF")
             info = AppKit.NSPrintInfo.sharedPrintInfo().copy()
+            # A landscape PDF (Profit & Loss by month) opens the panel on
+            # Landscape (#1044): the shared print info is portrait, and
+            # autoRotate only turned the page sideways on a portrait sheet.
+            if _pdf_is_landscape(document, Quartz):
+                info.setOrientation_(AppKit.NSPaperOrientationLandscape)
             operation = document.printOperationForPrintInfo_scalingMode_autoRotate_(
                 info, Quartz.kPDFPrintPageScaleNone, True
             )
