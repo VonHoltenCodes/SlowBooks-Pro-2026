@@ -203,3 +203,111 @@ def test_a_phone_width_window_keeps_its_sidebar(browser, company, books):
     finally:
         page.evaluate("() => localStorage.removeItem('slowbooks-sidebar-hidden')")
         page.close()
+
+
+# --- the brand, once, in the sidebar (#978) ------------------------------
+
+BRAND = """() => {
+    const logo = document.querySelector('#sidebar .sidebar-brand .sidebar-logo');
+    const side = document.getElementById('sidebar');
+    const head = document.querySelector('#sidebar .sidebar-header');
+    const bar = document.getElementById('topbar');
+    const box = el => { const r = el.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+                 width: r.width, height: r.height }; };
+    const shown = el => !!el && el.getClientRects().length > 0;
+    const ed = document.querySelector('#sidebar .sidebar-edition');
+    return {
+        shown: shown(logo),
+        logo: shown(logo) ? box(logo) : null,
+        head: shown(head) ? box(head) : null,
+        side: shown(side) ? box(side) : null,
+        name: logo ? logo.getAttribute('aria-label') : null,
+        role: logo ? logo.getAttribute('role') : null,
+        h1: [...document.querySelectorAll('h1')].filter(shown).length,
+        edition: shown(ed) ? { text: ed.innerText.trim(), box: box(ed) } : null,
+        barText: bar.innerText,
+        sideways: document.documentElement.scrollWidth > innerWidth + 1,
+    };
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("size", ["100", "115", "125", "150"])
+def test_the_brand_is_the_logo_in_the_sidebar(browser, company, books, theme, size):
+    """The logo is in the sidebar at every text size and in both themes,
+    named "SlowBooks Pro", inside the sidebar's padding, with the version
+    line under it as it was; the top bar names nothing."""
+    handled = []
+    page = new_page(browser, viewport={"width": 1280, "height": 800})
+    page.route("**/*", _served_by(company, handled, SERVED))
+    page.add_init_script(
+        f"localStorage.setItem('slowbooks-theme', '{theme}');"
+        f"localStorage.setItem('slowbooks.textsize', '{size}');"
+    )
+    page.goto(f"{ORIGIN}/")
+    page.wait_for_function("window.App && document.readyState === 'complete'")
+    try:
+        page.evaluate(NO_SPLASH)
+        settle(page, handled)
+        got = page.evaluate(BRAND)
+        on = page.evaluate("document.documentElement.getAttribute('data-text-size')")
+        assert (on or "100") == size, on
+        assert got["shown"], got
+        assert got["name"] == "SlowBooks Pro" and got["role"] == "img"
+        assert page.get_by_role("heading", name="SlowBooks Pro").count() == 1
+        logo, side = got["logo"], got["side"]
+        # 160 x 48 of the sidebar's 200 (scaled with it by the zoom)
+        assert abs(logo["width"] / side["width"] - 0.8) < 0.02, got
+        assert abs(logo["width"] / logo["height"] - 160 / 48) < 0.05, got
+        assert side["left"] < logo["left"] and logo["right"] < side["right"], got
+        assert logo["bottom"] <= got["edition"]["box"]["top"] + 0.5, got
+        assert got["edition"]["text"].startswith("2026 EDITION · V"), got
+        assert "slowbooks" not in got["barText"].lower(), got["barText"]
+        assert not got["sideways"]
+    finally:
+        page.close()
+
+
+def test_with_the_sidebar_hidden_the_brand_goes_with_it(browser, company, books):
+    """Hide sidebar (#688) puts the brand away with the sidebar: the bar does
+    not take the name back, and Back and the Fast Rack sit where it was."""
+    page, handled = _start(browser, company)
+    try:
+        page.evaluate("() => App.setSidebarHidden(true)")
+        got = page.evaluate(BRAND)
+        assert not got["shown"], got
+        assert "slowbooks" not in got["barText"].lower()
+        gap = page.evaluate("""() => {
+            const t = document.getElementById('sidebar-toggle').getBoundingClientRect();
+            const b = document.getElementById('back-btn').getBoundingClientRect();
+            return b.left - t.right; }""")
+        # room for each one's ring and halo, and no more
+        assert 9.5 <= gap <= 14, gap
+    finally:
+        page.evaluate(
+            "() => { App.setSidebarHidden(false); "
+            "localStorage.removeItem('slowbooks-sidebar-hidden'); }"
+        )
+        page.close()
+
+
+def test_a_phone_width_window_shows_the_brand(browser, company, books):
+    handled = []
+    page = new_page(browser, viewport={"width": 390, "height": 800})
+    page.route("**/*", _served_by(company, handled, SERVED))
+    page.goto(f"{ORIGIN}/")
+    page.wait_for_function("window.App && document.readyState === 'complete'")
+    try:
+        page.evaluate(NO_SPLASH)
+        settle(page, handled)
+        got = page.evaluate(BRAND)
+        assert got["shown"], got
+        assert (
+            got["side"]["left"]
+            < got["logo"]["left"]
+            < got["logo"]["right"]
+            < got["side"]["right"]
+        )
+    finally:
+        page.close()
