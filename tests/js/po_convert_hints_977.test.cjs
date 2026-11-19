@@ -49,7 +49,7 @@ test('the lines line is the tortoise on the Lines heading above the table, not o
     // it tells where each line is recorded: it heads the lines, outside the table's scroll box
     assert.match(html, /<label for="po-conv-date">Bill date<\/label>/);
     assert.match(html, /<h3 [^>]*>Lines <span class="hint-wrap">[\s\S]*?<\/h3>\s*<div class="table-container">/);
-    assert.equal(note(html, 'Lines'), "Choose where each line is recorded. The bill takes Steel &amp; Co's terms (Net 15) from the date below.");
+    assert.equal(note(html, 'Lines'), "Choose where each line is recorded. The bill takes Steel &amp; Co's terms (Net 15) from the date above.");
     assert.equal(note(html, 'Bill date'), null);
     assert.doesNotMatch(html, /<p[^>]*>Choose where/);
     assert.equal(note(html, 'Tax on this order'), null);
