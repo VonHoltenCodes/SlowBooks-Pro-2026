@@ -193,8 +193,9 @@ def test_no_moved_text_is_left_in_the_open():
 
 
 def test_each_page_has_its_count_of_tortoises():
+    # at least: a later group adds its own to a shared file (app.js)
     for name, count in TORTOISES.items():
-        assert len(_hint_calls(_src(name))) == count, name
+        assert len(_hint_calls(_src(name))) >= count, name
 
 
 def test_a_described_field_still_names_its_note():
