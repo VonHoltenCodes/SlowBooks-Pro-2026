@@ -71,10 +71,8 @@ def test_a_note_at_a_dialogs_right_edge_opens_whole(browser, company):
     try:
         _dialog(page, handled, "SettingsPage.showInvite()")
         # the dialog opens on its first field, not on the tortoise in its label
-        first = page.evaluate(
-            """() => { const a = document.activeElement;
-                return { hint: a.matches('[data-hint]'), name: a.name || '' }; }"""
-        )
+        first = page.evaluate("""() => { const a = document.activeElement;
+                return { hint: a.matches('[data-hint]'), name: a.name || '' }; }""")
         assert first == {"hint": False, "name": "username"}, first
         note_id = _open_note(page, "About Sign-in ends on")
         whole = page.evaluate(WHOLE, note_id)
@@ -97,9 +95,7 @@ def test_a_note_at_a_dialogs_right_edge_opens_whole(browser, company):
         page.close()
 
 
-def test_a_note_from_a_column_head_in_a_scrolling_table_opens_whole(
-    browser, company
-):
+def test_a_note_from_a_column_head_in_a_scrolling_table_opens_whole(browser, company):
     # an order with tax: its "Turn into a bill" dialog has a tortoise on the
     # Account column head, inside the lines table's own scroll box
     vendor = company.get("/api/vendors").json()[0]["id"]
@@ -119,9 +115,7 @@ def test_a_note_from_a_column_head_in_a_scrolling_table_opens_whole(
     )
     try:
         _dialog(page, handled, f"PurchaseOrdersPage.convertToBill({po})")
-        assert not page.evaluate(
-            "() => document.activeElement.matches('[data-hint]')"
-        )
+        assert not page.evaluate("() => document.activeElement.matches('[data-hint]')")
         label = "About Tax on this order"
         scroller = page.evaluate(
             f"""() => {{ const b = document.querySelector('#modal th button[data-hint][aria-label="{label}"]');

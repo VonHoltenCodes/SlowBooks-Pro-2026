@@ -58,8 +58,7 @@ def test_the_dialogs_tab_is_walked_in_script_in_the_browsers_order():
     assert "const stops = _tabStops($('#modal-body'), null);" in utils
     assert (
         "const first = stops.find(el => !el.matches('.skip-link, [data-hint]'))"
-        " || stops.find(el => !el.matches('[data-hint]'));"
-        in utils
+        " || stops.find(el => !el.matches('[data-hint]'));" in utils
     )
     # a text box's words are selected on the way in, a textarea's are not
     tab_to = utils[utils.index("function _tabTo(el)") :]
