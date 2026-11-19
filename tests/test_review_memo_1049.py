@@ -201,9 +201,9 @@ def test_the_migration_adds_the_column_and_walks_back(tmp_path):
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_revision(REVISION).down_revision == "e986b4d2a7c3"
+    assert script.get_revision(REVISION).down_revision == "e1055c0de4a1"
     assert script.get_heads() == [REVISION]
-    command.upgrade(cfg, "e986b4d2a7c3")  # the step below it
+    command.upgrade(cfg, "e1055c0de4a1")  # the step below it
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO bank_accounts (id, name, is_active) VALUES (1, 'Feed', 1)"
@@ -218,7 +218,7 @@ def test_the_migration_adds_the_column_and_walks_back(tmp_path):
         assert "pick_memo" in cols
         row = conn.execute("SELECT pick_memo, amount FROM bank_transactions").fetchone()
         assert row == (None, -12.5)
-    command.downgrade(cfg, "e986b4d2a7c3")
+    command.downgrade(cfg, "e1055c0de4a1")
     with sqlite3.connect(db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(bank_transactions)")}
         assert "pick_memo" not in cols
