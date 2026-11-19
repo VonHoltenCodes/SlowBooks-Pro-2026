@@ -364,6 +364,7 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
             "pick_vendor_name": picked_vendors.get(r.pick_vendor_id),
             "pick_customer_id": r.pick_customer_id,
             "pick_payee": r.pick_payee,
+            "pick_memo": r.pick_memo,
             "rule_class_id": by_rule.get(r.id, {}).get("class_id"),
             "rule_job_id": by_rule.get(r.id, {}).get("job_id"),
             "rule_vendor_id": by_rule.get(r.id, {}).get("vendor_id"),
@@ -649,6 +650,7 @@ def feed_add_all(
             "vendor_id": p.vendor_id,
             "customer_id": _entry_customer(db, p.customer_id),
             "payee": p.payee or None,
+            "memo": (p.memo or "").strip() or None,
         }
     out = m.add_all(db, ba, picks)
     db.commit()

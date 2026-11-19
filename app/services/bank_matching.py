@@ -277,6 +277,9 @@ def add(
         class_id, job_id, vendor_id, customer_id, payee = _with_picks(
             db, bt, class_id, job_id, vendor_id, customer_id, payee
         )
+    # the memo typed on the row and kept on the line (#1049), where the
+    # caller sent none; a payout's split lines carry their own
+    memo = (memo or "").strip() or (None if splits else bt.pick_memo) or None
     typed = (payee or "").strip() or None
     vendor = _entry_vendor(db, bt, typed or bt.payee, vendor_id)
     customer = db.get(Customer, customer_id) if customer_id and not splits else None
@@ -351,6 +354,7 @@ PICKS = {
     "vendor_id": "pick_vendor_id",
     "customer_id": "pick_customer_id",
     "payee": "pick_payee",
+    "memo": "pick_memo",
 }
 
 
@@ -389,7 +393,7 @@ def set_picks(db: Session, bt: BankTransaction, picks: dict) -> BankTransaction:
                 detail=f"{customer.name} is inactive; pick another name",
             )
     for key, value in picks.items():
-        if key == "payee":
+        if key in ("payee", "memo"):
             value = (value or "").strip() or None
         setattr(bt, PICKS[key], value)
     return bt

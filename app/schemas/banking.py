@@ -216,6 +216,7 @@ class BankTransactionResponse(BaseModel):
     pick_vendor_name: Optional[str] = None
     pick_customer_id: Optional[int] = None
     pick_payee: Optional[str] = None
+    pick_memo: Optional[str] = None
     # what the line's bank rule gives it besides the category: the row shows
     # them where nothing was picked, as Add posts them
     rule_class_id: Optional[int] = None
@@ -259,6 +260,8 @@ class FeedLinePicks(StrictModel):
     customer_id: Optional[int] = None
     # a name typed that is no vendor's: the entry's payee, as text
     payee: Optional[str] = None
+    # the memo typed on the row (#1049)
+    memo: Optional[str] = Field(default=None, max_length=500)
 
 
 class FeedAddAll(StrictModel):
@@ -307,6 +310,8 @@ class StatementCategory(StrictModel):
     customer_id: Optional[int] = None
     # a name typed that is no vendor's: the entry's payee, as text
     payee: Optional[str] = Field(default=None, max_length=200)
+    # the memo typed on the row (#1049): the entry's memo
+    memo: Optional[str] = Field(default=None, max_length=500)
 
 
 class ReconciliationCreate(StrictModel):

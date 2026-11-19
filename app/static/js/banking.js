@@ -1708,7 +1708,7 @@ const BankingPage = {
         setTimeout(() => BankingPage._fillCategorySelects(kind), 0);
         // one column for the row's picks (NEW-197: three columns pushed
         // Match / Exclude / Rule… past the right edge at 1280)
-        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name'].filter(Boolean).join(' / ')}</th>`;
+        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name', 'Memo'].filter(Boolean).join(' / ')}</th>`;
         return `<div class="card" id="reg-review" data-review-panel tabindex="-1" role="region" aria-label="To review" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
@@ -1720,7 +1720,7 @@ const BankingPage = {
                 <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} and the memo chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
                 <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
@@ -1854,7 +1854,9 @@ const BankingPage = {
             const kept = t.pick_vendor_name || t.pick_payee || t.rule_vendor_name || '';
             html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" value="${escapeHtml(kept)}" style="${small}" ${save}>`;
         }
-        return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';
+        // the entry's memo (#1049), kept on the line like the rest
+        html += `<input type="text" id="rv-memo-${t.id}" class="review-memo" data-write maxlength="500" autocomplete="off" aria-label="Memo, line ${t.id}" placeholder="Memo" value="${escapeHtml(t.pick_memo || '')}" style="${small}" ${save}>`;
+        return `<td><div style="display:grid; gap:2px;">${html}</div></td>`;
     },
 
     // What a review row chose besides its category, as the add call takes it.
@@ -1870,6 +1872,8 @@ const BankingPage = {
             const vendorId = BankingPage._payeeVendorId(name);
             if (vendorId) picks.vendor_id = vendorId; else picks.payee = name;
         }
+        const memo = val(`rv-memo-${lineId}`).trim();
+        if (memo) picks.memo = memo;
         return picks;
     },
 
@@ -1882,7 +1886,7 @@ const BankingPage = {
     setPicks(lineId) {
         const saving = new Promise(resolve => setTimeout(resolve, 0))
             .then(() => API.request('PATCH', `/banking/transactions/${lineId}`, {
-                class_id: null, job_id: null, customer_id: null, vendor_id: null, payee: null,
+                class_id: null, job_id: null, customer_id: null, vendor_id: null, payee: null, memo: null,
                 ...BankingPage._reviewPicks(lineId),
             }))
             .then(saved => {
