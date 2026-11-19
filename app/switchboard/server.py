@@ -569,9 +569,6 @@ def run_http(
     port: int,
     *,
     new_secret: bool = False,
-    # >>> private
-    secret_in_address: bool = False,
-    # <<< private
     allowed_origins=(),
     public_url: str | None = None,
 ) -> int:
@@ -583,13 +580,6 @@ def run_http(
     try:
         config = load_config()
         origins = tuple(remote.check_origin_arg(o) for o in allowed_origins)
-        # >>> private
-        if public_url and secret_in_address:
-            raise ConfigError(
-                "--public-url and --secret-in-address do not go together: with "
-                "OAuth the address stays /mcp and Claude signs in. Leave one out."
-            )
-        # <<< private
         signin = oauth_door.make(config, public_url)
         secret, made = remote.ensure_secret(replace=new_secret)
     except ConfigError as exc:
@@ -600,9 +590,6 @@ def run_http(
         build_registry(client),
         INSTRUCTIONS,
         secret,
-        # >>> private
-        secret_in_address=secret_in_address,
-        # <<< private
         allowed_origins=origins,
         oauth=signin.server if signin else None,
     )
@@ -642,13 +629,6 @@ def run_http(
                 else ""
             )
         )
-        # >>> private
-        if secret_in_address:
-            hint = (
-                "The connector's address in Claude is your tunnel's https:// "
-                f"address followed by {remote.ENDPOINT}/{secret}"
-            )
-        # <<< private
         _say(hint)
         if new_secret:
             _say("The connector secret used before this one no longer works.")
@@ -658,13 +638,6 @@ def run_http(
             "shown again; serve-http --new-secret makes a new one, and the old "
             "one then stops working)."
         )
-        # >>> private
-        if secret_in_address:
-            _say(
-                "The connector's address in Claude ends in "
-                f"{remote.ENDPOINT}/ followed by that secret."
-            )
-        # <<< private
     try:
         reached = probe.check(config, client)
         _say(reached.sentence())

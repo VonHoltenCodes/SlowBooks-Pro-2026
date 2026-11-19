@@ -3,10 +3,10 @@
 Connect Claude (Settings, Connections, #1087) holds the line to the
 SlowBooks relay with SlowBooks Switchboard's own client, so the product
 ships it instead of asking for a second program. The client is written
-and tested in the private SlowBooks-Pro-MCP repository, package `sbplive`;
-the relay server (`relay/`) is not copied.
+and tested in SlowBooks Switchboard's private source repository, package
+`sbplive`; the relay server (`relay/`) is not copied.
 
-- Source: SlowBooks-Pro-MCP, `sbplive/`
+- Source: SlowBooks Switchboard's source repository, `sbplive/`
 - Commit: 38869e1f0cbc640226b1bdac0d2e3a345dde8e22 (main, 2026-11-19,
   "relay/account-less")
 - Standard library only; nothing is added to the requirements.
@@ -23,10 +23,12 @@ The modules `line.py` imports, directly or through `server.py` (and
 Not copied: the OAuth door (`oauth*.py`, `app_signin.py`), the companion's
 window, CLI, autostart and host setup, and `probe.py`.
 
-## The two changes, and nothing else
+## The three changes, and nothing else
 
 1. A two-line header naming the source file.
-2. `from sbplive ...` / `import sbplive` read `app.switchboard` (import
+2. The blocks between `# >>> private` and `# <<< private` are left out, as
+   Switchboard's own public export leaves them out.
+3. `from sbplive ...` / `import sbplive` read `app.switchboard` (import
    lines only; the logger's name, the user agent and the sentences keep
    `sbplive`).
 
@@ -36,10 +38,10 @@ these files.
 
 ## Syncing
 
-    python scripts/sync_switchboard.py ~/Development/SlowBooks-Pro-MCP
-    python scripts/sync_switchboard.py ~/Development/SlowBooks-Pro-MCP --check
+    python scripts/sync_switchboard.py <source checkout>
+    python scripts/sync_switchboard.py <source checkout> --check
 
 then put the new commit above. `tests/test_switchboard_vendored_1087.py`
 compares the copies with a checkout when one is present
-(`SLOWBOOKS_SWITCHBOARD_SOURCE`, else `~/Development/SlowBooks-Pro-MCP`) and
+(`SLOWBOOKS_SWITCHBOARD_SOURCE`, else one found beside this checkout) and
 skips that comparison where there is none, as in CI.

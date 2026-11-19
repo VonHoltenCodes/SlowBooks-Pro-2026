@@ -1,18 +1,20 @@
 """Copy SlowBooks Switchboard's line client into app/switchboard (#1087).
 
-The client is written and tested in the private SlowBooks-Pro-MCP
-repository (package ``sbplive``); SlowBooks Pro carries a copy of the
-modules the line needs, so Settings can connect Claude with no second
-program. A copy is the source file with two mechanical changes and nothing
-else:
+The client is written and tested in SlowBooks Switchboard's private
+source repository (package ``sbplive``); SlowBooks Pro carries a copy of
+the modules the line needs, so Settings can connect Claude with no second
+program. A copy is the source file with three mechanical changes and
+nothing else:
 
 - a two-line header naming where it came from;
+- the blocks between "# >>> private" and "# <<< private" left out, as
+  Switchboard's own public export leaves them out;
 - its imports of ``sbplive`` read ``app.switchboard`` (the import lines
   only: the logger's name, the user agent and every sentence keep
   ``sbplive``).
 
-    python scripts/sync_switchboard.py ~/Development/SlowBooks-Pro-MCP
-    python scripts/sync_switchboard.py ~/Development/SlowBooks-Pro-MCP --check
+    python scripts/sync_switchboard.py <source checkout>
+    python scripts/sync_switchboard.py <source checkout> --check
 
 Then update the commit in app/switchboard/SOURCE.md. tests/
 test_switchboard_vendored_1087.py checks the copies against a checkout when
@@ -59,20 +61,30 @@ def header(name: str) -> str:
     return _HEADER_FIRST.format(name=name) + "\n" + _HEADER_SECOND
 
 
+PRIVATE_BEGIN, PRIVATE_END = "# >>> private", "# <<< private"
+
+
+def strip_private(text: str, name: str) -> str:
+    """The source without its private blocks (the public export's rule)."""
+    out, inside = [], False
+    for line in text.splitlines(keepends=True):
+        mark = line.strip()
+        if mark in (PRIVATE_BEGIN, PRIVATE_END):
+            if (mark == PRIVATE_BEGIN) == inside:
+                raise ValueError(f"{name}: private blocks do not pair up")
+            inside = mark == PRIVATE_BEGIN
+            continue
+        if not inside:
+            out.append(line)
+    if inside:
+        raise ValueError(f"{name}: a private block is not closed")
+    return "".join(out)
+
+
 def vendored(name: str, source: str) -> str:
     """The copy of sbplive/<name> as it sits in app/switchboard."""
-    return header(name) + _IMPORT.sub(r"\1\2 app.switchboard", source)
-
-
-def original(name: str, copy: str) -> str:
-    """Undo vendored(): what sbplive/<name> must be for this copy."""
-    head = header(name)
-    if not copy.startswith(head):
-        raise ValueError(f"{name}: the header is missing or changed")
-    body = copy[len(head) :]
-    return re.sub(
-        r"^(\s*)(from|import) app\.switchboard\b", r"\1\2 sbplive", body, flags=re.M
-    )
+    body = strip_private(source, name)
+    return header(name) + _IMPORT.sub(r"\1\2 app.switchboard", body)
 
 
 def main(argv) -> int:

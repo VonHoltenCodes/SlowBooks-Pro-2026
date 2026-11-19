@@ -1,10 +1,12 @@
 """The vendored line client is SlowBooks Switchboard's own (#1087).
 
 app/switchboard holds copies of the sbplive modules the line needs, each
-the source with a two-line header and its imports pointed at
-app.switchboard (scripts/sync_switchboard.py). Against a checkout of the
-private source repository the copies must match it exactly; CI has no
-checkout, so that test skips there. The rest holds everywhere.
+the source with a two-line header, its private blocks left out and its
+imports pointed at app.switchboard (scripts/sync_switchboard.py). Against
+a checkout of the private source repository (SLOWBOOKS_SWITCHBOARD_SOURCE,
+or one found beside this one) the copies must be exactly what the sync
+makes; CI has no checkout, so that test skips there. The rest holds
+everywhere.
 """
 
 import importlib.util
@@ -30,11 +32,15 @@ def _sync():
 
 
 def _checkout():
-    raw = os.environ.get(SOURCE_ENV) or str(
-        Path.home() / "Development" / "SlowBooks-Pro-MCP"
-    )
-    path = Path(raw).expanduser()
-    return path if (path / "sbplive" / "line.py").is_file() else None
+    raw = os.environ.get(SOURCE_ENV)
+    if raw:
+        candidates = [Path(raw).expanduser()]
+    else:  # a source checkout beside this one, by what it holds
+        candidates = sorted(ROOT.parent.glob("*"))
+    for path in candidates:
+        if (path / "sbplive" / "line.py").is_file() and (path / "relay").is_dir():
+            return path
+    return None
 
 
 def test_every_vendored_file_is_listed_with_its_header():
@@ -44,8 +50,9 @@ def test_every_vendored_file_is_listed_with_its_header():
     for name in sync.FILES:
         text = (VENDOR / name).read_text(encoding="utf-8")
         assert text.startswith(sync.header(name)), name
-        # no import of the companion's own package is left
+        # no import of the companion's own package is left, nor a private block
         assert not re.search(r"^\s*(from|import) sbplive\b", text, re.M), name
+        assert ">>> private" not in text and "<<< private" not in text, name
 
 
 def test_source_md_names_the_commit_and_the_files():
@@ -71,11 +78,11 @@ def test_the_copies_match_the_source_checkout():
     for name in sync.FILES:
         copy = (VENDOR / name).read_text(encoding="utf-8")
         source = (checkout / "sbplive" / name).read_text(encoding="utf-8")
-        assert sync.original(name, copy) == source, name
+        assert sync.vendored(name, source) == copy, name
     pinned = re.search(
         r"\b([0-9a-f]{40})\b", (VENDOR / "SOURCE.md").read_text(encoding="utf-8")
     ).group(1)
-    # the pinned commit is in the checkout's history, and its files are these
+    # the pinned commit is in the checkout's history, and its files make these
     for name in sync.FILES:
         shown = subprocess.run(
             ["git", "-C", str(checkout), "show", f"{pinned}:sbplive/{name}"],
@@ -85,4 +92,4 @@ def test_the_copies_match_the_source_checkout():
         if shown.returncode != 0:
             pytest.skip("the pinned commit is not in this checkout")
         copy = (VENDOR / name).read_text(encoding="utf-8")
-        assert sync.original(name, copy) == shown.stdout, name
+        assert sync.vendored(name, shown.stdout) == copy, name

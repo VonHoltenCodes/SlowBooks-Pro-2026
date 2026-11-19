@@ -67,14 +67,14 @@ test('connected: the address with Copy, a code and Disconnect; status only for o
     await f.page.loadSwitchboard();
     const html = f.panel.innerHTML;
     assert.equal(state(html), 'Connected');
-    assert.ok(html.includes(ADDRESS));
+    assert.equal((html.match(/<code id="claude-relay-address">([^<]*)</) || [])[1], ADDRESS);
     assert.ok(html.includes('Larkspur Supply'));
     assert.deepEqual(buttons(html), ['Copy', 'Show a sign-in code', 'Disconnect']);
     const g = fixture({ '/switchboard/status': { ...CONNECTED, can_manage: false } });
     await g.page.loadSwitchboard();
     assert.equal(state(g.panel.innerHTML), 'Connected');
     assert.deepEqual(buttons(g.panel.innerHTML), []);
-    assert.ok(!g.panel.innerHTML.includes(ADDRESS));
+    assert.ok(!g.panel.innerHTML.includes('claude-relay-address'));
 });
 
 test('a sign-in code shows with its ten-minute life', async () => {

@@ -29,12 +29,6 @@
 # the API token (mode 600). It is not the API token, which never leaves this
 # computer. Wrong or missing: 401 with no detail; too many failures from one
 # address: 429 for a while.
-# >>> private
-# --secret-in-address puts the secret in the path instead, for Claude
-# accounts whose connector form has no request headers (docs/DISTRIBUTION.md
-# says why and what that costs). Kept for our own testing: the public build
-# leaves it out.
-# <<< private
 #
 # With --public-url the door is also an OAuth authorization server (oauth.py,
 # docs/AUTH.md): /mcp then answers a missing or wrong bearer token with the
@@ -409,9 +403,6 @@ class Door:
         instructions: str,
         secret: str,
         *,
-        # >>> private
-        secret_in_address: bool = False,
-        # <<< private
         allowed_origins=(),
         limiter: FailureLimit | None = None,
         sessions: Sessions | None = None,
@@ -420,10 +411,6 @@ class Door:
         self.registry = registry
         self.instructions = instructions
         self._secret = secret.encode("utf-8")
-        # >>> private
-        self._secret_path = f"{ENDPOINT}/{secret}".encode()
-        self.secret_in_address = secret_in_address
-        # <<< private
         self.allowed_origins = tuple(allowed_origins)
         self.limiter = FailureLimit() if limiter is None else limiter
         self.sessions = Sessions() if sessions is None else sessions
@@ -479,23 +466,10 @@ class Door:
         return Reply(405, headers={"Allow": _ALLOW})
 
     def _path_allowed(self, path: str) -> bool:
-        # >>> private
-        if self.secret_in_address:
-            return True  # every /mcp/... path; _sign_in compares it
-        # <<< private
         return path in (ENDPOINT, ENDPOINT + "/")
 
     def _sign_in(self, path: str, headers, addr: str) -> tuple:
         """(who is signed in, None), or (None, the refusal to answer)."""
-        # >>> private
-        if self.secret_in_address:
-            given = path.rstrip("/").encode("utf-8", "replace")
-            if not hmac.compare_digest(given, self._secret_path):
-                self.limiter.failed(addr)
-                log.warning("refused a request from %s: not signed in", addr)
-                return None, Reply(404)
-            return "secret", None
-        # <<< private
         given = _bearer(headers.get_all("Authorization"))
         owner = self._signed_in(given)
         if owner is not None:
