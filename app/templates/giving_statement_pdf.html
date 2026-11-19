@@ -33,11 +33,18 @@
     .customer-name { font-size: 14pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
     .customer-info { font-size: 9pt; color: #333; }
     table.activity { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-    table.activity th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
-    table.activity th.r { text-align: right; }
-    table.activity td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.activity td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    .summary { float: right; width: 300px; margin-top: 8px; }
+    table.activity > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.activity > thead > tr > th.r { text-align: right; }
+    table.activity > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.activity > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    /* The last gift, the summary and the IRS statement are one unbreakable
+       group of the last gift table (#1047, as #1039 for the invoice): the
+       summary never starts a page with no gift above it, nor splits, nor
+       the IRS statement stands alone, on WeasyPrint's PDF and on Chromium's
+       print alike. */
+    table.activity > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.activity > tbody.doc-tail > tr.doc-end > td { padding: 0; border-bottom: 0; font-size: 10pt; }
+    .summary { margin-left: auto; width: 300px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
     .summary td { padding: 3px 8px; font-size: 10pt; }
     .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
     .summary .label { font-weight: 700; color: #4a4a6a; }
@@ -91,6 +98,19 @@
 
     {% if opening_message %}<div class="opening-message">{{ opening_message }}</div>{% endif %}
 
+    {# The summary and the IRS statement: in the last row of the last gift
+       table, with the last gift (#1047). #}
+    {% set closing %}
+    <div class="summary">
+        <table>
+            <tr><td class="label">Total contributions</td><td class="r">{{ st.totals.amount | currency }}</td></tr>
+            <tr><td class="label">Less goods and services received</td><td class="r">{{ st.totals.fair_value | currency }}</td></tr>
+            <tr><td class="label grand">Deductible contributions</td><td class="r grand">{{ st.totals.deductible | currency }}</td></tr>
+        </table>
+    </div>
+
+    <div class="irs">{{ st.irs_text }}</div>
+    {% endset %}
     <h3>Contributions</h3>
     <table class="activity">
         <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th class="r">Amount</th><th class="r">Goods / services</th><th class="r">Deductible</th><th class="r">Running total</th></tr></thead>
@@ -98,6 +118,7 @@
         {% set ns = namespace(running=0) %}
         {% for g in st.cash %}
             {% set ns.running = ns.running + (g.amount | float) %}
+            {% if loop.last and not st.in_kind %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
                 <td>{{ g.date | fdate }}</td>
                 <td>{{ g.number or '' }}</td>
@@ -108,8 +129,10 @@
                 <td class="r">{{ ns.running | currency }}</td>
             </tr>
         {% else %}
+            {% if not st.in_kind %}</tbody><tbody class="doc-tail">{% endif %}
             <tr><td colspan="7">No cash contributions recorded for {{ year }}.</td></tr>
         {% endfor %}
+        {% if not st.in_kind %}<tr class="doc-end"><td colspan="7">{{ closing }}</td></tr>{% endif %}
         </tbody>
     </table>
 
@@ -119,22 +142,17 @@
         <thead><tr><th>Date</th><th>Reference</th><th>Property</th></tr></thead>
         <tbody>
         {% for g in st.in_kind %}
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr><td>{{ g.date | fdate }}</td><td>{{ g.number }}</td><td>{% for ln in g.in_kind_lines %}{{ ln.description }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
         {% endfor %}
+        <tr class="doc-end"><td colspan="3">
+    <div style="font-size:8.5pt;color:#555;">Values of non-cash gifts are not stated; the donor determines fair market value.</div>
+    {{ closing }}
+        </td></tr>
         </tbody>
     </table>
-    <div style="font-size:8.5pt;color:#555;">Values of non-cash gifts are not stated; the donor determines fair market value.</div>
     {% endif %}
 
-    <div class="summary">
-        <table>
-            <tr><td class="label">Total contributions</td><td class="r">{{ st.totals.amount | currency }}</td></tr>
-            <tr><td class="label">Less goods and services received</td><td class="r">{{ st.totals.fair_value | currency }}</td></tr>
-            <tr><td class="label grand">Deductible contributions</td><td class="r grand">{{ st.totals.deductible | currency }}</td></tr>
-        </table>
-    </div>
-
-    <div class="irs">{{ st.irs_text }}</div>
     </div>
 {% endfor %}
 </body>

@@ -31,6 +31,9 @@
             </thead>
             <tbody>
                 {% for row in section.rows %}
+                {# The last two rows are a group of their own (#1047): a total never
+                   starts a page with no row above it. #}
+                {% if loop.revindex == 2 %}</tbody><tbody class="doc-tail">{% endif %}
                 <tr class="{{ row.style or '' }}">
                     {% for cell in row.cells %}
                     {# row.indent: the account's level under its heading (#390, #416) #}

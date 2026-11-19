@@ -2668,7 +2668,7 @@ def test_a_negative_current_payment_due_keeps_its_sign_on_one_line():
     html = _pdf_html(Decimal("-7894.13"), 0.0)
     assert '<td class="r grand">-$7,894.13</td>' in html
     assert html.count("-$7,894.13") >= 2  # summary and the line-detail totals
-    for selector in (".cert td.r", "table.cont td.r"):
+    for selector in (".cert td.r", "table.cont > tbody > tr > td.r"):
         rule = next(
             ln for ln in html.splitlines() if ln.strip().startswith(selector + " {")
         )

@@ -24,12 +24,18 @@
     .cert .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     h2.sheet { clear: both; font-size: 11pt; color: #003366; margin: 22px 0 8px 0; text-transform: uppercase; letter-spacing: 0.03em; }
     table.cont { width: 100%; border-collapse: collapse; }
-    table.cont th { background: #003366; color: white; padding: 5px 6px; font-size: 7.5pt; text-transform: uppercase; text-align: left; letter-spacing: 0.02em; }
-    table.cont th.r { text-align: right; }
-    table.cont td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
-    table.cont td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    table.cont tr.totals td { font-weight: 700; border-top: 2px solid #003366; }
-    table.cont tr { page-break-inside: avoid; }
+    table.cont > thead > tr > th { background: #003366; color: white; padding: 5px 6px; font-size: 7.5pt; text-transform: uppercase; text-align: left; letter-spacing: 0.02em; }
+    table.cont > thead > tr > th.r { text-align: right; }
+    table.cont > tbody > tr > td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
+    table.cont > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.cont > tbody > tr.totals > td { font-weight: 700; border-top: 2px solid #003366; }
+    table.cont > tbody > tr { page-break-inside: avoid; }
+    /* The last line, the Totals row, the note and the footer are one
+       unbreakable group of the line table (#1047, as #1039 for the invoice):
+       the Totals row never starts a page with no line above it, on
+       WeasyPrint's PDF and on Chromium's print alike. */
+    table.cont > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.cont > tbody.doc-tail > tr.doc-end > td { padding: 0; border-bottom: 0; font-size: 10pt; }
     .note { font-size: 8pt; color: #4a4a6a; margin: 6px 0 0 0; }
     .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
@@ -101,6 +107,7 @@
         </tr></thead>
         <tbody>
         {% for line in pa.lines %}
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
                 <td>{{ line.item_no or '' }}</td>
                 <td>{{ line.description or '' }}</td>
@@ -116,6 +123,7 @@
                 <td class="r">{{ line.retainage | currency }}</td>
             </tr>
         {% endfor %}
+        {% if not pa.lines %}</tbody><tbody class="doc-tail">{% endif %}
             {# A body row, not a tfoot: a footer repeats on every printed page. #}
             <tr class="totals">
             <td></td><td>Totals</td>
@@ -129,12 +137,14 @@
             {% set retainage_column = pa.lines | sum(attribute='retainage') %}
             <td class="r">{{ retainage_column | currency }}</td>
         </tr>
-        </tbody>
-    </table>
+        <tr class="doc-end"><td colspan="10">
     {# The whole equation: column total, less released, equals retainage to date. #}
     {% set released_to_date = totals.previous_released + totals.release_retainage %}
     {% if released_to_date %}<p class="note">The retainage column is before releases: its total of {{ retainage_column | currency }}, less retainage released to date of {{ released_to_date | currency }}, equals retainage to date of {{ totals.retainage_to_date | currency }}.</p>{% endif %}
 
     <div class="footer">{{ app.number }} · {{ header.job_name }}</div>
+        </td></tr>
+        </tbody>
+    </table>
 </body>
 </html>
