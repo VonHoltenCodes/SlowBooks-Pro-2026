@@ -83,6 +83,10 @@ def test_elsewhere_than_a_mac_the_page_prints_itself(monkeypatch):
         assert result["error"] == "The page prints itself on this system"
 
 
+# the print info the stand-in AppKit hands out, and the orientations set on it
+queued_info: list = []
+
+
 class _Panel:
     def __init__(self):
         self._options = 1
@@ -113,9 +117,17 @@ class _Operation:
 
 class _Document:
     made = []
+    page_size = (612.0, 792.0)
 
     def __init__(self):
         self.operation = _Operation()
+
+    def pageAtIndex_(self, index):
+        width, height = self.page_size
+        size = types.SimpleNamespace(width=width, height=height)
+        return types.SimpleNamespace(
+            boundsForBox_=lambda box: types.SimpleNamespace(size=size)
+        )
 
     @classmethod
     def alloc(cls):
@@ -137,19 +149,28 @@ def mac(monkeypatch):
     the main thread through AppHelper.callAfter, kept here to run by hand."""
     queued = []
     _Document.made = []
+    _Document.page_size = (612.0, 792.0)
+    oriented = []
     appkit = types.SimpleNamespace(
         NSPrintInfo=types.SimpleNamespace(
-            sharedPrintInfo=lambda: types.SimpleNamespace(copy=lambda: "the info")
+            sharedPrintInfo=lambda: types.SimpleNamespace(copy=lambda: info)
         ),
+        NSPaperOrientationLandscape=1,
         NSPrintPanelShowsOrientation=8,
         NSPrintPanelShowsPaperSize=4,
         NSPrintPanelShowsScaling=16,
     )
+    info = types.SimpleNamespace(setOrientation_=oriented.append)
+    queued_info.clear()
+    queued_info.extend([info, oriented])
     foundation = types.SimpleNamespace(
         NSData=types.SimpleNamespace(dataWithBytes_length_=lambda b, n: b)
     )
     quartz = types.SimpleNamespace(
-        PDFDocument=_Document, kPDFPrintPageScaleNone=0, kPDFPrintPageScaleDownToFit=2
+        PDFDocument=_Document,
+        kPDFPrintPageScaleNone=0,
+        kPDFPrintPageScaleDownToFit=2,
+        kPDFDisplayBoxMediaBox=0,
     )
     apphelper = types.SimpleNamespace(callAfter=lambda fn, *a: queued.append((fn, a)))
     tools = types.ModuleType("PyObjCTools")
@@ -175,10 +196,27 @@ def test_a_mac_opens_the_panel_on_the_pdf_from_the_main_thread(mac):
     assert doc.data == PDF
     info, mode, rotate = doc.printed
     # at the PDF's own size (#1040), turned to fit the sheet
-    assert (info, mode, rotate) == ("the info", 0, True)
+    assert (info, mode, rotate) == (queued_info[0], 0, True)
+    # a portrait page leaves the panel on Portrait
+    assert queued_info[1] == []
     assert doc.operation.title == "Invoice_1001.pdf"
     assert doc.operation.panel.options() == 1 | 8 | 4 | 16
     assert doc.operation.ran == 1
+
+
+def test_a_landscape_pdf_opens_the_panel_on_landscape(mac):
+    """#1044: Profit & Loss by month is 792 x 612; the panel opened on
+    Portrait with the page turned sideways on the sheet."""
+    _Document.page_size = (792.0, 612.0)
+    dl.PickerApi(port=1).print_document_pdf("ProfitLoss.pdf", _b64(PDF))
+    fn, args = mac[0]
+    fn(*args)
+    assert queued_info[1] == [1]
+    assert _Document.made[0].operation.ran == 1
+
+
+def test_a_page_that_cannot_be_measured_prints_portrait(mac):
+    assert dl._pdf_is_landscape(object(), sys.modules["Quartz"]) is False
 
 
 def test_an_untitled_pdf_prints_as_the_app(mac):
