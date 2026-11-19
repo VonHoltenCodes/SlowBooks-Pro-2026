@@ -628,7 +628,9 @@ jobs:
           # 398 with Find on this screen (#1092): its Chromium and WebKit modules
           # (test_browser_find.py, test_browser_find_webkit.py: one each without playwright).
           # 398 with the shards (#1095), unchanged: the sum of the shards' counts.
-          MAX_SKIPS: "398"
+          # 399 with the sidebar fold's browser test (#978, test_sidebar_fold_browser.py:
+          # one module without playwright), which landed on main without its line here.
+          MAX_SKIPS: "399"
         run: |
           total=0
           for f in shards/*/skips.txt; do
