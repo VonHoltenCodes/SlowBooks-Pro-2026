@@ -165,6 +165,8 @@ def test_the_invoice_form_has_the_cell_and_keeps_a_stored_class():
     assert "if (InvoicesPage.lineClasses()) await Nonprofit.loadFunds();" in src
     assert (
         "${InvoicesPage.lineClasses() ? Nonprofit.classHeadHtml() : ''}"
+        # the cost code and cost type heads follow in construction mode (#1055)
+        "${InvoicesPage.costCells() ? SalesCost.headHtml() : ''}"
         '<th scope="col" class="col-qty">Qty</th>' in src
     )
     assert (

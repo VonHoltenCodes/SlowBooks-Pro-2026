@@ -772,6 +772,7 @@ def duplicate_invoice(
             job_id=own_job(db, original.customer_id, oline.job_id, left_off),
             class_id=oline.class_id,
             cost_code_id=oline.cost_code_id,
+            cost_type=oline.cost_type,
             is_taxable=cline.is_taxable,
             line_order=oline.line_order,
         )

@@ -1133,9 +1133,12 @@ def test_a_sections_revenue_sits_beside_its_cost(client, db_session, seed_accoun
     row = next(r for r in tree["revenue_sections"] if r["cost_code_id"] == elec.id)
     assert (row["budget"], row["actual"]) == (88000.0, 40000.0)
     assert (row["est_revenue"], row["act_revenue"]) == (95000.0, 45000.0)
-    # the type branches carry cost only: no revenue under Other
-    for t in tree["types"]:
-        assert t["figures"]["act_revenue"] == 0 and t["figures"]["est_revenue"] == 0
+    # the revenue is on the tree's rows too (#1066): the budget's on the
+    # code and type it was budgeted on, the posted line's on its code, so
+    # the revenue columns foot to the Total row
+    assert sum(t["figures"]["est_revenue"] for t in tree["types"]) == 95000.0
+    assert sum(t["figures"]["act_revenue"] for t in tree["types"]) == 45000.0
+    assert tree["unassigned_revenue"]["figures"]["act_revenue"] == 0
     assert tree["totals"]["act_revenue"] == 45000.0
     assert tree["totals"]["est_revenue"] == 95000.0
 

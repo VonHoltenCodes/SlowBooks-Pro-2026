@@ -56,6 +56,7 @@ from app.services.jobs_service import (
     refuse_other_customers_jobs,
     refuse_other_customers_jobs_on_edit,
 )
+from app.services.job_costing import refuse_unknown_line_costs
 from app.services.terminology import document_reference, terms_from_db
 from app.services.audit import audited_bulk_delete
 
@@ -188,6 +189,7 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     due_date = data.due_date or _due_date_from_terms(db, data.date, data.terms)
     refuse_due_before_date(data.date, due_date)
     refuse_negative_lines(db, data.lines)
+    refuse_unknown_line_costs(db, data.lines)
     # the Tax exempt switch: as sent, else the job's, else the customer's
     # (#864); on, no line is taxed
     exempt = settle_tax_exempt(db, data.tax_exempt, customer, data.job_id)
@@ -295,6 +297,7 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
             job_id=line_data.job_id,
             class_id=line_data.class_id,
             cost_code_id=line_data.cost_code_id,
+            cost_type=line_data.cost_type,
             is_taxable=(
                 line_data.is_taxable if line_data.is_taxable is not None else True
             ),
@@ -511,6 +514,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         # Validate the proposed total before changing headers, lines or journals.
         if data.lines is not None:
             refuse_negative_lines(db, data.lines, invoice)
+            refuse_unknown_line_costs(db, data.lines)
             customer = db.get(
                 Customer, update_data.get("customer_id", invoice.customer_id)
             )
@@ -697,6 +701,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                         class_id=line_data.class_id,
                         job_id=line_data.job_id,
                         cost_code_id=line_data.cost_code_id,
+                        cost_type=line_data.cost_type,
                         is_taxable=(
                             line_data.is_taxable
                             if line_data.is_taxable is not None

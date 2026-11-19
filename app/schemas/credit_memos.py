@@ -6,6 +6,7 @@ from pydantic import BaseModel, field_validator, model_validator, field_serializ
 from app.schemas.common import (
     check_line_fits,
     check_lines_fit,
+    clean_line_cost_type,
     quantity_text,
     StrictModel,
     TaxRateFloat,
@@ -29,7 +30,13 @@ class CreditMemoLineCreate(StrictModel):
     # the memo's, as an invoice line does. A job must be the customer's.
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    # The cost code and type the credit takes revenue back from (#1055), as
+    # on an invoice line; blank type takes the code's own.
+    cost_code_id: Optional[int] = None
+    cost_type: Optional[str] = None
     line_order: int = 0
+
+    _cost_type = field_validator("cost_type")(clean_line_cost_type)
 
     @model_validator(mode="after")
     def _check_non_negative(self):
@@ -50,6 +57,8 @@ class CreditMemoLineResponse(BaseModel):
     amount: Decimal = Decimal("0")
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    cost_type: Optional[str] = None
     line_order: int = 0
     model_config = {"from_attributes": True}
 

@@ -313,7 +313,8 @@ jobs:
           # 377 with what leaves the last group (#1045, #1046: test_pdf_last_page_1045_1046.py nine).
           # 384 with #1047 (test_pdf_last_page_1047.py six, test_print_last_sheet_1047_browser.py one module).
           # 385 with the cash-basis Sales by Item PDF (#1062, test_cash_basis_sales_reports.py: one).
-          MAX_SKIPS: "385"
+          # 387 with the job cost PDFs (#1052, #1066: two).
+          MAX_SKIPS: "387"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

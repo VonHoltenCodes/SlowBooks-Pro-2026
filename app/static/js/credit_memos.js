@@ -161,6 +161,18 @@ const CreditMemosPage = {
         return row.querySelector('.line-class-fund') ? Nonprofit.fundFromRow(row, 'line-class') : null;
     },
 
+    // A replaced memo's line job, cost code and type, sent back while the
+    // memo stays on the same customer (a job is its customer's); a new line,
+    // or a memo moved to another customer, carries none.
+    lineJobFromRow(row, form) {
+        if (!row.dataset.customerId || row.dataset.customerId !== form.customer_id.value) return {};
+        return {
+            job_id: row.dataset.jobId ? parseInt(row.dataset.jobId) : null,
+            cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
+            cost_type: row.dataset.costType || null,
+        };
+    },
+
     // One credit line, priced from the item the way an invoice line is.
     lineRowHtml(idx) {
         return `<tr data-cmline="${idx}">
@@ -265,6 +277,12 @@ const CreditMemosPage = {
             if (tax) tax.checked = taxed;
             const cls = row.querySelector('select.line-class');
             if (cls && l.class_id) cls.value = String(l.class_id);
+            // the form has no job or cost code cells: what the line carries
+            // (set over the API, #640, #1055) goes back with the change
+            row.dataset.jobId = l.job_id == null ? '' : String(l.job_id);
+            row.dataset.costCodeId = l.cost_code_id == null ? '' : String(l.cost_code_id);
+            row.dataset.costType = l.cost_type || '';
+            row.dataset.customerId = String(cm.customer_id);
         });
         if (!(cm.lines || []).length) CreditMemosPage.addLine();
         CreditMemosPage.recalc();
@@ -283,6 +301,7 @@ const CreditMemosPage = {
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 class_id: CreditMemosPage.lineClassFromRow(row),
+                ...CreditMemosPage.lineJobFromRow(row, form),
                 line_order: i,
             });
         });

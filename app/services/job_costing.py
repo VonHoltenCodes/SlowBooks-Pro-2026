@@ -176,6 +176,20 @@ def line_cost_type(
     return None
 
 
+def refuse_unknown_line_costs(db: Session, lines) -> None:
+    """A sales line's cost code and cost type (#1055), checked before
+    anything is written: a code that is not on the chart, or a type the
+    cost_types table does not have, is refused with a 422 that names it.
+    Lines without them pass, as every sales line did before."""
+    for ln in lines:
+        code_id = getattr(ln, "cost_code_id", None)
+        if code_id is not None and db.get(CostCode, code_id) is None:
+            raise HTTPException(
+                status_code=422, detail=f"Cost code {code_id} was not found"
+            )
+        line_cost_type(db, code_id, getattr(ln, "cost_type", None))
+
+
 # ---------------------------------------------------------------------------
 # Cost-code tree
 # ---------------------------------------------------------------------------
@@ -1409,10 +1423,15 @@ def job_cost_tree(
 
     A contractor's tree reads as of `end_date` throughout: the change
     orders' budgets in effect by then and the commitments as Commitment
-    Status reads them that day. Its revenue is compared by section, not by
-    cost type (a pay application's revenue has no cost type): the type
-    branches carry cost only, and `revenue_sections` puts each section's
-    budgeted and actual revenue beside its budgeted and actual cost."""
+    Status reads them that day.
+
+    Revenue sits on the cost code and type its line or budget names (an
+    invoice line's own, #1055, else the code's type), so every figure in
+    the totals is on a row (#1066); revenue with no code and no type is
+    `unassigned_revenue`, a row of its own. A contractor's revenue is also
+    compared by section: `revenue_sections` puts each section's budgeted and
+    actual revenue beside its budgeted and actual cost, the billed markups
+    spread over the sections."""
     construction = _is_construction(db)
     # a contractor's commitments read as of the end date, as Commitment
     # Status does; other companies keep today's open commitments
@@ -1501,13 +1520,20 @@ def job_cost_tree(
 
     for ln, txn, acct in lines:
         k = key_for(ln.cost_code_id, ln.cost_type)
+        is_income = acct.account_type == AccountType.INCOME
+        if is_income and k == ("uncoded", "other") and not ln.cost_type:
+            # revenue with no cost code and no cost type has a row of its
+            # own (#1066), not Other's "No cost code"
+            k = ("revenue_uncoded",)
         f = fig.setdefault(k, _blank())
-        if acct.account_type == AccountType.INCOME:
+        if is_income:
             amt = Decimal(str(ln.credit)) - Decimal(str(ln.debit))
+            # on the code and type the line names (#1055), so every figure
+            # in the Total row is on a row above it (#1066); a contractor's
+            # revenue is compared by section as well
+            f["act_revenue"] += amt
             if construction:
                 section_cell(ln.cost_code_id)["act_revenue"] += amt
-            else:
-                f["act_revenue"] += amt
             kind = "income"
         else:
             amt = Decimal(str(ln.debit)) - Decimal(str(ln.credit))
@@ -1550,12 +1576,11 @@ def job_cost_tree(
             f["changes"] += Decimal(str(b.amount))
         else:
             f["original"] += Decimal(str(b.amount))
+        f["est_revenue"] += Decimal(str(b.revenue_amount or 0))
         if construction:
             sc = section_cell(b.cost_code_id)
             sc["budget"] += Decimal(str(b.amount))
             sc["est_revenue"] += Decimal(str(b.revenue_amount or 0))
-        else:
-            f["est_revenue"] += Decimal(str(b.revenue_amount or 0))
 
     # build the code tree per cost type with roll-ups. A code node appears
     # under a type when its subtree carries any figure for that type OR the
@@ -1624,9 +1649,11 @@ def job_cost_tree(
                 },
             }
         )
-    # whole-job budgets (no code, no type) sit outside the type branches
+    # whole-job budgets (no code, no type) sit outside the type branches,
+    # and so does revenue with no code and no type (#1066)
+    unassigned_revenue = fig.get(("revenue_uncoded",), _blank())
     for k in job_level:
-        grand[k] += job_level[k]
+        grand[k] += job_level[k] + unassigned_revenue[k]
 
     def strip(node):
         node.pop("_raw", None)
@@ -1642,9 +1669,6 @@ def job_cost_tree(
             db, job_id, budgets, sections, section_of, start_date, end_date
         )
         revenue_sections = _revenue_sections(sections, code_by_id)
-        for sc in sections.values():
-            grand["est_revenue"] += sc["est_revenue"]
-            grand["act_revenue"] += sc["act_revenue"]
     totals = _finish(grand)
     # A contractor's projected final cost carries the budget nothing has taken
     # up yet, so a trade not bought reads as cost to come, not a saving. It is
@@ -1680,11 +1704,57 @@ def job_cost_tree(
         "end_date": end_date.isoformat() if end_date else None,
         "types": type_nodes,
         "job_level_budget": fin(job_level),
+        "unassigned_revenue": {
+            "figures": fin(unassigned_revenue),
+            "lines": line_rows.get(("revenue_uncoded",), []),
+        },
         "totals": totals,
     }
     if revenue_sections is not None:
         out["revenue_sections"] = revenue_sections
     return out
+
+
+# The figures a cost tree row is judged by for Hide zero balances (#1052):
+# budget (original and changes), committed, actual and the revenue pair.
+_ROW_FIGURES = (
+    "original",
+    "changes",
+    "committed",
+    "actual",
+    "est_revenue",
+    "act_revenue",
+)
+
+
+def _row_has_figures(f: dict) -> bool:
+    return any(abs(f.get(k) or 0) >= 0.005 for k in _ROW_FIGURES)
+
+
+def hide_zero_rows(tree: dict) -> dict:
+    """The cost tree without the cost codes that carry nothing (Hide zero
+    balances, #1052, as #625 on the financial reports): a code with no
+    budget, no committed cost, no actual cost and no revenue is left out,
+    and a cost type left with nothing goes with it. Its totals are the
+    tree's own, untouched, so they read the same either way; a code with a
+    figure keeps its parent, whose roll-up carries it."""
+
+    def keep(node):
+        if not _row_has_figures(node["figures"]):
+            return None
+        return {
+            **node,
+            "children": [k for k in (keep(ch) for ch in node["children"]) if k],
+        }
+
+    types = []
+    for ty in tree["types"]:
+        codes = [k for k in (keep(n) for n in ty["codes"]) if k]
+        un = ty["uncoded"]
+        if not codes and not _row_has_figures(ty["figures"]) and not un["lines"]:
+            continue
+        types.append({**ty, "codes": codes})
+    return {**tree, "types": types, "hide_zero": True}
 
 
 # The schedule-of-values kinds that carry the estimate's markups.

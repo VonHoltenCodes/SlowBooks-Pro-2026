@@ -129,6 +129,8 @@ const SalesReceiptsPage = {
         const classGroup = await classFormGroupHtml(null);
         // narrowed to the customer's jobs; a blank customer is the walk-in
         const jobGroup = await jobFormGroupHtml(null, 'sr-customer-select');
+        // construction: a line's cost code and type (#1055)
+        if (SalesReceiptsPage.costCells()) await SalesCost.load();
 
         SalesReceiptsPage.lineCount = sr.lines.length;
         SalesReceiptsPage._items = items;
@@ -205,7 +207,7 @@ const SalesReceiptsPage = {
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th>
+                        <th scope="col">Item</th><th scope="col">Description</th>${SalesReceiptsPage.costCells() ? SalesCost.headHtml() : ''}<th scope="col" class="col-qty">Qty</th>
                         <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>
                     </tr></thead>
                     <tbody id="sr-lines">
@@ -362,11 +364,16 @@ const SalesReceiptsPage = {
         $('#sr-customer-select').value = '';
     },
 
+    // The line's cost code and type cells (#1055), the shared helper in
+    // utils.js; a bare page without it draws none.
+    costCells() { return typeof SalesCost !== 'undefined'; },
+
     lineRowHtml(idx, line, items) {
-        return `<tr data-line="${idx}">
+        return `<tr data-line="${idx}"${SalesReceiptsPage.costCells() ? ' ' + SalesCost.dataAttrs(line) : ''}>
             <td><select class="line-item" onchange="SalesReceiptsPage.itemSelected(${idx})">
                 ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
+            ${SalesReceiptsPage.costCells() ? SalesCost.cellHtml(line) : ''}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="SalesReceiptsPage.recalc()">${SalesLines.onHandHtml(line.item_id, items)}</td>
             <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="SalesReceiptsPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="SalesReceiptsPage.recalc()"></td>
@@ -397,6 +404,8 @@ const SalesReceiptsPage = {
 
     recalc() {
         TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'), $('#sales-receipt-form'));
+        // the cost code and type show while a job is chosen (#1055)
+        if (SalesReceiptsPage.costCells()) SalesCost.sync($('#sales-receipt-form'), $('#sr-lines'));
         const cur = $('#sales-receipt-form [name="currency"]')?.value;
         const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value, cur);
         SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total'], cur);
@@ -418,6 +427,7 @@ const SalesReceiptsPage = {
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                ...(SalesReceiptsPage.costCells() ? SalesCost.fromRow(row, form) : {}),
                 line_order: i,
             });
         });

@@ -137,6 +137,10 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
     # The job, on the header or a line, is this customer's (NEW-36).
     refuse_other_customers_jobs(db, customer.id, data.job_id, data.lines, "credit memo")
+    # a line's cost code and type are on the chart (#1055)
+    from app.services.job_costing import refuse_unknown_line_costs
+
+    refuse_unknown_line_costs(db, data.lines)
 
     # A memo that credits an invoice takes that invoice's tax rate unless
     # it states its own: the tax goes back the way it was charged. It
@@ -222,6 +226,8 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                 amount=amt,
                 class_id=line_data.class_id,
                 job_id=line_data.job_id,
+                cost_code_id=line_data.cost_code_id,
+                cost_type=line_data.cost_type,
                 line_order=i,
             )
         )
@@ -243,6 +249,10 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                         # and A/R lines below do
                         "class_id": line_data.class_id,
                         "job_id": line_data.job_id,
+                        # the cost code and type whose revenue it takes back
+                        # (#1055); the account is the item's
+                        "cost_code_id": line_data.cost_code_id,
+                        "cost_type": line_data.cost_type,
                     }
                 )
 
