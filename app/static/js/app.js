@@ -1227,6 +1227,8 @@ const App = {
             form.querySelectorAll('button').forEach(b => {
                 if (/closeModal\(/.test(b.getAttribute('onclick') || '')) return;
                 if (b.hasAttribute('data-readonly-ok')) return;
+                // a tortoise only opens its note (#977): reading is never locked
+                if (b.hasAttribute('data-hint')) return;
                 b.disabled = true;
                 b.style.opacity = '0.5';
                 b.style.cursor = 'not-allowed';
