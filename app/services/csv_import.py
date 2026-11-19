@@ -181,7 +181,8 @@ def _terms(row: dict, default: str, choices) -> tuple[str | None, str | None]:
         shown += f" and {len(choices) - TERMS_SHOWN} more"
     return None, (
         f"Terms \"{raw[:50]}\" isn't on the terms list ({shown}) and isn't "
-        '"Net" and a number of days. Use one of those, add it under Settings > '
+        '"Net" and a number of days (or "Net 30 EOM", days after the end of '
+        "the month). Use one of those, add it under Settings > "
         "Payment Terms, or leave Terms blank for the default."
     )
 
