@@ -181,7 +181,10 @@ pytest -k "audit or portal"  # subset by keyword
 ```
 
 The browser tests need Playwright's Chromium (`playwright install
-chromium`) and skip without it; the PostgreSQL-only tests run when
+chromium`) and skip without it; CI runs them in its "Browser tests" job
+(Playwright 1.60.0), and splits the suite into shards of whole files
+(`scripts/ci_shards.py`, which also refreshes the measured durations the
+split balances on). The PostgreSQL-only tests run when
 `SLOWBOOKS_TEST_POSTGRES_URL` names a database. To run the app while you
 work: `cp .env.example .env`, set `APP_DEBUG=true`, `APP_HOST=127.0.0.1` and
 a `PAYROLL_ENCRYPTION_SECRET`, then `python run.py` and open
