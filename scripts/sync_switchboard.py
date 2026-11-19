@@ -30,8 +30,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "app" / "switchboard"
 
 # The modules sbplive/line.py imports, directly or through server.py (and
-# remote.py, which server.Mcp imports for its sessions). Not the OAuth
-# door, the companion's window, its CLI or the relay.
+# remote.py, which server.Mcp imports for its sessions). Not serve-http's
+# runner (serve_http.py), the OAuth door, the companion's window, its CLI or
+# the relay.
 FILES = (
     "__init__.py",
     "account.py",

@@ -7,8 +7,11 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: 38869e1f0cbc640226b1bdac0d2e3a345dde8e22 (main, 2026-11-19,
-  "relay/account-less")
+- Commit: c0ab2c3ee0f1b3dbec50e44a0f619543fe1bca8d (main, 2026-11-19,
+  "sbplive/serve-http-module": serve-http's runner in its own module, an
+  explicit TLS 1.2 minimum; it carries "relay/line-concurrency", which
+  stopped the line dropping with 1006 when one TLS socket was read and
+  written from two threads at once)
 - Standard library only; nothing is added to the requirements.
 
 ## The files
@@ -16,12 +19,28 @@ and tested in SlowBooks Switchboard's private source repository, package
 The modules `line.py` imports, directly or through `server.py` (and
 `remote.py`, whose session table `server.Mcp` uses):
 
-`__init__.py`, `account.py`, `client.py`, `config.py`, `line.py`, `logs.py`,
-`operations.py`, `protocol.py`, `registry.py`, `remote.py`, `server.py`,
-`store.py`, `tools.py`, `ws.py`
+| File | Lines (copy) |
+|---|---:|
+| `__init__.py` | 16 |
+| `account.py` | 544 |
+| `client.py` | 223 |
+| `config.py` | 205 |
+| `line.py` | 973 |
+| `logs.py` | 78 |
+| `operations.py` | 628 |
+| `protocol.py` | 389 |
+| `registry.py` | 359 |
+| `remote.py` | 682 |
+| `server.py` | 558 |
+| `store.py` | 170 |
+| `tools.py` | 382 |
+| `ws.py` | 589 |
+| 14 files | 5796 |
 
-Not copied: the OAuth door (`oauth*.py`, `app_signin.py`), the companion's
-window, CLI, autostart and host setup, and `probe.py`.
+Not copied: the self-hosted HTTP door's runner (`serve_http.py`, which
+shows its connector secret on first run), the OAuth door (`oauth*.py`,
+`app_signin.py`), the companion's window, CLI, autostart and host setup,
+and `probe.py`.
 
 ## The three changes, and nothing else
 

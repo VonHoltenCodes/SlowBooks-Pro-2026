@@ -17,6 +17,13 @@
 # - timeouts: one for connecting (TCP, TLS and the handshake together) and
 #   one for reading. A read that times out ends the connection: the line
 #   then reconnects, which is simpler and safer than resuming mid-frame.
+# - one reading thread and any number of sending threads at once. A TLS
+#   connection is not safe for a read in one thread and a write in another
+#   at the same moment (OpenSSL keeps one state for both): on the live relay
+#   that made a read report a false end of stream the instant an answer
+#   went out, and the line dropped with 1006 (2026-11-19). So the socket is
+#   non-blocking, every read and write on it holds one lock for that call
+#   only, and the waiting for data or room is done outside the lock.
 #
 # TLS: wss:// is verified, always: the platform's trusted certificates and
 # the host name. A context may be passed (the tests pass one that trusts a
@@ -28,10 +35,12 @@
 import base64
 import hashlib
 import os
+import select
 import socket
 import ssl
 import struct
 import threading
+import time
 from urllib.parse import urlsplit
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -118,14 +127,23 @@ def check_url(url: str) -> tuple:
     return secure, parts.hostname, port or (443 if secure else 80), resource
 
 
+# The oldest TLS the line speaks, set on every context rather than left to
+# the platform's OpenSSL configuration.
+TLS_MINIMUM = ssl.TLSVersion.TLSv1_2
+
+
 def _verified(context) -> ssl.SSLContext:
     if context is None:
-        return ssl.create_default_context()
+        context = ssl.create_default_context()
+        context.minimum_version = TLS_MINIMUM
+        return context
     if context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname:
         raise WebSocketError(
             "A TLS context that does not verify the certificate and the host "
             "name was given; there is no way to turn verification off."
         )
+    # A context handed in keeps its certificates; its floor is raised.
+    context.minimum_version = max(context.minimum_version, TLS_MINIMUM)
     return context
 
 
@@ -275,17 +293,102 @@ class WebSocket:
         self._buf = bytearray(leftover)
         self._send_lock = threading.Lock()  # one frame at a time
         self._message_lock = threading.Lock()  # one data message at a time
+        # Held for each single read or write on the socket, never while
+        # waiting: a TLS connection must not be read and written at once.
+        self._io_lock = threading.RLock()
+        self._timeout = sock.gettimeout()  # for each read, and each write
+        sock.setblocking(False)
         self.close_sent = False
         self.closed = False
         self.on_pong = None  # called with the payload of each pong
+
+    def settimeout(self, seconds: float | None) -> None:
+        """How long a read (or a write) may wait; None waits for ever."""
+        self._timeout = seconds
+
+    # -- the socket, one call at a time ----------------------------------------
+
+    def _adopt_timeout(self) -> None:
+        # A caller that set the timeout on the socket itself (as line.py did
+        # before settimeout() was here) made it blocking again: take the
+        # value and make it non-blocking, so no call waits inside the lock.
+        current = self.sock.gettimeout()
+        if current != 0.0:
+            self._timeout = current
+            self.sock.setblocking(False)
+
+    def _deadline(self):
+        return None if self._timeout is None else time.monotonic() + self._timeout
+
+    def _wait(self, want: str, deadline) -> None:
+        """Wait, holding no lock, until the socket can be read ("r") or
+        written ("w"); TimeoutError at the deadline."""
+        left = None if deadline is None else deadline - time.monotonic()
+        if left is not None and left <= 0:
+            raise TimeoutError("timed out")
+        if self.closed:
+            return
+        fd = self.sock.fileno()
+        if fd < 0:
+            return  # closed meanwhile: the next call says so
+        if hasattr(select, "poll"):
+            poller = select.poll()
+            mask = select.POLLIN if want == "r" else select.POLLOUT
+            poller.register(fd, mask | select.POLLERR | select.POLLHUP)
+            ready = poller.poll(None if left is None else max(0, int(left * 1000)) + 1)
+        else:  # pragma: no cover - Windows
+            r, w, _ = select.select(
+                [fd] if want == "r" else [], [fd] if want == "w" else [], [], left
+            )
+            ready = r or w
+        if not ready and deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("timed out")
+
+    def _recv_some(self, size: int) -> bytes:
+        deadline = self._deadline()
+        while True:
+            with self._io_lock:
+                if self.closed:
+                    raise ConnectionClosed(CLOSE_ABNORMAL)
+                self._adopt_timeout()
+                try:
+                    return self.sock.recv(size)
+                except (ssl.SSLWantReadError, BlockingIOError, InterruptedError):
+                    want = "r"
+                except ssl.SSLWantWriteError:
+                    want = "w"
+            self._wait(want, deadline)
+
+    def _write_all(self, data: bytes) -> None:
+        view = memoryview(data)
+        deadline = self._deadline()
+        while view:
+            with self._io_lock:
+                if self.closed:
+                    raise ConnectionClosed(CLOSE_ABNORMAL)
+                self._adopt_timeout()
+                try:
+                    sent = self.sock.send(view)
+                    want = ""
+                except (ssl.SSLWantWriteError, BlockingIOError, InterruptedError):
+                    sent, want = 0, "w"
+                except ssl.SSLWantReadError:
+                    sent, want = 0, "r"
+            if sent:
+                view = view[sent:]
+            elif want:
+                self._wait(want, deadline)
 
     # -- reading --------------------------------------------------------------
 
     def _exact(self, n: int) -> bytes:
         while len(self._buf) < n:
             try:
-                chunk = self.sock.recv(max(65536, n - len(self._buf)))
+                chunk = self._recv_some(max(65536, n - len(self._buf)))
             except TimeoutError:
+                self.shutdown()
+                raise
+            except ConnectionClosed:
                 self.shutdown()
                 raise
             except OSError:
@@ -429,8 +532,8 @@ class WebSocket:
             if self.closed or (self.close_sent and opcode != OP_CLOSE):
                 raise ConnectionClosed(CLOSE_ABNORMAL)
             try:
-                self.sock.sendall(frame)
-            except OSError:
+                self._write_all(frame)
+            except OSError:  # TimeoutError too: a write that cannot go out
                 raise ConnectionClosed(CLOSE_ABNORMAL) from None
 
     def send(self, data, *, fragment: int | None = None) -> None:
@@ -472,14 +575,15 @@ class WebSocket:
         self.close_sent = True
 
     def shutdown(self) -> None:
-        if self.closed:
-            return
-        self.closed = True
-        try:
-            self.sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
-            self.sock.close()
-        except OSError:
-            pass
+        with self._io_lock:  # never held while waiting, so this is quick
+            if self.closed:
+                return
+            self.closed = True
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                self.sock.close()
+            except OSError:
+                pass

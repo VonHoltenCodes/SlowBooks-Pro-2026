@@ -71,7 +71,6 @@ import logging
 import os
 import random
 import re
-import ssl
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -79,7 +78,7 @@ from email.message import Message
 from urllib.parse import urlsplit
 
 from app.switchboard import __version__, account, store, ws
-from app.switchboard.client import ApiClient, ApiError, urllib_transport
+from app.switchboard.client import ApiClient, ApiError, tls_context, urllib_transport
 from app.switchboard.config import (
     DEFAULT_URL,
     ConfigError,
@@ -511,7 +510,7 @@ class Line:
                 else {}
             )
             welcomed = self._welcomed = True
-            sock.sock.settimeout(t.dead_after)
+            sock.settimeout(t.dead_after)
             slug = str(frame.get("slug") or "")
             self._set(
                 state="connected",
@@ -771,7 +770,7 @@ class Line:
                 self.app_host,
                 self.app_port,
                 timeout=timeout,
-                context=ssl.create_default_context(),
+                context=tls_context(),
             )
         return http.client.HTTPConnection(self.app_host, self.app_port, timeout=timeout)
 

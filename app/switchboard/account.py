@@ -177,8 +177,12 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def _opener(context=None):
     if context is None:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
     elif context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname:
         raise ConfigError("The relay's certificate is always verified.")
+    else:
+        # A context handed in keeps its certificates; its floor is raised.
+        context.minimum_version = max(context.minimum_version, ssl.TLSVersion.TLSv1_2)
     return urllib.request.build_opener(
         _NoRedirect(), urllib.request.HTTPSHandler(context=context)
     )

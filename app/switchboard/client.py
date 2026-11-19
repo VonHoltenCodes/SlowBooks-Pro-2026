@@ -100,14 +100,18 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def tls_context() -> ssl.SSLContext:
+    """The platform's trusted certificates, hostname checked, TLS 1.2 at the
+    least; there is deliberately no setting that loosens any of it."""
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 def _opener(base_url: str):
     handlers = [_NoRedirect()]
     if base_url.startswith("https://"):
-        # The platform's trusted certificates, hostname checked; there is
-        # deliberately no setting that turns verification off.
-        handlers.append(
-            urllib.request.HTTPSHandler(context=ssl.create_default_context())
-        )
+        handlers.append(urllib.request.HTTPSHandler(context=tls_context()))
     return urllib.request.build_opener(*handlers)
 
 
