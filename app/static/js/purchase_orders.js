@@ -492,8 +492,9 @@ const PurchaseOrdersPage = {
             ? ' ' + hint(`${po.retainage_pct}% retainage is held back on this bill and posted to Retainage Payable.`, 'Retainage')
             : '';
         openModal(`Turn ${po.po_number} into a bill`, `
-            <div class="form-group" style="max-width:200px;"><label for="po-conv-date">Bill date ${hint(`Choose where each line is recorded. The bill takes ${escapeHtml(vendor.name)}'s terms (${escapeHtml(vendor.terms || 'Net 30')}) from the date below.`, 'Bill date')}</label>
+            <div class="form-group" style="max-width:200px;"><label for="po-conv-date">Bill date</label>
                 <input type="date" id="po-conv-date" value="${todayISO()}"></div>
+            <h3 style="margin:12px 0 8px; font-size:14px;">Lines ${hint(`Choose where each line is recorded. The bill takes ${escapeHtml(vendor.name)}'s terms (${escapeHtml(vendor.terms || 'Net 30')}) from the date below.`, 'Lines')}</h3>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Line</th>${receiving ? '<th scope="col" class="amount">Ordered</th><th scope="col" class="amount">Received</th>' : ''}<th scope="col" class="amount">Scheduled</th>${partial ? '<th scope="col" class="amount">Previous</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">This period</th><th scope="col" class="amount">Retainage' + retNote + '</th>' : ''}<th scope="col">Account${taxNote}</th></tr></thead>
                 <tbody>${rows}</tbody>

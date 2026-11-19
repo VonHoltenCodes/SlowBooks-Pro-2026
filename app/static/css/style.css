@@ -2820,19 +2820,26 @@ tr.clickable { cursor: pointer; }
 .hint-icon img { display: block; }
 .hint-icon:hover, .hint-icon[aria-expanded="true"] { border-color: var(--panel-border); background: var(--panel-bg); }
 .hint-icon:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* The note is placed against the window (Hints.position): fixed, so no
+   dialog edge or table scroll box around it cuts it off, and never wider
+   than the window less 8px a side. It sets every text style it would
+   otherwise take from where it sits (a column head's mono capitals, a
+   label's small bold), so it reads the same everywhere. */
 .hint-pop {
-    position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+    position: fixed; top: 0; left: 0; z-index: 60;
     display: flex; gap: 8px; align-items: flex-start;
-    width: max-content; max-width: 340px;
+    width: max-content; max-width: min(340px, calc(100% - 16px));
+    box-sizing: border-box;
     padding: 8px 10px;
     background: var(--panel-bg); color: var(--text-primary);
     border: 1px solid var(--panel-border); border-radius: 4px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
-    font-size: 12px; font-weight: 400; line-height: 1.45; text-align: left;
-    white-space: normal; text-transform: none; letter-spacing: normal;
+    font-family: var(--font); font-size: 12px; font-weight: 400; font-style: normal;
+    font-variant: normal; line-height: 1.45; text-align: left; text-indent: 0;
+    white-space: normal; text-transform: none; letter-spacing: normal; word-spacing: normal;
+    text-shadow: none; cursor: auto;
 }
 .hint-pop[hidden] { display: none; }
-.hint-pop--right { left: auto; right: 0; }
 .hint-pop-mark { flex: 0 0 auto; }
 .hint-pop-title { display: block; margin-bottom: 2px; }
 
@@ -2841,7 +2848,7 @@ tr.clickable { cursor: pointer; }
    Wider than a field's note, and never taller than 24rem: a long list
    scrolls inside the note (which takes focus, so the keyboard scrolls it). */
 .hint-pop--list {
-    width: 30rem; max-width: 30rem; max-height: 24rem;
+    width: 30rem; max-width: calc(100% - 16px); max-height: 24rem;
     overflow-y: auto; overscroll-behavior: contain;
 }
 .hint-pop--list:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
@@ -2854,8 +2861,6 @@ tr.clickable { cursor: pointer; }
 .hint-list dd { margin: 0 0 8px; }
 .hint-list-item:last-child dd { margin-bottom: 0; }
 .hint-list code { font-size: 11px; }
-/* opened from a heading low in the window: upward, above its button */
-.hint-pop--list.hint-pop--up { top: auto; bottom: calc(100% + 4px); }
 /* a section heading and its tortoise on one line; the rule under the row */
 .settings-h-row {
     display: flex; align-items: center; gap: 2px;

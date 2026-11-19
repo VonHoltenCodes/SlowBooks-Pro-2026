@@ -133,7 +133,7 @@ MOVED = [
         "purchase_orders.js",
         "Choose where each line is recorded. The bill takes ${escapeHtml(vendor.name)}'s"
         " terms (${escapeHtml(vendor.terms || 'Net 30')}) from the date below.",
-        "Bill date",
+        "Lines",
     ),
     (
         217,

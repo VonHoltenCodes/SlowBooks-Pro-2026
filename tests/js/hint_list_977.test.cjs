@@ -165,36 +165,45 @@ test('the list note scrolls inside a fixed height, in rem, wider than a field no
     assert.ok(at > css.indexOf('.hint-pop-title {'), 'after the field hint rules');
     assert.match(rule, /max-height: 24rem;/);
     assert.match(rule, /overflow-y: auto;/);
-    assert.match(rule, /width: 30rem; max-width: 30rem;/);
+    // never wider than the window less 8px a side
+    assert.match(rule, /width: 30rem; max-width: calc\(100% - 16px\);/);
     assert.ok(!/\d(vh|vw|vmin|vmax)\b/.test(rule));
     assert.ok(css.includes('.hint-pop--list:focus-visible { outline: 2px solid var(--focus-ring);'));
 });
 
-// a list note's button and note with their places in a window 800 tall
-function placed(env, id, buttonTop, noteBottom, noteHeight) {
+// a list note's button and note with their places in a window 800 tall:
+// the note is placed against the window (position: fixed) from its button
+function placed(env, id, buttonTop, noteHeight) {
     const p = listPair(env, id);
-    const classes = new Set(['hint-pop', 'hint-pop--list']);
-    p.note.classList = { add: (c) => classes.add(c), remove: (c) => classes.delete(c), has: (c) => classes.has(c), contains: (c) => classes.has(c) };
-    p.note.getBoundingClientRect = () => ({ right: 700, bottom: noteBottom, height: noteHeight });
-    p.note.scrollIntoView = () => { p.scrolled = true; };
-    p.button.getBoundingClientRect = () => ({ top: buttonTop });
+    p.note.style = {};
+    p.note.setAttribute = (k, v) => { p.note[k] = v; };
+    p.note.getBoundingClientRect = () => ({ left: 0, top: 0, width: 480, height: noteHeight, right: 480, bottom: noteHeight });
+    p.button.getBoundingClientRect = () => ({ left: 500, right: 524, top: buttonTop, bottom: buttonTop + 24 });
     return p;
 }
 
-test('a section note from a heading low in the window opens upward, or brings itself into view', () => {
+test('a section note from a heading low in the window opens upward, and one with no room either side scrolls in what it has', () => {
     const env = load();
     env.context.window.innerHeight = 800;
-    const low = placed(env, 'hint-list-7', 700, 1100, 384);
+    env.context.window.addEventListener = () => {};
+    env.context.window.removeEventListener = () => {};
+    const low = placed(env, 'hint-list-7', 700, 384);
     env.listeners.click[0]({ target: low.button, preventDefault() {} });
-    assert.equal(low.note.classList.has('hint-pop--up'), true);
+    assert.equal(low.note['data-side'], 'above');
+    assert.equal(low.note.style.top, `${700 - 4 - 384}px`);
+    assert.equal(low.note.style.maxHeight, '');
     env.listeners.click[0]({ target: low.button, preventDefault() {} });
-    const fits = placed(env, 'hint-list-8', 100, 500, 384);
+    const fits = placed(env, 'hint-list-8', 100, 384);
     env.listeners.click[0]({ target: fits.button, preventDefault() {} });
-    assert.equal(fits.note.classList.has('hint-pop--up'), false);
-    assert.equal(fits.scrolled, undefined);
+    assert.equal(fits.note['data-side'], 'below');
+    assert.equal(fits.note.style.top, `${124 + 4}px`);
     env.listeners.click[0]({ target: fits.button, preventDefault() {} });
-    const cramped = placed(env, 'hint-list-9', 200, 900, 384);
+    // 384 tall, 300 above and 464 below in a window 500 tall: neither fits
+    env.context.window.innerHeight = 500;
+    const cramped = placed(env, 'hint-list-9', 200, 384);
     env.listeners.click[0]({ target: cramped.button, preventDefault() {} });
-    assert.equal(cramped.note.classList.has('hint-pop--up'), false);
-    assert.equal(cramped.scrolled, true);
+    assert.equal(cramped.note['data-side'], 'below');
+    assert.equal(cramped.note.style.top, '228px');
+    assert.equal(cramped.note.style.maxHeight, `${500 - 8 - 228}px`);
+    assert.equal(cramped.note.style.overflowY, 'auto');
 });

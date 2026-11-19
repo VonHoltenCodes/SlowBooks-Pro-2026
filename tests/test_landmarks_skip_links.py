@@ -70,7 +70,8 @@ def test_a_dialog_still_opens_on_its_first_field_never_on_void_or_delete():
     opening = opening[: opening.index("function closeModal(")]
     assert "const stops = _tabStops($('#modal-body'), null);" in opening
     assert (
-        "const first = stops.find(el => !el.matches('.skip-link')) || stops[0];"
+        "const first = stops.find(el => !el.matches('.skip-link, [data-hint]'))"
+        " || stops.find(el => !el.matches('[data-hint]'));"
         in opening
     )
     assert (
