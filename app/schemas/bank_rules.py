@@ -13,6 +13,10 @@ class BankRuleCreate(StrictModel):
     # the class and job a matched line comes in with (#675)
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    # the customer for money in and the memo a matched line posts with
+    # (#1075); the memo's length is checked in words by the route
+    customer_id: Optional[int] = None
+    memo: Optional[str] = None
     rule_type: str = "contains"
     priority: int = 0
     is_active: bool = True
@@ -25,6 +29,8 @@ class BankRuleUpdate(StrictModel):
     vendor_id: Optional[int] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    memo: Optional[str] = None
     rule_type: Optional[str] = None
     priority: Optional[int] = None
     is_active: Optional[bool] = None
@@ -38,6 +44,8 @@ class BankRuleResponse(BaseModel):
     vendor_id: Optional[int]
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    memo: Optional[str] = None
     rule_type: str
     priority: int
     is_active: bool
@@ -47,5 +55,6 @@ class BankRuleResponse(BaseModel):
     vendor_name: Optional[str] = None
     class_name: Optional[str] = None
     job_name: Optional[str] = None
+    customer_name: Optional[str] = None
 
     model_config = {"from_attributes": True}

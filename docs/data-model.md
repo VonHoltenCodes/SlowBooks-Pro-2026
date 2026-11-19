@@ -50,7 +50,7 @@ and job-cost tables are described in their own sections below the table.
 | `pay_stubs` | Individual pay stubs with withholding breakdowns |
 | `qbo_mappings` | Which local record a QuickBooks Online record became, written by the connector retired in 2.23.2; read so those documents still void and edit right |
 | `attachments` | File attachments linked to invoices, bills, etc. |
-| `bank_rules` | Pattern-matching rules for auto-categorizing bank imports |
+| `bank_rules` | Pattern-matching rules for auto-categorizing bank imports; a rule may name a category, vendor, class and job (#675), and a customer for money in and a memo (`customer_id`, `memo`, #1075, migration `a1075c4d8e2f`) |
 | `budgets` | Budget amounts by account and period |
 | `email_templates` | Customizable email templates |
 | `inventory_movements` | Per-item qty/cost ledger (purchases, sales, adjustments) |

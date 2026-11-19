@@ -371,6 +371,9 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
             "rule_job_id": by_rule.get(r.id, {}).get("job_id"),
             "rule_vendor_id": by_rule.get(r.id, {}).get("vendor_id"),
             "rule_vendor_name": by_rule.get(r.id, {}).get("vendor_name"),
+            "rule_customer_id": by_rule.get(r.id, {}).get("customer_id"),
+            "rule_customer_name": by_rule.get(r.id, {}).get("customer_name"),
+            "rule_memo": by_rule.get(r.id, {}).get("memo"),
         }
         for r in rows
     ]

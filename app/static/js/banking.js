@@ -1852,14 +1852,15 @@ const BankingPage = {
         }
         if (moneyIn) {
             const opts = (BankingPage._customers || [])
-                .map(c => `<option value="${c.id}"${sel(c.id, t.pick_customer_id)}>${escapeHtml(customerLabel(c))}</option>`).join('');
+                .map(c => `<option value="${c.id}"${sel(c.id, or(t.pick_customer_id, t.rule_customer_id))}>${escapeHtml(customerLabel(c))}</option>`).join('');
             html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         } else {
             const kept = t.pick_vendor_name || t.pick_payee || t.rule_vendor_name || '';
             html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" value="${escapeHtml(kept)}" style="${small}" ${save}>`;
         }
-        // the entry's memo (#1049), kept on the line like the rest
-        html += `<input type="text" id="rv-memo-${t.id}" class="review-memo" data-write maxlength="500" autocomplete="off" aria-label="Memo, line ${t.id}" placeholder="Memo" value="${escapeHtml(t.pick_memo || '')}" style="${small}" ${save}>`;
+        // the entry's memo (#1049), kept on the line like the rest; where
+        // none was typed, the memo the line's bank rule gives it (#1075)
+        html += `<input type="text" id="rv-memo-${t.id}" class="review-memo" data-write maxlength="500" autocomplete="off" aria-label="Memo, line ${t.id}" placeholder="Memo" value="${escapeHtml(t.pick_memo || t.rule_memo || '')}" style="${small}" ${save}>`;
         return `<td><div style="display:grid; gap:2px;">${html}</div></td>`;
     },
 
@@ -2231,8 +2232,9 @@ const BankingPage = {
     // A bank rule from a statement line (#259): the rule form opens with
     // the payee as the pattern and the category chosen here filled in, so
     // the two screens that know the same payee hand it across; the vendor,
-    // class and job picked on the row come too (#904: a rule names no
-    // customer, nor a name that is no vendor's). Saved, the rules run over
+    // class and job picked on the row come too (#904), and the customer and
+    // memo (#1075; a rule names no name that is no vendor's). Saved, the
+    // rules run over
     // the queue, and the register comes back with every row's picks, which
     // are kept on the lines.
     async ruleFromLine(lineId, accountId) {
@@ -2250,6 +2252,8 @@ const BankingPage = {
             vendor_id: picks.vendor_id || '',
             class_id: picks.class_id || '',
             job_id: picks.job_id || '',
+            customer_id: picks.customer_id || '',
+            memo: picks.memo || '',
             from: 'a statement line',
             afterSave: async () => {
                 try { await API.post('/bank-rules/apply'); } catch (e) { /* the rule is saved; the queue catches it on the next import */ }

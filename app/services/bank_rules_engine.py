@@ -173,11 +173,33 @@ def rule_dimensions(db: Session, payee: str | None) -> tuple[int | None, int | N
     return class_id, job_id
 
 
+def rule_customer(db: Session, rule, amount):
+    """The customer `rule` gives a statement line of `amount` (#1075): the
+    rule's customer on money in, None on money out (the rule's vendor is
+    its name there) and None when the customer is gone or inactive (the
+    line then comes in without it, as a line whose rule names none)."""
+    if rule is None or not rule.customer_id or not amount or amount <= 0:
+        return None
+    from app.models.contacts import Customer
+
+    customer = db.get(Customer, rule.customer_id)
+    if customer is None or customer.is_active is False:
+        return None
+    return customer
+
+
+def rule_memo(rule) -> str | None:
+    """The memo `rule` gives a line it matches (#1075), or None."""
+    return ((rule.memo or "").strip() or None) if rule is not None else None
+
+
 def rule_picks(db: Session, rows) -> dict[int, dict]:
     """What the rule each unmatched statement line follows gives it besides
     the category, by line id: {"class_id", "job_id", "vendor_id",
-    "vendor_name"}, each None when the rule names none (or the class is
-    archived, the job inactive). The review row is drawn with them, so it
+    "vendor_name", "customer_id", "customer_name", "memo"}, each None when
+    the rule names none (or the class is archived, the job inactive). The
+    customer is given to money in, and there the rule's vendor only when it
+    names no customer (rule_customer, #1075). The review row is drawn with them, so it
     shows the class and the vendor Add will post with (rule_dimensions and
     _entry_vendor in bank_matching ask the same rule)."""
     rows = [r for r in rows if r.match_status == "unmatched"]
@@ -199,7 +221,12 @@ def rule_picks(db: Session, rows) -> dict[int, dict]:
             continue
         cls = db.get(TxnClass, rule.class_id) if rule.class_id else None
         job = db.get(Job, rule.job_id) if rule.job_id else None
-        vendor = db.get(Vendor, rule.vendor_id) if rule.vendor_id else None
+        customer = rule_customer(db, rule, line.amount)
+        vendor = (
+            db.get(Vendor, rule.vendor_id)
+            if rule.vendor_id and customer is None
+            else None
+        )
         out[line.id] = {
             "class_id": cls.id if cls is not None and not cls.is_archived else None,
             "job_id": (
@@ -207,6 +234,9 @@ def rule_picks(db: Session, rows) -> dict[int, dict]:
             ),
             "vendor_id": vendor.id if vendor is not None else None,
             "vendor_name": vendor.name if vendor is not None else None,
+            "customer_id": customer.id if customer is not None else None,
+            "customer_name": customer.name if customer is not None else None,
+            "memo": rule_memo(rule),
         }
     return out
 

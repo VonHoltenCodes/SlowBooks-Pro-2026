@@ -223,6 +223,10 @@ class BankTransactionResponse(BaseModel):
     rule_job_id: Optional[int] = None
     rule_vendor_id: Optional[int] = None
     rule_vendor_name: Optional[str] = None
+    # the customer (money in) and memo it gives (#1075)
+    rule_customer_id: Optional[int] = None
+    rule_customer_name: Optional[str] = None
+    rule_memo: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

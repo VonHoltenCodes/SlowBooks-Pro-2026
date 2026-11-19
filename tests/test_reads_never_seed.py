@@ -471,8 +471,8 @@ def test_books_from_before_2_9_get_the_default_asset_type_at_the_upgrade(tmp_pat
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("407d52f22d78").down_revision == "d7b3f9a1c5e2"
     assert script.get_heads() == [
-        "f1049c2a7e5b"
-    ]  # the review line memo (#1049) is the head above it
+        "a1075c4d8e2f"
+    ]  # the bank rule's customer and memo (#1075) is the head above it
     command.upgrade(cfg, "407d52f22d78")
     types, accounts = _after_upgrade(db)
     expense = accounts["Depreciation Expense"]
