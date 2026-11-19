@@ -57,6 +57,8 @@ function load({ routes = {}, construction = false } = {}) {
         },
     };
     vm.createContext(context);
+    // the tortoise helper the forms' teaching text sits behind (#977)
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), context);
     vm.runInContext(fs.readFileSync(path.join(JS, 'deposits.js'), 'utf8') + '\nthis.DepositsPage = DepositsPage;', context);
     return { page: context.DepositsPage, modal: () => modal };
 }
