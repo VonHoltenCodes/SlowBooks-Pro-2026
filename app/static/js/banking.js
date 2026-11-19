@@ -82,12 +82,7 @@ const BankingPage = {
     _renderMercurySection(feed, feeds, rows = []) {
         let body;
         if (!feed.connected) {
-            body = `<p>See payments arriving in your Mercury account in SlowBooks.
-                Create a <strong>Read Only</strong> token in
-                <a href="https://app.mercury.com/settings/tokens" target="_blank" rel="noopener">Mercury’s API token settings</a>,
-                then connect here. Your token is stored encrypted on this server.</p>
-                <p class="form-hint">SlowBooks Pro is not affiliated with, endorsed by, or sponsored by Mercury; Mercury is a trademark of Mercury Technologies, Inc.</p>
-                <p class="form-hint hidden" data-admin-note>An administrator connects the bank feed.</p>
+            body = `<p class="form-hint hidden" data-admin-note>An administrator connects the bank feed.</p>
                 <form onsubmit="BankingPage.connectMercury(event)" data-admin>
                     <div class="form-group">
                         <label for="mercury-token">Mercury read-only API token</label>
@@ -102,10 +97,7 @@ const BankingPage = {
                 <td class="amount mercury-available">${escapeHtml(a.available_balance)} USD</td>
                 <td class="amount mercury-inflight">${a.in_flight_balance === undefined ? '—' : escapeHtml(a.in_flight_balance) + ' USD'}</td>
                 <td>${BankingPage._importCell('mercury', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank'])}</td></tr>`).join('');
-            body = `<p>Sync posted deposits and withdrawals into <em>To review</em>.
-                Match them to payments already recorded, or review and add them to your books.
-                Syncing does not mark invoices paid.</p>
-                <p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)}</p>
+            body = `<p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)}</p>
                 <p>${feed.last_sync ? 'Last successful sync: ' + escapeHtml(feed.last_sync.replace('T', ' ')) : 'Not synced yet.'}</p>
                 <div class="table-container"><table id="mercury-balances">
                     <thead><tr><th scope="col">Mercury account</th><th scope="col" class="amount">Current balance</th><th scope="col" class="amount">Available</th><th scope="col" class="amount">Incoming transfers</th><th scope="col">Imports into</th></tr></thead>
@@ -115,10 +107,8 @@ const BankingPage = {
                 <form onsubmit="BankingPage.syncMercury(event)" data-write>
                     <div class="form-group" style="margin-top:12px;">
                         <label for="mercury-since">Import transactions posted since</label>
-                        <input type="date" id="mercury-since" value="${escapeHtml(feed.since)}" max="${todayISO()}" required>
+                        <input type="date" id="mercury-since" value="${escapeHtml(feed.since)}" max="${todayISO()}" required aria-describedby="mercury-since-help">
                     </div>
-                    <p>Each sync checks this date range again and skips transactions already imported.
-                        Choose an earlier date to bring in more history. Use one feed source per bank account to avoid duplicates from other imports.</p>
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary">Sync Mercury</button>
                         <button type="button" class="btn btn-secondary" onclick="BankingPage.refreshMercury(this)">Refresh accounts</button>
@@ -129,7 +119,26 @@ const BankingPage = {
         }
         clearTimeout(BankingPage._mercuryBalanceTimer);
         if (feed.connected) BankingPage._mercuryBalanceTimer = setTimeout(() => BankingPage.pollMercuryBalances(), 15000);
-        return `<div class="card" style="margin-top:16px;"><div class="card-header">Bank Feed (Mercury)</div>${body}</div>`;
+        // #977: the card's teaching behind one tortoise on its heading, a
+        // list (connected, the card has four lines of it)
+        return `<div class="card" style="margin-top:16px;"><div class="card-header">Bank Feed (Mercury) ${hintList('Bank Feed (Mercury)', feed.connected ? [
+            { text: `Sync posted deposits and withdrawals into <em>To review</em>.
+            Match them to payments already recorded, or review and add them to your books.
+            Syncing does not mark invoices paid.` },
+            { name: 'Import transactions posted since', id: 'mercury-since-help', text: `Each sync checks this date range again and skips transactions already imported.
+                    Choose an earlier date to bring in more history. Use one feed source per bank account to avoid duplicates from other imports.` },
+            { name: 'Balance webhooks', text: `Receive current, available, and incoming-transfer balance updates automatically.
+            The balances above refresh every 15 seconds while Banking is open. These updates do not post ledger entries.` },
+            { name: 'Webhook URL', id: 'mercury-webhook-url-help', text: `Register the HTTPS URL below with Mercury for checking and savings balance events.
+            <a href="https://docs.mercury.com/reference/createwebhook" target="_blank" rel="noopener">Mercury webhook registration</a>
+            returns a signing secret; save it here. Registering requires Mercury permission to manage webhooks.` },
+        ] : [
+            { text: `See payments arriving in your Mercury account in SlowBooks.
+            Create a <strong>Read Only</strong> token in
+            <a href="https://app.mercury.com/settings/tokens" target="_blank" rel="noopener">Mercury’s API token settings</a>,
+            then connect here. Your token is stored encrypted on this server.` },
+            { text: 'SlowBooks Pro is not affiliated with, endorsed by, or sponsored by Mercury; Mercury is a trademark of Mercury Technologies, Inc.' },
+        ])}</div>${body}</div>`;
     },
 
     _mercuryBalanceStatus(feed) {
@@ -168,15 +177,11 @@ const BankingPage = {
     _renderMercuryWebhook(webhook) {
         const url = location.origin + webhook.path;
         const registration = JSON.stringify({ url, eventTypes: webhook.event_types }, null, 2);
+        // its two teaching lines are in the card's note (#977)
         return `<details style="margin-top:16px;"><summary>Balance webhooks</summary>
-            <p>Receive current, available, and incoming-transfer balance updates automatically.
-                The balances above refresh every 15 seconds while Banking is open. These updates do not post ledger entries.</p>
-            <p>Register the HTTPS URL below with Mercury for checking and savings balance events.
-                <a href="https://docs.mercury.com/reference/createwebhook" target="_blank" rel="noopener">Mercury webhook registration</a>
-                returns a signing secret; save it here. Registering requires Mercury permission to manage webhooks.</p>
             ${location.protocol !== 'https:' ? '<p>Open SlowBooks at your public HTTPS address before copying this registration. Mercury cannot deliver to a LAN address.</p>' : ''}
             <div class="form-group"><label for="mercury-webhook-url">Webhook URL</label>
-                <input id="mercury-webhook-url" readonly value="${escapeHtml(url)}"></div>
+                <input id="mercury-webhook-url" readonly value="${escapeHtml(url)}" aria-describedby="mercury-webhook-url-help"></div>
             <div class="form-group"><label for="mercury-webhook-registration">Mercury registration JSON</label>
                 <textarea id="mercury-webhook-registration" rows="7" readonly>${escapeHtml(registration)}</textarea></div>
             <form onsubmit="BankingPage.saveMercuryWebhook(event)" data-admin>
@@ -447,9 +452,8 @@ const BankingPage = {
         };
         openModal('Use an account I already have', `
             <form onsubmit="BankingPage.useOwnAccount(event)" data-source="${escapeHtml(source)}" data-row="${escapeHtml(row)}" data-row-name="${escapeHtml(rowName)}">
-                <p>Choose the account in your chart that ${escapeHtml(rowName)} is. It becomes ${cards ? 'a bank account (or a credit-card account, for a liability)' : 'a bank account'}
-                    with a register, and this feed imports into it.</p>
-                <div class="form-group"><label for="own-account">Account</label>
+                <div class="form-group"><label for="own-account">Account ${hint(`Choose the account in your chart that ${escapeHtml(rowName)} is. It becomes ${cards ? 'a bank account (or a credit-card account, for a liability)' : 'a bank account'}
+                    with a register, and this feed imports into it.`, 'Account')}</label>
                     <select id="own-account" name="account_id" required>
                         ${group(cards ? 'Asset accounts: become bank accounts' : 'Asset accounts', 'asset')}
                         ${cards ? group('Liability accounts: become credit-card accounts', 'liability') : ''}
@@ -486,15 +490,17 @@ const BankingPage = {
 
     _renderFeedSection(feed, feeds, rows = []) {
         let body;
+        // #977: the not-connected card's one teaching line, behind the
+        // tortoise on its heading (the connected card's line is state and
+        // stays in the open)
+        let about = '';
         if (!feed.connected) {
-            body = `
-                <p style="font-size:12px; margin-bottom:8px;">
-                    Pull transactions straight from your bank — no file exports.
+            about = ` ${hint(`Pull transactions straight from your bank — no file exports.
                     Connect your bank at any SimpleFIN provider — the reference one is
                     <a href="https://bridge.simplefin.org" target="_blank" rel="noopener">bridge.simplefin.org</a> —
                     then paste the <strong>setup token</strong> it gives you below.
-                    Your credential stays on this machine; SlowBooks has no middleman server.
-                </p>
+                    Your credential stays on this machine; SlowBooks has no middleman server.`, 'Bank Feeds (SimpleFIN)')}`;
+            body = `
                 <p class="form-hint hidden" data-admin-note>An administrator connects the bank feed.</p>
                 <form onsubmit="BankingPage.connectSimpleFIN(event)" data-admin>
                     <div class="form-group">
@@ -560,7 +566,7 @@ const BankingPage = {
                 </div>`;
         }
         return `<div class="card" style="margin-top:16px;">
-            <div class="card-header">Bank Feeds (SimpleFIN)</div>${body}</div>`;
+            <div class="card-header">Bank Feeds (SimpleFIN)${about}</div>${body}</div>`;
     },
 
     async connectSimpleFIN(e) {
@@ -600,19 +606,16 @@ const BankingPage = {
         openModal('Fetch older history', `
             <form onsubmit="BankingPage.fetchSimpleFINHistory(event)">
                 <div class="form-group">
-                    <label for="simplefin-history">Reach back</label>
+                    <label for="simplefin-history">Reach back ${hint(`How much history there is depends on your SimpleFIN provider: the SimpleFIN Bridge keeps
+                    about 90 days, and others, such as BankSync, keep up to a year. Transactions already
+                    imported are skipped; the rest wait in each account's <em>To review</em> list, where
+                    anything from before your books began can be excluded.`, 'Reach back')}</label>
                     <select id="simplefin-history" name="history_months">
                         <option value="3">3 months</option>
                         <option value="6">6 months</option>
                         <option value="12" selected>12 months</option>
                     </select>
                 </div>
-                <p style="font-size:12px; margin:8px 0;">
-                    How much history there is depends on your SimpleFIN provider: the SimpleFIN Bridge keeps
-                    about 90 days, and others, such as BankSync, keep up to a year. Transactions already
-                    imported are skipped; the rest wait in each account's <em>To review</em> list, where
-                    anything from before your books began can be excluded.
-                </p>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Fetch</button>
@@ -703,10 +706,9 @@ const BankingPage = {
     showSimpleFINUpdateToken() {
         openModal('Update SimpleFIN token', `
             <form onsubmit="BankingPage.updateSimpleFINToken(event)">
-                <p>Paste a new setup token from your SimpleFIN provider. Every mapping and Reverse signs choice
+                <div class="form-group"><label for="simplefin-new-token">New setup token ${hint(`Paste a new setup token from your SimpleFIN provider. Every mapping and Reverse signs choice
                     is kept; a mapped account the new connection does not report is shown as
-                    <em>Gone from SimpleFIN</em>, to move to its new account or set to not imported.</p>
-                <div class="form-group"><label for="simplefin-new-token">New setup token</label>
+                    <em>Gone from SimpleFIN</em>, to move to its new account or set to not imported.`, 'New setup token')}</label>
                     <input type="password" id="simplefin-new-token" name="setup_token" required autocomplete="off"
                            placeholder="Paste the one-time setup token"></div>
                 <div class="form-actions">
@@ -792,9 +794,8 @@ const BankingPage = {
                         <input name="bank_name"></div>
                     <div class="form-group"><label>Last 4 digits</label>
                         <input name="last_four" maxlength="4"></div>
-                    <div class="form-group"><label>Statement balance</label>
+                    <div class="form-group"><label>Statement balance ${hint('What the statement says on the As-of date: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900) — unless the books already carry this account, when only a difference you confirm is posted.', 'Statement balance')}</label>
                         <input name="opening_balance" class="money" type="number" step="0.01" value="0" oninput="this.dataset.touched = '1'">
-                        <div style="font-size:10px; color:var(--gray-500);">What the statement says on the As-of date: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900) — unless the books already carry this account, when only a difference you confirm is posted.</div>
                         <div id="acct-ledger-note" style="font-size:11px; margin-top:4px;" role="status"></div></div>
                     <div class="form-group"><label>As of</label>
                         <input name="opening_date" type="date" value="${todayISO()}" onchange="BankingPage._showLedgerBalance(this.form)"></div>
@@ -1711,7 +1712,10 @@ const BankingPage = {
         // Match / Exclude / Rule… past the right edge at 1280)
         const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name', 'Memo'].filter(Boolean).join(' / ')}</th>`;
         return `<div class="card" id="reg-review" data-review-panel tabindex="-1" role="region" aria-label="To review" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
-            <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
+            <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books ${hint(`What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} and the memo chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                Tick lines to set a category, ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}or name on all of them from the bar above the list; <strong>Add selected</strong> sets what the bar holds on them and adds them.
+                <strong>Match</strong> links it to something you already entered.
+                A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.`, 'To review')}
                 <span style="float:right;">
                     <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.addSelected(${feedId}, ${accountId})" title="Add the ticked lines, with what the bar above the list sets on them">Add selected</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
@@ -1722,12 +1726,6 @@ const BankingPage = {
             <div class="table-container"><table>
                 <thead><tr><th scope="col"><input type="checkbox" id="review-tick-all" data-write aria-label="Tick every line shown" onchange="BankingPage.tickAll(this)"></th><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
-            <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} and the memo chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
-                Tick lines to set a category, ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}or name on all of them from the bar above the list; <strong>Add selected</strong> sets what the bar holds on them and adds them.
-                <strong>Match</strong> links it to something you already entered.
-                A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
-            </div>
         </div>`;
     },
 
@@ -1752,13 +1750,10 @@ const BankingPage = {
         return `<div class="excluded-lines" style="margin-bottom:16px;">
             <button type="button" class="btn btn-sm btn-secondary" id="excluded-toggle" data-readonly-ok aria-expanded="false" aria-controls="excluded-list" onclick="BankingPage.toggleExcluded(this)">Show excluded (${n})</button>
             <div id="excluded-list" class="card" hidden style="margin-top:6px;">
-                <div class="card-header">Excluded — ${n} statement line${n === 1 ? '' : 's'} set aside, not in To review</div>
+                <div class="card-header">Excluded — ${n} statement line${n === 1 ? '' : 's'} set aside, not in To review ${hint('<strong>Restore</strong> returns a line to To review, where it can be added or matched. Nothing here is posted.', 'Excluded')}</div>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Why</th><th scope="col"></th></tr></thead>
                     <tbody>${rows}</tbody></table></div>
-                <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                    <strong>Restore</strong> returns a line to To review, where it can be added or matched. Nothing here is posted.
-                </div>
             </div>
         </div>`;
     },
@@ -2099,14 +2094,11 @@ const BankingPage = {
         const gross = net;
         openModal(`Record ${escapeHtml(name)} payout`, `
             <form onsubmit="BankingPage.submitPayout(event, ${lineId}, ${accountId})">
-                <p style="font-size:12px; margin:0 0 8px;">
-                    This ${escapeHtml(formatCurrency(net))} deposit clears the ${escapeHtml(name)} clearing
+                <div class="form-grid">
+                    <div class="form-group"><label>Gross cleared ${hint(`This ${escapeHtml(formatCurrency(net))} deposit clears the ${escapeHtml(name)} clearing
                     account, which holds ${escapeHtml(formatCurrency(bal))} awaiting payout. Leave the gross
                     at the net unless the processor took a fee that was not booked when the payment came in:
-                    the gross less the net is booked as fee.
-                </p>
-                <div class="form-grid">
-                    <div class="form-group"><label>Gross cleared</label>
+                    the gross less the net is booked as fee.`, 'Gross cleared')}</label>
                         <input id="payout-gross" type="number" step="0.01" min="${net.toFixed(2)}" value="${gross.toFixed(2)}"
                             oninput="BankingPage._payoutFee()"></div>
                     <div class="form-group"><label>Fee</label>
@@ -2740,15 +2732,14 @@ const BankingPage = {
                 <div class="form-grid">
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${carried || todayISO()}" data-carried="${carried}"></div>
-                    <div class="form-group"><label>Amount *</label>
-                        <input name="amount" class="money" type="number" step="0.01" required>
-                        <div style="font-size:10px; color:var(--gray-500);">${isCard ? 'Negative = a charge (owe more). Positive = a payment to the card.' : 'Negative = money out (a payment). Positive = money in (a deposit).'}</div></div>
+                    <div class="form-group"><label>Amount * ${hint(isCard ? 'Negative = a charge (owe more). Positive = a payment to the card.' : 'Negative = money out (a payment). Positive = money in (a deposit).', 'Amount')}</label>
+                        <input name="amount" class="money" type="number" step="0.01" required></div>
                     <div class="form-group"><label>Payee</label>
                         <input name="payee" id="entry-payee" list="entry-payee-vendors" autocomplete="off" onblur="BankingPage.payeeTyped(this.value, BankingPage._formMoneyIn(), 'entry-payee')">
                         ${BankingPage._vendorDatalist('entry-payee-vendors')}</div>
                     <div class="form-group"><label>Check / ref #</label>
                         <input name="check_number"></div>
-                    <div class="form-group full-width" id="entry-category-group"><label>Category * <span style="font-weight:normal; color:var(--gray-500);">(the other side of the entry; a bank or card account makes it a transfer)</span></label>
+                    <div class="form-group full-width" id="entry-category-group"><label>Category * ${hint('(the other side of the entry; a bank or card account makes it a transfer)', 'Category')}</label>
                         ${AccountQuickAdd.picker(`<select name="category_account_id" id="entry-category"><option value="">Select…</option>${catOpts}</select>`, 'register', { ctx: accountId, id: 'entry-category-add', label: 'Add a new account…' })}</div>
                     <div class="form-group full-width"><label>Memo</label>
                         <input name="description"></div>
@@ -2757,7 +2748,7 @@ const BankingPage = {
                     <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from)</span></label>
                         ${BankingPage.nameSelectHtml('entry-name', 'customer_id', null, `${T('Customer')}`)}</div>
                     <div class="form-group full-width" id="entry-splits" style="display:none;">
-                        <label>Split across accounts <span style="font-weight:normal; color:var(--gray-500);">(each line's share of the amount; a loan payment's principal and interest, a check that pays several things, a card processor's deposit as the gross with the fee taken out)</span></label>
+                        <label>Split across accounts ${hint("(each line's share of the amount; a loan payment's principal and interest, a check that pays several things, a card processor's deposit as the gross with the fee taken out)", 'Split across accounts')}</label>
                         <table class="data-table" style="font-size:12px;"><thead><tr><th scope="col">Account</th><th scope="col" class="amount">Amount</th><th scope="col">Taken out</th><th scope="col">${T('Customer')}</th>${Nonprofit.classHeadHtml()}<th scope="col">Memo</th><th scope="col"></th></tr></thead>
                         <tbody id="entry-split-rows"></tbody></table>
                         ${BankingPage.newNameBoxHtml()}
@@ -3434,12 +3425,11 @@ const BankingPage = {
         const toOpts = accounts.map(a => opt(a, firstCard ? a.id === firstCard.id : a.id !== fromId)).join('');
         openModal('Transfer', `
             <form onsubmit="BankingPage.saveTransfer(event)">
-                <p style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Move money between bank and card accounts. Paying a card is a transfer from the bank to the card.</p>
                 <div class="form-grid">
                     <div class="form-group"><label>Date *</label><input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Amount *</label><input name="amount" class="money" type="number" step="0.01" min="0.01" required></div>
                     <div class="form-group"><label>From *</label><select name="from_account_id" required>${fromOpts}</select></div>
-                    <div class="form-group"><label>To *</label><select name="to_account_id" required>${toOpts}</select></div>
+                    <div class="form-group"><label>To * ${hint('Move money between bank and card accounts. Paying a card is a transfer from the bank to the card.', 'To')}</label><select name="to_account_id" required>${toOpts}</select></div>
                     <div class="form-group"><label>Reference</label><input name="reference"></div>
                     <div class="form-group"><label>Memo</label><input name="memo"></div>
                     ${classGroup}
@@ -3535,14 +3525,11 @@ const BankingPage = {
         const defaultDate = minDate && todayISO() < minDate ? minDate : todayISO();
         openModal('Begin Reconciliation', `
             <form onsubmit="BankingPage.createReconciliation(event, ${accountId})">
-                <p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">
-                    Enter the ending date and balance from your statement. For a card, the balance is the amount owed.
-                    ${last ? `This account is reconciled through ${formatDate(last)}; the statement date comes after that.` : ''}
-                </p>
+                ${last ? `<p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">This account is reconciled through ${formatDate(last)}; the statement date comes after that.</p>` : ''}
                 <div class="form-grid">
                     <div class="form-group"><label>Statement Date *</label>
                         <input name="statement_date" type="date" required value="${defaultDate}" ${minDate ? `min="${minDate}"` : ''}></div>
-                    <div class="form-group"><label>Statement Ending Balance *</label>
+                    <div class="form-group"><label>Statement Ending Balance * ${hint('Enter the ending date and balance from your statement. For a card, the balance is the amount owed.', 'Statement Ending Balance')}</label>
                         <input name="statement_balance" class="money" type="number" step="0.01" required></div>
                 </div>
                 <div class="form-actions">
@@ -3771,13 +3758,10 @@ const BankingPage = {
     changeStatement(reconId, statementDate, statementBalance) {
         openModal('Change Statement', `
             <form onsubmit="BankingPage.saveStatement(event, ${reconId})">
-                <p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">
-                    Correct the ending date or balance from your statement. The lines you have ticked stay ticked; the difference is refigured.
-                </p>
                 <div class="form-grid">
                     <div class="form-group"><label>Statement Date *</label>
                         <input name="statement_date" type="date" required value="${escapeHtml(statementDate)}"></div>
-                    <div class="form-group"><label>Statement Ending Balance *</label>
+                    <div class="form-group"><label>Statement Ending Balance * ${hint('Correct the ending date or balance from your statement. The lines you have ticked stay ticked; the difference is refigured.', 'Statement Ending Balance')}</label>
                         <input name="statement_balance" class="money" type="number" step="0.01" required value="${Number(statementBalance).toFixed(2)}"></div>
                 </div>
                 <div class="form-actions">

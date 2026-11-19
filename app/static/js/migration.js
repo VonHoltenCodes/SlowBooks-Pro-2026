@@ -20,10 +20,7 @@ const MigrationPage = {
         ).join('');
         return `
             <div class="page-header">
-                <h2>Migrate Data</h2>
-                <div style="font-size:10px; color:var(--text-muted);">
-                    Bring your accounting history in from another system
-                </div>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Migrate Data</h2>${hint('Bring your accounting history in from another system', 'Migrate Data')}</div>
             </div>
             <div class="card" style="max-width:640px;">
                 <div class="form-group" style="max-width:260px;">
