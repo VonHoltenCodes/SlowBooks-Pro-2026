@@ -5,6 +5,7 @@ from sqlalchemy import and_ as sqla_and_, or_ as sqla_or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.accounts import Account
 from app.models.items import Item, InventoryMovement
 from app.schemas.items import (
     ItemCreate,
@@ -23,6 +24,74 @@ from app.services.inventory_service import (
 )
 
 router = APIRouter(prefix="/api/items", tags=["items"])
+
+
+# The accounts an item's income or expense account may not be (#1038): the
+# ones whose figure a sub-ledger keeps. An invoice line crediting Accounts
+# Receivable would take the sale off what the customer owes while the
+# invoice still says it is owed; the others the same way for the bills,
+# the deposits and the stock. A bank or card account is left out too: money
+# into or out of it is a deposit, a payment or a charge, not an item. Any
+# other balance-sheet account is allowed (a security deposit credits a
+# liability), as the bill line allows it (#766, W-143).
+_ITEM_ACCOUNT_CONTROLS = {
+    "1100": "which only invoices and customer payments post to",
+    "2000": "which only bills and bill payments post to",
+    "1200": "which holds customer payments until they are deposited",
+    "1300": "which only an inventory item's purchases and sales post to",
+}
+_ACCOUNT_FIELDS = {
+    "income_account_id": "income",
+    "expense_account_id": "expense or cost of goods",
+}
+
+
+def _refuse_item_accounts(db: Session, fields: dict, item=None) -> None:
+    """Refuse (422), in a sentence, an income or expense account an item may
+    not post through. An account the item already has is not refused, so an
+    item imported that way can still be edited."""
+    from app.services.control_accounts import is_control
+
+    for field, what in _ACCOUNT_FIELDS.items():
+        account_id = fields.get(field)
+        if account_id is None or (
+            item is not None and getattr(item, field) == account_id
+        ):
+            continue
+        account = db.get(Account, account_id)
+        if account is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"The {what} account chosen is not in the chart of accounts; choose another account.",
+            )
+        number = str(account.account_number or "")
+        named = f"{number} {account.name}".strip()
+        start = f"An item's {what} account can't be {named}"
+        if account.bank_kind:
+            kind = "card" if account.bank_kind == "credit_card" else "bank"
+            raise HTTPException(
+                status_code=422,
+                detail=f"{start}, a {kind} account: money into or out of it is "
+                "a deposit, a payment or a charge. Choose another account.",
+            )
+        detail = getattr(account.detail_type, "value", account.detail_type)
+        where = _ITEM_ACCOUNT_CONTROLS.get(number)
+        if where and is_control(number, account.account_type):
+            raise HTTPException(
+                status_code=422, detail=f"{start}, {where}; choose another account."
+            )
+        if detail == "accounts_receivable":
+            raise HTTPException(
+                status_code=422,
+                detail=f"{start}, an accounts receivable account, which only "
+                "invoices and customer payments post to; choose another account.",
+            )
+        if detail == "accounts_payable":
+            raise HTTPException(
+                status_code=422,
+                detail=f"{start}, an accounts payable account, which only bills "
+                "and bill payments post to; choose another account.",
+            )
 
 
 def item_name_key(name) -> str:
@@ -255,6 +324,7 @@ def create_item(data: ItemCreate, db: Session = Depends(get_db)):
     _refuse_duplicate_name(db, data.name)
     _refuse_duplicate_code(db, data.code)
     fields = data.model_dump()
+    _refuse_item_accounts(db, fields)
     if fields.get("is_taxable") is None:
         fields["is_taxable"] = new_lines_taxable(db)
     # as_of dates the opening entry only; it is not an Item column.
@@ -299,6 +369,7 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db)):
         _refuse_duplicate_name(db, new_name, item.id)
     if update_data.get("code"):
         _refuse_duplicate_code(db, update_data["code"], item.id)
+    _refuse_item_accounts(db, update_data, item)
     for key, val in update_data.items():
         setattr(item, key, val)
     db.commit()
