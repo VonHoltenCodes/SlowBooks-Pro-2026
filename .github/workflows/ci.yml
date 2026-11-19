@@ -320,7 +320,9 @@ jobs:
           # 395 with Connect Claude (#1087): the vendored client's identity check
           # (test_switchboard_vendored_1087.py, needs the source checkout) and
           # the credential file's POSIX mode (test_switchboard_connect_1087.py).
-          MAX_SKIPS: "396"
+          # 398 with Find on this screen (#1092): its Chromium and WebKit modules
+          # (test_browser_find.py, test_browser_find_webkit.py: one each without playwright).
+          MAX_SKIPS: "398"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
