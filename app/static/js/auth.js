@@ -727,10 +727,26 @@
             'style="background:#fff;color:#111;padding:28px 28px 24px;border-radius:8px;' +
             'min-width:380px;max-width:440px;width:100%;' +
             'box-shadow:0 20px 60px rgba(0,0,0,0.4);">' +
-            '<h2 style="margin:0 0 6px;font-size:22px;">Set up Slowbooks Pro 2026</h2>' +
-            '<p style="margin:0 0 8px;color:#555;font-size:13px;line-height:1.5;">' +
-            "Just enough to get you in. You can configure everything else later." +
-            "</p>" +
+            // The setup's teaching lines sit behind one tortoise beside its
+            // heading (#977): the lead, the Settings line and Legal entity.
+            '<div style="display:flex;align-items:center;gap:4px;margin:0 0 8px;">' +
+            '<h2 style="margin:0;font-size:22px;">Set up Slowbooks Pro 2026</h2>' +
+            hintList("Set up Slowbooks Pro 2026", [
+                { text: "Just enough to get you in. You can configure everything else later." },
+                {
+                    text:
+                        "You can add your address, phone, tax ID, payment defaults, " +
+                        "and integrations in Settings after you sign in.",
+                },
+                {
+                    name: "Legal entity",
+                    id: "entity_choice-hint",
+                    text:
+                        "Picks the tax return and the equity accounts (owner's equity and draw; partner capital; " +
+                        "common stock and shareholder distributions). You can change it in Settings.",
+                },
+            ]) +
+            "</div>" +
             existingNotice +
             // On a served host the setup form is one choice among the
             // companies, like the sign-in: a company nobody has set up yet,
@@ -791,10 +807,6 @@
             '<div id="auth-error" style="' +
             errorBoxStyle() +
             '"></div>' +
-            '<p style="margin:14px 0 0;color:#767676;font-size:12px;line-height:1.5;text-align:center;">' +
-            "You can add your address, phone, tax ID, payment defaults, " +
-            "and integrations in Settings after you sign in." +
-            "</p>" +
             "</form>"
         );
     }
@@ -823,13 +835,9 @@
         }).join("");
         return (
             '<label for="entity_choice" style="' + labelStyle() + '">Legal entity</label>' +
-            '<select id="entity_choice" name="entity_choice" style="' + inputStyle() + '">' +
+            '<select id="entity_choice" name="entity_choice" aria-describedby="entity_choice-hint" style="' + inputStyle() + '">' +
             options +
-            "</select>" +
-            '<div style="font-size:11px;color:#767676;margin-top:4px;line-height:1.4;">' +
-            "Picks the tax return and the equity accounts (owner's equity and draw; partner capital; " +
-            "common stock and shareholder distributions). You can change it in Settings." +
-            "</div>"
+            "</select>"
         );
     }
 

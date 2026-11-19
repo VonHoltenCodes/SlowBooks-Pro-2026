@@ -44,7 +44,12 @@ const CompaniesPage = {
         CompaniesPage._ac = ac;
         let html = `
             <div class="page-header">
-                <h2>Company Files</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Company Files</h2>${hint(`Each company is stored in its own separate database.
+                ${CompaniesPage._isDesktop()
+                    ? 'Switch company takes you back to the company picker; this company is signed out.'
+                    : serves
+                    ? 'This server serves every company in this list. Open one here or choose it on the sign-in screen: each has its own users and roles, and a company this sign-in is not a user of asks for its own password. A new company is set up by the administrator who opens it first.'
+                    : 'A server serves one database, the one its DATABASE_URL names. A new company is created as its own database, ready to serve: run a second server pointed at it (on Docker, a second service in docker-compose.yml on another port), or point this one at it and restart. The sign-in page names the company a server serves; it never lists them. See docs/operations.md, "Several companies on a server".'}`, 'Company Files')}</div>
                 <div>
                     ${CompaniesPage._isDesktop() ? '<button class="btn btn-secondary" onclick="CompaniesPage.switchCompany()">Switch company…</button> ' : ''}
                     ${ac.is_copy ? '<button class="btn btn-primary" data-accountant-ok onclick="CompaniesPage.sendChanges()">Send changes back…</button> ' : ''}
@@ -57,14 +62,6 @@ const CompaniesPage = {
             </div>
             ${ac.is_copy ? `<div class="hint" style="margin-bottom:12px;">This is an accountant's copy of <strong>${escapeHtml(ac.copy.company_name)}</strong>, made ${ac.copy.made_at ? escapeHtml(new Date(ac.copy.made_at).toLocaleDateString()) : ''}. It takes journal entries dated on or before <strong>${escapeHtml(ac.copy.dividing_date)}</strong> and nothing else. When the adjustments are in, Send changes back writes the file to return.</div>` : ''}
             ${!ac.is_copy && ac.sent.length ? `<div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Copies sent to an accountant: ${ac.sent.map(s => `${escapeHtml(s.dividing_date)} (${s.applied} entr${s.applied === 1 ? 'y' : 'ies'} applied back)`).join(' · ')}</div>` : ''}
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                Each company is stored in its own separate database.
-                ${CompaniesPage._isDesktop()
-                    ? 'Switch company takes you back to the company picker; this company is signed out.'
-                    : serves
-                    ? 'This server serves every company in this list. Open one here or choose it on the sign-in screen: each has its own users and roles, and a company this sign-in is not a user of asks for its own password. A new company is set up by the administrator who opens it first.'
-                    : 'A server serves one database, the one its DATABASE_URL names. A new company is created as its own database, ready to serve: run a second server pointed at it (on Docker, a second service in docker-compose.yml on another port), or point this one at it and restart. The sign-in page names the company a server serves; it never lists them. See docs/operations.md, "Several companies on a server".'}
-            </p>
             <!-- Creating one is the administrator's (POST /api/companies) -->
             <p class="hidden" data-admin-note style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">New company files are created by an administrator.</p>`;
 
@@ -91,9 +88,8 @@ const CompaniesPage = {
     showSendToAccountant() {
         openModal('Send to accountant', `
             <form onsubmit="CompaniesPage.sendToAccountant(event)">
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">A copy of these books, encrypted under a passphrase shown once, for your accountant to open in their own SlowBooks Pro. They work on or before the dividing date; you keep working after it. Their changes come back as one small file you apply here.</p>
                 <div class="form-grid">
-                    <div class="form-group"><label>Dividing date *</label><input name="dividing_date" type="date" required value="${todayISO()}"></div>
+                    <div class="form-group"><label>Dividing date * ${hint('A copy of these books, encrypted under a passphrase shown once, for your accountant to open in their own SlowBooks Pro. They work on or before the dividing date; you keep working after it. Their changes come back as one small file you apply here.', 'Send to accountant')}</label><input name="dividing_date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Type the company's name to confirm *</label><input name="company_name" required autocomplete="off"></div>
                 </div>
                 <div id="ac-make-status" role="status" aria-live="polite" style="font-size:11px; color:var(--text-muted); min-height:14px; margin-top:6px;"></div>
@@ -151,9 +147,8 @@ const CompaniesPage = {
     showOpenCopy() {
         openModal("Open accountant's copy", `
             <form onsubmit="CompaniesPage.openCopy(event)">
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">The .sbacopy file your client sent, and the passphrase they sent separately. It becomes a company file of its own here, opened with a password you choose.</p>
                 <div class="form-grid">
-                    <div class="form-group full-width"><label>Copy file *</label><input name="file" type="file" accept=".sbacopy,.zip" required data-accountant-ok></div>
+                    <div class="form-group full-width"><label>Copy file * ${hint('The .sbacopy file your client sent, and the passphrase they sent separately. It becomes a company file of its own here, opened with a password you choose.', 'Copy file')}</label><input name="file" type="file" accept=".sbacopy,.zip" required data-accountant-ok></div>
                     <div class="form-group full-width"><label>Passphrase *</label><input name="passphrase" type="password" required autocomplete="off"></div>
                 </div>
                 <div class="form-actions">
@@ -188,8 +183,7 @@ const CompaniesPage = {
     showApplyChanges() {
         openModal("Apply accountant's changes", `
             <form onsubmit="CompaniesPage.previewChanges(event)">
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">The .sbchanges file your accountant sent back. You see every entry before anything posts; the new ones post as adjusting entries in their name, and a file applied twice posts nothing twice.</p>
-                <div class="form-group"><label>Changes file *</label><input name="file" type="file" accept=".sbchanges,.json" required></div>
+                <div class="form-group"><label>Changes file * ${hint('The .sbchanges file your accountant sent back. You see every entry before anything posts; the new ones post as adjusting entries in their name, and a file applied twice posts nothing twice.', 'Changes file')}</label><input name="file" type="file" accept=".sbchanges,.json" required></div>
                 <div id="ac-preview"></div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>

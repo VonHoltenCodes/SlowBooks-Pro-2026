@@ -52,7 +52,7 @@ const DashboardPage = {
         const editing = DashboardPage._editing;
         return `
             <div class="page-header">
-                <h2>${DashboardPage._title()}</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>${DashboardPage._title()}</h2>${editing ? hint('Use the arrows to reorder, × to hide. Your layout is remembered for your login.', 'Customize') : ''}</div>
                 <div style="display:flex; gap:8px; align-items:center;">
                     ${editing ? `
                         <button class="btn btn-sm btn-secondary" onclick="DashboardPage.showAdd()">+ Add a card</button>
@@ -62,7 +62,6 @@ const DashboardPage = {
                     : `<button class="btn btn-sm btn-secondary" data-write onclick="DashboardPage.startEdit()" title="Choose which cards show and in what order">Customize</button>`}
                 </div>
             </div>
-            ${editing ? '<div style="font-size:11px;color:var(--gray-500);margin-bottom:8px;">Use the arrows to reorder, × to hide. Your layout is remembered for your login.</div>' : ''}
             <div id="dash-grid" class="dash-grid">${DashboardPage._gridHtml()}</div>`;
     },
 

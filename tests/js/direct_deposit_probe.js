@@ -43,6 +43,7 @@ const ctx = {
   },
 };
 vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);  // hint(), hintList() (#977)
 vm.runInContext(fs.readFileSync('app/static/js/payroll.js', 'utf8'), ctx, { filename: 'payroll.js' });
 vm.runInContext('this.PayrollPage = PayrollPage;', ctx);
 
@@ -55,7 +56,8 @@ const stripTags = (s) => { let prev; s = String(s); do { prev = s; s = s.replace
   for (const [key, id] of [['processed', 1], ['checks_only', 2], ['draft', 3]]) {
     modal = null;
     await ctx.PayrollPage.view(id);
-    const html = flat(modal.html);
+    // a column head's tortoise (Other's, #977) is not a column
+    const html = flat(modal.html).replace(/<span class="hint-wrap">.*?<\/span><\/span><\/span>/g, '');
     const note = (html.match(/<p[^>]*>([^<]*(?:Direct deposit file|pay each stub by check|Once processed)[^<]*)<\/p>/) || [])[1] || '';
     const paid_by = [];
     const header = (html.match(/<thead>.*?<\/thead>/) || [''])[0].match(/<th[^>]*>([^<]*)<\/th>/g).map(stripTags);

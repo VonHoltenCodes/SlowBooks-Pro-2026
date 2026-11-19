@@ -23,11 +23,8 @@ const InKindPage = {
         </tr>`).join('');
         return `
             <div class="page-header">
-                <h2>In-Kind Gifts</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>In-Kind Gifts</h2>${hint("Donated property and services. The value you enter is the donor's estimate for the books; the acknowledgment letter describes the gift without a dollar figure.", 'In-Kind Gifts')}</div>
                 <button class="btn btn-primary" onclick="InKindPage.showForm()">+ In-Kind Gift</button>
-            </div>
-            <div class="toolbar" style="font-size:11px; color:var(--gray-500);">
-                Donated property and services. The value you enter is the donor's estimate for the books; the acknowledgment letter describes the gift without a dollar figure.
             </div>
             ${gifts.length === 0 ? `<div class="empty-state"><p>No in-kind gifts yet.</p></div>` : `
             <div class="table-container"><table>
