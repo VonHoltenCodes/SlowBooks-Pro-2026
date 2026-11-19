@@ -238,6 +238,36 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements*.txt
+      - name: Which browsers the modules launch
+        # Chromium always; WebKit only once a module launches it (the Find
+        # on this screen WebKit module, #1092), so no one has to remember
+        # to add it here
+        id: engines
+        run: |
+          engines=chromium
+          if grep -lqE '\.webkit\.launch\(' tests/test_*.py; then engines="chromium webkit"; fi
+          echo "engines=$engines" >> "$GITHUB_OUTPUT"
+          echo "key=${engines// /-}" >> "$GITHUB_OUTPUT"
+          echo "engines: $engines"
+      # apt's downloads are kept and cached: WebKit's system libraries are
+      # 126 MB from the Ubuntu mirror, which took 7 and 16 minutes on two of
+      # the four shards of this job's first run (300 kB/s) and under a
+      # minute on the others. The cache is restored from GitHub instead.
+      - name: Keep apt's downloads where the cache can find them
+        run: |
+          mkdir -p "$HOME/apt-cache/partial"
+          printf 'Dir::Cache::Archives "%s/apt-cache";\nAPT::Keep-Downloaded-Packages "true";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' "$HOME" \
+            | sudo tee /etc/apt/apt.conf.d/99ci-keep-debs
+      - name: Cache apt's downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-cache
+          key: apt-browser-ubuntu-24.04-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}
+      - name: Cache Playwright's browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}
       - name: System deps for WeasyPrint
         run: |
           sudo apt-get update
@@ -250,24 +280,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt "playwright==$PLAYWRIGHT_VERSION"
-      - name: Which browsers the modules launch
-        # Chromium always; WebKit only once a module launches it (the Find
-        # on this screen WebKit module, #1092), so no one has to remember
-        # to add it here
-        id: engines
-        run: |
-          engines=chromium
-          if grep -lqE '\.webkit\.launch\(' tests/test_*.py; then engines="chromium webkit"; fi
-          echo "engines=$engines" >> "$GITHUB_OUTPUT"
-          echo "key=${engines// /-}" >> "$GITHUB_OUTPUT"
-          echo "engines: $engines"
-      - name: Cache Playwright's browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ms-playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}
       - name: Install the browsers and their system libraries
         run: python -m playwright install --with-deps ${{ steps.engines.outputs.engines }}
+      - name: Let the cache read apt's downloads
+        run: sudo chown -R "$(id -u):$(id -g)" "$HOME/apt-cache"
       - name: This shard's browser modules
         run: |
           python scripts/ci_shards.py list --group browser --platform linux \
