@@ -134,8 +134,9 @@ const SupportPage = {
         // banner, fields enabled) — exactly who may need to report a problem.
         openModal('Contact support', `
             <form id="support-form" data-readonly-ok onsubmit="return false;">
+                <p style="font-size:12px; margin:0 0 10px;">Redaction is best-effort — please read the message before you send it.</p>
                 <div class="form-group">
-                    <label for="support-what-happened">What happened ${hint("Send opens your own mail program with the message written for you — SlowBooks sends nothing itself. mailto can't attach files, so attach screenshots or the log file in your mail program if you can. Long logs are trimmed; use Copy diagnostics for the full block. Redaction is best-effort — please read the message before you send it.", 'Contact support')}</label>
+                    <label for="support-what-happened">What happened ${hint("Send opens your own mail program with the message written for you — SlowBooks sends nothing itself. mailto can't attach files, so attach screenshots or the log file in your mail program if you can. Long logs are trimmed; use Copy diagnostics for the full block.", 'Contact support')}</label>
                     <textarea id="support-what-happened" name="What happened" rows="4" oninput="SupportPage.refresh()"></textarea>
                 </div>
                 <div class="form-group">
