@@ -13,23 +13,26 @@
     @page { @top-center { content: {{ (('Donation receipt' if kind == 'DonationReceipt' else 'Pledge' if kind == 'Pledge' else 'Sales receipt' if kind == 'SalesReceipt' else 'Invoice') ~ ' ' ~ (inv.invoice_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; } }
     @page :first { @top-center { content: none; } }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
-    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 14px; }
     .company-info { font-size: 9pt; color: #4a4a6a; }
     .company-name { font-size: 16pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
     .company-logo { display: block; max-height: 60px; max-width: 200px; margin-bottom: 6px; }
     .invoice-title { text-align: right; }
     .invoice-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
-    .invoice-number { font-size: 12pt; color: #666; margin-top: 4px; }
+    .invoice-number { font-size: 12pt; color: #666; margin-top: 2px; }
     .invoice-title .void { color: #b00020; }
     /* Labels over values, one column each: side by side, four labels at a
        fixed 80px squeezed the values until "Sep 01, 2026" and "Net 30" broke
        over two lines whenever a PO # was present (2.17.3 exploratory W-L1). */
-    .meta-table { width: 100%; margin-bottom: 16px; border-collapse: collapse; table-layout: fixed; }
-    .meta-table th { padding: 3px 8px; font-size: 8pt; font-weight: 700; color: #4a4a6a; text-align: left; border-bottom: 1px solid #d0d6e0; }
-    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; white-space: nowrap; }
-    .meta-table td.po { white-space: normal; overflow-wrap: anywhere; }
-    .terms-discount { margin: -10px 0 14px; padding: 0 8px; font-size: 9pt; font-weight: 700; }
-    .addresses { display: flex; gap: 40px; margin-bottom: 20px; }
+    /* The dates and terms sit beside the title, label and value on a row
+       each (#1041): a band of their own across the page pushed the line
+       table a fifth of the way down the sheet. */
+    .meta-table { margin: 6px 0 0 auto; border-collapse: collapse; }
+    .meta-table th { padding: 1px 8px 1px 0; font-size: 8pt; font-weight: 700; color: #4a4a6a; text-align: right; white-space: nowrap; }
+    .meta-table td { padding: 1px 0; font-size: 9pt; vertical-align: top; white-space: nowrap; text-align: right; }
+    .meta-table td.po { white-space: normal; overflow-wrap: anywhere; max-width: 180px; }
+    .terms-discount { margin: -6px 0 12px; padding: 0 8px; font-size: 9pt; font-weight: 700; }
+    .addresses { display: flex; gap: 40px; margin-bottom: 14px; }
     .address-block { flex: 1; }
     .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
     .address-text { font-size: 9pt; color: #333; }
@@ -87,28 +90,18 @@
         <div class="invoice-title">
             <h1>{% if kind == 'DonationReceipt' %}DONATION RECEIPT{% elif kind == 'Pledge' %}PLEDGE{% elif kind == 'SalesReceipt' %}SALES RECEIPT{% else %}INVOICE{% endif %}{% if inv.status == 'void' %} <span class="void">VOID</span>{% endif %}</h1>
             <div class="invoice-number">#{{ inv.invoice_number }}</div>
+            <table class="meta-table">
+                <tr><th scope="row">{% if kind == 'DonationReceipt' %}Date of contribution:{% elif kind == 'Pledge' %}Pledge date:{% else %}Date:{% endif %}</th><td>{{ inv.date | fdate }}</td></tr>
+                {# A sales receipt is paid at the time of sale: no due date, no terms. #}
+                {% if not inv.is_sales_receipt %}
+                <tr><th scope="row">{% if kind == 'Pledge' %}Due:{% else %}Due Date:{% endif %}</th><td>{{ inv.due_date | fdate }}</td></tr>
+                {% if kind != 'Pledge' and inv.terms %}<tr><th scope="row">Terms:</th><td>{{ inv.terms }}</td></tr>{% endif %}
+                {% endif %}
+                {% if inv.po_number %}<tr><th scope="row">PO #:</th><td class="po">{{ inv.po_number }}</td></tr>{% endif %}
+            </table>
         </div>
     </div>
 
-    {# A sales receipt is paid at the time of sale — no due date, no terms. #}
-    <table class="meta-table">
-        <tr>
-            <th scope="col">{% if kind == 'DonationReceipt' %}Date of contribution:{% elif kind == 'Pledge' %}Pledge date:{% else %}Date:{% endif %}</th>
-            {% if not inv.is_sales_receipt %}
-            <th scope="col">{% if kind == 'Pledge' %}Due:{% else %}Due Date:{% endif %}</th>
-            {% if kind != 'Pledge' %}<th scope="col">Terms:</th>{% endif %}
-            {% endif %}
-            {% if inv.po_number %}<th scope="col">PO #:</th>{% endif %}
-        </tr>
-        <tr>
-            <td>{{ inv.date | fdate }}</td>
-            {% if not inv.is_sales_receipt %}
-            <td>{{ inv.due_date | fdate }}</td>
-            {% if kind != 'Pledge' %}<td>{{ inv.terms or '' }}</td>{% endif %}
-            {% endif %}
-            {% if inv.po_number %}<td class="po">{{ inv.po_number }}</td>{% endif %}
-        </tr>
-    </table>
     {# The early-payment discount the terms offer (#664), and by when: never
        once it is paid or a discount was taken, even if an older server still
        sends the offer line (#665). #}
