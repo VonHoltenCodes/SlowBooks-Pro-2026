@@ -9,11 +9,11 @@
 # Frames, text, one JSON object each, version 1 (field names exactly):
 #
 #   -> hello      {"t":"hello","v":1,"device","switchboard","app","caps":
-#                  ["mcp","http"],"mcp":bool,"http":bool}
+#                  ["mcp","http","replay"],"mcp":bool,"http":bool}
 #   <- welcome    {"t":"welcome","account","slug","subscription":{"status",
 #                  "until"}}
 #   -> switch     {"t":"switch","mcp":bool,"http":bool} when one changes
-#   -> ping       {"t":"ping"} every 30 s; <- pong {"t":"pong"}
+#   -> ping       {"t":"ping"} every 15 s; <- pong {"t":"pong"}
 #   <- mcp        {"t":"mcp","id","era","headers","body"[,"method"]}
 #   -> mcp.result {"t":"mcp.result","id","status","headers","body"}
 #   <- http       {"t":"http","id","method","path","headers","body","more"}
@@ -90,8 +90,18 @@ from app.switchboard.server import INSTRUCTIONS, Mcp, build_registry, serve_mcp
 log = logging.getLogger("sbplive")
 
 VERSION = 1
-PING_EVERY = 30.0
-DEAD_AFTER = 75.0  # no frame at all for this long: the line is gone
+# The line can go silent without closing: Cloudflare stops acknowledging
+# it, and neither end hears a close (docs/RELAY.md, "As built: the idle
+# line"). A ping every 15 s and a line given up after 35 s with no frame (two
+# pongs missed) keep that gap short; the relay keeps the requests caught in
+# it and sends them again down the next line ("replay" below).
+PING_EVERY = 15.0
+DEAD_AFTER = 35.0  # no frame at all for this long: the line is gone
+# An mcp request's answer is kept this long by its id, so a request the
+# relay sends again after the line came back is answered once, never run
+# twice (the relay's MCP wait is 110 s).
+REPLAY_KEEP = 150.0
+REPLAY_MAX = 256
 WELCOME_WAIT = 30.0
 BACKOFF_FIRST = 1.0
 BACKOFF_MAX = 60.0
@@ -267,8 +277,9 @@ class _Refused(Exception):
 class _Request:
     """One request in flight: answered once, cancellable."""
 
-    def __init__(self, id_: str):
+    def __init__(self, id_: str, kind: str = ""):
         self.id = id_
+        self.kind = kind
         self.lock = threading.Lock()
         self.done = False
         self.cancelled = False
@@ -338,6 +349,10 @@ class Line:
         self._stop = threading.Event()
         self._ws = None
         self._inflight: dict = {}
+        # mcp requests by id across reconnects: those still running, and
+        # the answers given (when, frame), for the relay's replay
+        self._mcp_running: dict = {}
+        self._answers: dict = {}
         self.status = Status()
         self._said = ""  # the relay's last sentence before a welcome
         self._welcomed = False  # this connection reached a welcome
@@ -483,7 +498,7 @@ class Line:
                     "device": self.device,
                     "switchboard": __version__,
                     "app": self.app_version,
-                    "caps": ["mcp", "http"],
+                    "caps": ["mcp", "http", "replay"],
                     "mcp": sw["mcp"],
                     "http": sw["http"],
                 },
@@ -552,6 +567,10 @@ class Line:
                 flights = list(self._inflight.values())
                 self._inflight.clear()
             for req in flights:
+                if req.kind == "mcp":
+                    # it runs to its end; its answer is kept and goes down
+                    # the next line if the relay sends the request again
+                    continue
                 req.finish()
                 req.cancel()
             sock.shutdown()
@@ -625,7 +644,17 @@ class Line:
         if kind == "http" and not switch["http"]:
             self._error(sock, id_, TEAM_OFF)
             return
-        req = _Request(id_)
+        if kind == "mcp":
+            with self._lock:
+                kept = self._answers.get(id_)
+                running = id_ in self._mcp_running
+            if kept is not None:
+                self._send(sock, kept[1])  # sent again: answered as before
+                log.info("mcp -> %s again (sent again by the relay)", kept[1]["status"])
+                return
+            if running:
+                return  # its answer goes down whichever line is open then
+        req = _Request(id_, kind)
         with self._lock:
             if id_ in self._inflight:
                 busy = "A request with this id is already in flight."
@@ -634,6 +663,8 @@ class Line:
             else:
                 busy = None
                 self._inflight[id_] = req
+                if kind == "mcp":
+                    self._mcp_running[id_] = req
         if busy:
             self._error(sock, id_, busy)
             return
@@ -677,6 +708,19 @@ class Line:
         with self._lock:
             if self._inflight.get(req.id) is req:
                 del self._inflight[req.id]
+            if self._mcp_running.get(req.id) is req:
+                del self._mcp_running[req.id]
+
+    def _keep_answer(self, id_: str, frame: dict) -> None:
+        now = time.monotonic()
+        with self._lock:
+            for old in [
+                k for k, (at, _) in self._answers.items() if now - at > REPLAY_KEEP
+            ]:
+                del self._answers[old]
+            while len(self._answers) >= REPLAY_MAX:
+                del self._answers[next(iter(self._answers))]
+            self._answers[id_] = (now, frame)
 
     # -- mcp ------------------------------------------------------------------
 
@@ -702,17 +746,19 @@ class Line:
         out = headers_out(extra.items())
         if answer is not None:
             out["content-type"] = "application/json"
+        result = {
+            "t": "mcp.result",
+            "id": req.id,
+            "status": status,
+            "headers": out,
+            "body": answer,
+        }
+        self._keep_answer(req.id, result)
         if req.finish():
-            self._send(
-                sock,
-                {
-                    "t": "mcp.result",
-                    "id": req.id,
-                    "status": status,
-                    "headers": out,
-                    "body": answer,
-                },
-            )
+            # down the line that is open now: the one it came on may be gone
+            with self._lock:
+                now_open = self._ws
+            self._send(now_open or sock, result)
         log.info("mcp -> %s in %.0f ms", status, (time.monotonic() - started) * 1000)
 
     # -- http -----------------------------------------------------------------

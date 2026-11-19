@@ -33,8 +33,18 @@ NARROW = (
     "ask for one record by id."
 )
 
-# Annotations, as 2025-11-25 and 2026-07-28 define them (the same). Every tool here works
-# one company's books through one API, so none is open-world.
+# Annotations, as 2025-11-25 and 2026-07-28 define them (the same):
+# destructiveHint true "may perform destructive updates", false "performs
+# only additive updates"; Anthropic's connector review asks for
+# destructiveHint true on "tools that modify or delete data", and
+# destructive tools always prompt. In a ledger nothing a write does is only
+# additive: a new invoice or bill moves A/R or A/P and the accounts it posts
+# to, a payment changes what its invoices or bills still owe, a void
+# reverses, a PUT overwrites. So every tool that writes the books is
+# destructive, and only the reads are not. idempotentHint is true where the
+# same call again changes nothing more: a payment under the same key books
+# once, a second void or delete of the same record is refused. Every tool
+# works one company's books through one API, so none is open-world.
 READ_ONLY = {
     "readOnlyHint": True,
     "destructiveHint": False,
@@ -43,12 +53,13 @@ READ_ONLY = {
 }
 WRITE = {
     "readOnlyHint": False,
-    "destructiveHint": False,
+    "destructiveHint": True,
     "idempotentHint": False,
     "openWorldHint": False,
 }
 KEYED_WRITE = {**WRITE, "idempotentHint": True}
-DESTRUCTIVE = {**WRITE, "destructiveHint": True}
+DESTRUCTIVE = WRITE  # every write is; kept as a name for the general tools
+ONCE_WRITE = KEYED_WRITE  # the same call again changes nothing more
 
 # Tools an earlier version had, with where their work went, so a host or a
 # skill that still asks for one hears the way on.
@@ -277,6 +288,40 @@ def _refused_sentence(detail: str) -> str:
     return known or f"SlowBooks Pro refused this: {_end(detail)}"
 
 
+# A server failure's own words are passed on only when they are a short
+# sentence the app chose to say; an empty body, a stock "Internal Server
+# Error", an HTML page or a traceback is not shown (it says nothing a
+# bookkeeper can act on, and a traceback can carry the books' data).
+_PLAIN_REASON = 300
+_STOCK = {"internal server error", "bad gateway", "service unavailable",
+          "gateway timeout"}  # fmt: skip
+
+
+def _plain_reason(detail: str) -> str | None:
+    text = (detail or "").strip()
+    if (
+        not text
+        or len(text) > _PLAIN_REASON
+        or any(c in text for c in "<>\n\r{}")
+        or "traceback" in text.lower()
+        or text.rstrip(".").lower() in _STOCK
+        or text.startswith("the request failed with status")
+    ):
+        return None
+    return text
+
+
+def _server_failed(status: int, detail: str) -> str:
+    reason = _plain_reason(detail)
+    said = f": {_end(reason)}" if reason else " and gave no reason."
+    return (
+        f"SlowBooks Pro failed while doing this (HTTP {status}){said} If this "
+        "was a change, whether it was made is not known: check with search or "
+        "list_records before trying again. If it keeps happening, SlowBooks "
+        "Pro's own log has the cause; check that it is up to date and running."
+    )
+
+
 def error_sentence(exc: Exception) -> str:
     """The sentence for a failed tool call; the API's own words are kept."""
     if isinstance(exc, Refused):
@@ -297,10 +342,7 @@ def error_sentence(exc: Exception) -> str:
         if exc.status == 404:
             return f"SlowBooks Pro found nothing there: {_end(detail)}"
         if exc.status >= 500:
-            return (
-                f"SlowBooks Pro failed while doing this (HTTP {exc.status}): "
-                f"{_end(detail)} Check that it is up to date and running."
-            )
+            return _server_failed(exc.status, detail)
         if exc.status == 403:
             return _refused_sentence(detail)
         return f"SlowBooks Pro refused this: {_end(detail)}"

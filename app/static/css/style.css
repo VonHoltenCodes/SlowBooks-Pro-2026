@@ -4078,3 +4078,83 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
 .pw-eye:hover, .pw-eye[aria-pressed="true"] { color: var(--qb-navy); }
 .pw-eye:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }  /* the theme's ring, 3:1+ (#990) */
 [data-theme="dark"] .pw-eye:hover, [data-theme="dark"] .pw-eye[aria-pressed="true"] { color: #e0e4ec; }
+
+/* Find on this screen (find.js): the desktop window's find bar, opened by
+   Ctrl+F (⌘F). Over a dialog (200) and a toast (300), under a type-ahead's
+   list (450) and the splash. Every match gets a see-through tinted box
+   laid over its text (#find-marks) and the page itself is untouched. The
+   tint is see-through by its own alpha, not by mix-blend-mode: the macOS
+   window's WKWebView drew a blended box solid, over the word. A field
+   that matches, whose value no box over text can mark, is outlined. */
+:root {
+    --find-match-bg: rgba(255, 204, 0, 0.42);
+    --find-current-bg: rgba(255, 122, 0, 0.5);
+    --find-current-edge: #c75400;
+    /* a field's outline: 3:1 and more on the page and on white */
+    --find-match-ring: #9a6f00;
+    --find-current-ring: #c75400;
+}
+.find-bar {
+    position: fixed;
+    top: calc(var(--topbar-height) + 6px);
+    right: 16px;
+    z-index: 440;
+    width: min(420px, calc(100% - 32px));
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background: var(--panel-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 20, 50, 0.22);
+    font-size: 12px;
+}
+.find-bar[hidden] { display: none; }
+.find-row { display: flex; align-items: center; gap: 4px; }
+.find-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--input-border);
+    border-radius: 3px;
+    font: inherit;
+    color: inherit;
+    background: var(--panel-bg);
+}
+.find-bar--none .find-input { border-color: var(--danger); }
+.find-count { flex: 0 0 auto; min-width: 64px; text-align: right; color: var(--text-secondary); white-space: nowrap; }
+.find-btn {
+    flex: 0 0 auto;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 5px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+.find-btn:hover:not(:disabled) { border-color: var(--panel-border); color: var(--text-primary); }
+.find-btn:disabled { opacity: 0.45; cursor: default; }
+.find-btn:focus-visible, .find-records:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.find-empty { margin-top: 6px; color: var(--text-secondary); }
+.find-empty[hidden] { display: none; }
+.find-records {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-link);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.find-records[hidden] { display: none; }
+/* Over the top bar and its menu (250) and a dialog (200), under a toast
+   (300), the find bar and a list */
+.find-marks { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 260; pointer-events: none; overflow: hidden; }
+.find-mark { position: absolute; border-radius: 2px; background: var(--find-match-bg); }
+.find-mark--current { background: var(--find-current-bg); box-shadow: 0 0 0 1px var(--find-current-edge); }
+[data-find-hit="match"] { outline: 2px dashed var(--find-match-ring); outline-offset: 1px; }
+[data-find-hit="current"] { outline: 3px solid var(--find-current-ring); outline-offset: 1px; }
+@media print { .find-bar, .find-marks { display: none !important; } }
