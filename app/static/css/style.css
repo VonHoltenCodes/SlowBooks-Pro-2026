@@ -2873,6 +2873,18 @@ tr.clickable { cursor: pointer; }
     margin: -4px 0 0 8px;
 }
 
+/* An Interoperability heading and its tortoise on one line (#977), the
+   rule under the row; the hare stays at the heading's right end */
+.iif-h-row {
+    display: flex; align-items: center; gap: 2px;
+    margin-bottom: 12px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--panel-border);
+}
+.iif-section .iif-h-row > h3 { flex: 1 1 auto; margin: 0; padding: 0; border: 0; }
+/* the import review's heading: no rule, its own spacing */
+.iif-h-row--plain { margin-bottom: 8px; padding-bottom: 0; border-bottom: 0; }
+.iif-results .iif-h-row--plain > h4 { margin: 0; }
+
 .iif-export-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

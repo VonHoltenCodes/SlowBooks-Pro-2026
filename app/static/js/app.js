@@ -2141,8 +2141,7 @@ const App = {
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
                 <div class="settings-section">
-                    <h3>Export</h3>
-                    <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Download data as CSV files.</p>
+                    <div class="settings-h-row"><h3>Export</h3>${hint('Download data as CSV files.', 'Export')}</div>
                     <div style="display:flex; flex-direction:column; gap:8px;">
                         <a href="/api/csv/export/customers" class="btn btn-secondary" download>Export ${T('Customers')}</a>
                         <a href="/api/csv/export/vendors" class="btn btn-secondary" download>Export Vendors</a>
@@ -2157,18 +2156,16 @@ const App = {
                     </div>
                 </div>
                 <div class="settings-section" data-write>
-                    <h3>Import</h3>
-                    <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Upload CSV files to import data.</p>
+                    <div class="settings-h-row"><h3>Import</h3>${hint('Upload CSV files to import data.', 'Import')}</div>
                     <form id="csv-import-form" onsubmit="App.importCSV(event)">
-                        <div class="form-group"><label>Entity Type</label>
-                            <select name="entity_type" id="csv-entity" onchange="App.csvImportHelp(this.value)">
+                        <div class="form-group"><label for="csv-entity">Entity Type ${hint(App._csvImportHelpHtml('customers'), 'Entity Type', 'csv-import-help')}</label>
+                            <select name="entity_type" id="csv-entity" aria-describedby="csv-import-help" onchange="App.csvImportHelp(this.value)">
                                 <option value="customers">${T('Customers')}</option>
                                 <option value="vendors">Vendors</option>
                                 <option value="items">Items</option>
                                 <option value="accounts">Chart of Accounts</option>
                                 <option value="invoices">${T('Invoices')}</option>
                             </select></div>
-                        <div class="hint" id="csv-import-help" aria-live="polite" style="font-size:11px; margin-bottom:10px;">${App._csvImportHelpHtml('customers')}</div>
                         <div class="form-group"><label>CSV File</label>
                             <input type="file" name="file" accept=".csv" required></div>
                         <button type="submit" class="btn btn-primary">Import</button>
@@ -2239,9 +2236,15 @@ const App = {
             + `<a href="/static/downloads/${spec.template}" download>Download a template</a>.`;
     },
 
+    // The columns follow the type, inside the Entity Type note (#977): its
+    // body's markup swapped (a list and a template link, so not
+    // Hints.setText's plain words), the field's name kept at its head
     csvImportHelp(entity) {
-        const help = $('#csv-import-help');
-        if (help) help.innerHTML = App._csvImportHelpHtml(entity);
+        const body = $('#csv-import-help .hint-pop-body');
+        if (!body) return;
+        const head = body.querySelector('.hint-pop-title');
+        body.innerHTML = App._csvImportHelpHtml(entity);
+        if (head) body.insertBefore(head, body.firstChild);
     },
 
     async importCSV(e) {

@@ -110,7 +110,7 @@ MARKED = {
         r'data-write onclick="App\.setAccountActive\(\$\{a\.id\}, false\)">Deactivate',
         r'data-write onclick="App\.setAccountActive\(\$\{a\.id\}, true\)">Reactivate',
         r'data-write onclick="App\.deleteAccount\(\$\{a\.id\}\)">Delete',
-        r'<div class="settings-section" data-write>\s*<h3>Import</h3>',
+        r'<div class="settings-section" data-write>\s*<div class="settings-h-row"><h3>Import</h3>',
         r"data-write>Save & Next \(Ctrl\+Enter\)",
     ],
     "settings.js": [

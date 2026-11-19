@@ -327,7 +327,7 @@ def test_the_entries_list_on_journal_entries_with_their_word(
     )  # the toast counts them (NEW-123)
     assert (
         "Transaction Detail\n" in js
-        or "Transaction Detail" in js.split("Import from Report CSV")[1][:1500]
+        or "Transaction Detail" in js.split("Import from Report CSV</h3>")[1][:1500]
     )
 
 

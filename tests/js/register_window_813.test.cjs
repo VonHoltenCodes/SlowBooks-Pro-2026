@@ -31,6 +31,7 @@ function load() {
     };
     vm.createContext(ctx);
     const src = fs.readFileSync(path.join(__dirname, '../../app/static/js/banking.js'), 'utf8');
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), ctx);  // hint(), hintList() (#977)
     vm.runInContext(src + '\nthis.BankingPage = BankingPage;', ctx);
     return { B: ctx.BankingPage, seen };
 }
