@@ -79,20 +79,35 @@ def load_durations(platform):
     return data.get(platform, {})
 
 
-def split(files, n, durations):
+# Each shard runs its files on the runner's cores (pytest -n auto,
+# --dist loadfile): GitHub's Linux and Windows runners have four.
+WORKERS = 4
+
+
+def split(files, n, durations, workers=WORKERS):
     """n lists of files: the measured ones longest first, each onto the
-    lightest shard so far; then the unmeasured ones round-robin."""
+    shard that would finish soonest with it; then the unmeasured ones
+    round-robin. A shard's time is its files spread over its workers, but
+    never less than its longest file, which one worker runs alone (the
+    keyboard sweep is a quarter of the browser modules)."""
     if n < 1:
         raise ValueError("at least one shard")
     shards = [[] for _ in range(n)]
     loads = [0.0] * n
+    longest = [0.0] * n
+
+    def finish(k, extra):
+        return max((loads[k] + extra) / workers, longest[k], extra)
+
     known = sorted(
         (f for f in files if f in durations), key=lambda f: (-durations[f], f)
     )
     for f in known:
-        i = min(range(n), key=lambda k: (loads[k], k))
+        d = durations[f]
+        i = min(range(n), key=lambda k: (finish(k, d), loads[k], k))
         shards[i].append(f)
-        loads[i] += durations[f]
+        loads[i] += d
+        longest[i] = max(longest[i], d)
     unknown = sorted(f for f in files if f not in durations)
     for j, f in enumerate(unknown):
         shards[j % n].append(f)
@@ -124,9 +139,12 @@ def _cmd_show(args):
     durations = load_durations(args.platform)
     for i, files in enumerate(shards, 1):
         new = sum(1 for f in files if f not in durations)
+        longest = max((durations.get(f, 0.0) for f in files), default=0.0)
         print(
             f"shard {i}/{args.of}: {len(files)} files, "
-            f"{loads[i - 1]:.0f} s measured, {new} unmeasured"
+            f"{loads[i - 1]:.0f} s measured (about "
+            f"{max(loads[i - 1] / WORKERS, longest):.0f} s on {WORKERS} workers), "
+            f"{new} unmeasured"
         )
 
 
