@@ -708,6 +708,12 @@ PICKER_HTML = """<!DOCTYPE html>
   .company .name { font-weight: 600; color: #1a2b3c; }
   .company .file { font-size: 11px; color: #99a; }
   .company .note { font-size: 12px; color: #a0522d; margin-top: 4px; line-height: 1.4; }
+  .company.missing { cursor: default; }
+  .company.missing:hover { border-color: #d8dee4; box-shadow: none; }
+  .company.missing .name { color: #778; }
+  .company .remove { flex: none; margin-left: 12px; padding: 6px 10px; border: 1px solid #c6ccd4; border-radius: 6px;
+                     background: #e8ecf1; color: #1a2b3c; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .company .remove:focus-visible { outline: 2px solid #a37a29; outline-offset: 1px; }
   .open { color: #2f6fed; font-size: 12px; font-weight: 600; }
   .newco { margin-top: 20px; background: #fff; border: 1px dashed #b9c2cc;
            border-radius: 8px; padding: 16px; }
@@ -867,22 +873,46 @@ async function refresh() {
   list.innerHTML = info.companies.map(function (c) {
     const last = c.file === info.last_opened ? ' <span class="open">last opened</span>' : '';
     const sample = c.sample ? ' <span class="open">sample</span>' : '';
+    // a company whose file was deleted by hand (#1054): said so, and taken
+    // off the list on request; nothing on disk is touched
+    if (c.missing) {
+      return '<div class="company missing" data-file="' + esc(c.file) + '">' +
+        '<div><div class="name">' + esc(c.name) + '</div>' +
+        '<div class="file">' + esc(c.file) + '</div>' +
+        '<div class="note">Missing: the company file is no longer in the company folder.</div></div>' +
+        '<button type="button" class="remove" data-remove="' + esc(c.file) + '">Remove from list</button></div>';
+    }
     return '<div class="company" data-file="' + esc(c.file) + '">' +
       '<div><div class="name">' + esc(c.name) + sample + last + '</div>' +
       '<div class="file">' + esc(c.file) + '</div>' +
       (c.note ? '<div class="note">' + esc(c.note) + '</div>' : '') + '</div>' +
       '<div class="open">Open &rsaquo;</div></div>';
   }).join('');
-  list.querySelectorAll('.company').forEach(function (el) {
+  list.querySelectorAll('.company:not(.missing)').forEach(function (el) {
     el.onclick = function () { openCompany(el.getAttribute('data-file'), el.querySelector('.name').firstChild.textContent); };
+  });
+  list.querySelectorAll('.company.missing .remove').forEach(function (btn) {
+    btn.onclick = function () { removeFromList(btn.getAttribute('data-remove'), btn.closest('.company').querySelector('.name').textContent); };
   });
   // First launch of the window: straight into the last company. The
   // sign-in screen it lands on offers "Choose a different company", and
-  // Sign out comes back here with auto_open off.
-  const last = info.companies.find(function (c) { return c.file === info.last_opened; });
+  // Sign out comes back here with auto_open off. Once only: the list
+  // drawn again after a Remove from list does not open anything.
+  const last = !autoOpenTried && info.companies.find(function (c) { return c.file === info.last_opened && !c.missing; });
   if (info.auto_open && last) {
     openCompany(last.file, last.name);
   }
+  autoOpenTried = true;
+}
+var autoOpenTried = false;
+async function removeFromList(file, name) {
+  const result = await window.pywebview.api.remove_from_list(file);
+  if (result && result.success) {
+    setStatus('Removed ' + (name || file) + ' from the list. Nothing in the company folder was changed.');
+  } else {
+    setStatus((result && result.error) || 'Could not remove the company from the list.', true);
+  }
+  await refresh();
 }
 async function openCompany(file, name) {
   setBusy(true);
@@ -1722,6 +1752,17 @@ class PickerApi:
             "last_opened": company_service.get_last_opened(),
             "auto_open": self._auto_open,
         }
+
+    def remove_from_list(self, filename: str) -> dict:
+        """Take a company whose file is missing off the list (#1054): the
+        list's entry only, never a file; a company whose file is there is
+        refused with a sentence."""
+        from app.services import company_service
+
+        try:
+            return company_service.remove_missing_from_list(str(filename or ""))
+        except Exception as exc:  # surfaced in the picker, not a traceback
+            return {"success": False, "error": str(exc)}
 
     def create_company(self, name: str) -> dict:
         from app.services import company_service

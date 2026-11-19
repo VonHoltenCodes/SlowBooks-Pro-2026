@@ -204,12 +204,45 @@ def manifest_list_companies() -> list[dict]:
             "file": filename,
             "is_current": is_current,
             "sample": bool(c.get("sample")),
+            # its file is gone from the company folder (#1054): deleted by
+            # hand, so the picker offers Remove from list
+            "missing": not is_current and _file_missing(filename),
         }
         note = None if is_current else _below_floor_note(filename)
         if note:
             entry["note"] = note
         companies.append(entry)
     return companies
+
+
+def _file_missing(filename: str) -> bool:
+    """True when the list names a company whose file is not in the company
+    folder: deleted or moved by hand (#1054), or a name no company file can
+    have."""
+    path = company_db_path(filename) if filename else None
+    return path is None or not path.exists()
+
+
+MISSING_NOT_LISTED = "That company is not on the list."
+MISSING_FILE_PRESENT = (
+    "That company's file is still in the company folder, so it stays on "
+    "the list. Open it to work in it."
+)
+
+
+def remove_missing_from_list(filename: str) -> dict:
+    """Take a company whose file is missing off the companies list (#1054).
+
+    Only the list's entry goes: nothing in the data folder is touched, and a
+    company whose file is still there is refused, so this can never stand in
+    for deleting a company. When it was the last company opened, the list
+    remembers the first one left instead."""
+    if not any(c.get("file") == filename for c in _read_manifest()["companies"]):
+        return {"success": False, "error": MISSING_NOT_LISTED}
+    if not _file_missing(filename):
+        return {"success": False, "error": MISSING_FILE_PRESENT}
+    _drop_manifest_entry(filename)
+    return {"success": True}
 
 
 def _below_floor_note(filename: str) -> str | None:
