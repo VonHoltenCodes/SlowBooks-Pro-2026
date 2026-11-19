@@ -335,9 +335,10 @@ def test_an_inactive_rule_customer_is_passed_over(client, db_session, setup):
 
 def test_the_rule_form_has_a_customer_picker_and_a_memo_box():
     assert "API.get('/customers?tree=1')" in RULES_JS
-    assert "<label for=\"bank-rule-customer\">${T('Customer')}</label>" in RULES_JS
+    # each label carries its hint behind the tortoise (#977)
+    assert "<label for=\"bank-rule-customer\">${T('Customer')} ${hint(" in RULES_JS
     assert 'id="bank-rule-customer" name="customer_id"' in RULES_JS
-    assert '<label for="bank-rule-memo">Memo</label>' in RULES_JS
+    assert '<label for="bank-rule-memo">Memo ${hint(' in RULES_JS
     assert 'id="bank-rule-memo" name="memo" maxlength="500"' in RULES_JS
     assert "c.is_active !== false || c.id == rule.customer_id" in RULES_JS
     assert (

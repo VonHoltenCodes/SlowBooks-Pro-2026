@@ -45,10 +45,8 @@ const BillQuickEntry = {
                 <h2>Bill Quick Entry</h2>
                 <div style="font-size:10px; color:var(--text-muted);">
                     Batch bill entry — for entering a stack of vendor bills quickly
+                    ${hint('Enter the bill and press <strong>Save &amp; Next</strong> (or Ctrl+Enter) to save it and start the next one. Each line is an account and an amount.', 'Bill Quick Entry')}
                 </div>
-            </div>
-            <div class="quick-entry-info" style="background:var(--primary-light); padding:8px 12px; margin-bottom:12px; border:1px solid var(--qb-gold); font-size:11px;">
-                Enter the bill and press <strong>Save &amp; Next</strong> (or Ctrl+Enter) to save it and start the next one. Each line is an account and an amount.
             </div>
             <form id="bqe-form" aria-label="Bill Quick Entry" onsubmit="BillQuickEntry.save(event)">
                 <div class="form-grid">

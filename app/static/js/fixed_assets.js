@@ -178,9 +178,8 @@ const FixedAssetsPage = {
                         <input name="purchase_date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Purchase Price *</label>
                         <input name="purchase_price" type="number" step="0.01" min="0.01" required></div>
-                    <div class="form-group"><label>Salvage Value</label>
-                        <input name="salvage_value" type="number" step="0.01" min="0" value="0">
-                        <div style="font-size:10px; color:var(--gray-500);">No more than the purchase price.</div></div>
+                    <div class="form-group"><label>Salvage Value ${hint('No more than the purchase price.', 'Salvage Value')}</label>
+                        <input name="salvage_value" type="number" step="0.01" min="0" value="0"></div>
                     ${acquisition}
                     <div class="form-group full-width"><label>Description</label>
                         <textarea name="description"></textarea></div>

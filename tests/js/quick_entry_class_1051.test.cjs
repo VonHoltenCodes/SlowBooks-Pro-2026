@@ -62,6 +62,8 @@ function context(classes, state) {
     ctx.$ = (sel) => (sel === '#qe-lines' || sel === '#bqe-lines' ? state.tbody : state.cells[sel] || null);
     ctx.$$ = (sel) => (sel === '#qe-lines tr' || sel === '#bqe-lines tr' ? state.rows : []);
     vm.createContext(ctx);
+    // the tortoise helper the forms' teaching text sits behind (#977)
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), ctx);
     // Nonprofit alone: the rest of utils.js brings its own $ and $$
     const utils = read('utils.js');
     const np = utils.slice(utils.indexOf('const Nonprofit = {'), utils.indexOf("// Normalize a form's class_id"));

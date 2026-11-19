@@ -48,6 +48,7 @@ function journal({ accountant = false, post } = {}) {
         location: { hash: '#/journal' },
         T: (w) => w,
         Terms: { text: (w) => w },
+        hint: (text) => `<span class="hint-pop" hidden>${text}</span>`,
         escapeHtml: (v) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`),
         accountLabel: (a) => a.name,
         todayISO: () => '2026-11-12',
@@ -158,6 +159,8 @@ function vendorCredits({ post } = {}) {
         document: { querySelector: () => null },
     };
     vm.createContext(context);
+    // the tortoise helper the forms' teaching text sits behind (#977)
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), context);
     vm.runInContext(read('vendor_credits.js') + '\nthis.VendorCreditsPage = VendorCreditsPage;', context);
     const VendorCreditsPage = context.VendorCreditsPage;
     VendorCreditsPage.lineHtml = () => '<tr></tr>';

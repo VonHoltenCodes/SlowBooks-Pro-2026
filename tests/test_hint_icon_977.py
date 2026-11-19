@@ -33,3 +33,27 @@ def test_the_button_is_a_24px_target_with_a_focus_ring_and_a_dark_theme():
     assert ":hover .hint-pop" not in css, "a note never opens on hover"
     dark = (ROOT / "app/static/css/dark.css").read_text(encoding="utf-8")
     assert '[data-theme="dark"] .hint-pop {' in dark
+
+
+def test_the_mark_is_the_whole_tortoise_on_a_clear_ground():
+    """The button's mark was a crop of the shell on a pale block: the head
+    was cut off and the block showed on a dark page. All four are the whole
+    round mark with nothing behind the tortoise."""
+    from PIL import Image
+
+    for name, side in (
+        ("tortoise-hint.png", 22),
+        ("tortoise-hint@2x.png", 44),
+        ("tortoise-info.png", 28),
+        ("tortoise-info@2x.png", 56),
+    ):
+        mark = Image.open(ROOT / "app/static/img" / name).convert("RGBA")
+        assert mark.size == (side, side), name
+        alpha = mark.getchannel("A")
+        # clear at the corners and inside the ring, above the tortoise
+        for spot in ((0, 0), (side - 1, 0), (0, side - 1), (side // 2, side // 6)):
+            assert alpha.getpixel(spot) < 40, (name, spot)
+        # and the tortoise is there
+        assert alpha.getpixel((side // 2, side // 2)) == 255, name
+    js = (ROOT / "app/static/js/hint.js").read_text(encoding="utf-8")
+    assert 'tortoise-hint@2x.png 2x" width="22" height="22"' in js

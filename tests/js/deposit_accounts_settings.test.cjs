@@ -70,6 +70,8 @@ function load(file, name, { accounts, settings = {}, routes = {} }) {
     };
     context.fetchAllPages = url => context.API.get(url);
     vm.createContext(context);
+    // the tortoise helper the forms' teaching text sits behind (#977)
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), context);
     // the files a new document holds before its first save (#881): not this test's
     context.PendingFiles = { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} };
     vm.runInContext(fs.readFileSync(path.join(JS, file), 'utf8') + `\nthis.${name} = ${name};`, context);
