@@ -85,8 +85,20 @@ def _has_ledger_match(db: Session, line: BankTransaction) -> bool:
 
 
 def _matches(rule_type: str, pattern: str, payee: str) -> bool:
+    """`payee` is lower-cased. A `*` in the pattern stands for any run of
+    characters, as people type it ("T-MOBILE*"); without one the pattern is
+    plain text."""
     pattern = (pattern or "").strip().lower()
-    if not pattern:
+    if not pattern.strip("*").strip():
+        return False
+    if "*" in pattern:
+        rx = ".*".join(re.escape(part) for part in pattern.split("*"))
+        if rule_type == "exact":
+            return re.fullmatch(rx, payee, re.S) is not None
+        if rule_type == "starts_with":
+            return re.match(rx, payee, re.S) is not None
+        if rule_type == "contains":
+            return re.search(rx, payee, re.S) is not None
         return False
     if rule_type == "contains":
         return pattern in payee
@@ -159,6 +171,44 @@ def rule_dimensions(db: Session, payee: str | None) -> tuple[int | None, int | N
         if job is not None and job.is_active is not False:
             job_id = job.id
     return class_id, job_id
+
+
+def rule_picks(db: Session, rows) -> dict[int, dict]:
+    """What the rule each unmatched statement line follows gives it besides
+    the category, by line id: {"class_id", "job_id", "vendor_id",
+    "vendor_name"}, each None when the rule names none (or the class is
+    archived, the job inactive). The review row is drawn with them, so it
+    shows the class and the vendor Add will post with (rule_dimensions and
+    _entry_vendor in bank_matching ask the same rule)."""
+    rows = [r for r in rows if r.match_status == "unmatched"]
+    if not rows:
+        return {}
+    rules = _active_rules(db)
+    if not rules:
+        return {}
+    from app.models.classes import TxnClass
+    from app.models.contacts import Vendor
+    from app.models.jobs import Job
+
+    names = _vendor_names(db, rules)
+    out = {}
+    for line in rows:
+        text = (line.payee or "").lower()
+        rule = next((r for r in rules if _hit(r, text, names)), None)
+        if rule is None:
+            continue
+        cls = db.get(TxnClass, rule.class_id) if rule.class_id else None
+        job = db.get(Job, rule.job_id) if rule.job_id else None
+        vendor = db.get(Vendor, rule.vendor_id) if rule.vendor_id else None
+        out[line.id] = {
+            "class_id": cls.id if cls is not None and not cls.is_archived else None,
+            "job_id": (
+                job.id if job is not None and job.is_active is not False else None
+            ),
+            "vendor_id": vendor.id if vendor is not None else None,
+            "vendor_name": vendor.name if vendor is not None else None,
+        }
+    return out
 
 
 def apply_bank_rules(db: Session, bank_account_id: int | None = None) -> int:

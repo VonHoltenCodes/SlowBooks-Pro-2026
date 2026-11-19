@@ -1830,16 +1830,19 @@ const BankingPage = {
         const small = 'font-size:11px; padding:2px 4px; width:150px; display:block;';
         const save = `onchange="BankingPage.setPicks(${t.id})"`;
         const sel = (id, kept) => (String(id) === String(kept) ? ' selected' : '');
+        // where nothing was picked, the class, job and vendor the line's
+        // bank rule gives it: the row shows what Add posts
+        const or = (pick, rule) => (pick !== null && pick !== undefined ? pick : rule);
         let html = '';
         if (BankingPage._lineClassShown()) {
             const opts = BankingPage._classes_().filter(c => !c.is_archived)
-                .map(c => `<option value="${c.id}"${sel(c.id, t.pick_class_id)}>${escapeHtml(c.name)}</option>`).join('');
+                .map(c => `<option value="${c.id}"${sel(c.id, or(t.pick_class_id, t.rule_class_id))}>${escapeHtml(c.name)}</option>`).join('');
             html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         }
         const moneyIn = parseFloat(t.amount) > 0;
         const jobs = BankingPage._jobs || [];
         if (jobs.length) {
-            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}"${sel(j.id, t.pick_job_id)}>${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}"${sel(j.id, or(t.pick_job_id, t.rule_job_id))}>${escapeHtml(j.full_name || j.name)}</option>`).join('');
             const bind = moneyIn ? ` data-customer-select="rv-customer-${t.id}"` : '';
             html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}" ${save}><option value="">— No job —</option>${opts}</select>`;
         }
@@ -1848,7 +1851,7 @@ const BankingPage = {
                 .map(c => `<option value="${c.id}"${sel(c.id, t.pick_customer_id)}>${escapeHtml(customerLabel(c))}</option>`).join('');
             html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         } else {
-            const kept = t.pick_vendor_name || t.pick_payee || '';
+            const kept = t.pick_vendor_name || t.pick_payee || t.rule_vendor_name || '';
             html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" value="${escapeHtml(kept)}" style="${small}" ${save}>`;
         }
         return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';

@@ -327,6 +327,11 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
     # A payout suggestion (#584) is offered only on an unmatched deposit, so
     # the settings read and the per-provider lookup stay off the common path.
     settings = get_all_settings(db)
+    # the class, job and vendor the line's rule gives it, to draw the row
+    # with what Add posts
+    from app.services.bank_rules_engine import rule_picks
+
+    by_rule = rule_picks(db, rows)
 
     def _payout(r):
         if r.match_status != "unmatched" or not r.amount or r.amount <= 0:
@@ -359,6 +364,10 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
             "pick_vendor_name": picked_vendors.get(r.pick_vendor_id),
             "pick_customer_id": r.pick_customer_id,
             "pick_payee": r.pick_payee,
+            "rule_class_id": by_rule.get(r.id, {}).get("class_id"),
+            "rule_job_id": by_rule.get(r.id, {}).get("job_id"),
+            "rule_vendor_id": by_rule.get(r.id, {}).get("vendor_id"),
+            "rule_vendor_name": by_rule.get(r.id, {}).get("vendor_name"),
         }
         for r in rows
     ]

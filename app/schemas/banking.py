@@ -216,6 +216,12 @@ class BankTransactionResponse(BaseModel):
     pick_vendor_name: Optional[str] = None
     pick_customer_id: Optional[int] = None
     pick_payee: Optional[str] = None
+    # what the line's bank rule gives it besides the category: the row shows
+    # them where nothing was picked, as Add posts them
+    rule_class_id: Optional[int] = None
+    rule_job_id: Optional[int] = None
+    rule_vendor_id: Optional[int] = None
+    rule_vendor_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
