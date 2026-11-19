@@ -2806,6 +2806,36 @@ tr.clickable { cursor: pointer; }
     border-bottom: 1px solid var(--panel-border);
 }
 
+/* Helper text behind the tortoise (#977): hint() in hint.js. The button is
+   the tortoise's shell with its "i", after a field's label; its note opens
+   under it. 24px square, the smallest target the keyboard and touch sweeps
+   accept, with the mark centred in it. */
+.hint-wrap { position: relative; display: inline-block; vertical-align: middle; line-height: 1; }
+.hint-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; margin: -4px 0 -4px 2px; padding: 0;
+    background: none; border: 1px solid transparent; border-radius: 12px;
+    cursor: pointer;
+}
+.hint-icon img { display: block; }
+.hint-icon:hover, .hint-icon[aria-expanded="true"] { border-color: var(--panel-border); background: var(--panel-bg); }
+.hint-icon:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.hint-pop {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+    display: flex; gap: 8px; align-items: flex-start;
+    width: max-content; max-width: 340px;
+    padding: 8px 10px;
+    background: var(--panel-bg); color: var(--text-primary);
+    border: 1px solid var(--panel-border); border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    font-size: 12px; font-weight: 400; line-height: 1.45; text-align: left;
+    white-space: normal; text-transform: none; letter-spacing: normal;
+}
+.hint-pop[hidden] { display: none; }
+.hint-pop--right { left: auto; right: 0; }
+.hint-pop-mark { flex: 0 0 auto; }
+.hint-pop-title { display: block; margin-bottom: 2px; }
+
 /* The hare mark (#979): on the From QuickBooks sections only, at the heading's
    right end, never in the chrome. */
 .hare-mark {

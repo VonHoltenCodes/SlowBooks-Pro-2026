@@ -635,3 +635,7 @@
 [data-theme="dark"] .table--frozen tbody tr:nth-child(even) td:first-child { background: #181a22; }
 [data-theme="dark"] .table--frozen tbody tr:hover td:first-child { background: #222838; }
 [data-theme="dark"] .budget-variance__acct { color: var(--qb-navy); }
+
+/* Helper text behind the tortoise (#977) */
+[data-theme="dark"] .hint-icon:hover, [data-theme="dark"] .hint-icon[aria-expanded="true"] { background: #2a2f3a; border-color: #4a5160; }
+[data-theme="dark"] .hint-pop { background: #232833; color: #e6e8ee; border-color: #4a5160; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5); }
