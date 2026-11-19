@@ -870,6 +870,11 @@ def test_a_read_only_sign_in_opens_a_fields_note_in_a_locked_form(
     page, handled = _signed_in(browser, reader, "readonly")
     opened = []
     try:
+        # the welcome splash is up over the page, and a real click is wanted
+        page.evaluate(
+            "() => { const s = document.getElementById('splash');"
+            " if (s) s.classList.add('hidden'); }"
+        )
         for route, opener in LOCKED_FORMS_WITH_HINTS:
             _visit(page, handled, route.format(**books))
             page.evaluate("() => closeModal()")
