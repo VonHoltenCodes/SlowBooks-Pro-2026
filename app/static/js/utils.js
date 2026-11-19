@@ -1229,7 +1229,11 @@ function openModal(title, html, opts) {
     // A form's own skip link (skipLinkHtml) is the first stop for Tab and
     // a screen reader, not where a dialog opens: the first field is. Nor a
     // field's tortoise (hint(), [data-hint], #977): it opens on the field's
-    // help, not on the help's button; it stays in the Tab order.
+    // help, not on the help's button; it stays in the Tab order. Nor the
+    // Activity panel's toggle (ActivityPanel, data-activity-toggle): a
+    // history under the record, not where the record starts; a view whose
+    // next control is Void opens on the dialog itself (NEW-32), and the
+    // toggle stays in the Tab order.
     setTimeout(() => {
         const target = _modalLanding();
         focusFor(target, _byKeyboard());
@@ -1237,13 +1241,14 @@ function openModal(title, html, opts) {
 }
 
 // Where an open dialog's focus belongs (openModal, above): its first
-// control, passing over a skip link and a tortoise, or the dialog itself
-// when that control undoes something. Also used when the control focus
-// landed on is disabled after the dialog opened (ScanHelper.wire).
+// control, passing over a skip link, a tortoise and the Activity toggle,
+// or the dialog itself when that control undoes something. Also used when
+// the control focus landed on is disabled after the dialog opened
+// (ScanHelper.wire).
 function _modalLanding() {
     const modal = $('#modal');
     const stops = _tabStops($('#modal-body'), null);
-    const first = stops.find(el => !el.matches('.skip-link, [data-hint]')) || stops.find(el => !el.matches('[data-hint]'));
+    const first = stops.find(el => !el.matches('.skip-link, [data-hint], [data-activity-toggle]')) || stops.find(el => !el.matches('[data-hint], [data-activity-toggle]'));
     const target = first && !first.matches('[data-destructive]') ? first : modal;
     return target;
 }
@@ -2957,7 +2962,7 @@ const ActivityPanel = {
             <details id="${key}" class="activity-panel" data-activity-type="${t}" data-activity-id="${n}"
                 ontoggle="ActivityPanel.toggled(this)"
                 style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
-                <summary style="font-size:13px; font-weight:600; cursor:pointer;">Activity<span class="activity-count"></span></summary>
+                <summary data-activity-toggle style="font-size:13px; font-weight:600; cursor:pointer;">Activity<span class="activity-count"></span></summary>
                 <div class="activity-list" aria-live="polite" style="margin-top:8px; font-size:11px;"></div>
             </details>`;
     },

@@ -701,6 +701,58 @@ def test_a_nonprofits_dialogs_open_safely_too(
         page.close()
 
 
+# The views whose Activity panel (#894) sits ahead of Void: the toggle was
+# the first control, so each opened on it, a history rather than the record
+# (#1095). The landing passes over it as it does a skip link or a tortoise.
+ACTIVITY_FIRST_VIEWS = [
+    ("#/payments", "PaymentsPage.view({payment})"),
+    ("#/credit-memos", "CreditMemosPage.view({memo})"),
+    ("#/deposits", "DepositsPage.view({deposit})"),
+]
+
+
+def test_a_view_with_activity_ahead_of_void_opens_at_its_top(browser, company, books):
+    """The payment, credit memo and deposit views open at their top with
+    focus neither on Void or Delete nor on the Activity toggle; the toggle
+    is still in the Tab order, and opens the panel from the keyboard."""
+    page, handled = _open(browser, company)
+    try:
+        for route, opener in ACTIVITY_FIRST_VIEWS:
+            call = opener.format(**books)
+            _visit(page, handled, route)
+            page.evaluate("() => closeModal()")
+            page.evaluate(f"async () => {{ await {call}; }}")
+            page.wait_for_function(MODAL_SHOWN)
+            settle(page, handled)
+            assert page.locator("#modal-body [data-activity-toggle]").count() == 1, call
+            at = page.evaluate("""() => {
+                const a = document.activeElement;
+                return { id: a.id || '', text: a.textContent.trim().slice(0, 40),
+                         destructive: a.hasAttribute('data-destructive'),
+                         activity: a.hasAttribute('data-activity-toggle'),
+                         scrolled: [document.getElementById('modal').scrollTop,
+                                    document.getElementById('modal-body').scrollTop] };
+            }""")
+            assert not at["destructive"] and not DESTRUCTIVE.match(at["text"]), (
+                call,
+                at,
+            )
+            assert not at["activity"], (call, at)
+            assert at["scrolled"] == [0, 0], (call, at)
+            # still a Tab stop, and Return there opens the panel
+            _tab_until(
+                page,
+                "() => document.activeElement.hasAttribute('data-activity-toggle')",
+            )
+            page.keyboard.press("Enter")
+            page.wait_for_function(
+                "() => document.querySelector('#modal-body details.activity-panel').open"
+            )
+            page.evaluate("() => closeModal()")
+    finally:
+        page.close()
+
+
 # ── NEW-38: the customer page's invoice rows are links ───────────────────
 
 

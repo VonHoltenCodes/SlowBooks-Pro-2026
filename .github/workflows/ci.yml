@@ -6,9 +6,34 @@ on:
   pull_request:
     branches: [main, server-edition, feat/v2.8]
 
+# A newer push to a pull request (or a feature branch) cancels the run still
+# going for the older one (#1095: several agents pushing at once queued
+# 25-minute runs behind each other). A push to main or a release/* branch is
+# never cancelled: its group is the run's own id, so no later run shares it.
+# (A group that main shared would also drop a QUEUED main run when the next
+# push arrived, cancel-in-progress or not.)
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && github.run_id || github.ref }}
   cancel-in-progress: true
+
+# How the suite is split (#1095). The one-job run had grown to 20-25 minutes
+# on Linux and 15-18 on Windows. It now runs as parallel shards of whole test
+# FILES (never a file split across jobs: --dist loadfile and the browser
+# modules' module-scoped fixtures depend on a file staying in one process),
+# balanced on the per-file durations in scripts/ci_test_durations.json.
+# scripts/ci_shards.py does the split; a file with no measurement yet is dealt
+# round-robin, and each platform's final job reads back every shard's list and
+# fails unless together they are every test file exactly once. To refresh the
+# durations after a run: gh run download <run-id> -p 'junit-*' -D junit, then
+#   python scripts/ci_shards.py refresh --platform linux junit/junit-linux-*/*.xml junit/junit-browser-*/*.xml
+#   python scripts/ci_shards.py refresh --platform windows junit/junit-windows-*/*.xml
+# and commit the JSON. To change a shard count, edit its matrix list: the
+# scripts read the count from strategy.job-total.
+#
+# Branch protection requires "Test (pytest + coverage)" and "Docker build" by
+# name (with Lint, the dependency scan and CodeQL); the per-platform final jobs
+# keep those names and need every shard, so the shards themselves are never
+# required checks and a shard count can change without touching settings.
 
 jobs:
   lint:
@@ -35,18 +60,28 @@ jobs:
         run: ruff check app/ tests/ scripts/
 
   test:
-    name: Test (pytest + coverage)
+    # One shard of the Linux suite: every test file except the browser
+    # modules (those run in test-browser, below, where Chromium is installed;
+    # here they would only skip). The required check of this name is the
+    # final job, test-linux-gate.
+    name: Linux tests ${{ matrix.shard }} of ${{ strategy.job-total }} (pytest + coverage)
     # Pinned: ubuntu-latest began serving 26.04 (resolute) on 2026-10-23,
     # where apt has no `libxml2` candidate and the system-deps step below
     # dies before a test runs. 24.04 is what the suite has run on since
     # the libjpeg note; move it on purpose, with the package list.
     runs-on: ubuntu-24.04
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
       - name: System deps for WeasyPrint + OCR integration tests
         run: |
           sudo apt-get update
@@ -65,6 +100,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
+      - name: This shard's test files
+        run: |
+          python scripts/ci_shards.py list --group core --platform linux \
+            --shard ${{ matrix.shard }} --of ${{ strategy.job-total }} --out shard-files.txt
+          wc -l shard-files.txt
       - name: Run pytest with coverage
         # One worker per runner core (#770): the suite had grown to 33 to 38
         # minutes run serially, most of it the migration walks and the browser
@@ -77,6 +117,9 @@ jobs:
         # Tesseract starved past its 20 s limit in the OCR tests. conftest
         # gives every worker its own scratch data folder and migration
         # cache. pytest-cov combines the workers' coverage by itself.
+        # Since #1095 the files are split across the shards above, and each
+        # shard still runs its share one worker per core with loadfile; the
+        # coverage of the shards is combined in test-linux-gate.
         env:
           # Quoted because the value contains colons (sqlite:///:memory:)
           # — unquoted, YAML mis-parses "sqlite:" as a nested mapping key
@@ -93,14 +136,183 @@ jobs:
           OMP_THREAD_LIMIT: "1"
         run: |
           nproc
-          pytest -n auto --dist loadfile --cov=app --cov-report=term-missing --cov-report=xml
-      - name: Upload coverage artifact
+          # --durations=40: each shard's slowest, so a slow test shows (#1095)
+          pytest @shard-files.txt -n auto --dist loadfile --durations=40 \
+            --cov=app --cov-report= \
+            --junitxml=junit.xml -o junit_family=xunit1
+          mv .coverage .coverage.linux-${{ matrix.shard }}
+      - name: Upload this shard's coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-linux-${{ matrix.shard }}
+          path: .coverage.linux-${{ matrix.shard }}
+          include-hidden-files: true
+          retention-days: 3
+      - name: Upload this shard's file list and timings
         uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: junit-linux-${{ matrix.shard }}
+          path: |
+            shard-files.txt
+            junit.xml
+          retention-days: 14
+
+  test-linux-gate:
+    # The required check (branch protection names it): every Linux shard
+    # passed, together they ran every non-browser test file once, and their
+    # coverage, combined, is the report the one job used to print.
+    name: Test (pytest + coverage)
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    steps:
+      - name: Every shard passed
+        run: |
+          echo "shards: ${{ needs.test.result }}"
+          test "${{ needs.test.result }}" = success
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install coverage
+        run: pip install "coverage>=7.5"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: junit-linux-*
+          path: shards
+      - name: The shards ran every test file once
+        run: python scripts/ci_shards.py verify --group core shards/*/shard-files.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-linux-*
+          merge-multiple: true
+          path: .
+      - name: Combine coverage
+        run: |
+          coverage combine .coverage.linux-*
+          coverage report -m
+          coverage xml
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
           retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # The browser modules in Playwright's Chromium (#1095).
+  #
+  # Until this job, no CI run executed a browser test: Playwright is not in
+  # requirements-dev.txt, so every module that starts with
+  # pytest.importorskip("playwright.sync_api") skipped as one, and 17 of them
+  # were failing on main unseen. They are selected by that import
+  # (scripts/ci_shards.py --group browser), never by a list, so a new browser
+  # module runs here without anyone naming it. Playwright stays out of
+  # requirements-dev.txt on purpose: Windows would then try to run the
+  # browser modules, and its skip budget counts them as skips.
+  #
+  # The keyboard, read-only, contrast and field-name sweeps stay whole: a
+  # module is never split, only whole modules dealt to shards.
+  #
+  # A browser module that skips here means Chromium did not start, so a skip
+  # naming playwright fails the shard rather than passing it quietly.
+  # ---------------------------------------------------------------------------
+  test-browser:
+    name: Browser tests ${{ matrix.shard }} of ${{ strategy.job-total }} (Playwright)
+    runs-on: ubuntu-24.04
+    needs: lint
+    env:
+      PLAYWRIGHT_VERSION: "1.60.0"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: System deps for WeasyPrint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 libffi-dev \
+            libxml2 libxslt1.1 \
+            tesseract-ocr poppler-utils
+      - name: Install deps and Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt "playwright==$PLAYWRIGHT_VERSION"
+      - name: Which browsers the modules launch
+        # Chromium always; WebKit only once a module launches it (the Find
+        # on this screen WebKit module, #1092), so no one has to remember
+        # to add it here
+        id: engines
+        run: |
+          engines=chromium
+          if grep -lqE '\.webkit\.launch\(' tests/test_*.py; then engines="chromium webkit"; fi
+          echo "engines=$engines" >> "$GITHUB_OUTPUT"
+          echo "key=${engines// /-}" >> "$GITHUB_OUTPUT"
+          echo "engines: $engines"
+      - name: Cache Playwright's browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}
+      - name: Install the browsers and their system libraries
+        run: python -m playwright install --with-deps ${{ steps.engines.outputs.engines }}
+      - name: This shard's browser modules
+        run: |
+          python scripts/ci_shards.py list --group browser --platform linux \
+            --shard ${{ matrix.shard }} --of ${{ strategy.job-total }} --out shard-files.txt
+          cat shard-files.txt
+      - name: Run the browser modules
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+          SESSION_SECRET_KEY: ci-secret-key
+          RATE_LIMIT_ENABLED: "0"
+          OMP_THREAD_LIMIT: "1"
+        run: |
+          nproc
+          pytest @shard-files.txt -n auto --dist loadfile --durations=20 \
+            --junitxml=junit.xml -o junit_family=xunit1
+      - name: No browser module skipped for want of Chromium
+        run: python scripts/ci_shards.py skips --fail-on playwright junit.xml
+      - name: Upload this shard's file list and timings
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-browser-${{ matrix.shard }}
+          path: |
+            shard-files.txt
+            junit.xml
+          retention-days: 14
+
+  test-browser-gate:
+    # One stable name for branch protection, whatever the shard count.
+    name: Browser tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: test-browser
+    if: always()
+    steps:
+      - name: Every shard passed
+        run: |
+          echo "shards: ${{ needs.test-browser.result }}"
+          test "${{ needs.test-browser.result }}" = success
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: junit-browser-*
+          path: shards
+      - name: The shards ran every browser module once
+        run: python scripts/ci_shards.py verify --group browser shards/*/shard-files.txt
 
   # ---------------------------------------------------------------------------
   # The suite on Windows (issue #121).
@@ -124,16 +336,25 @@ jobs:
   # something changed in the suite, not in the runner.
   #
   # Verified on real Windows before wiring: 2030 tests, 0 failed, 65 skipped.
+  #
+  # Since #1095 it runs as shards (test-windows, a matrix) and a final job of
+  # the old name (test-windows-gate) that sums their skips against the budget.
   # ---------------------------------------------------------------------------
   test-windows:
-    name: Test on Windows (portability)
+    name: Windows tests ${{ matrix.shard }} of ${{ strategy.job-total }} (portability)
     runs-on: windows-latest
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
       - name: Keep Defender's real-time scan off the test tree
         # The suite is file-bound here (SQLite company files, migrations
         # walked on a real file, PDFs): Defender scanning every write is
@@ -149,17 +370,82 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
           pip install pytest-timeout
-      - name: Run pytest, and refuse a quiet rise in skips
+      - name: This shard's test files
+        run: |
+          python scripts/ci_shards.py list --group all --platform windows --shard ${{ matrix.shard }} --of ${{ strategy.job-total }} --out shard-files.txt
+      - name: Run pytest, and count its skips
+        # The skip budget is enforced in test-windows-gate, below, on the
+        # sum of every shard's count; each shard writes its own here.
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+          SESSION_SECRET_KEY: ci-secret-key
+          RATE_LIMIT_ENABLED: "0"
+        shell: pwsh
+        run: |
+          # -v names each test as it starts, so a mid-run death is identified
+          # in the log rather than guessed at. The timeout is generous because
+          # the alembic migration tests walk 36 migrations against a real file
+          # and take ~3 s on Linux but far longer here — a Windows runner's
+          # file I/O with real-time scanning was the difference before the
+          # Defender exclusions above. 120 s catches a genuine hang without
+          # failing an honestly slow test (the slowest test here is well under
+          # a minute).
+          # one worker per core here too (#770): 14 minutes against 22
+          # serial. worksteal suits this job, which has no browser tests
+          # (no Playwright) and no Tesseract to starve; each worker has its
+          # own scratch folder and migration cache, and the skip budget
+          # reads the same summary line, shard by shard (#1095).
+          pytest "@shard-files.txt" -q -n auto --dist worksteal --timeout=120 --tb=short --junitxml=junit.xml -o junit_family=xunit1 | Tee-Object -Variable out
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $line = ($out | Select-String -Pattern '\d+ passed').Line
+          Write-Host "summary: $line"
+          $skips = 0
+          if ($line -match '(\d+) skipped') { $skips = [int]$Matches[1] }
+          Write-Host "skipped in this shard: $skips"
+          Set-Content -Path skips.txt -Value $skips -NoNewline
+      - name: Upload this shard's skips, file list and timings
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-windows-${{ matrix.shard }}
+          path: |
+            shard-files.txt
+            skips.txt
+            junit.xml
+          retention-days: 14
+
+  test-windows-gate:
+    name: Test on Windows (portability)
+    runs-on: ubuntu-latest
+    needs: test-windows
+    if: always()
+    steps:
+      - name: Every shard passed
+        run: |
+          echo "shards: ${{ needs.test-windows.result }}"
+          test "${{ needs.test-windows.result }}" = success
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: junit-windows-*
+          path: shards
+      - name: The shards ran every test file once
+        run: python scripts/ci_shards.py verify --group all shards/*/shard-files.txt
+      - name: Refuse a quiet rise in skips
         # A portability job's worst failure mode is staying green while
         # covering less, so the skip count is a budget rather than a
         # curiosity. 65 is what real Windows produced when this was wired
         # (macOS-only tests, and the OCR/PDF paths whose binaries this image
         # deliberately does not carry). A rise means something started
         # skipping that used to run — investigate before raising the number.
+        # The budget is the whole suite's: since #1095 the Windows suite runs
+        # as shards, each writes its own count (skips.txt), and this step sums
+        # them. To raise it, bump MAX_SKIPS below, here, with a line saying
+        # which tests skip and why.
         env:
-          DATABASE_URL: "sqlite:///:memory:"
-          SESSION_SECRET_KEY: ci-secret-key
-          RATE_LIMIT_ENABLED: "0"
           # 90 observed at 2.18.0: the explore-2.17.3 fixes added PDF tests (bills, purchase
           # orders, credit memos, reconciliation reports, tax forms, report footers, the
           # invoice header, emailed statements) that skip where WeasyPrint's native stack
@@ -320,34 +606,18 @@ jobs:
           # 395 with Connect Claude (#1087): the vendored client's identity check
           # (test_switchboard_vendored_1087.py, needs the source checkout) and
           # the credential file's POSIX mode (test_switchboard_connect_1087.py).
+          # 396 with the shards (#1095), unchanged: the sum of the shards' counts.
           MAX_SKIPS: "396"
-        shell: pwsh
         run: |
-          # -v names each test as it starts, so a mid-run death is identified
-          # in the log rather than guessed at. The timeout is generous because
-          # the alembic migration tests walk 36 migrations against a real file
-          # and take ~3 s on Linux but far longer here — a Windows runner's
-          # file I/O with real-time scanning was the difference before the
-          # Defender exclusions above. 120 s catches a genuine hang without
-          # failing an honestly slow test (the slowest test here is well under
-          # a minute).
-          # one worker per core here too (#770): 14 minutes against 22
-          # serial. worksteal suits this job, which has no browser tests
-          # (no Playwright) and no Tesseract to starve; each worker has its
-          # own scratch folder and migration cache, and the skip budget
-          # below reads the same summary line.
-          pytest -q -n auto --dist worksteal --timeout=120 --tb=short | Tee-Object -Variable out
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $line = ($out | Select-String -Pattern '\d+ passed').Line
-          Write-Host "summary: $line"
-          if ($line -match '(\d+) skipped') {
-            $skips = [int]$Matches[1]
-            Write-Host "skipped: $skips (budget $env:MAX_SKIPS)"
-            if ($skips -gt [int]$env:MAX_SKIPS) {
-              Write-Error "skip count $skips exceeds the budget of $env:MAX_SKIPS — something that used to run is now skipping"
-              exit 1
-            }
-          }
+          total=0
+          for f in shards/*/skips.txt; do
+            n=$(cat "$f"); echo "$f: $n"; total=$((total + n))
+          done
+          echo "skipped: $total (budget $MAX_SKIPS)"
+          if [ "$total" -gt "$MAX_SKIPS" ]; then
+            echo "::error::skip count $total exceeds the budget of $MAX_SKIPS — something that used to run is now skipping"
+            exit 1
+          fi
 
   pip-audit:
     name: Dependency vulnerability scan
@@ -373,7 +643,12 @@ jobs:
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
-    needs: test
+    # After lint, beside the tests (#1095). It used to wait for the Linux
+    # tests, which only put a minute on the end of every run: the image is
+    # built and thrown away here, nothing it makes is used by another job,
+    # and a test failure fails the run (and the required checks) all the
+    # same.
+    needs: lint
     steps:
       - uses: actions/checkout@v4
       - name: Build image

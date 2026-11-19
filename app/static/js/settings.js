@@ -2673,7 +2673,8 @@ const SettingsPage = {
         return `It works once, for ten minutes${when}. Type it on the relay's sign-in page when Claude or Grok asks.`;
     },
 
-    // The panel: words for everyone, an administrator's buttons. `error` is
+    // The panel: words for everyone, an administrator's buttons (data-admin,
+    // so the bookkeeper sweep knows them as the administrator's). `error` is
     // a refusal or failure to show (the server's own sentence).
     switchboardHtml(st, code, error) {
         st = st || {};
@@ -2688,7 +2689,7 @@ const SettingsPage = {
         if (error) html += `<div id="claude-relay-error" role="alert" style="margin-top:4px; color:var(--text-danger);">${escapeHtml(error)}</div>`;
         if (!admin) return html;
         if (!st.linked) {
-            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" onclick="SettingsPage.connectClaude()">Connect Claude</button></div>';
+            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin onclick="SettingsPage.connectClaude()">Connect Claude</button></div>';
             return html;
         }
         if (!st.this_company && st.state !== 'damaged') return html;
@@ -2703,8 +2704,8 @@ const SettingsPage = {
                 + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div></div>`;
         }
         html += '<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
-        if (st.this_company) html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-code" onclick="SettingsPage.claudeCode()">Show a sign-in code</button>';
-        html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>';
+        if (st.this_company) html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin onclick="SettingsPage.claudeCode()">Show a sign-in code</button>';
+        html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>';
         return html;
     },
 
