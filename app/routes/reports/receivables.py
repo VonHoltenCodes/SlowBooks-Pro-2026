@@ -322,7 +322,48 @@ def income_by_customer(
             r["total_paid"] += p.unapplied_home
             r["total_balance"] -= p.unapplied_home
 
+    _add_bank_entry_income(db, by_customer, start_date, end_date)
     return _income_by_customer_answer(by_customer, start_date, end_date, "accrual")
+
+
+def _add_bank_entry_income(db: Session, by_customer: dict, start_date, end_date):
+    """Money a customer paid that was recorded straight from the bank (#1065):
+    a register entry, or a bank-feed line added, whose income line names a
+    customer. It never had an invoice, so the report, reading invoices alone,
+    showed it under nobody. Each is that customer's Sales and, being money in
+    the bank already, Paid, on either basis. A voided entry counts for
+    nothing, and a refund out of the account to a customer lowers both."""
+    from app.models.accounts import Account, AccountType
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services.bank_register import voided_transaction_ids
+
+    lines = (
+        db.query(TransactionLine, Transaction.id)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(Transaction.source_type == "bank_entry")
+        .filter(Transaction.date >= start_date, Transaction.date <= end_date)
+        .filter(TransactionLine.customer_id.isnot(None))
+        .filter(Account.account_type == AccountType.INCOME)
+        .all()
+    )
+    if not lines:
+        return
+    voided = voided_transaction_ids(db, [txn_id for _, txn_id in lines])
+    live = [(line, txn_id) for line, txn_id in lines if txn_id not in voided]
+    names = {
+        c.id: c.full_name
+        for c in db.query(Customer).filter(
+            Customer.id.in_({line.customer_id for line, _ in live})
+        )
+    }
+    for line, _ in live:
+        amount = Decimal(str(line.credit or 0)) - Decimal(str(line.debit or 0))
+        r = _income_row(
+            by_customer, line.customer_id, names.get(line.customer_id, "Unknown")
+        )
+        r["total_sales"] += amount
+        r["total_paid"] += amount
 
 
 def _income_by_customer_answer(by_customer: dict, start_date, end_date, basis: str):
@@ -392,6 +433,7 @@ def _income_by_customer_cash(db: Session, start_date: date, end_date: date) -> d
             r["total_sales"] += amount
             r["total_paid"] += amount
             r["total_balance"] -= amount
+    _add_bank_entry_income(db, by_customer, start_date, end_date)
     return _income_by_customer_answer(by_customer, start_date, end_date, "cash")
 
 
