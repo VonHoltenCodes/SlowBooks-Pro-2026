@@ -20,11 +20,15 @@
  * an amount ignores $, the thousands commas and accounting parentheses on
  * both sides, so 1234.5 finds $1,234.50 and -200 finds (200.00).
  *
- * How it shows: the CSS Custom Highlight API paints every match and the
- * current one, and the page itself is never changed. Wrapping matches in
- * <mark> would break the pages' inline handlers, a field's caret and the
- * redraws below. Where the API is missing (an older WebKitGTK), the current
- * match's element is outlined instead. A field that matches is outlined
+ * How it shows: each match gets a tinted box laid over its text in a
+ * layer of its own (#find-marks), the current one in a stronger colour, and
+ * the page itself is never changed. Wrapping matches in <mark> would break
+ * the pages' inline handlers, a field's caret and the redraws below. The
+ * CSS Custom Highlight API was the first answer and is not used: the macOS
+ * window's WKWebView takes the highlights, reports them registered and
+ * styled, and never paints them (the desktop's own test, "1 of 1" and
+ * nothing to see). The boxes follow a scroll and a resize, and are clipped
+ * to the box that scrolls their text. A field that matches is outlined
  * (a box's value is not text a highlight can reach).
  *
  * The screen changes under it: a page redraws, a report refreshes itself,
@@ -216,6 +220,9 @@
         return { node: tail.node, offset: tail.node.data.length };
     }
 
+    // A match: its range, and one range per text node it covers (the boxes
+    // are drawn from those, so an element the range crosses is never boxed
+    // whole, as a range's own getClientRects would)
     function toMatch(hit) {
         if (hit.chunk.field) return { field: hit.chunk.field };
         const a = pointAt(hit.chunk, hit.start, false);
@@ -223,7 +230,17 @@
         const range = document.createRange();
         range.setStart(a.node, a.offset);
         range.setEnd(b.node, b.offset);
-        return { range };
+        const parts = [];
+        for (const p of hit.chunk.pieces) {
+            const from = Math.max(hit.start, p.start);
+            const to = Math.min(hit.end, p.start + p.node.data.length);
+            if (to <= from) continue;
+            const r = document.createRange();
+            r.setStart(p.node, from - p.start);
+            r.setEnd(p.node, to - p.start);
+            parts.push(r);
+        }
+        return { range, parts };
     }
 
     function anchorOf(m) {
@@ -239,7 +256,6 @@
 
     // ── The bar ───────────────────────────────────────────────────────────
 
-    const hasHighlights = () => typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
     const isMac = () => /Mac|iP(hone|ad|od)/.test((typeof navigator !== 'undefined' && navigator.platform) || '');
     const dialogOpen = () => {
         const overlay = document.getElementById('modal-overlay');
@@ -260,6 +276,9 @@
         _refresh: null,
         _observer: null,
         _onEdit: null,
+        _onMove: null,
+        _layer: null,
+        _frame: 0,
 
         // Ctrl+F (⌘F): either modifier, as Ctrl+K and ⌘K both search, and
         // never with Alt (Ctrl+Alt is AltGr, typing a character)
@@ -413,8 +432,9 @@
             const n = FindBar._matches.length;
             if (!n) return;
             FindBar._index = (FindBar._index + dir + n) % n;
-            FindBar._paint();
+            // scrolled to first, so the boxes are drawn where the text is
             FindBar._reveal(FindBar._matches[FindBar._index]);
+            FindBar._paint();
             FindBar._status();
         },
 
@@ -452,8 +472,8 @@
                 index = seen === -1 ? 0 : seen;
             }
             FindBar._index = index;
-            FindBar._paint();
             if (o.reveal && index >= 0) FindBar._reveal(FindBar._matches[index]);
+            FindBar._paint();
             FindBar._status();
         },
 
@@ -474,26 +494,80 @@
         _paint() {
             for (const el of document.querySelectorAll('[data-find-hit]')) el.removeAttribute('data-find-hit');
             const current = FindBar._matches[FindBar._index];
-            if (hasHighlights()) {
-                CSS.highlights.delete('find-all');
-                CSS.highlights.delete('find-current');
-            }
-            if (!FindBar._matches.length) return;
-            if (hasHighlights()) {
-                const all = new Highlight();
-                const now = new Highlight();
-                now.priority = 1;
-                for (const m of FindBar._matches) if (m.range) all.add(m.range);
-                if (current && current.range) now.add(current.range);
-                CSS.highlights.set('find-all', all);
-                CSS.highlights.set('find-current', now);
-            } else if (current && current.range) {
-                const el = current.range.startContainer.parentElement;
-                if (el) el.setAttribute('data-find-hit', 'current');
-            }
             for (const m of FindBar._matches) {
                 if (m.field && m.field.getAttribute('data-find-hit') !== 'current') m.field.setAttribute('data-find-hit', m === current ? 'current' : 'match');
             }
+            FindBar._drawMarks();
+        },
+
+        // The boxes over the matches' text, drawn again from where the text
+        // is now. Each is clipped to every box that clips its text (a table
+        // scrolled sideways, the page's own scroll), and one wholly out of
+        // sight is not drawn. The layer is inside the page's text-size zoom
+        // (html's CSS zoom), so a position read from the screen is turned
+        // into the layer's own pixels by the ratio of the two.
+        _drawMarks() {
+            if (FindBar._frame) cancelAnimationFrame(FindBar._frame);
+            FindBar._frame = 0;
+            let layer = FindBar._layer;
+            if (!layer) {
+                layer = FindBar._layer = document.createElement('div');
+                layer.id = 'find-marks';
+                layer.className = 'find-marks';
+                layer.setAttribute('aria-hidden', 'true');
+                document.body.appendChild(layer);
+            }
+            layer.textContent = '';
+            if (!FindBar._open || !FindBar._matches.length) return;
+            const base = layer.getBoundingClientRect();
+            const scale = layer.offsetWidth ? base.width / layer.offsetWidth : 1;
+            const clips = new Map();
+            const clipOf = (el) => {
+                if (!el || el === document.documentElement || el === document.body) {
+                    return { left: base.left, top: base.top, right: base.right, bottom: base.bottom };
+                }
+                if (clips.has(el)) return clips.get(el);
+                const outer = clipOf(el.parentElement);
+                let clip = outer;
+                const cs = getComputedStyle(el);
+                if (/(auto|scroll|hidden|clip)/.test(cs.overflowX + cs.overflowY)) {
+                    const b = el.getBoundingClientRect();
+                    clip = {
+                        left: Math.max(outer.left, b.left), top: Math.max(outer.top, b.top),
+                        right: Math.min(outer.right, b.right), bottom: Math.min(outer.bottom, b.bottom),
+                    };
+                }
+                clips.set(el, clip);
+                return clip;
+            };
+            const frag = document.createDocumentFragment();
+            FindBar._matches.forEach((m, i) => {
+                if (!m.parts) return;
+                for (const part of m.parts) {
+                    const clip = clipOf(part.startContainer.parentElement);
+                    for (const r of part.getClientRects()) {
+                        const left = Math.max(r.left, clip.left);
+                        const right = Math.min(r.right, clip.right);
+                        const top = Math.max(r.top, clip.top);
+                        const bottom = Math.min(r.bottom, clip.bottom);
+                        if (right <= left || bottom <= top) continue;
+                        const box = document.createElement('div');
+                        box.className = i === FindBar._index ? 'find-mark find-mark--current' : 'find-mark';
+                        box.style.left = `${(left - base.left) / scale}px`;
+                        box.style.top = `${(top - base.top) / scale}px`;
+                        box.style.width = `${(right - left) / scale}px`;
+                        box.style.height = `${(bottom - top) / scale}px`;
+                        frag.appendChild(box);
+                    }
+                }
+            });
+            layer.appendChild(frag);
+        },
+
+        // A scroll anywhere or a resize: the boxes again, once a frame
+        _redrawSoon() {
+            if (FindBar._frame || !FindBar._open) return;
+            FindBar._frame = requestAnimationFrame(() => { FindBar._frame = 0; FindBar._drawMarks(); });
         },
 
         _rect(m) {
@@ -551,6 +625,11 @@
             FindBar._onEdit = (e) => { if (!FindBar._bar.contains(e.target)) again(); };
             document.addEventListener('input', FindBar._onEdit, true);
             document.addEventListener('change', FindBar._onEdit, true);
+            // the boxes follow their text: a scroll (of any box: capture)
+            // or the window changing size
+            FindBar._onMove = () => FindBar._redrawSoon();
+            document.addEventListener('scroll', FindBar._onMove, true);
+            window.addEventListener('resize', FindBar._onMove);
         },
 
         _unwatch() {
@@ -561,6 +640,11 @@
                 document.removeEventListener('change', FindBar._onEdit, true);
             }
             FindBar._onEdit = null;
+            if (FindBar._onMove) {
+                document.removeEventListener('scroll', FindBar._onMove, true);
+                window.removeEventListener('resize', FindBar._onMove);
+            }
+            FindBar._onMove = null;
         },
     };
 

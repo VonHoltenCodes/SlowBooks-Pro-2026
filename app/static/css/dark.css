@@ -640,12 +640,12 @@
 [data-theme="dark"] .hint-icon:hover, [data-theme="dark"] .hint-icon[aria-expanded="true"] { background: #2a2f3a; border-color: #4a5160; }
 [data-theme="dark"] .hint-pop { background: #232833; color: #e6e8ee; border-color: #4a5160; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5); }
 
-/* Find on this screen (find.js): a match reads as dark gold under the
-   light text, the current one as orange under dark text */
+/* Find on this screen (find.js): the see-through boxes over the light
+   text on the dark ground, a match gold, the current one orange */
 [data-theme="dark"] {
-    --find-match-bg: #7a5f00;
-    --find-current-bg: #ffa94d;
-    --find-current-text: #111111;
+    --find-match-bg: rgba(255, 200, 0, 0.3);
+    --find-current-bg: rgba(255, 140, 30, 0.5);
+    --find-current-edge: #ffa94d;
     --find-match-ring: #d4a72c;
     --find-current-ring: #ffa94d;
 }

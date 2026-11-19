@@ -6,8 +6,9 @@ playwright's Chromium:
 - It finds what is drawn on the page: not what is hidden, folded or
   written for a screen reader only, and not the sidebar or the top bar.
   A field's value counts, and the field is outlined.
-- Matches are painted by the CSS Custom Highlight API, the page untouched;
-  Enter, Shift+Enter, Ctrl+G and F3 step through them, wrapping.
+- Each match gets a box laid over its text (#find-marks), the page
+  untouched; the boxes sit on their text at any text size and follow a
+  scroll. Enter, Shift+Enter, Ctrl+G and F3 step through them, wrapping.
 - An amount is found however it is written ($, commas, parentheses).
 - Over a dialog it finds in the dialog; Escape closes the bar and leaves
   the dialog open, and Tab stays among the bar's controls.
@@ -54,10 +55,19 @@ PAGE = """() => {
         <p id="far">Acme far below</p>`;
 }"""
 COUNT = "() => document.getElementById('find-count').textContent"
-HITS = """() => ({
-    all: CSS.highlights.get('find-all') ? CSS.highlights.get('find-all').size : 0,
-    current: CSS.highlights.get('find-current') ? [...CSS.highlights.get('find-current')].map(r => r.toString()) : [],
-})"""
+# The boxes drawn (a match across two text nodes is two), the current
+# match's text when it is text, and whether the current box sits on it
+HITS = """() => {
+    const boxes = document.querySelectorAll('#find-marks .find-mark');
+    const cur = document.querySelector('#find-marks .find-mark--current');
+    const m = FindBar._matches[FindBar._index];
+    let aligned = null;
+    if (m && m.range && cur) {
+        const a = cur.getBoundingClientRect(), b = m.parts[0].getClientRects()[0];
+        aligned = ['left', 'top', 'width', 'height'].every(k => Math.abs(a[k] - b[k]) < 1.5);
+    }
+    return { all: boxes.length, current: m && m.range && cur ? [m.range.toString()] : [], aligned };
+}"""
 FIELD_HITS = """() => Object.fromEntries([...document.querySelectorAll('[data-find-hit]')]
     .map(el => [el.id, el.getAttribute('data-find-hit')]))"""
 MODAL_SHOWN = (
@@ -97,7 +107,9 @@ def test_ctrl_f_opens_the_bar_and_finds_what_is_on_the_screen(desk):
     # drop-down and the one far below; nothing hidden, folded, read only to
     # a screen reader or typed into a password box
     assert page.evaluate(COUNT) == "1 of 6"
-    assert page.evaluate(HITS) == {"all": 4, "current": ["Acme"]}
+    # boxes for the table's three ("Ac" and "me" are two), none for the one
+    # out of sight below, the current one on its text
+    assert page.evaluate(HITS) == {"all": 4, "current": ["Acme"], "aligned": True}
     assert page.evaluate(FIELD_HITS) == {"memo": "match", "pick": "match"}
     # not the sidebar's or the top bar's words
     _find(page, "Customers")
@@ -196,7 +208,7 @@ def test_over_a_dialog_it_finds_in_the_dialog_and_escape_closes_only_the_bar(
     assert page.evaluate(MODAL_SHOWN) is True
     # back where it was, highlights gone
     assert page.evaluate("() => document.activeElement.id") == "ok"
-    assert page.evaluate(HITS) == {"all": 0, "current": []}
+    assert page.evaluate(HITS) == {"all": 0, "current": [], "aligned": None}
     # the next Escape closes the dialog, as ever
     page.keyboard.press("Escape")
     assert page.evaluate(MODAL_SHOWN) is False
@@ -258,3 +270,30 @@ def test_no_matches_offers_the_record_search_with_the_query(desk):
     _find(page, "zebra")
     assert page.is_visible(".find-empty")
     assert not page.is_visible(".find-records")
+
+
+def test_the_boxes_sit_on_their_text_at_any_text_size_and_follow_a_scroll(desk):
+    page = desk
+    for size in ("125", "150"):
+        page.evaluate(
+            "(s) => document.documentElement.setAttribute('data-text-size', s)", size
+        )
+        page.evaluate("() => FindBar.open()")
+        _find(page, "acme")
+        assert page.evaluate(HITS)["aligned"] is True, size
+    page.evaluate("() => document.documentElement.removeAttribute('data-text-size')")
+    page.evaluate("() => FindBar.search({})")
+    # the far one, scrolled to: its box comes with it
+    for _ in range(5):
+        page.keyboard.press("Enter")
+    assert page.evaluate(COUNT) == "6 of 6"
+    assert page.evaluate(HITS) == {
+        "all": 1,
+        "current": ["Acme"],
+        "aligned": True,
+    }
+    # scrolled away by hand: the box goes out of sight with its text
+    page.evaluate("() => { document.getElementById('content').scrollTop = 0; }")
+    page.wait_for_function(
+        "() => !document.querySelector('#find-marks .find-mark--current')"
+    )

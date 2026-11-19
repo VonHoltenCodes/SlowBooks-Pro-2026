@@ -4094,14 +4094,15 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
 
 /* Find on this screen (find.js): the desktop window's find bar, opened by
    Ctrl+F (⌘F). Over a dialog (200) and a toast (300), under a type-ahead's
-   list (450) and the splash. Every match is painted by the CSS Custom
-   Highlight API and the page itself is untouched; a field that matches,
-   whose value no highlight can reach, is outlined, as is the current
-   match's element where the API is missing. */
+   list (450) and the splash. Every match gets a see-through tinted box
+   laid over its text (#find-marks) and the page itself is untouched. The
+   tint is see-through by its own alpha, not by mix-blend-mode: the macOS
+   window's WKWebView drew a blended box solid, over the word. A field
+   that matches, whose value no box over text can mark, is outlined. */
 :root {
-    --find-match-bg: #ffe27a;
-    --find-current-bg: #ff9632;
-    --find-current-text: #1a1a2e;
+    --find-match-bg: rgba(255, 204, 0, 0.42);
+    --find-current-bg: rgba(255, 122, 0, 0.5);
+    --find-current-edge: #c75400;
     /* a field's outline: 3:1 and more on the page and on white */
     --find-match-ring: #9a6f00;
     --find-current-ring: #c75400;
@@ -4164,8 +4165,10 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
     cursor: pointer;
 }
 .find-records[hidden] { display: none; }
-::highlight(find-all) { background-color: var(--find-match-bg); }
-::highlight(find-current) { background-color: var(--find-current-bg); color: var(--find-current-text); }
+/* Over a dialog (200), under a toast (300), the find bar and a list */
+.find-marks { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 205; pointer-events: none; overflow: hidden; }
+.find-mark { position: absolute; border-radius: 2px; background: var(--find-match-bg); }
+.find-mark--current { background: var(--find-current-bg); box-shadow: 0 0 0 1px var(--find-current-edge); }
 [data-find-hit="match"] { outline: 2px dashed var(--find-match-ring); outline-offset: 1px; }
 [data-find-hit="current"] { outline: 3px solid var(--find-current-ring); outline-offset: 1px; }
-@media print { .find-bar { display: none !important; } }
+@media print { .find-bar, .find-marks { display: none !important; } }
