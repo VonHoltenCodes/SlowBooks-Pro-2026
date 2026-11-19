@@ -30,6 +30,9 @@ from app.services.entry_text import BANK_ENTRY_HEADER, header_text
 
 AUTO_WINDOW_DAYS = 5
 CANDIDATE_WINDOW_DAYS = 30
+# the ranges Match offers (#1050): days either side of the line's date,
+# "all" for any date
+MATCH_RANGES = {"30": 30, "90": 90, "365": 365, "all": None}
 
 
 def _feed_account(db: Session, bt: BankTransaction) -> Account:
@@ -52,12 +55,13 @@ def candidate_lines(
     account_id: int,
     amount: Decimal,
     on_date: date,
-    window_days: int = CANDIDATE_WINDOW_DAYS,
+    window_days: int | None = CANDIDATE_WINDOW_DAYS,
     exclude_line_ids=frozenset(),
 ) -> list[dict]:
     """Unlinked, unreconciled ledger lines on `account_id` with exactly this
-    amount on the statement's side, within the window, nearest date first.
-    Voided postings and their reversals never qualify."""
+    amount on the statement's side, within the window (None: any date,
+    #1050), nearest date first. Voided postings and their reversals never
+    qualify."""
     amount = _q(amount)
     side = TransactionLine.debit if amount > 0 else TransactionLine.credit
     linked = exists().where(BankTransaction.transaction_line_id == TransactionLine.id)
@@ -69,9 +73,12 @@ def candidate_lines(
         .filter(TransactionLine.reconciliation_id.is_(None))
         .filter(~linked)
         .filter(~Transaction.source_type.like("%\\_void", escape="\\"))
-        .filter(Transaction.date >= on_date - timedelta(days=window_days))
-        .filter(Transaction.date <= on_date + timedelta(days=window_days))
     )
+    if window_days is not None:
+        q = q.filter(
+            Transaction.date >= on_date - timedelta(days=window_days),
+            Transaction.date <= on_date + timedelta(days=window_days),
+        )
     rows = [(tl, txn) for tl, txn in q.all() if tl.id not in exclude_line_ids]
     if not rows:
         return []
@@ -277,8 +284,18 @@ def add(
         class_id, job_id, vendor_id, customer_id, payee = _with_picks(
             db, bt, class_id, job_id, vendor_id, customer_id, payee
         )
-    payee = payee or bt.payee
-    vendor = _entry_vendor(db, bt, payee, vendor_id)
+    # the memo typed on the row and kept on the line (#1049), where the
+    # caller sent none; a payout's split lines carry their own
+    memo = (memo or "").strip() or (None if splits else bt.pick_memo) or None
+    typed = (payee or "").strip() or None
+    vendor = _entry_vendor(db, bt, typed or bt.payee, vendor_id)
+    customer = db.get(Customer, customer_id) if customer_id and not splits else None
+    # the name picked, or the rule's vendor, is the entry's payee, so the
+    # register, the entry and every list by name show it; the bank's own
+    # words stay on the entry as its memo
+    payee = entry_payee(bt, typed, vendor, customer)
+    if not memo and payee != bt.payee:
+        memo = bt.description or bt.payee
     if not splits and (class_id is None or job_id is None):
         # the class and job the statement line's rule names (#675), where
         # the caller named none; a split's lines carry their own
@@ -322,6 +339,20 @@ def add(
     return bt
 
 
+def entry_payee(bt: BankTransaction, typed, vendor, customer) -> str | None:
+    """The payee a feed line posts with: a name typed for it; else, money
+    in, the customer picked and then the vendor, money out the vendor (the
+    one picked, the rule's or the one the bank text names) and then the
+    customer; else the bank's text, as before."""
+    if typed:
+        return typed
+    names = [customer, vendor] if _q(bt.amount) > 0 else [vendor, customer]
+    for party in names:
+        if party is not None and (party.name or "").strip():
+            return party.name.strip()
+    return bt.payee
+
+
 # The review row's picks kept on a statement line (#904): the request
 # field -> the line's column.
 PICKS = {
@@ -330,6 +361,7 @@ PICKS = {
     "vendor_id": "pick_vendor_id",
     "customer_id": "pick_customer_id",
     "payee": "pick_payee",
+    "memo": "pick_memo",
 }
 
 
@@ -368,7 +400,7 @@ def set_picks(db: Session, bt: BankTransaction, picks: dict) -> BankTransaction:
                 detail=f"{customer.name} is inactive; pick another name",
             )
     for key, value in picks.items():
-        if key == "payee":
+        if key in ("payee", "memo"):
             value = (value or "").strip() or None
         setattr(bt, PICKS[key], value)
     return bt
@@ -521,23 +553,55 @@ def restore(bt: BankTransaction) -> BankTransaction:
     return bt
 
 
-def add_all(db: Session, bank_account: BankAccount, picks: dict | None = None) -> dict:
+def add_all(
+    db: Session,
+    bank_account: BankAccount,
+    picks: dict | None = None,
+    only: list[int] | None = None,
+) -> dict:
     """Add every unmatched line that already carries a category (from a
     rule or the user). Lines that cannot post are reported, not fatal.
     `picks` ({line id: {"class_id", "job_id", "vendor_id", "customer_id",
-    "payee"}}, #671) is what each review row chose besides its category."""
+    "payee", "memo"}}, #671) is what each review row chose besides its
+    category. With `only` (Add selected, #1053) just those lines are
+    added; one of them with no category, or no longer waiting, is reported
+    with the reason instead of being passed over in silence."""
     picks = picks or {}
-    rows = (
-        db.query(BankTransaction)
-        .filter(
-            BankTransaction.bank_account_id == bank_account.id,
+    q = db.query(BankTransaction).filter(
+        BankTransaction.bank_account_id == bank_account.id
+    )
+    if only is None:
+        q = q.filter(
             BankTransaction.match_status == "unmatched",
             BankTransaction.category_account_id.isnot(None),
         )
-        .order_by(BankTransaction.date, BankTransaction.id)
-        .all()
-    )
+    else:
+        q = q.filter(BankTransaction.id.in_(only or [-1]))
+    rows = q.order_by(BankTransaction.date, BankTransaction.id).all()
     added, skipped, no_vendor = 0, [], []
+    if only is not None:
+        found = {bt.id for bt in rows}
+        skipped += [
+            {"id": i, "reason": "That line is not on this feed's To review list"}
+            for i in dict.fromkeys(only)
+            if i not in found
+        ]
+        waiting = []
+        for bt in rows:
+            if bt.transaction_line_id or bt.match_status in ("added", "auto", "manual"):
+                skipped.append(
+                    {"id": bt.id, "reason": "That line is already in the books"}
+                )
+            elif bt.match_status != "unmatched":
+                skipped.append(
+                    {
+                        "id": bt.id,
+                        "reason": "That line is excluded; restore it to add it",
+                    }
+                )
+            else:
+                waiting.append(bt)
+        rows = waiting
     for bt in rows:
         try:
             with db.begin_nested():

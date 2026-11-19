@@ -216,6 +216,13 @@ class BankTransactionResponse(BaseModel):
     pick_vendor_name: Optional[str] = None
     pick_customer_id: Optional[int] = None
     pick_payee: Optional[str] = None
+    pick_memo: Optional[str] = None
+    # what the line's bank rule gives it besides the category: the row shows
+    # them where nothing was picked, as Add posts them
+    rule_class_id: Optional[int] = None
+    rule_job_id: Optional[int] = None
+    rule_vendor_id: Optional[int] = None
+    rule_vendor_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -253,6 +260,8 @@ class FeedLinePicks(StrictModel):
     customer_id: Optional[int] = None
     # a name typed that is no vendor's: the entry's payee, as text
     payee: Optional[str] = None
+    # the memo typed on the row (#1049)
+    memo: Optional[str] = Field(default=None, max_length=500)
 
 
 class FeedAddAll(StrictModel):
@@ -260,12 +269,49 @@ class FeedAddAll(StrictModel):
     listed posts with its category alone, as before."""
 
     lines: list[FeedLinePicks] = []
+    # Add selected (#1053): only these lines, each reported if it cannot
+    # post (no category, already in the books); left out, every line that
+    # has a category, as before
+    line_ids: Optional[list[int]] = Field(default=None, max_length=10000)
 
 
 class FeedExcludeAll(StrictModel):
     """Exclude all shown (#705): the review list's statement line ids."""
 
     line_ids: list[int] = Field(default_factory=list, max_length=10000)
+
+
+class FeedInvoiceApplied(StrictModel):
+    invoice_id: int
+    amount: Decimal
+
+
+class FeedBillApplied(StrictModel):
+    bill_id: int
+    amount: Decimal
+
+
+class StatementReceivePayment(StrictModel):
+    """Receive payment from a money-in line (#1056): the customer, and what
+    to apply to each of their open invoices, in full or in part. The
+    payment is the line's whole amount, on its date, into the feed's
+    account; what is not applied stays a credit on the customer."""
+
+    customer_id: int
+    allocations: list[FeedInvoiceApplied] = Field(default_factory=list, max_length=500)
+    class_id: Optional[int] = None
+    memo: Optional[str] = Field(default=None, max_length=500)
+
+
+class StatementPayBills(StrictModel):
+    """Pay bills from a money-out line (#1056): the vendor, and what to
+    apply to each of their open bills, in full or in part; what is not
+    applied stays a prepayment to the vendor."""
+
+    vendor_id: int
+    allocations: list[FeedBillApplied] = Field(default_factory=list, max_length=500)
+    class_id: Optional[int] = None
+    memo: Optional[str] = Field(default=None, max_length=500)
 
 
 class StatementPayout(StrictModel):
@@ -301,6 +347,8 @@ class StatementCategory(StrictModel):
     customer_id: Optional[int] = None
     # a name typed that is no vendor's: the entry's payee, as text
     payee: Optional[str] = Field(default=None, max_length=200)
+    # the memo typed on the row (#1049): the entry's memo
+    memo: Optional[str] = Field(default=None, max_length=500)
 
 
 class ReconciliationCreate(StrictModel):

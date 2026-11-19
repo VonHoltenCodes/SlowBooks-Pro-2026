@@ -683,7 +683,7 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["e1055c0de4a1"]  # credit memo line cost codes (#1055)
+    assert script.get_heads() == ["f1049c2a7e5b"]  # the review line memo (#1049)
     assert script.get_revision("e5c1a7d3f9b2").down_revision == "95209e8d293c"
 
     command.upgrade(cfg, "95209e8d293c")

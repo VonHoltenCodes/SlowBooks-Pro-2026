@@ -93,6 +93,8 @@ class BankTransaction(Base):
     pick_vendor_id = Column(Integer, nullable=True)
     pick_customer_id = Column(Integer, nullable=True)
     pick_payee = Column(String(200), nullable=True)
+    # the memo typed on the row (#1049), posted as the entry's memo
+    pick_memo = Column(String(500), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

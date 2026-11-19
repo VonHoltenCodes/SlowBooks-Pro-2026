@@ -1691,6 +1691,7 @@ const BankingPage = {
         BankingPage._reviewLines = Object.fromEntries(review.map(t => [t.id, t]));
         const rows = review.map(t => `
             <tr data-review-line="${t.id}">
+                <td><input type="checkbox" class="review-tick" data-review-tick="${t.id}" data-write aria-label="Tick the line of ${formatDate(t.date)}, ${escapeHtml(t.payee || t.description || 'no payee')}, ${formatCurrency(t.amount)}" onchange="BankingPage.tickChanged()"></td>
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(t.description || '')}</div></td>
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)'}">${formatCurrency(t.amount)}</td>
@@ -1708,19 +1709,22 @@ const BankingPage = {
         setTimeout(() => BankingPage._fillCategorySelects(kind), 0);
         // one column for the row's picks (NEW-197: three columns pushed
         // Match / Exclude / Rule… past the right edge at 1280)
-        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name'].filter(Boolean).join(' / ')}</th>`;
+        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name', 'Memo'].filter(Boolean).join(' / ')}</th>`;
         return `<div class="card" id="reg-review" data-review-panel tabindex="-1" role="region" aria-label="To review" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
+                    <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.addSelected(${feedId}, ${accountId})" title="Add the ticked lines, with what the bar above the list sets on them">Add selected</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
                     <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.excludeAll(${feedId}, ${accountId})" aria-label="Exclude all shown: ${review.length} statement line${review.length === 1 ? '' : 's'}" title="Set aside every line in this list; Show excluded, under the list, has each one with Restore">Exclude all shown</button>
                 </span>
             </div>
+            ${BankingPage._bulkBar(accountId)}
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
+                <thead><tr><th scope="col"><input type="checkbox" id="review-tick-all" data-write aria-label="Tick every line shown" onchange="BankingPage.tickAll(this)"></th><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} and the memo chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                Tick lines to set a category, ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}or name on all of them from the bar above the list; <strong>Add selected</strong> sets what the bar holds on them and adds them.
                 <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
@@ -1783,7 +1787,7 @@ const BankingPage = {
     // and the heading says so where the hand goes; the kind label stays.
     _fillReviewCats() {
         const usable = BankingPage._reviewAccounts || [];
-        document.querySelectorAll('select.review-cat').forEach(sel => {
+        document.querySelectorAll('select.review-cat, select.review-bulk-cat').forEach(sel => {
             const current = sel.value || sel.dataset.current;
             const opt = (a) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
             const transfers = usable.filter(a => a.bank_kind);
@@ -1830,16 +1834,19 @@ const BankingPage = {
         const small = 'font-size:11px; padding:2px 4px; width:150px; display:block;';
         const save = `onchange="BankingPage.setPicks(${t.id})"`;
         const sel = (id, kept) => (String(id) === String(kept) ? ' selected' : '');
+        // where nothing was picked, the class, job and vendor the line's
+        // bank rule gives it: the row shows what Add posts
+        const or = (pick, rule) => (pick !== null && pick !== undefined ? pick : rule);
         let html = '';
         if (BankingPage._lineClassShown()) {
             const opts = BankingPage._classes_().filter(c => !c.is_archived)
-                .map(c => `<option value="${c.id}"${sel(c.id, t.pick_class_id)}>${escapeHtml(c.name)}</option>`).join('');
+                .map(c => `<option value="${c.id}"${sel(c.id, or(t.pick_class_id, t.rule_class_id))}>${escapeHtml(c.name)}</option>`).join('');
             html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         }
         const moneyIn = parseFloat(t.amount) > 0;
         const jobs = BankingPage._jobs || [];
         if (jobs.length) {
-            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}"${sel(j.id, t.pick_job_id)}>${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}"${sel(j.id, or(t.pick_job_id, t.rule_job_id))}>${escapeHtml(j.full_name || j.name)}</option>`).join('');
             const bind = moneyIn ? ` data-customer-select="rv-customer-${t.id}"` : '';
             html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}" ${save}><option value="">— No job —</option>${opts}</select>`;
         }
@@ -1848,10 +1855,138 @@ const BankingPage = {
                 .map(c => `<option value="${c.id}"${sel(c.id, t.pick_customer_id)}>${escapeHtml(customerLabel(c))}</option>`).join('');
             html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         } else {
-            const kept = t.pick_vendor_name || t.pick_payee || '';
+            const kept = t.pick_vendor_name || t.pick_payee || t.rule_vendor_name || '';
             html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" value="${escapeHtml(kept)}" style="${small}" ${save}>`;
         }
-        return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';
+        // the entry's memo (#1049), kept on the line like the rest
+        html += `<input type="text" id="rv-memo-${t.id}" class="review-memo" data-write maxlength="500" autocomplete="off" aria-label="Memo, line ${t.id}" placeholder="Memo" value="${escapeHtml(t.pick_memo || '')}" style="${small}" ${save}>`;
+        return `<td><div style="display:grid; gap:2px;">${html}</div></td>`;
+    },
+
+    // The bar above the To review list (#1053): what it holds is set on
+    // every ticked line, by Set on ticked or by Add selected before it
+    // adds them. A box left at its blank choice changes nothing. Money-out
+    // lines take the vendor, money-in lines the customer.
+    _bulkBar(accountId) {
+        const small = 'font-size:11px; padding:2px 4px; width:150px;';
+        let html = `<select id="bulk-cat" class="review-bulk-cat" data-write aria-label="Category for the ticked lines" style="${small}"><option value="">Pick a category…</option></select>`;
+        if (BankingPage._lineClassShown()) {
+            const opts = BankingPage._classes_().filter(c => !c.is_archived)
+                .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+            html += `<select id="bulk-class" data-write data-no-search aria-label="${T('Class')} for the ticked lines" style="${small}"><option value="">${T('Class')}…</option>${opts}</select>`;
+        }
+        const jobs = BankingPage._jobs || [];
+        if (jobs.length) {
+            const opts = jobs.map(j => `<option value="${j.id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            html += `<select id="bulk-job" data-write data-no-search aria-label="${T('Job')} for the ticked lines" style="${small}"><option value="">${T('Job')}…</option>${opts}</select>`;
+        }
+        html += `<input type="text" id="bulk-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor for the ticked money-out lines" placeholder="Vendor (money out)" style="${small}">`;
+        const custs = (BankingPage._customers || [])
+            .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
+        html += `<select id="bulk-customer" data-write aria-label="${T('Customer')} for the ticked money-in lines" style="${small}"><option value="">${T('Customer')} (money in)…</option>${custs}</select>`;
+        return `<div class="review-bulk" role="group" aria-labelledby="review-bulk-label" data-write style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; font-size:11px;">
+                <span id="review-bulk-label">For the ticked lines (<span id="review-ticked" aria-live="polite">none ticked</span>):</span>
+                ${html}
+                <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.applyToTicked()">Set on ticked</button>
+            </div>`;
+    },
+
+    _tickedIds() {
+        return [...document.querySelectorAll('input.review-tick:checked')]
+            .map(b => parseInt(b.dataset.reviewTick, 10)).filter(Number.isFinite);
+    },
+
+    // the count beside the bar, and the header box ticked, clear or mixed
+    tickChanged() {
+        const boxes = [...document.querySelectorAll('input.review-tick')];
+        const n = boxes.filter(b => b.checked).length;
+        const out = document.getElementById('review-ticked');
+        if (out) out.textContent = n ? `${n} ticked` : 'none ticked';
+        const all = document.getElementById('review-tick-all');
+        if (all) {
+            all.checked = n > 0 && n === boxes.length;
+            all.indeterminate = n > 0 && n < boxes.length;
+        }
+    },
+
+    tickAll(box) {
+        document.querySelectorAll('input.review-tick').forEach(b => { b.checked = box.checked; });
+        BankingPage.tickChanged();
+    },
+
+    // Set what the bar holds on each ticked line, kept on the line as a pick
+    // on the row is (setCategory, setPicks). Returns how many lines changed,
+    // or null when nothing is ticked.
+    async applyToTicked({ quiet = false } = {}) {
+        const ids = BankingPage._tickedIds();
+        if (!ids.length) { toast('Tick the lines first: the box at the start of each row.', 'error'); return null; }
+        const val = (id) => { const el = document.getElementById(id); return el && el.value ? el.value.trim() : ''; };
+        const cat = val('bulk-cat'), cls = val('bulk-class'), job = val('bulk-job');
+        const vendor = val('bulk-vendor'), customer = val('bulk-customer');
+        if (!(cat || cls || job || vendor || customer)) {
+            if (!quiet) toast('Choose a category, class, job or name in the bar to set on the ticked lines.', 'error');
+            return 0;
+        }
+        const lines = BankingPage._reviewLines || {};
+        const saves = [];
+        let changed = 0;
+        for (const id of ids) {
+            const t = lines[id];
+            if (!t) continue;
+            const moneyIn = parseFloat(t.amount) > 0;
+            let picks = false;
+            const set = (elId, value) => {
+                const el = document.getElementById(elId);
+                if (!el || !value) return false;
+                if (el.tagName === 'SELECT' && !el.querySelector(`option[value="${CSS.escape(value)}"]`)) return false;
+                el.value = value;
+                return true;
+            };
+            if (cat) {
+                const sel = document.getElementById(`cat-${id}`);
+                if (sel) {
+                    if (!sel.querySelector(`option[value="${CSS.escape(cat)}"]`)) {
+                        const src = document.querySelector(`#bulk-cat option[value="${CSS.escape(cat)}"]`);
+                        if (src) sel.appendChild(src.cloneNode(true));
+                    }
+                    sel.value = cat;
+                    saves.push(BankingPage.setCategory(id, sel));
+                }
+            }
+            picks = set(`rv-class-${id}`, cls) || picks;
+            if (moneyIn) picks = set(`rv-customer-${id}`, customer) || picks;
+            else picks = set(`rv-vendor-${id}`, vendor) || picks;
+            picks = set(`rv-job-${id}`, job) || picks;
+            if (picks) saves.push(BankingPage.setPicks(id));
+            if (cat || picks) changed += 1;
+        }
+        await Promise.allSettled(saves);
+        if (!quiet) toast(`Set on ${changed} ticked line${changed === 1 ? '' : 's'}`);
+        return changed;
+    },
+
+    // Add selected (#1053): the ticked lines, after the bar's choices are
+    // set on them, each with its own row's picks; a line that cannot post
+    // (no category yet) is named in the toast, not passed over.
+    async addSelected(feedId, accountId) {
+        const ids = BankingPage._tickedIds();
+        if (!ids.length) { toast('Tick the lines to add first: the box at the start of each row.', 'error'); return; }
+        try {
+            await BankingPage.applyToTicked({ quiet: true });
+            await Promise.allSettled([...BankingPage._pendingCategories]);
+            const lines = BankingPage._reviewLines || {};
+            const picked = ids.map(id => ({ id, ...BankingPage._reviewPicks(id) }))
+                .filter(p => Object.keys(p).length > 1);
+            const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`, { line_ids: ids, lines: picked });
+            const skipped = new Set(r.skipped.map(x => x.id));
+            const outside = BankingPage._outsideFilterAll(ids.filter(id => !skipped.has(id) && lines[id]).map(id => String(lines[id].date || '')));
+            const said = `Added ${r.added} of ${ids.length} ticked${r.skipped.length ? `; not added ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`;
+            toast(outside ? `${said}. ${outside}` : said, r.added ? undefined : 'error');
+            BankingPage._backToRegister(accountId);
+            const typed = Object.fromEntries(picked.filter(p => p.payee).map(p => [p.id, p.payee]));
+            BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id])
+                .filter(Boolean).map(t => (typed[t.id] ? { ...t, payee: typed[t.id] } : t)));
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     // What a review row chose besides its category, as the add call takes it.
@@ -1867,6 +2002,8 @@ const BankingPage = {
             const vendorId = BankingPage._payeeVendorId(name);
             if (vendorId) picks.vendor_id = vendorId; else picks.payee = name;
         }
+        const memo = val(`rv-memo-${lineId}`).trim();
+        if (memo) picks.memo = memo;
         return picks;
     },
 
@@ -1879,7 +2016,7 @@ const BankingPage = {
     setPicks(lineId) {
         const saving = new Promise(resolve => setTimeout(resolve, 0))
             .then(() => API.request('PATCH', `/banking/transactions/${lineId}`, {
-                class_id: null, job_id: null, customer_id: null, vendor_id: null, payee: null,
+                class_id: null, job_id: null, customer_id: null, vendor_id: null, payee: null, memo: null,
                 ...BankingPage._reviewPicks(lineId),
             }))
             .then(saved => {
@@ -1909,6 +2046,7 @@ const BankingPage = {
         const hadFocus = row.contains(document.activeElement);
         row.remove();
         if (BankingPage._reviewLines) delete BankingPage._reviewLines[lineId];
+        BankingPage.tickChanged();
         if (hadFocus && next) {
             const add = next.querySelector('button.btn-primary');
             if (add) add.focus();
@@ -2165,9 +2303,28 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    async showMatch(lineId, accountId) {
+    // Match's date range (#1050): 30 days either side of the line by
+    // default, or 90 days, a year or all dates; the choice is kept for the
+    // sitting (this tab), so the next line opens with it.
+    MATCH_RANGES: [['30', '30 days'], ['90', '90 days'], ['365', 'A year'], ['all', 'All dates']],
+    _matchRange() {
+        let kept = BankingPage._matchDays;
+        if (!kept) { try { kept = sessionStorage.getItem('sb.matchDays'); } catch (e) { kept = null; } }
+        return BankingPage.MATCH_RANGES.some(([v]) => v === kept) ? kept : '30';
+    },
+    _keepMatchRange(value) {
+        BankingPage._matchDays = value;
+        try { sessionStorage.setItem('sb.matchDays', value); } catch (e) { /* kept in memory for the sitting */ }
+    },
+    async matchRangeChanged(sel, lineId, accountId) {
+        BankingPage._keepMatchRange(sel.value);
+        await BankingPage.showMatch(lineId, accountId, { refocus: true });
+    },
+
+    async showMatch(lineId, accountId, { refocus = false } = {}) {
         try {
-            const cands = await API.get(`/banking/transactions/${lineId}/candidates`);
+            const days = BankingPage._matchRange();
+            const cands = await API.get(`/banking/transactions/${lineId}/candidates?days=${days}`);
             // each posting's date, for Matched to say one the dates leave out
             BankingPage._matchDates = Object.fromEntries(cands.map(c => [c.line_id, c.date]));
             const rows = cands.map(c => `<tr>
@@ -2175,11 +2332,175 @@ const BankingPage = {
                 <td>${escapeHtml(c.payee || c.description || '')}</td>
                 <td>${escapeHtml(c.reference || '')}</td>
                 <td style="font-size:10px;">${escapeHtml(sourceWord(c.source_type, c.source_kind))}</td>
-                <td><button class="btn btn-sm btn-primary" onclick="BankingPage.matchLine(${lineId}, ${c.line_id}, ${accountId})">Match</button></td>
+                <td><button class="btn btn-sm btn-primary" onclick="BankingPage.matchLine(${lineId}, ${c.line_id}, ${accountId})" aria-label="Match to ${escapeHtml(c.payee || c.description || 'this posting')}, ${formatDate(c.date)}">Match</button></td>
             </tr>`).join('');
-            openModal('Match to a posting', rows
+            const range = BankingPage.MATCH_RANGES.find(([v]) => v === days)[1];
+            const within = days === 'all' ? 'on any date' : `within ${range.toLowerCase()} of this line`;
+            const opts = BankingPage.MATCH_RANGES.map(([v, label]) => `<option value="${v}"${v === days ? ' selected' : ''}>${label}</option>`).join('');
+            const bar = `<div style="margin-bottom:8px; font-size:12px;"><label for="match-range">Look for postings</label>
+                <select id="match-range" data-readonly-ok onchange="BankingPage.matchRangeChanged(this, ${lineId}, ${accountId})" style="margin-left:6px;">${opts}</select>
+                <span style="color:var(--gray-500); margin-left:6px;">either side of the line's date</span></div>`;
+            openModal('Match to a posting', bar + BankingPage._feedPayOffer(lineId, accountId) + (rows
                 ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Payee / description</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col"></th></tr></thead><tbody>${rows}</tbody></table></div>`
-                : `<p>Nothing in the books has this amount within 30 days. Use <strong>Add</strong> to post it.</p>`);
+                : `<p>Nothing in the books has this amount ${within}. Look further back, or use <strong>Add</strong> to post it.</p>`));
+            if (refocus) { const sel = document.getElementById('match-range'); if (sel) sel.focus(); }
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Receive payment / Pay bills from a line (#1056): a money-in line
+    // pays a customer's open invoices, a money-out line a vendor's open
+    // bills, in full or in part. The server posts one payment for the
+    // line's whole amount, on its date, into or out of this account, and
+    // matches it to the line; what is not applied stays a credit on the
+    // customer or a prepayment to the vendor, as Receive Payments and Pay
+    // Bills leave it.
+    _feedPayOffer(lineId, accountId) {
+        const t = (BankingPage._reviewLines || {})[lineId];
+        if (!t) return '';
+        const moneyIn = parseFloat(t.amount) > 0;
+        const what = moneyIn ? `pays ${T('customer').toLowerCase()} ${T('invoices').toLowerCase()} still open` : 'pays vendor bills still open';
+        return `<div class="feed-pay" data-write style="margin:0 0 10px; padding:8px; border:1px solid var(--gray-200); border-radius:4px;">
+                <button type="button" class="btn btn-sm btn-secondary" data-write id="feed-pay-open" aria-expanded="false" aria-controls="feed-pay-panel" onclick="BankingPage.openFeedPay(${lineId}, ${accountId})">${moneyIn ? 'Receive payment…' : 'Pay bills…'}</button>
+                <span style="font-size:11px; color:var(--gray-500); margin-left:6px;">when this ${moneyIn ? 'deposit' : 'payment'} ${what}</span>
+                <div id="feed-pay-panel" hidden style="margin-top:8px;"></div>
+            </div>`;
+    },
+
+    _feedPayCtx: null,
+
+    async openFeedPay(lineId, accountId) {
+        const t = (BankingPage._reviewLines || {})[lineId];
+        const panel = document.getElementById('feed-pay-panel');
+        const opener = document.getElementById('feed-pay-open');
+        if (!t || !panel) return;
+        const moneyIn = parseFloat(t.amount) > 0;
+        BankingPage._feedPayCtx = { lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
+        let picked = '';
+        let options = '';
+        if (moneyIn) {
+            const sel = document.getElementById(`rv-customer-${lineId}`);
+            picked = String((sel && sel.value) || t.pick_customer_id || '');
+            options = (BankingPage._customers || [])
+                .map(c => `<option value="${c.id}"${String(c.id) === picked ? ' selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
+        } else {
+            const box = document.getElementById(`rv-vendor-${lineId}`);
+            picked = String(BankingPage._payeeVendorId(box ? box.value : '') || t.pick_vendor_id || t.rule_vendor_id || '');
+            options = [...(BankingPage._vendorsByName || new Map()).values()]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(v => `<option value="${v.id}"${String(v.id) === picked ? ' selected' : ''}>${escapeHtml(v.name)}</option>`).join('');
+        }
+        const who = moneyIn ? T('Customer') : 'Vendor';
+        panel.innerHTML = `<form id="feed-pay-form" onsubmit="BankingPage.submitFeedPay(event)">
+                <div class="form-group" style="margin-bottom:6px;"><label for="feed-pay-party">${who}</label>
+                    <select id="feed-pay-party" onchange="BankingPage.loadFeedPayDocs()"><option value="">Pick the ${who.toLowerCase()}…</option>${options}</select></div>
+                <div id="feed-pay-docs"></div>
+                <p id="feed-pay-sum" aria-live="polite" style="font-size:12px; margin:6px 0;"></p>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" id="feed-pay-submit">${moneyIn ? 'Receive payment' : 'Pay bills'}</button>
+                </div>
+            </form>`;
+        panel.hidden = false;
+        if (opener) opener.setAttribute('aria-expanded', 'true');
+        if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms(panel);
+        if (picked) await BankingPage.loadFeedPayDocs();
+        else BankingPage._feedPaySum();
+        const party = document.getElementById('feed-pay-party');
+        if (party) party.focus();
+    },
+
+    // the open invoices or bills of the one picked, oldest first, each
+    // filled with what the line covers, oldest first, as Receive Payments
+    // fills them
+    async loadFeedPayDocs() {
+        const ctx = BankingPage._feedPayCtx;
+        const party = document.getElementById('feed-pay-party');
+        const box = document.getElementById('feed-pay-docs');
+        if (!ctx || !party || !box) return;
+        if (!party.value) { ctx.docs = []; box.innerHTML = ''; BankingPage._feedPaySum(); return; }
+        const id = parseInt(party.value, 10);
+        let docs;
+        try {
+            docs = ctx.moneyIn
+                ? await fetchAllPages(`/invoices?customer_id=${id}&open_only=true&billed_to=true`)
+                : await fetchAllPages(`/bills?vendor_id=${id}&open_only=true`);
+        } catch (err) { toast(err.message, 'error'); return; }
+        if (BankingPage._feedPayCtx !== ctx || party.value !== String(id)) return;
+        docs = docs.filter(d => d.status !== 'void' && (parseFloat(d.balance_due) || 0) > 0)
+            .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id));
+        ctx.docs = docs;
+        const word = ctx.moneyIn ? T('Invoice') : 'Bill';
+        if (!docs.length) {
+            box.innerHTML = `<p style="font-size:12px;">${escapeHtml(party.options[party.selectedIndex].text)} has no open ${ctx.moneyIn ? T('invoices').toLowerCase() : 'bills'}.</p>`;
+            BankingPage._feedPaySum();
+            return;
+        }
+        let left = Math.round(ctx.amount * 100);
+        const rows = docs.map(d => {
+            const due = Math.round((parseFloat(d.balance_due) || 0) * 100);
+            const put = Math.max(0, Math.min(due, left));
+            left -= put;
+            const num = ctx.moneyIn ? d.invoice_number : (d.bill_number || d.id);
+            return `<tr>
+                <td>${escapeHtml(String(num || ''))}</td>
+                <td>${formatDate(d.date)}</td>
+                <td class="amount">${formatCurrency(d.balance_due)}</td>
+                <td><input type="number" class="feed-pay-amount" data-doc="${d.id}" data-due="${(due / 100).toFixed(2)}" step="0.01" min="0" max="${(due / 100).toFixed(2)}" value="${put ? (put / 100).toFixed(2) : ''}" aria-label="Amount to apply to ${escapeHtml(word.toLowerCase())} ${escapeHtml(String(num || ''))}" oninput="BankingPage._feedPaySum()" style="width:110px;"></td>
+            </tr>`;
+        }).join('');
+        box.innerHTML = `<div class="table-container"><table><thead><tr><th scope="col">${escapeHtml(word)}</th><th scope="col">Date</th><th scope="col" class="amount">Still due</th><th scope="col">Apply</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+        if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms(box);
+        BankingPage._feedPaySum();
+    },
+
+    _feedPayAmounts() {
+        return [...document.querySelectorAll('#feed-pay-docs input.feed-pay-amount')]
+            .map(i => ({ id: parseInt(i.dataset.doc, 10), cents: Math.round((parseFloat(i.value) || 0) * 100) }))
+            .filter(a => a.cents > 0);
+    },
+
+    // what the line covers, what is applied, and where the rest goes
+    _feedPaySum() {
+        const ctx = BankingPage._feedPayCtx;
+        const out = document.getElementById('feed-pay-sum');
+        if (!ctx || !out) return;
+        const line = Math.round(ctx.amount * 100);
+        const applied = BankingPage._feedPayAmounts().reduce((n, a) => n + a.cents, 0);
+        const money = (c) => formatCurrency(c / 100);
+        if (applied > line) {
+            out.textContent = `Applied ${money(applied)}, more than this line's ${money(line)}. Lower an amount.`;
+        } else if (applied === line) {
+            out.textContent = `Applying all of this line's ${money(line)}.`;
+        } else {
+            const rest = ctx.moneyIn ? `stays a credit on the ${T('customer').toLowerCase()}, to apply later` : 'stays a prepayment to the vendor, to apply later';
+            out.textContent = `Applying ${money(applied)} of this line's ${money(line)}; the ${money(line - applied)} left over ${rest}.`;
+        }
+    },
+
+    async submitFeedPay(e) {
+        e.preventDefault();
+        const ctx = BankingPage._feedPayCtx;
+        const party = document.getElementById('feed-pay-party');
+        if (!ctx || !party) return;
+        if (!party.value) { toast(`Pick the ${ctx.moneyIn ? T('customer').toLowerCase() : 'vendor'} first.`, 'error'); party.focus(); return; }
+        const amounts = BankingPage._feedPayAmounts();
+        if (!amounts.length) { toast(`Enter an amount to apply to at least one ${ctx.moneyIn ? T('invoice').toLowerCase() : 'bill'}.`, 'error'); return; }
+        const { lineId, accountId, moneyIn } = ctx;
+        const picks = BankingPage._reviewPicks(lineId);
+        const body = moneyIn
+            ? { customer_id: parseInt(party.value, 10), allocations: amounts.map(a => ({ invoice_id: a.id, amount: (a.cents / 100).toFixed(2) })) }
+            : { vendor_id: parseInt(party.value, 10), allocations: amounts.map(a => ({ bill_id: a.id, amount: (a.cents / 100).toFixed(2) })) };
+        if (picks.class_id) body.class_id = picks.class_id;
+        if (picks.memo) body.memo = picks.memo;
+        try {
+            await Promise.allSettled([...BankingPage._pendingCategories]);
+            const done = await API.post(`/banking/transactions/${lineId}/${moneyIn ? 'receive-payment' : 'pay-bills'}`, body);
+            closeModal();
+            const who = party.options[party.selectedIndex].text;
+            const said = moneyIn ? `Payment from ${who} received and matched` : `Bills of ${who} paid and matched`;
+            const outside = BankingPage._outsideFilter(BankingPage._lineDate(done, lineId));
+            toast(outside ? `${said}. ${outside}` : said);
+            BankingPage._feedPayCtx = null;
+            BankingPage._dropReviewRow(lineId, accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
 

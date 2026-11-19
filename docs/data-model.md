@@ -23,7 +23,7 @@ and job-cost tables are described in their own sections below the table.
 | `transaction_lines` | Journal entry splits (debit OR credit); `cleared` / `reconciliation_id` on bank-account lines |
 | `accounts.bank_kind` | `bank` / `credit_card` — which chart accounts the register, pickers and transfers use |
 | `bank_accounts` | A bank feed: the statement identity of a ledger account (`account_id`); `legacy_balance` = the pre-2.10 register balance until posted or dismissed |
-| `bank_transactions` | Statement lines (feeds, OFX/CSV imports) with `match_status` and the ledger line they match (`transaction_line_id`) |
+| `bank_transactions` | Statement lines (feeds, OFX/CSV imports) with `match_status` and the ledger line they match (`transaction_line_id`); `pick_*` hold what the To review row picked until the line is added (#904), `pick_memo` its memo (#1049, migration `f1049c2a7e5b`) |
 | `reconciliations` | Reconciliation sessions over a ledger account's lines (`account_id`, `beginning_balance`, `cleared_total`) |
 | `settings` | Company settings key-value store |
 | `audit_log` | Automatic change tracking for all entities |

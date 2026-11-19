@@ -42,7 +42,9 @@ from app.schemas.banking import (
     StatementAdd,
     FeedAddAll,
     FeedExcludeAll,
+    StatementPayBills,
     StatementPayout,
+    StatementReceivePayment,
     StatementVendors,
     StatementCategory,
     StatementMatch,
@@ -327,6 +329,11 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
     # A payout suggestion (#584) is offered only on an unmatched deposit, so
     # the settings read and the per-provider lookup stay off the common path.
     settings = get_all_settings(db)
+    # the class, job and vendor the line's rule gives it, to draw the row
+    # with what Add posts
+    from app.services.bank_rules_engine import rule_picks
+
+    by_rule = rule_picks(db, rows)
 
     def _payout(r):
         if r.match_status != "unmatched" or not r.amount or r.amount <= 0:
@@ -359,6 +366,11 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
             "pick_vendor_name": picked_vendors.get(r.pick_vendor_id),
             "pick_customer_id": r.pick_customer_id,
             "pick_payee": r.pick_payee,
+            "pick_memo": r.pick_memo,
+            "rule_class_id": by_rule.get(r.id, {}).get("class_id"),
+            "rule_job_id": by_rule.get(r.id, {}).get("job_id"),
+            "rule_vendor_id": by_rule.get(r.id, {}).get("vendor_id"),
+            "rule_vendor_name": by_rule.get(r.id, {}).get("vendor_name"),
         }
         for r in rows
     ]
@@ -403,13 +415,19 @@ def _statement_line(db: Session, txn_id: int) -> BankTransaction:
 
 
 @router.get("/transactions/{txn_id}/candidates")
-def statement_candidates(txn_id: int, db: Session = Depends(get_db)):
-    """Ledger lines this statement line could be matched to."""
+def statement_candidates(txn_id: int, days: str = "30", db: Session = Depends(get_db)):
+    """Ledger lines this statement line could be matched to: within 30
+    days of its date, or `days` 90, 365 or all (#1050)."""
     from app.services import bank_matching as m
 
+    if days not in m.MATCH_RANGES:
+        raise HTTPException(
+            status_code=422,
+            detail="Pick a range of 30 days, 90 days, a year or all dates",
+        )
     bt = _statement_line(db, txn_id)
     acct = m._feed_account(db, bt)
-    return m.candidate_lines(db, acct.id, bt.amount, bt.date)
+    return m.candidate_lines(db, acct.id, bt.amount, bt.date, m.MATCH_RANGES[days])
 
 
 @router.post("/transactions/{txn_id}/match", response_model=BankTransactionResponse)
@@ -566,6 +584,37 @@ def statement_payout(txn_id: int, data: StatementPayout, db: Session = Depends(g
     return _statement_out([bt], db)[0]
 
 
+@router.post(
+    "/transactions/{txn_id}/receive-payment", response_model=BankTransactionResponse
+)
+def statement_receive_payment(
+    txn_id: int, data: StatementReceivePayment, db: Session = Depends(get_db)
+):
+    """A customer payment from a money-in line (#1056), applied to open
+    invoices and matched to the line, so the line leaves To review and the
+    register shows the payment once."""
+    from app.services.bank_feed_payments import receive_payment
+
+    bt = receive_payment(db, _statement_line(db, txn_id), data)
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
+@router.post("/transactions/{txn_id}/pay-bills", response_model=BankTransactionResponse)
+def statement_pay_bills(
+    txn_id: int, data: StatementPayBills, db: Session = Depends(get_db)
+):
+    """A bill payment from a money-out line (#1056), applied to open bills
+    and matched to the line."""
+    from app.services.bank_feed_payments import pay_bills
+
+    bt = pay_bills(db, _statement_line(db, txn_id), data)
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
 @router.post("/transactions/vendors")
 def statement_vendors(data: StatementVendors, db: Session = Depends(get_db)):
     """Make the payees of these added feed lines vendors, or link them to
@@ -640,8 +689,9 @@ def feed_add_all(
             "vendor_id": p.vendor_id,
             "customer_id": _entry_customer(db, p.customer_id),
             "payee": p.payee or None,
+            "memo": (p.memo or "").strip() or None,
         }
-    out = m.add_all(db, ba, picks)
+    out = m.add_all(db, ba, picks, only=data.line_ids if data else None)
     db.commit()
     return out
 
