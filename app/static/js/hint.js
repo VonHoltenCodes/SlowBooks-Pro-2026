@@ -138,7 +138,7 @@ function hintList(about, entries) {
             list += `<div class="hint-list-item"${marks}><dt>${escapeHtml(e.name)}</dt><dd id="${eid}">${e.text || ''}</dd></div>`;
         }
     });
-    return `<div class="hint-wrap hint-wrap--list"><button type="button" class="hint-icon" data-hint aria-label="${name}" aria-expanded="false" aria-controls="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="17" alt="" aria-hidden="true"></button>`
+    return `<div class="hint-wrap hint-wrap--list"><button type="button" class="hint-icon" data-hint aria-label="${name}" aria-expanded="false" aria-controls="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="22" alt="" aria-hidden="true"></button>`
         + `<div class="hint-pop hint-pop--list" id="${id}" role="note" aria-label="${name}" tabindex="0" hidden><img class="hint-pop-mark" src="/static/img/tortoise-info.png" srcset="/static/img/tortoise-info@2x.png 2x" width="28" height="28" alt="" aria-hidden="true">`
         + `<div class="hint-pop-body"><strong class="hint-pop-title">${escapeHtml(about)}</strong>${lead}${list ? `<dl class="hint-list">${list}</dl>` : ''}</div></div></div>`;
 }
