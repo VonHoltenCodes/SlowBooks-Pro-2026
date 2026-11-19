@@ -31,6 +31,9 @@ const JobsPage = {
     // Pay apps. A job not opened yet opens on Overview.
     _tabByJob: {},
     _period: { start: '', end: '' },
+    // Hide zero balances on the Cost Detail tab (#1052, as #625): kept on the
+    // address (hide_zero=1) and on the Save PDF / Save CSV links.
+    _hideZero: false,
     _tree: null,
     _open: new Set(),        // expanded node keys
     _showLines: new Set(),   // nodes with their line list open
@@ -195,6 +198,7 @@ const JobsPage = {
         // figures, with an address that said nothing of it — and a refused
         // range named that period as "kept": round-3 review.)
         JobsPage._period = { start: dates.start_date, end: dates.end_date };
+        JobsPage._hideZero = q.hide_zero === '1' || q.hide_zero === 'true';
         JobsPage._from =(typeof ReportsPage !== 'undefined' && ReportsPage._view(q.from)) ? q.from : null;
         try {
             JobsPage._job = await API.get(`/jobs/${id}`);
@@ -277,6 +281,7 @@ const JobsPage = {
         const qs = new URLSearchParams();
         if (JobsPage._period.start) qs.set('start_date', JobsPage._period.start);
         if (JobsPage._period.end) qs.set('end_date', JobsPage._period.end);
+        if (JobsPage._hideZero) qs.set('hide_zero', '1');
         if (JobsPage._from) qs.set('from', JobsPage._from);
         const q = qs.toString();
         const url = `#/jobs/${JobsPage._job.id}${q ? `?${q}` : ''}`;
@@ -288,6 +293,18 @@ const JobsPage = {
         if (p.start) parts.push(`start_date=${p.start}`);
         if (p.end) parts.push(`end_date=${p.end}`);
         return parts.length ? '?' + parts.join('&') : '';
+    },
+    // the cost tree's query: the period, and Hide zero balances when on
+    _treeQs() {
+        const qs = JobsPage._periodQs();
+        if (!JobsPage._hideZero) return qs;
+        return (qs ? qs + '&' : '?') + 'hide_zero=1';
+    },
+    async setHideZero(on) {
+        JobsPage._hideZero = !!on;
+        JobsPage._tree = null;
+        JobsPage._syncAddress();
+        await JobsPage.setTab(JobsPage._tab);
     },
 
     async tabHtml() {
@@ -310,7 +327,7 @@ const JobsPage = {
     },
 
     async loadTree() {
-        if (!JobsPage._tree) JobsPage._tree = await API.get(`/jobs/${JobsPage._job.id}/cost-tree${JobsPage._periodQs()}`);
+        if (!JobsPage._tree) JobsPage._tree = await API.get(`/jobs/${JobsPage._job.id}/cost-tree${JobsPage._treeQs()}`);
         return JobsPage._tree;
     },
 
@@ -401,7 +418,8 @@ const JobsPage = {
     // ---- Cost Detail: the drill-down tree --------------------------------------
     async costsHtml() {
         const tree = await JobsPage.loadTree();
-        if (!tree.types.length) {
+        // with zero balances hidden the toolbar stays, so the box can be unticked
+        if (!tree.types.length && !tree.hide_zero) {
             return `<div class="empty-state"><p>Nothing budgeted or posted to this job yet.</p>
                 <p style="font-size:12px;color:var(--text-muted)">Tag a bill, expense, time entry or job cost entry to it, or set a budget on the Budget tab.</p></div>`;
         }
@@ -468,7 +486,11 @@ const JobsPage = {
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(true)">Expand all</button>
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(false)">Collapse all</button>
                 <span>Click a type or code to open it; click the line count to see the posted lines; click a line to open its document.</span>
-                <span style="margin-left:auto;display:flex;gap:6px">
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+                    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text)" title="Leave out a cost code with no budget, no committed cost, no actual cost and no revenue; the totals are the same">
+                        <input type="checkbox" id="job-hide-zero" ${JobsPage._hideZero ? 'checked' : ''} onchange="JobsPage.setHideZero(this.checked)">
+                        Hide zero balances
+                    </label>
                     <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('pdf')" title="The tree as shown, for this period">Save PDF</button>
                     <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('csv')" title="Every type and cost code, for this period">Save CSV</button>
                 </span>
@@ -555,7 +577,7 @@ const JobsPage = {
     // the PDF prints the rows that are open, the CSV every row.
     saveCostTree(kind) {
         const id = JobsPage._job.id;
-        const qs = new URLSearchParams(JobsPage._periodQs().replace(/^\?/, ''));
+        const qs = new URLSearchParams(JobsPage._treeQs().replace(/^\?/, ''));
         let url = `/api/jobs/${id}/cost-tree/csv`;
         if (kind === 'pdf') {
             url = `/api/jobs/${id}/cost-tree/pdf`;

@@ -1572,12 +1572,17 @@ def cost_tree_period(tree: dict) -> str:
     """The period line: Job to date, or the dates the actuals were read for."""
     start, end = tree.get("start_date"), tree.get("end_date")
     if start and end:
-        return f"{start} — {end}"
-    if end:
-        return f"Job to date through {end}"
-    if start:
-        return f"From {start}"
-    return "Job to date"
+        period = f"{start} — {end}"
+    elif end:
+        period = f"Job to date through {end}"
+    elif start:
+        period = f"From {start}"
+    else:
+        period = "Job to date"
+    # Hide zero balances (#1052) says so, as the financial reports do (#625)
+    if tree.get("hide_zero"):
+        period += " (zero balances hidden)"
+    return period
 
 
 def _cost_tree_shows_uncoded(un: dict) -> bool:

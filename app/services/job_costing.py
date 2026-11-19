@@ -1687,6 +1687,48 @@ def job_cost_tree(
     return out
 
 
+# The figures a cost tree row is judged by for Hide zero balances (#1052):
+# budget (original and changes), committed, actual and the revenue pair.
+_ROW_FIGURES = (
+    "original",
+    "changes",
+    "committed",
+    "actual",
+    "est_revenue",
+    "act_revenue",
+)
+
+
+def _row_has_figures(f: dict) -> bool:
+    return any(abs(f.get(k) or 0) >= 0.005 for k in _ROW_FIGURES)
+
+
+def hide_zero_rows(tree: dict) -> dict:
+    """The cost tree without the cost codes that carry nothing (Hide zero
+    balances, #1052, as #625 on the financial reports): a code with no
+    budget, no committed cost, no actual cost and no revenue is left out,
+    and a cost type left with nothing goes with it. Its totals are the
+    tree's own, untouched, so they read the same either way; a code with a
+    figure keeps its parent, whose roll-up carries it."""
+
+    def keep(node):
+        if not _row_has_figures(node["figures"]):
+            return None
+        return {
+            **node,
+            "children": [k for k in (keep(ch) for ch in node["children"]) if k],
+        }
+
+    types = []
+    for ty in tree["types"]:
+        codes = [k for k in (keep(n) for n in ty["codes"]) if k]
+        un = ty["uncoded"]
+        if not codes and not _row_has_figures(ty["figures"]) and not un["lines"]:
+            continue
+        types.append({**ty, "codes": codes})
+    return {**tree, "types": types, "hide_zero": True}
+
+
 # The schedule-of-values kinds that carry the estimate's markups.
 _MARKUP_SOV_KINDS = ("general_conditions", "insurance", "fee", "bond")
 
