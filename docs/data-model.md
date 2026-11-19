@@ -86,11 +86,14 @@ and job-cost tables are described in their own sections below the table.
 
 The terms list. `name` (String(50), unique; what a document's own `terms`
 column holds, so free text from before the list still reads), `kind`
-(`standard` · `date_driven`), `net_days` (standard: due this many days after
-the date), `due_day` and `cutoff_days` (date-driven: due on that day of the
+(`standard` · `date_driven` · `end_of_month`, #1091; no check constraint, so
+the third kind took no migration), `net_days` (standard: due this many days
+after the date; end-of-month: this many days after the last day of the
+date's month), `due_day` and `cutoff_days` (date-driven: due on that day of the
 month, the next month's when the document is dated fewer than `cutoff_days`
 before it), `discount_percent` (Numeric(5,2)) with `discount_days`
-(standard) or `discount_day` (date-driven), and `is_active`. `invoices`,
+(standard, or end-of-month counted from the month's end) or `discount_day`
+(date-driven), and `is_active`. `invoices`,
 `bills`, `recurring_invoices` and `memorized_transactions` gain
 `payment_term_id` (FK payment_terms, nullable): the entry their terms named
 when the person picked them, whose rule gives their discount; NULL for text

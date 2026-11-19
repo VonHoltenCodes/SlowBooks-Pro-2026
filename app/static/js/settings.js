@@ -486,6 +486,7 @@ const SettingsPage = {
             SettingsPage.loadApiTokens();
             SettingsPage.loadSignInPref();
             SettingsPage.loadOcrStatus();
+            SettingsPage.loadSwitchboard();
             SettingsPage.loadOcrEnginePref();
             SettingsPage.loadPostSoundPref();
             SettingsPage.loadMyPreferences();
@@ -953,11 +954,22 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <!-- SlowBooks Switchboard (#829): words and links only. The
-                     program is its own public repository; nothing of it runs
-                     inside SlowBooks Pro, and this block has no setting. -->
+                <!-- SlowBooks Switchboard (#829) and Connect Claude (#1087): the
+                     line to the SlowBooks relay is held by SlowBooks Pro itself
+                     (app/services/switchboard_link.py); loadSwitchboard draws its
+                     state and an administrator's buttons into #switchboard-relay.
+                     The local program's download and guide stay for Claude
+                     Desktop and Claude Code. -->
                 <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
                     <div class="settings-h-row"><h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>${hintList('Claude and agents', [
+                        { id: 'settings-claude-relay-help', text: `Connect Claude lets Claude on the web, the desktop or a phone, and Grok,
+                        work this company's books through the SlowBooks relay, with nothing else to install. SlowBooks Pro
+                        makes a <strong>bookkeeper API token</strong> for the connection and dials out to the relay itself:
+                        no port is opened, and there is no account, email or password. Add the address below as a connector
+                        in Claude or Grok, and type a sign-in code from here when it asks, so only someone at the books can
+                        approve a connection. The assistant can do only what the token's role allows, and every change it
+                        makes is in the audit log as <code>token:&lt;label&gt;</code>. On the desktop the connection is up
+                        only while SlowBooks Pro is open. Disconnect ends it and revokes the token.` },
                         { id: 'settings-switchboard-help', text: `SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
@@ -971,6 +983,11 @@ const SettingsPage = {
                         computer unless you set that door up. What Claude reads from the books goes to Claude,
                         as with any agent.` },
                     ])}</div>
+                    <div id="switchboard-relay" aria-live="polite" style="font-size:12px;">Checking…</div>
+                    <p id="switchboard-relay-caution" style="font-size:11px; margin:8px 0;">The relay is free and comes with no guarantee: it may be slow, change, or stop, and it may not stay free without donations. Use it at your own risk.
+                        <a href="https://www.slowbookspro.com/terms/" target="_blank" rel="noopener">Terms</a>
+                        &middot;
+                        <a href="https://www.slowbookspro.com/privacy/" target="_blank" rel="noopener">Privacy</a></p>
                     <div style="font-size:11px;">
                         <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
                         &middot;
@@ -1074,7 +1091,7 @@ const SettingsPage = {
                 <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-payment-terms">
                     <div class="settings-h-row"><h3 id="settings-h-payment-terms">Payment Terms</h3>${hintList('Payment Terms', [
                         { id: 'settings-payment-terms-help', text: `The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
-                        the date; a date-driven term is due on a day of the month. Either can offer an early-payment discount, which Receive Payments and Pay Bills
+                        the date; a date-driven term is due on a day of the month; an end-of-month term is due a number of days after the last day of the month the document is dated in ("Net 75 EOM"). Any can offer an early-payment discount, which Receive Payments and Pay Bills
                         suggest until its date passes. Each ${T('invoice')} or bill keeps the term it was saved under; a term on one keeps its rule, so make it inactive and add a new one to change it.
                         A term added later never reaches what was saved before it: saving one again with exactly the same terms leaves it as it was, and picking any other terms (even the same words in other case) ties it to the term they name. A date-driven term is due on its next day of the month, or the one a month later when the document is dated fewer than the given number of days before that day.` },
                     ])}</div>
@@ -2635,6 +2652,140 @@ const SettingsPage = {
         } catch (e) { /* leave the default selected */ }
     },
 
+    // ---- Connect Claude (#1087) ------------------------------------------
+    _claude: { status: null, code: null, error: '', timer: null },
+
+    // The state in words: what the panel says, for any role.
+    claudeStateWords(st) {
+        const state = (st && st.state) || 'not_connected';
+        if (state === 'connected') return 'Connected';
+        if (state === 'connecting') return 'Connecting…';
+        if (state === 'unreachable') return 'The relay cannot be reached';
+        return 'Not connected';
+    },
+
+    // The code's life in words: ten minutes, and until when on this clock.
+    claudeCodeLife(expires) {
+        const until = expires ? new Date(expires) : null;
+        const when = until && !isNaN(until.getTime())
+            ? ` (until ${until.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`
+            : '';
+        return `It works once, for ten minutes${when}. Type it on the relay's sign-in page when Claude or Grok asks.`;
+    },
+
+    // The panel: words for everyone, an administrator's buttons. `error` is
+    // a refusal or failure to show (the server's own sentence).
+    switchboardHtml(st, code, error) {
+        st = st || {};
+        const admin = !!st.can_manage;
+        const words = SettingsPage.claudeStateWords(st);
+        const colour = st.state === 'connected' ? 'var(--text-success)'
+            : (st.state === 'unreachable' ? 'var(--text-warning)' : 'var(--text-muted)');
+        let html = `<div><span style="color:var(--text-muted);">Status:</span> <strong id="claude-relay-state" style="color:${colour};">${escapeHtml(words)}</strong>`
+            + (st.linked && st.company && st.this_company ? ` <span style="color:var(--text-muted);">&middot; Company: ${escapeHtml(st.company)}</span>` : '')
+            + '</div>';
+        if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
+        if (error) html += `<div id="claude-relay-error" role="alert" style="margin-top:4px; color:var(--text-danger);">${escapeHtml(error)}</div>`;
+        if (!admin) return html;
+        if (!st.linked) {
+            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" onclick="SettingsPage.connectClaude()">Connect Claude</button></div>';
+            return html;
+        }
+        if (!st.this_company && st.state !== 'damaged') return html;
+        if (st.address) {
+            html += '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
+                + copyLineHtml('claude-relay-address', 'Connector address', st.address, 'SettingsPage.copyClaudeAddress()')
+                + '</div>';
+        }
+        if (code && code.code) {
+            html += '<div id="claude-relay-code-box" style="margin-top:8px;">'
+                + `<div><span style="color:var(--text-muted);">Sign-in code:</span> <code id="claude-relay-code" style="font-family:var(--font-mono); font-size:14px; user-select:all;">${escapeHtml(code.code)}</code></div>`
+                + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div></div>`;
+        }
+        html += '<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
+        if (st.this_company) html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-code" onclick="SettingsPage.claudeCode()">Show a sign-in code</button>';
+        html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>';
+        return html;
+    },
+
+    _drawSwitchboard() {
+        const el = $('#switchboard-relay');
+        if (!el) return;
+        const c = SettingsPage._claude;
+        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error);
+        // while the line is coming up or the relay is away, the words follow
+        // it: asked again in a few seconds, while the panel is on the page
+        const state = c.status && c.status.state;
+        if ((state === 'connecting' || state === 'unreachable') && !c.timer) {
+            c.timer = setTimeout(() => {
+                c.timer = null;
+                if (document.getElementById('switchboard-relay')) SettingsPage.loadSwitchboard();
+            }, 3000);
+        }
+    },
+
+    async loadSwitchboard() {
+        const el = $('#switchboard-relay');
+        if (!el) return;
+        try {
+            SettingsPage._claude.status = await API.get('/switchboard/status');
+            SettingsPage._claude.error = '';
+        } catch (e) {
+            SettingsPage._claude.status = null;
+            SettingsPage._claude.error = 'Could not read the Claude connection.';
+        }
+        SettingsPage._drawSwitchboard();
+    },
+
+    async connectClaude() {
+        const button = $('#claude-connect');
+        if (button) { button.disabled = true; button.textContent = 'Connecting…'; }
+        try {
+            SettingsPage._claude.status = await API.post('/switchboard/connect');
+            SettingsPage._claude.code = null;
+            SettingsPage._claude.error = '';
+            toast('Claude is connected. Add the address in Claude, then show a sign-in code.');
+        } catch (err) {
+            // a relay that cannot be reached says so where the button was
+            SettingsPage._claude.status = Object.assign({}, SettingsPage._claude.status || {},
+                err.status === 502 ? { state: 'unreachable' } : {});
+            SettingsPage._claude.error = err.message;
+        }
+        SettingsPage._drawSwitchboard();
+    },
+
+    async claudeCode() {
+        try {
+            SettingsPage._claude.code = await API.post('/switchboard/code');
+            SettingsPage._claude.error = '';
+        } catch (err) {
+            SettingsPage._claude.code = null;
+            SettingsPage._claude.error = err.message;
+        }
+        SettingsPage._drawSwitchboard();
+    },
+
+    async copyClaudeAddress() {
+        const st = SettingsPage._claude.status || {};
+        await copyToClipboard(st.address || '', 'Address', $('#claude-relay-address'));
+    },
+
+    async disconnectClaude() {
+        if (!confirm('Disconnect Claude? The connection ends, the relay forgets this computer, and the token "'
+            + ((SettingsPage._claude.status || {}).token_label || 'Claude (relay)') + '" is revoked.')) return;
+        try {
+            const r = await API.post('/switchboard/disconnect');
+            toast(r && r.unlinked === false
+                ? 'Claude is disconnected and the token revoked. The relay could not be told, but it can no longer reach these books.'
+                : 'Claude is disconnected.');
+            SettingsPage._claude.code = null;
+            SettingsPage._claude.error = '';
+        } catch (err) {
+            SettingsPage._claude.error = err.message;
+        }
+        await SettingsPage.loadSwitchboard();
+    },
+
     async loadOcrStatus() {
         const el = $('#ocr-status');
         if (!el) return;
@@ -3279,9 +3430,13 @@ const SettingsPage = {
                         <select id="pt-kind" name="kind" onchange="SettingsPage.paymentTermKind(this.value)">
                             <option value="standard" ${v.kind === 'standard' ? 'selected' : ''}>Standard: due in a number of days</option>
                             <option value="date_driven" ${v.kind === 'date_driven' ? 'selected' : ''}>Date-driven: due on a day of the month</option>
+                            <option value="end_of_month" ${v.kind === 'end_of_month' ? 'selected' : ''}>End of month: due a number of days after the month ends</option>
                         </select></div>
                     <div class="form-group" data-kind="standard"><label for="pt-net-days">Due in (days)</label>
                         <input id="pt-net-days" name="net_days" type="number" min="0" max="3650" step="1" value="${val(v.net_days)}"></div>
+                    <div class="form-group" data-kind="end_of_month"><label for="pt-eom-days">Due (days) after the end of the month ${hint(`Counted from the last day of the month the ${T('invoice')} or bill is dated in, whatever day of the month that is: 75 here is "Net 75 EOM". 0 is due on the last day of the month.`, 'Days after the end of the month')}</label>
+                        <input id="pt-eom-days" name="eom_days" type="number" min="0" max="3650" step="1" value="${val(v.kind === 'end_of_month' ? v.net_days : 30)}" oninput="SettingsPage.paymentTermExample()"></div>
+                    <p class="form-group full-width" data-kind="end_of_month" id="pt-eom-example" aria-live="polite" style="margin:0; font-size:12px; color:var(--text-muted);"></p>
                     <div class="form-group" data-kind="date_driven"><label for="pt-due-day">Due on day of the month</label>
                         <input id="pt-due-day" name="due_day" type="number" min="1" max="31" step="1" value="${val(v.due_day)}"></div>
                     <div class="form-group" data-kind="date_driven"><label for="pt-cutoff">Next month's when dated fewer than (days) before it</label>
@@ -3290,6 +3445,8 @@ const SettingsPage = {
                         <input id="pt-discount" name="discount_percent" type="number" min="0" max="99.99" step="0.01" value="${val(v.discount_percent)}" placeholder="none"></div>
                     <div class="form-group" data-kind="standard"><label for="pt-discount-days">if paid within (days)</label>
                         <input id="pt-discount-days" name="discount_days" type="number" min="0" max="3650" step="1" value="${val(v.discount_days)}"></div>
+                    <div class="form-group" data-kind="end_of_month"><label for="pt-eom-discount-days">if paid within (days) after the end of the month</label>
+                        <input id="pt-eom-discount-days" name="eom_discount_days" type="number" min="0" max="3650" step="1" value="${val(v.kind === 'end_of_month' ? v.discount_days : '')}"></div>
                     <div class="form-group" data-kind="date_driven"><label for="pt-discount-day">if paid by day of the month</label>
                         <input id="pt-discount-day" name="discount_day" type="number" min="1" max="31" step="1" value="${val(v.discount_day)}"></div>
                 </div>
@@ -3306,6 +3463,25 @@ const SettingsPage = {
         document.querySelectorAll('#payment-term-editor [data-kind]').forEach(g => {
             g.hidden = g.dataset.kind !== kind;
         });
+        if (kind === 'end_of_month') SettingsPage.paymentTermExample();
+    },
+
+    // The end-of-month kind's example (#1091): today's date and the due date
+    // the server's parser gives "Net N EOM" from it (the same rule as the
+    // term), so the form never computes a due date of its own.
+    async paymentTermExample() {
+        const el = document.getElementById('pt-eom-example');
+        const input = document.getElementById('pt-eom-days');
+        if (!el || !input) return;
+        const days = input.value === '' ? NaN : Number(input.value);
+        if (!Number.isInteger(days) || days < 0 || days > 3650) { el.textContent = ''; return; }
+        const today = todayISO();
+        const asked = input.value;
+        const d = await PaymentTerms.dates(today, `Net ${days} EOM`);
+        if (input.value !== asked) return;  // a later keystroke answers instead
+        el.textContent = d && d.due_date
+            ? `For example, a document dated ${formatDate(today)} is due ${formatDate(d.due_date)}.`
+            : '';
     },
 
     async savePaymentTerm(e, id) {
@@ -3313,16 +3489,18 @@ const SettingsPage = {
         const form = e.target;
         const kind = form.kind.value;
         const num = name => (form[name].value === '' ? null : Number(form[name].value));
+        const eom = kind === 'end_of_month';
         const pct = form.discount_percent.value === '' ? null : form.discount_percent.value;
         // the other kind's fields go as null, so the server checks one rule
         const data = {
             name: form.name.value.trim(),
             kind,
-            net_days: kind === 'standard' ? num('net_days') : null,
+            net_days: kind === 'standard' ? num('net_days') : eom ? num('eom_days') : null,
             due_day: kind === 'date_driven' ? num('due_day') : null,
             cutoff_days: kind === 'date_driven' ? (num('cutoff_days') || 0) : 0,
             discount_percent: pct,
-            discount_days: kind === 'standard' && pct !== null ? num('discount_days') : null,
+            discount_days: pct === null ? null
+                : kind === 'standard' ? num('discount_days') : eom ? num('eom_discount_days') : null,
             discount_day: kind === 'date_driven' && pct !== null ? num('discount_day') : null,
         };
         try {

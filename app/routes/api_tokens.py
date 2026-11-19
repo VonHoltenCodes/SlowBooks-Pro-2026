@@ -96,6 +96,36 @@ def _check_grants(role: str, allow_payroll: bool, allow_imports: bool) -> None:
         )
 
 
+def issue_token(
+    db: Session,
+    *,
+    label: str,
+    role: str,
+    created_by: str,
+    allow_backups: bool = False,
+    allow_payroll: bool = False,
+    allow_imports: bool = False,
+) -> tuple:
+    """Make and keep one token: (the row, the secret). The one way a token
+    is made, for Settings, API Tokens and for Connect Claude (#1087); the
+    caller has checked the label is free and the role is not admin."""
+    secret = generate_token()
+    row = ApiToken(
+        label=label,
+        token_hash=hash_token(secret),
+        token_hint=secret[:10],
+        role=role,
+        is_active=True,
+        allow_backups=allow_backups,
+        allow_payroll=allow_payroll,
+        allow_imports=allow_imports,
+        created_by=created_by,
+    )
+    db.add(row)
+    db.commit()
+    return row, secret
+
+
 @router.get("")
 def list_tokens(request: Request, db: Session = Depends(get_db)):
     _require_admin(request)
@@ -125,20 +155,15 @@ def create_token(payload: TokenCreate, request: Request, db: Session = Depends(g
     _check_grants(payload.role, payload.allow_payroll, payload.allow_imports)
     if db.query(ApiToken).filter(ApiToken.label == label).first():
         raise HTTPException(status_code=409, detail="Label already exists")
-    secret = generate_token()
-    row = ApiToken(
+    row, secret = issue_token(
+        db,
         label=label,
-        token_hash=hash_token(secret),
-        token_hint=secret[:10],
         role=payload.role,
-        is_active=True,
+        created_by=request.session.get("username") or "operator",
         allow_backups=payload.allow_backups,
         allow_payroll=payload.allow_payroll,
         allow_imports=payload.allow_imports,
-        created_by=request.session.get("username") or "operator",
     )
-    db.add(row)
-    db.commit()
     out = _out(row)
     # The one and only time the secret leaves the server.
     out["token"] = secret
