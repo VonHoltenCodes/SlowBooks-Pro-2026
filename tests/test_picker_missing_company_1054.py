@@ -126,7 +126,7 @@ def test_the_picker_draws_missing_with_remove_from_list_and_does_not_open_it():
     assert "Nothing in the company folder was changed." in js
 
 
-def test_the_picker_script_still_parses():
+def test_the_picker_script_still_parses(tmp_path):
     """The page is a Python string: a stray quote would break the whole
     picker. Node checks the script parses."""
     import shutil
@@ -135,8 +135,14 @@ def test_the_picker_script_still_parses():
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
-    script = re.search(r"<script>([\s\S]*)</script>", dl.PICKER_HTML).group(1)
+    script = re.search(
+        r"<script>([\s\S]*)</script>", dl.PICKER_HTML, flags=re.IGNORECASE
+    ).group(1)
+    # from a file: node --check reading the script on stdin never returned
+    # on the Windows runner
+    path = tmp_path / "picker.js"
+    path.write_text(script, encoding="utf-8")
     r = subprocess.run(
-        [node, "--check", "-"], input=script, capture_output=True, text=True, timeout=60
+        [node, "--check", str(path)], capture_output=True, text=True, timeout=60
     )
     assert r.returncode == 0, r.stderr
