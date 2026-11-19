@@ -310,7 +310,8 @@ jobs:
           # 362 with Print all as one PDF (#1030, test_invoices_print_all_1007.py: one).
           # 368 with the last-page renders (#1039: test_pdf_last_page_w183.py five, and
           # test_print_last_sheet_browser.py, one module without playwright).
-          MAX_SKIPS: "368"
+          # 377 with what leaves the last group (#1045, #1046: test_pdf_last_page_1045_1046.py nine).
+          MAX_SKIPS: "377"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

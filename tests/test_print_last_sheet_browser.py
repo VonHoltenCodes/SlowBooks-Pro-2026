@@ -53,3 +53,60 @@ def test_chromium_prints_no_orphaned_totals_notes_or_footer(
                     wrong.append(f"{kind}, {n} lines, notes={notes}: {problem}")
     page.close()
     assert not wrong, "\n".join(wrong)
+
+
+def _chromium_pages(page, html):
+    page.set_content(html.replace("window.print()", "void 0"))
+    pdf = page.pdf(prefer_css_page_size=True)
+    return [
+        " ".join((p.extract_text() or "").split())
+        for p in pypdf.PdfReader(io.BytesIO(pdf)).pages
+    ]
+
+
+def test_chromium_prints_long_notes_and_a_long_last_line_whole(
+    client, seed_accounts, seed_customer, chromium, monkeypatch
+):
+    """#1045: long notes leave the last group, and a long last line is not bound."""
+    from tests import test_pdf_last_page_1045_1046 as t
+
+    wrong = []
+    page = chromium.new_page()
+    for kind in MAKERS:
+        url = t.make_long_notes(client, seed_accounts, seed_customer, kind, monkeypatch)
+        pages = _chromium_pages(page, client.get(f"{url}/print-preview").text)
+        wrong += [f"{kind}, long notes: {p}" for p in t.long_notes_problems(pages)]
+    r = client.post("/api/invoices", json=t.long_line_invoice(seed_customer))
+    assert r.status_code == 201, r.text
+    html = client.get(f"/api/invoices/{r.json()['id']}/print-preview").text
+    wrong += [
+        f"long last line: {p}"
+        for p in t.long_line_problems(_chromium_pages(page, html))
+    ]
+    page.close()
+    assert not wrong, "\n".join(wrong)
+
+
+@pytest.mark.parametrize("layout", ["line_markup", "bid", "bid tables"])
+def test_chromium_prints_a_construction_estimates_total_with_a_row_and_the_acceptance(
+    client, seed_accounts, seed_customer, chromium, layout
+):
+    """#1046, on Chromium's print: both construction layouts, the lengths the gate found."""
+    from tests import test_pdf_last_page_1045_1046 as t
+
+    t._construction(client)
+    wrong = []
+    page = chromium.new_page()
+    for terms, notes, lengths in t.VARIANTS:
+        for n in lengths:
+            est_id, last = t.construction_estimate(
+                client, seed_customer, layout, n, terms, notes
+            )
+            html = client.get(f"/api/estimates/{est_id}/print-preview").text
+            for problem in t.construction_problems(_chromium_pages(page, html), last):
+                wrong.append(
+                    f"{layout}, {n} lines, terms={len(terms)}, "
+                    f"notes={len(notes or '')}: {problem}"
+                )
+    page.close()
+    assert not wrong, "\n".join(wrong)
