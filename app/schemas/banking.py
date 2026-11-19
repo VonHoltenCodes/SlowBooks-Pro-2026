@@ -281,6 +281,39 @@ class FeedExcludeAll(StrictModel):
     line_ids: list[int] = Field(default_factory=list, max_length=10000)
 
 
+class FeedInvoiceApplied(StrictModel):
+    invoice_id: int
+    amount: Decimal
+
+
+class FeedBillApplied(StrictModel):
+    bill_id: int
+    amount: Decimal
+
+
+class StatementReceivePayment(StrictModel):
+    """Receive payment from a money-in line (#1056): the customer, and what
+    to apply to each of their open invoices, in full or in part. The
+    payment is the line's whole amount, on its date, into the feed's
+    account; what is not applied stays a credit on the customer."""
+
+    customer_id: int
+    allocations: list[FeedInvoiceApplied] = Field(default_factory=list, max_length=500)
+    class_id: Optional[int] = None
+    memo: Optional[str] = Field(default=None, max_length=500)
+
+
+class StatementPayBills(StrictModel):
+    """Pay bills from a money-out line (#1056): the vendor, and what to
+    apply to each of their open bills, in full or in part; what is not
+    applied stays a prepayment to the vendor."""
+
+    vendor_id: int
+    allocations: list[FeedBillApplied] = Field(default_factory=list, max_length=500)
+    class_id: Optional[int] = None
+    memo: Optional[str] = Field(default=None, max_length=500)
+
+
 class StatementPayout(StrictModel):
     """Record an unmatched deposit as a provider payout (#584): the server
     builds the split (CR clearing the gross, DR the fee, DR bank the net)

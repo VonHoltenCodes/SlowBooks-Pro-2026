@@ -42,7 +42,9 @@ from app.schemas.banking import (
     StatementAdd,
     FeedAddAll,
     FeedExcludeAll,
+    StatementPayBills,
     StatementPayout,
+    StatementReceivePayment,
     StatementVendors,
     StatementCategory,
     StatementMatch,
@@ -577,6 +579,37 @@ def statement_payout(txn_id: int, data: StatementPayout, db: Session = Depends(g
         )
         splits.append((fee_acct, -fee, f"{display} payout fee"))
     bt = m.add(db, bt, payee=f"{display} payout", splits=splits)
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
+@router.post(
+    "/transactions/{txn_id}/receive-payment", response_model=BankTransactionResponse
+)
+def statement_receive_payment(
+    txn_id: int, data: StatementReceivePayment, db: Session = Depends(get_db)
+):
+    """A customer payment from a money-in line (#1056), applied to open
+    invoices and matched to the line, so the line leaves To review and the
+    register shows the payment once."""
+    from app.services.bank_feed_payments import receive_payment
+
+    bt = receive_payment(db, _statement_line(db, txn_id), data)
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
+@router.post("/transactions/{txn_id}/pay-bills", response_model=BankTransactionResponse)
+def statement_pay_bills(
+    txn_id: int, data: StatementPayBills, db: Session = Depends(get_db)
+):
+    """A bill payment from a money-out line (#1056), applied to open bills
+    and matched to the line."""
+    from app.services.bank_feed_payments import pay_bills
+
+    bt = pay_bills(db, _statement_line(db, txn_id), data)
     db.commit()
     db.refresh(bt)
     return _statement_out([bt], db)[0]
