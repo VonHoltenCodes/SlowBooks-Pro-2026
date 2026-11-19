@@ -8,12 +8,18 @@
  * browser's own find in page and this file is never used.
  *
  * What it finds: the words drawn on the screen in front of the reader.
- * The open dialog if there is one (it is modal, the page beneath it is
- * covered), the page otherwise. Not the sidebar, the top bar or the
- * status bar, and nothing that is not drawn: a hidden element, a folded
- * section, a screen reader's own words (.visually-hidden). The value in a
- * text box, a text area or a drop-down counts too: on a bill or an invoice
- * most of what is on screen is in a field.
+ * With no dialog open, the whole window: the top bar, the sidebar, the
+ * page, the status bar, and whatever is open over them (a menu, the
+ * record search's list, a type-ahead's list, a notice). With the app's
+ * dialog open (#modal), the dialog alone, the window beneath it being
+ * covered. The app's small questions (the closed period's password,
+ * askChoice: aria-modal boxes of their own over everything) take Escape
+ * and Tab for themselves, so the bar does not open over one, and one that
+ * comes up while it is open is not searched. Nothing that is not drawn:
+ * a hidden element, a folded section, a screen reader's own words
+ * (.visually-hidden). The value in a text box, a text area or a
+ * drop-down counts too: on a bill or an invoice most of what is on screen
+ * is in a field.
  *
  * How it matches: case and accents are always ignored (a book's names,
  * numbers and memos never differ by case alone, so there is no "match
@@ -147,7 +153,7 @@
 
     function shown(el) {
         if (SKIP.has(el.localName) || el.hidden) return false;
-        if (el.matches('.visually-hidden, .skip-link, .skip-link--inline, #find-bar')) return false;
+        if (el.matches('.visually-hidden, .skip-link, .skip-link--inline, #find-bar, #find-marks')) return false;
         if (typeof el.checkVisibility === 'function') {
             if (el.checkVisibility({ visibilityProperty: true })) return true;
             // display: contents draws no box of its own; its children do
@@ -170,6 +176,9 @@
     // field's value ({ text, field })
     function collectChunks(root) {
         const chunks = [];
+        // another dialog inside the root (a small question over the window)
+        // is not what is being searched
+        const elsewhere = (el) => el !== root && el.getAttribute('aria-modal') === 'true';
         let run = null;
         const flush = () => {
             if (run && run.text.trim()) chunks.push(run);
@@ -185,7 +194,12 @@
                     if (!run) run = { text: '', pieces: [] };
                     run.pieces.push({ node: n, start: run.text.length });
                     run.text += n.data;
-                } else if (n.nodeType === 1 && shown(n)) {
+                } else if (n.nodeType === 1 && n.localName === 'br') {
+                    // a line break is a space in the run, not its end ("Total
+                    // due" over two lines is one phrase); the space has no
+                    // node of its own, and a match never starts or ends on it
+                    if (run) run.text += ' ';
+                } else if (n.nodeType === 1 && shown(n) && !elsewhere(n)) {
                     const tag = n.localName;
                     if (tag === 'input' || tag === 'textarea' || tag === 'select') {
                         const text = fieldText(n);
@@ -253,10 +267,15 @@
     // ── The bar ───────────────────────────────────────────────────────────
 
     const isMac = () => /Mac|iP(hone|ad|od)/.test((typeof navigator !== 'undefined' && navigator.platform) || '');
-    const dialogOpen = () => {
-        const overlay = document.getElementById('modal-overlay');
-        return !!overlay && !overlay.classList.contains('hidden');
+    // The app's dialog when it is open, else null
+    const topDialog = () => {
+        const modal = document.getElementById('modal');
+        return modal && shown(modal) ? modal : null;
     };
+    // One of the app's small questions is up (api.js's closing-date
+    // password, utils.js askChoice): an aria-modal box of its own
+    const questionUp = () => [...document.querySelectorAll('[aria-modal="true"]')]
+        .some(el => el.id !== 'modal' && shown(el));
 
     const FindBar = {
         MAX_MATCHES,
@@ -289,9 +308,16 @@
 
         isOpen() { return FindBar._open; },
 
-        // The open dialog, else the page
+        // The open dialog, else the whole window
         scope() {
-            return dialogOpen() ? document.getElementById('modal') : document.getElementById('page-content');
+            return topDialog() || document.body;
+        },
+
+        // The bar's own elements and its boxes: their changes are not the
+        // screen changing
+        _own(node) {
+            const el = node && (node.nodeType === 1 ? node : node.parentElement);
+            return !!el && (FindBar._bar.contains(el) || (!!FindBar._layer && FindBar._layer.contains(el)));
         },
 
         _build() {
@@ -359,6 +385,8 @@
         // Open (or, open already, take focus): the selected text is the
         // query when there is one, else the last query, selected
         open() {
+            // a small question has Escape and Tab, and two lines to read
+            if (questionUp()) return;
             FindBar._build();
             const active = document.activeElement;
             if (active && !FindBar._bar.contains(active)) FindBar._returnTo = active;
@@ -388,7 +416,10 @@
             const back = FindBar._returnTo;
             FindBar._returnTo = null;
             if (back && back !== document.body && document.contains(back) && !back.closest('.hidden')) back.focus();
-            else if (dialogOpen()) document.getElementById('modal').focus();
+            else {
+                const d = topDialog();
+                if (d && typeof d.focus === 'function') d.focus();
+            }
         },
 
         // The query, handed to the record search (the empty state's link)
@@ -397,7 +428,7 @@
             FindBar._returnTo = null;
             FindBar.close();
             const search = document.getElementById('global-search');
-            if (!search || dialogOpen()) return;
+            if (!search || topDialog()) return;
             search.value = q;
             search.focus();
             if (window.App && typeof App.globalSearch === 'function') App.globalSearch(q);
@@ -471,7 +502,7 @@
             FindBar._bar.classList.toggle('find-bar--none', !!q && !n);
             empty.hidden = !q || !!n;
             // the record search lies under a dialog's overlay, out of reach
-            empty.querySelector('.find-records').hidden = dialogOpen();
+            empty.querySelector('.find-records').hidden = !!topDialog();
             FindBar._bar.querySelector('[data-find="prev"]').disabled = n < 2;
             FindBar._bar.querySelector('[data-find="next"]').disabled = n < 2;
         },
@@ -592,21 +623,22 @@
             return text && text.length <= 200 && !/\n/.test(text) ? text : '';
         },
 
-        // While open: the page, the dialog and whether it is open are
-        // watched, and so is typing in a field (a value is no mutation)
+        // While open: the whole window is watched (a page drawn, a dialog
+        // or a menu opened or closed, a section folded: the class is how
+        // most of the app shows and hides), but for the bar's own changes,
+        // and so is typing in a field (a value is no mutation)
         _watch() {
             const again = () => {
                 clearTimeout(FindBar._refresh);
                 FindBar._refresh = setTimeout(() => FindBar.search({ keepPlace: true }), 150);
             };
-            FindBar._observer = new MutationObserver(again);
-            const opts = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'open', 'style'] };
-            for (const id of ['page-content', 'modal']) {
-                const el = document.getElementById(id);
-                if (el) FindBar._observer.observe(el, opts);
-            }
-            const overlay = document.getElementById('modal-overlay');
-            if (overlay) FindBar._observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+            FindBar._observer = new MutationObserver((records) => {
+                if (records.some(r => !FindBar._own(r.target))) again();
+            });
+            FindBar._observer.observe(document.body, {
+                childList: true, subtree: true, characterData: true,
+                attributes: true, attributeFilter: ['hidden', 'open', 'style', 'class'],
+            });
             FindBar._onEdit = (e) => { if (!FindBar._bar.contains(e.target)) again(); };
             document.addEventListener('input', FindBar._onEdit, true);
             document.addEventListener('change', FindBar._onEdit, true);

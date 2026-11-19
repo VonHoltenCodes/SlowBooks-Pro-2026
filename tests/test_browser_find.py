@@ -3,15 +3,18 @@ playwright's Chromium:
 
 - Ctrl+F opens it in the desktop window with the cursor in its box; the
   query is the selected text when there is one.
-- It finds what is drawn on the page: not what is hidden, folded or
-  written for a screen reader only, and not the sidebar or the top bar.
+- With no dialog open it finds what is drawn in the whole window: the
+  top bar, the sidebar, the page and the status bar; not what is hidden,
+  folded or written for a screen reader only. A line break is a space.
   A field's value counts, and the field is outlined.
 - Each match gets a box laid over its text (#find-marks), the page
   untouched; the boxes sit on their text at any text size and follow a
   scroll. Enter, Shift+Enter, Ctrl+G and F3 step through them, wrapping.
 - An amount is found however it is written ($, commas, parentheses).
 - Over a dialog it finds in the dialog; Escape closes the bar and leaves
-  the dialog open, and Tab stays among the bar's controls.
+  the dialog open, and Tab stays among the bar's controls. It does not
+  open over one of the app's small questions (askChoice), which keeps
+  Escape, and one that comes up while it is open is not searched.
 - The page changing under it is searched again, the bar left open.
 - No matches offers the record search, which gets the query.
 
@@ -52,6 +55,7 @@ PAGE = """() => {
         <select id="pick"><option>Other</option><option selected>Acme Corp</option></select>
         <input type="password" value="acme">
         <div style="height: 2000px"></div>
+        <p id="broken">Total<br>due now</p>
         <p id="far">Acme far below</p>`;
 }"""
 COUNT = "() => document.getElementById('find-count').textContent"
@@ -68,6 +72,12 @@ HITS = """() => {
     }
     return { all: boxes.length, current: m && m.range && cur ? [m.range.toString()] : [], aligned };
 }"""
+# Where each match is: the window's part it lies in
+WHERE = """() => FindBar._matches.map(m => {
+    const el = m.field || m.range.startContainer.parentElement;
+    const part = el.closest('#topbar, #sidebar, #page-content, #statusbar, #modal, [aria-modal]');
+    return part ? (part.id || part.getAttribute('role')) : null;
+})"""
 FIELD_HITS = """() => Object.fromEntries([...document.querySelectorAll('[data-find-hit]')]
     .map(el => [el.id, el.getAttribute('data-find-hit')]))"""
 MODAL_SHOWN = (
@@ -111,9 +121,18 @@ def test_ctrl_f_opens_the_bar_and_finds_what_is_on_the_screen(desk):
     # out of sight below, the current one on its text
     assert page.evaluate(HITS) == {"all": 4, "current": ["Acme"], "aligned": True}
     assert page.evaluate(FIELD_HITS) == {"memo": "match", "pick": "match"}
-    # not the sidebar's or the top bar's words
-    _find(page, "Customers")
-    assert page.evaluate(COUNT) == "No matches"
+    # the top bar, the sidebar and the status bar are searched too
+    _find(page, "Sign Out")
+    assert page.evaluate(COUNT) == "1 of 1"
+    assert page.evaluate(WHERE) == ["topbar"]
+    _find(page, "Bill Quick Entry")
+    assert page.evaluate(WHERE) == ["topbar", "sidebar"]
+    _find(page, "Ready")
+    assert "statusbar" in page.evaluate(WHERE)
+    # a line break is a space: "Total<br>due" is "Total due"
+    _find(page, "total due")
+    assert page.evaluate(COUNT) == "1 of 1"
+    assert page.evaluate(WHERE) == ["page-content"]
 
 
 def test_enter_shift_enter_ctrl_g_and_f3_step_through_the_matches(desk):
@@ -295,3 +314,28 @@ def test_the_boxes_sit_on_their_text_at_any_text_size_and_follow_a_scroll(desk):
     page.wait_for_function(
         "() => !document.querySelector('#find-marks .find-mark--current')"
     )
+
+
+def test_not_over_one_of_the_apps_small_questions_which_keeps_escape(desk):
+    page = desk
+    ask = """() => { window._asked = askChoice({ title: 'Remove Acme?',
+        message: 'Acme Supply will be removed.', yes: 'Remove', no: 'Keep' }); }"""
+    page.evaluate(ask)
+    page.wait_for_selector("[role='alertdialog']")
+    # Ctrl+F over the question opens nothing; Escape still answers it
+    page.keyboard.press("Control+KeyF")
+    assert page.evaluate("() => !!window.FindBar && FindBar.isOpen()") is False
+    page.keyboard.press("Escape")
+    assert page.evaluate("async () => await window._asked") is False
+    # a question that comes up while the bar is open is not searched, and
+    # Escape answers it, leaving the bar open
+    page.evaluate("() => FindBar.open()")
+    _find(page, "acme")
+    assert page.evaluate(COUNT) == "1 of 6"
+    page.evaluate(ask)
+    page.wait_for_selector("[role='alertdialog']")
+    page.evaluate("() => FindBar.search({ keepPlace: true })")
+    assert page.evaluate(COUNT).endswith("of 6")
+    page.keyboard.press("Escape")
+    assert page.evaluate("async () => await window._asked") is False
+    assert page.evaluate("() => FindBar.isOpen()") is True
