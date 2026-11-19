@@ -194,13 +194,33 @@ const EmployeesPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // The dialog's teaching lines, behind one tortoise beside its first
+    // heading (#977): three sections each carried one, so the dialog would
+    // show three. Portal URL's line joins the note when a link is shown.
+    _detailHints(id) {
+        return hintList('Employee', [
+            {
+                name: 'Portal URL', id: `emp-portal-url-hint-${id}`, hidden: true,
+                text: "opens in the employee's browser — the address must be reachable from where they are (this machine only for a desktop install; the LAN or your public name for Server Edition)",
+            },
+            { name: 'E-Verify', id: `emp-everify-hint-${id}`, text: 'Record-keeping only — submit cases via the federal E-Verify portal.' },
+            {
+                name: 'Opening YTD', id: `emp-opening-hint-${id}`,
+                text: `What the old payroll paid this year before the first SlowBooks pay run, quarter by quarter,
+                    through the day before it (a May switch fills Q1 and Q2 to date). Enter the old system's
+                    taxable wages too: the Social Security, Medicare, FUTA and SUTA wage bases start from them.
+                    No journal entry is made: the old system booked that payroll.`,
+            },
+        ]);
+    },
+
     async viewDetails(id) {
         const emp = await API.get(`/employees/${id}`);
         const fullName = `${escapeHtml(emp.first_name)} ${escapeHtml(emp.last_name)}`;
 
         const html = `
             <div style="max-width:700px;margin:0 auto">
-                <h4>Overview</h4>
+                <div style="display:flex;gap:4px;align-items:center;"><h4 style="margin:0;">Overview</h4>${EmployeesPage._detailHints(id)}</div>
                 <dl class="detail-list" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
                     <dt>Name</dt><dd>${fullName}</dd>
                     <dt>Email</dt><dd>${escapeHtml(emp.email || '—')}</dd>
@@ -317,10 +337,7 @@ const EmployeesPage = {
                 ${data.closed_at ? `&nbsp;·&nbsp;Closed ${escapeHtml(data.closed_at.slice(0, 10))}` : ''}
             </p>
             ${data.notes ? `<p style="font-size:12px;color:var(--text-muted);margin:0 0 6px 0;white-space:pre-wrap">${escapeHtml(data.notes)}</p>` : ''}
-            <button class="btn btn-sm btn-secondary" onclick="EmployeesPage._showEverifyForm(${id})">Update E-Verify case</button>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:6px">
-                Record-keeping only — submit cases via the federal E-Verify portal.
-            </p>`;
+            <button class="btn btn-sm btn-secondary" onclick="EmployeesPage._showEverifyForm(${id})">Update E-Verify case</button>`;
     },
 
     async _showEverifyForm(id) {
@@ -379,6 +396,8 @@ const EmployeesPage = {
                 API.get(`/employees/${id}/portal-access?limit=10`).catch(() => []),
             ]);
             el.innerHTML = EmployeesPage._renderPortalSection(id, token, access);
+            // the Portal URL line of the dialog's note, while a link is shown
+            Hints.showEntry(`emp-portal-url-hint-${id}`, !!token.portal_url);
         } catch (err) {
             // A role the portal is not open to (403: an employee's login is
             // an administrator's) gets the sentence and no button it can't
@@ -413,8 +432,7 @@ const EmployeesPage = {
         }
 
         let html = `
-            <p style="margin:0 0 4px 0">Portal URL: <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
-                <span style="font-size:11px;color:var(--gray-400);">opens in the employee's browser — the address must be reachable from where they are (this machine only for a desktop install; the LAN or your public name for Server Edition)</span></p>
+            <p style="margin:0 0 4px 0">Portal URL: <a href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-describedby="emp-portal-url-hint-${id}">${escapeHtml(url)}</a></p>
             <p style="font-size:12px;color:var(--text-muted);margin:0 0 4px 0">
                 <span ${expiryClass}>Expires ${expires ? expires.toISOString().slice(0,10) : 'never'}${daysUntilExpiry !== null ? ` (${daysUntilExpiry} days)` : ''}</span>
                 &nbsp;·&nbsp;
@@ -631,12 +649,6 @@ const EmployeesPage = {
             : '';
         return `
             <form onsubmit="EmployeesPage.saveOpening(event, ${id})" data-opening-form="${id}">
-                <p style="font-size:12px;color:var(--text-muted);margin:0 0 6px 0">
-                    What the old payroll paid this year before the first SlowBooks pay run, quarter by quarter,
-                    through the day before it (a May switch fills Q1 and Q2 to date). Enter the old system's
-                    taxable wages too: the Social Security, Medicare, FUTA and SUTA wage bases start from them.
-                    No journal entry is made: the old system booked that payroll.
-                </p>
                 ${lock}
                 <div class="form-grid">
                     <div class="form-group"><label>Year</label>

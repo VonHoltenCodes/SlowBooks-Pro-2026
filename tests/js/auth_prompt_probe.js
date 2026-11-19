@@ -32,6 +32,8 @@ statusCompany.textContent = 'Company: bookkeeper.sbk';
 
 const ctx = {
   console,
+  // utils.js's escapeHtml, which hint.js uses on the page (#977)
+  escapeHtml: (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'),
   window: { addEventListener() {} },
   fetch: async () => ({ ok: true, json: async () => scenario.status }),
   document: {
@@ -46,6 +48,7 @@ const ctx = {
   },
 };
 vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);  // hint(), hintList() (#977)
 vm.runInContext(fs.readFileSync('app/static/js/auth.js', 'utf8'), ctx);
 
 (async () => {

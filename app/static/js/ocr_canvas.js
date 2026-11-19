@@ -66,11 +66,8 @@ const OcrCanvas = {
         return `
         <div id="ocr-canvas-panel" style="display:none; margin-bottom:14px; border:1px solid var(--gray-300); border-radius:6px; padding:10px; background:var(--content-bg, #fff);">
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                <strong style="font-size:12px;">Review scan</strong>
-                <span style="font-size:11px; color:var(--gray-600);">
-                    Drag a box around a value, then tap what it is below — or tap a field first, then drag.
-                    Click a colored box to change or re-read it.
-                </span>
+                <strong style="font-size:12px;">Review scan</strong>${hint(`Drag a box around a value, then tap what it is below — or tap a field first, then drag.
+                    Click a colored box to change or re-read it.`, 'Review scan')}
             </div>
             <div style="max-height:min(420px, calc(55vh / var(--ui-scale, 1))); overflow:auto; border:1px solid var(--gray-200);">
                 <canvas id="ocr-canvas" style="display:block; cursor:crosshair;"></canvas>

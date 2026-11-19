@@ -27,10 +27,13 @@ const ctx = {
   openModal: (title, html, opts) => { modal = html; modalOpts = opts || null; }, closeModal: () => {},
 };
 vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);  // hint(), hintList() (#977)
 vm.runInContext(fs.readFileSync('app/static/js/payroll.js', 'utf8') + '\nthis.P = PayrollPage;', ctx);
 (async () => {
   await ctx.P.view(3);
-  const heads = [...modal.matchAll(/<th scope="col"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1].trim());
+  // a column head's tortoise (Other's, #977) is not part of its name
+  const unhinted = modal.replace(/<span class="hint-wrap">[\s\S]*?<\/span><\/span><\/span>/g, '');
+  const heads = [...unhinted.matchAll(/<th scope="col"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1].trim());
   const body = modal.slice(modal.indexOf('<tbody>'), modal.indexOf('</tbody>'));
   for (const tr of body.split('<tr>').slice(1)) {
     const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => stripTags(m[1]).trim());

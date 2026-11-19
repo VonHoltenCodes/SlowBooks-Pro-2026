@@ -64,13 +64,10 @@ const PayrollPage = {
     showOpeningImport() {
         openModal('Import opening balances', `
             <form onsubmit="PayrollPage.previewOpeningImport(event)">
-                <p class="hint" style="margin-bottom:10px;">
-                    What each employee was paid this year before the first SlowBooks pay run: the
+                <div class="form-group"><label>File ${hint(`What each employee was paid this year before the first SlowBooks pay run: the
                     <a href="/api/payroll/opening-ytd/template" download>SlowBooks template</a>
                     (one row per employee; a second state on a row with only the state columns).
-                    No journal entry is made.
-                </p>
-                <div class="form-group"><label>File</label>
+                    No journal entry is made.`, 'File')}</label>
                     <input type="file" name="file" accept=".csv,.txt" required></div>
                 <div class="form-group"><label>Reason (only to correct an employee whose balance is locked by a processed pay run)</label>
                     <input name="reason" maxlength="300"></div>
@@ -312,10 +309,9 @@ const PayrollPage = {
             <div class="table-container table-container--scroll"><table class="pay-run-table">
                 <thead><tr><th scope="col">Employee</th><th scope="col" class="amount">Hours</th><th scope="col" class="amount">Gross</th>
                 <th scope="col" class="amount">Fed</th><th scope="col" class="amount">State</th><th scope="col" class="amount">SS</th>
-                <th scope="col" class="amount">Med</th><th scope="col" class="amount">Other</th><th scope="col">Benefits (EE, +ER)</th><th scope="col" class="amount">Deductions</th>${anyReimb ? '<th scope="col" class="amount">+ Reimb.</th>' : ''}<th scope="col" class="amount">Net</th><th scope="col">Paid by</th><th scope="col">Stub</th></tr></thead>
+                <th scope="col" class="amount">Med</th><th scope="col" class="amount">Other ${hint(`Other: state taxes withheld besides income tax (disability, family leave, transit) and garnishments. Gross − Fed − State − SS − Med − Other − Deductions${anyReimb ? ' + Reimb.' : ''} = Net.`, 'Other')}</th><th scope="col">Benefits (EE, +ER)</th><th scope="col" class="amount">Deductions</th>${anyReimb ? '<th scope="col" class="amount">+ Reimb.</th>' : ''}<th scope="col" class="amount">Net</th><th scope="col">Paid by</th><th scope="col">Stub</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
-            <p style="font-size:11px;color:var(--gray-500);margin:4px 0 8px;">Other: state taxes withheld besides income tax (disability, family leave, transit) and garnishments. Gross − Fed − State − SS − Med − Other − Deductions${anyReimb ? ' + Reimb.' : ''} = Net.</p>
             <div class="invoice-totals">
                 <div class="total-row"><span class="label">Total Gross</span><span class="value">${formatCurrency(run.total_gross)}</span></div>
                 <div class="total-row"><span class="label">Total Taxes</span><span class="value">${formatCurrency(run.total_taxes)}</span></div>

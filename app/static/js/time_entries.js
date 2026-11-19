@@ -106,9 +106,8 @@ const TimeEntriesPage = {
                         <input name="doubletime_hours" type="number" step="0.01" min="0" value="0"></div>
                     <div class="form-group"><label>Clock In (optional)</label>
                         <input name="clock_in" type="time" oninput="TimeEntriesPage._hoursFromClock(this.form)"></div>
-                    <div class="form-group"><label>Clock Out (optional)</label>
-                        <input name="clock_out" type="time" oninput="TimeEntriesPage._hoursFromClock(this.form)">
-                        <small style="color:var(--gray-400);">Clock times work out Regular Hours</small></div>
+                    <div class="form-group"><label>Clock Out (optional) ${hint('Clock times work out Regular Hours', 'Clock Out')}</label>
+                        <input name="clock_out" type="time" oninput="TimeEntriesPage._hoursFromClock(this.form)"></div>
                     <div class="form-group"><label>Break (minutes)</label>
                         <input name="break_minutes" type="number" min="0" value="0" oninput="TimeEntriesPage._hoursFromClock(this.form)"></div>
                     ${jobGroup}${codeGroup}

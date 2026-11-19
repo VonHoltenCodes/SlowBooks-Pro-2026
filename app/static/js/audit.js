@@ -13,10 +13,7 @@ const AuditPage = {
 
         return `
             <div class="page-header">
-                <h2>Audit Log</h2>
-                <div style="font-size:10px; color:var(--text-muted);">
-                    All create, update, and delete operations are logged here
-                </div>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Audit Log</h2>${hint('All create, update, and delete operations are logged here', 'Audit Log')}</div>
             </div>
             <div class="toolbar">
                 <select id="audit-table" aria-label="Table" onchange="AuditPage.load()">
