@@ -61,4 +61,9 @@
        headings again at the top of each (NEW-208) #}
     table.report thead { display: table-header-group; }
     table.report tr { break-inside: avoid; page-break-inside: avoid; }
+    {# the last row and the one above it never part (#1047): the grand
+       total never starts the last page alone under the column headings,
+       on WeasyPrint's PDF and on Chromium's print alike (Chromium does
+       not honour break-before: avoid on a row) #}
+    table.report > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
 </style>

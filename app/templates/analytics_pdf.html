@@ -182,6 +182,10 @@
 
         /* Avoid breaking tables awkwardly */
         table.data, .kpi-row { page-break-inside: avoid; }
+        /* an aging table taller than a page breaks, but never between its
+           last row and TOTAL (#1047), on WeasyPrint's PDF and on Chromium's
+           print alike */
+        table.data > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
         h2.section { page-break-after: avoid; }
     </style>
 </head>
@@ -322,6 +326,9 @@
                 </thead>
                 <tbody>
                     {% for r in sorted_rows %}
+                    {# the last row and TOTAL are a group of their own (#1047): the
+                       total never starts a page with no row above it #}
+                    {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
                     <tr>
                         <td>{{ r.name }}</td>
                         <td class="num">{{ r.cur | currency }}</td>
