@@ -67,6 +67,8 @@ DEFAULT_RELAY = ""
 LINE_PATH = "/v1/line"
 LINK_PATH = "/v1/link"
 UNLINK_PATH = "/v1/unlink"
+FORGET_PATH = "/v1/forget"
+SUPPORT = "support@slowbookspro.com"
 PHRASE_PATH = "/v1/access-phrase"
 CODE_PATH = "/v1/code"
 KEY_PATH = "/v1/key"
@@ -284,27 +286,87 @@ def link(
     return made
 
 
-def unlink(context=None) -> tuple:
-    """Forget the link. (whether a link was kept, whether the relay heard
-    it); the link is forgotten here even when the relay cannot be told."""
+@dataclass(frozen=True)
+class Forgotten:
+    """What Disconnect did: kept (a link was kept here), told (the relay
+    heard it), deleted (the relay deleted the account and everything it kept
+    for it), devices_left (computers still linked to the account) and slug
+    (the account's relay name, for the fallback sentence)."""
+
+    kept: bool
+    told: bool
+    deleted: bool = False
+    devices_left: int = 0
+    slug: str = ""
+
+    def sentence(self) -> str:
+        return forgotten_sentence(self)
+
+
+def forgotten_sentence(f: "Forgotten") -> str:
+    if not f.kept:
+        return "This computer was not linked to a relay account."
+    if not f.told:
+        return unreachable_sentence(f.slug)
+    if f.devices_left:
+        others = "computer" if f.devices_left == 1 else "computers"
+        return (
+            f"This computer is unlinked. The relay keeps the account (relay name "
+            f"{f.slug}) for the {f.devices_left} other {others} linked to it."
+        )
+    return (
+        "This computer is unlinked, and the relay deleted its record of these "
+        f"books (relay name {f.slug})."
+    )
+
+
+def unreachable_sentence(slug: str) -> str:
+    """The fallback: the relay could not be told, so the person can ask."""
+    return (
+        "This computer is unlinked here, but the relay could not be reached, "
+        f"so it still holds a record under relay name {slug or '(unknown)'}. "
+        f"Send that name to {SUPPORT} to have it removed."
+    )
+
+
+def forget(context=None) -> Forgotten:
+    """Disconnect: unlink this computer and, when it is the account's last,
+    have the relay delete the account and everything it keeps for it
+    (POST /v1/forget). The link is forgotten here even when the relay
+    cannot be reached; the answer then carries the relay name for the
+    fallback (support deletes it by hand)."""
     kept = load_link()
     if kept is None:
         forget_link()
-        return False, False
-    told = False
+        return Forgotten(False, False)
+    told, deleted, left = False, False, 0
+    auth = {"Authorization": f"Bearer {kept.credential}"}
     try:
-        status, _, _ = _post(
-            kept.relay,
-            UNLINK_PATH,
-            None,
-            {"Authorization": f"Bearer {kept.credential}"},
-            context,
-        )
-        told = 200 <= status < 300 or status in (401, 404)
+        status, data, _ = _post(kept.relay, FORGET_PATH, None, auth, context)
+        if status == 404:  # a relay from before /v1/forget: unlink, as then
+            status, data, _ = _post(kept.relay, UNLINK_PATH, None, auth, context)
+            told = 200 <= status < 300 or status == 401
+        elif 200 <= status < 300 and isinstance(data, dict):
+            told = True
+            deleted = data.get("deleted") is True
+            left = (
+                data.get("devices_left")
+                if isinstance(data.get("devices_left"), int)
+                else 0
+            )
+        elif status == 401:
+            told = deleted = True  # the relay knows this computer no longer
     except (LinkError, ConfigError):
         told = False
     forget_link()
-    return True, told
+    return Forgotten(True, told, deleted, left, kept.slug)
+
+
+def unlink(context=None) -> tuple:
+    """(whether a link was kept, whether the relay heard it): forget() for
+    the callers that need only those two."""
+    done = forget(context)
+    return done.kept, done.told
 
 
 # -- one-time codes and keys --------------------------------------------------------

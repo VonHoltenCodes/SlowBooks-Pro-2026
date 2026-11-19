@@ -4,7 +4,7 @@ SlowBooks Pro links itself to the SlowBooks relay, makes a bookkeeper API
 token for the connection and holds the line to the relay itself, with
 SlowBooks Switchboard's line client (app/switchboard). Here against a fake
 relay on 127.0.0.1: the HTTP routes the client calls (/v1/link, /v1/code,
-/v1/unlink) and the WebSocket line (/v1/line), written on the standard
+/v1/forget, /v1/unlink) and the WebSocket line (/v1/line), written on the standard
 library apart from the client's own ws.py, so a mistake in one is not
 hidden by the same mistake in the other.
 
@@ -195,6 +195,10 @@ class FakeRelay:
                     )
                 if self.path == "/v1/unlink":
                     return self._answer(200, {"unlinked": True})
+                if self.path == "/v1/forget":
+                    return self._answer(
+                        200, {"deleted": True, "devices_left": 0, "slug": relay.slug}
+                    )
                 return self._answer(404, {"error": "No such route."})
 
             def do_GET(self):
@@ -413,9 +417,15 @@ def test_disconnect_closes_unlinks_revokes_and_forgets(relay, client, db_session
     _, line = _connected(relay, client)
     r = client.post("/api/switchboard/disconnect")
     assert r.status_code == 200, r.text
-    assert r.json() == {"unlinked": True, "revoked": True}
+    got = r.json()
+    assert got["unlinked"] is True and got["revoked"] is True
+    assert got["deleted"] is True and got["slug"] == relay.slug
+    assert got["sentence"] == (
+        "This computer is unlinked, and the relay deleted its record of these "
+        f"books (relay name {relay.slug})."
+    )
     assert line.closed.wait(5)
-    assert ("POST", "/v1/unlink") in relay.paths()
+    assert ("POST", "/v1/forget") in relay.paths()
     assert relay.calls[-1][2] == relay.credential
     db_session.expire_all()
     row = db_session.query(ApiToken).filter(ApiToken.label == "Claude (relay)").one()
@@ -622,3 +632,32 @@ def test_no_secret_in_a_log_or_an_answer(relay, client, caplog):
     # the vendored client's logger carries its own mask
     masked = logging.getLogger("sbplive")
     assert any(type(f).__name__ == "_MaskSecrets" for f in masked.filters)
+
+
+# -- Disconnect deletes the relay record; the relay name and the fallback ----------
+
+
+def test_status_shows_the_relay_name_while_connected(relay, client):
+    _connected(relay, client)
+    assert client.get("/api/switchboard/status").json()["slug"] == relay.slug
+
+
+def test_disconnect_with_the_relay_out_of_reach_gives_the_fallback(
+    relay, client, db_session, monkeypatch
+):
+    _, line = _connected(relay, client)
+    record = json.loads(link.link_path().read_text())
+    record["relay"] = "http://127.0.0.1:9"  # nothing listens there
+    link.link_path().write_text(json.dumps(record))
+    r = client.post("/api/switchboard/disconnect")
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert got["unlinked"] is False and got["revoked"] is True
+    assert got["slug"] == relay.slug and got["deleted"] is False
+    assert got["sentence"] == (
+        "This computer is unlinked here, but the relay could not be reached, so it "
+        f"still holds a record under relay name {relay.slug}. Send that name to "
+        "support@slowbookspro.com to have it removed."
+    )
+    assert not link.link_path().exists()
+    assert record["credential"] not in r.text

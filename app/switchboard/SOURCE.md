@@ -7,18 +7,14 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: cb1e1bb2ebba484413f78a9e7f18b83acc964f4c (main, 2026-11-19,
-  "sbplive/annotations": every tool that writes the books is marked
-  destructive, and a server failure with nothing usable to say is one
-  clear sentence, never its body). It carries "relay/steady-line" and
-  "sbplive/ask-first" (a create with
-  little on it is held back until the assistant asked the person; every
-  create's answer says what was left blank) and the steadier line (a ping
-  every 15 s, a silent line given up after 35 s, and "replay": a request
-  the relay sends again after a drop is answered from what was kept and
-  never run twice). Before it: c0ab2c3 (serve-http's runner in its own
-  module, an explicit TLS 1.2 minimum, and the line read and written from
-  one thread at a time)
+- Commit: f5da708e224cfc0882d79d8b1fca71c7257de5d7 (main, 2026-11-19,
+  "relay/forget": Disconnect has the relay delete its record of these
+  books, POST /v1/forget, with the relay name kept for the manual
+  fallback). It carries "sbplive/annotations" (every tool that writes the books marked destructive; a clear 5xx
+  sentence), "relay/steady-line" (a ping every 15 s, a silent line given up
+  after 35 s, and "replay") and "sbplive/ask-first" (a create with little on
+  it held back until the assistant asked; left_blank on every create).
+  Before it: c0ab2c3
 - Standard library only; nothing is added to the requirements.
 
 ## The files
@@ -29,7 +25,7 @@ The modules `line.py` imports, directly or through `server.py` (and
 | File | Lines (copy) |
 |---|---:|
 | `__init__.py` | 16 |
-| `account.py` | 544 |
+| `account.py` | 606 |
 | `client.py` | 223 |
 | `config.py` | 205 |
 | `line.py` | 1019 |
@@ -42,7 +38,7 @@ The modules `line.py` imports, directly or through `server.py` (and
 | `store.py` | 170 |
 | `tools.py` | 612 |
 | `ws.py` | 589 |
-| 14 files | 6158 |
+| 14 files | 6220 |
 
 Not copied: the self-hosted HTTP door's runner (`serve_http.py`, which
 shows its connector secret on first run), the OAuth door (`oauth*.py`,
