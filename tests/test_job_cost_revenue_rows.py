@@ -159,3 +159,23 @@ def test_the_pdf_prints_the_revenue_row(client, job):
         )
         assert "Revenue with no cost code" in text
         assert "$2,500.00" in text and "$1,200.00" in text
+
+
+def test_what_has_no_cost_code_is_called_that_in_both_tables():
+    """The cost tree's row reads "Revenue with no cost code"; the section
+    table's row, which carries cost too, read "Unassigned" for the same
+    thing. It is "No cost code" now."""
+    from types import SimpleNamespace
+    from decimal import Decimal
+
+    from app.services import job_costing
+
+    figures = {
+        k: Decimal("10") for k in ("budget", "actual", "est_revenue", "act_revenue")
+    }
+    code = SimpleNamespace(code="03", name="Concrete", label="03 Concrete")
+    rows = job_costing._revenue_sections(
+        {None: dict(figures), 7: dict(figures)}, {7: code}
+    )
+    assert [r["label"] for r in rows] == ["03 Concrete", "No cost code"]
+    assert rows[-1]["name"] == job_costing.NO_COST_CODE == "No cost code"

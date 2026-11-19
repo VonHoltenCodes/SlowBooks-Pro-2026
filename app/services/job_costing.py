@@ -1846,10 +1846,17 @@ def _spread_markup_revenue(
     unassigned["act_revenue"] -= billed
 
 
+# The section row for what has no cost code. The cost tree above it calls
+# its own row "Revenue with no cost code"; this one carries cost as well as
+# revenue, so it is "No cost code": one phrase for the one thing, where the
+# two tables on the page said "Unassigned" and "Revenue with no cost code".
+NO_COST_CODE = "No cost code"
+
+
 def _revenue_sections(sections: dict, code_by_id: dict) -> list[dict]:
     """The cost tree's revenue by section: each section's budgeted cost,
-    actual cost, budgeted and actual revenue, in code order, the Unassigned
-    row (no code: markup lines, a whole-job budget) last."""
+    actual cost, budgeted and actual revenue, in code order, the No cost
+    code row (markup lines, a whole-job budget) last."""
     out = []
     for sid, f in sections.items():
         if not any(f.values()):
@@ -1859,8 +1866,8 @@ def _revenue_sections(sections: dict, code_by_id: dict) -> list[dict]:
             {
                 "cost_code_id": sid,
                 "code": code.code if code else "",
-                "name": code.name if code else "Unassigned",
-                "label": code.label if code else "Unassigned",
+                "name": code.name if code else NO_COST_CODE,
+                "label": code.label if code else NO_COST_CODE,
                 "budget": float(_q(f["budget"])),
                 "actual": float(_q(f["actual"])),
                 "est_revenue": float(_q(f["est_revenue"])),
