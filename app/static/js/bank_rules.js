@@ -28,7 +28,7 @@ const BankRulesPage = {
             html += `<div class="table-container"><table>
                 <thead><tr>
                     <th scope="col">Name</th><th scope="col">Pattern</th><th scope="col">Match Type</th>
-                    <th scope="col">Category Account</th><th scope="col">Vendor</th>${withCustomer ? '<th scope="col">Customer</th>' : ''}${withClass ? `<th scope="col">${T('Class')}</th>` : ''}${withJob ? `<th scope="col">${T('Job')}</th>` : ''}<th scope="col">Priority</th><th scope="col">Active</th><th scope="col">Actions</th>
+                    <th scope="col">Category Account</th><th scope="col">Vendor</th>${withCustomer ? `<th scope="col">${T('Customer')}</th>` : ''}${withClass ? `<th scope="col">${T('Class')}</th>` : ''}${withJob ? `<th scope="col">${T('Job')}</th>` : ''}<th scope="col">Priority</th><th scope="col">Active</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const r of rules) {
                 html += `<tr>
@@ -128,7 +128,7 @@ const BankRulesPage = {
                     <div class="form-group"><label for="bank-rule-vendor">Vendor</label>
                         <select id="bank-rule-vendor" name="vendor_id" aria-describedby="bank-rule-vendor-hint"><option value="">-- None --</option>${vendorOpts}</select>
                         <div id="bank-rule-vendor-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">A line this rule matches is added for this vendor. The vendor's own name matches too.</div></div>
-                    <div class="form-group"><label for="bank-rule-customer">Customer</label>
+                    <div class="form-group"><label for="bank-rule-customer">${T('Customer')}</label>
                         <select id="bank-rule-customer" name="customer_id" aria-describedby="bank-rule-customer-hint"><option value="">-- None --</option>${customerOpts}</select>
                         <div id="bank-rule-customer-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">A deposit this rule matches is added for this customer. Money out takes the vendor.</div></div>
                     ${classGroup}
