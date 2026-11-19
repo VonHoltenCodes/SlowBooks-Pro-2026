@@ -1231,11 +1231,21 @@ function openModal(title, html, opts) {
     // field's tortoise (hint(), [data-hint], #977): it opens on the field's
     // help, not on the help's button; it stays in the Tab order.
     setTimeout(() => {
-        const stops = _tabStops($('#modal-body'), null);
-        const first = stops.find(el => !el.matches('.skip-link, [data-hint]')) || stops.find(el => !el.matches('[data-hint]'));
-        const target = first && !first.matches('[data-destructive]') ? first : modal;
+        const target = _modalLanding();
         focusFor(target, _byKeyboard());
     }, 0);
+}
+
+// Where an open dialog's focus belongs (openModal, above): its first
+// control, passing over a skip link and a tortoise, or the dialog itself
+// when that control undoes something. Also used when the control focus
+// landed on is disabled after the dialog opened (ScanHelper.wire).
+function _modalLanding() {
+    const modal = $('#modal');
+    const stops = _tabStops($('#modal-body'), null);
+    const first = stops.find(el => !el.matches('.skip-link, [data-hint]')) || stops.find(el => !el.matches('[data-hint]'));
+    const target = first && !first.matches('[data-destructive]') ? first : modal;
+    return target;
 }
 
 // opts.keepAddress: the app is moving on by itself (App.navigate, Back or

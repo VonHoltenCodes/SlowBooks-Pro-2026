@@ -237,6 +237,11 @@ SWEEP = r"""(root) => {
     'button, a[href], input, select, textarea, summary, [onclick], [onchange], [oninput], [onblur]');
   for (const el of controls) {
     if (el.matches('form, label')) continue;
+    // A field's tortoise (hint(), [data-hint], #977) opens its help note:
+    // it sends nothing and reads nothing of the books, and it goes with the
+    // section it explains, so where a sign-in may not see a section it may
+    // not see its help either. Neither a write offered nor a read lost.
+    if (el.matches('[data-hint]')) continue;
     if (!el.getClientRects().length || getComputedStyle(el).visibility === 'hidden') continue;
     if (el.disabled || el.closest('fieldset:disabled')) continue;
     if (el.matches('input, textarea') && el.readOnly) continue;

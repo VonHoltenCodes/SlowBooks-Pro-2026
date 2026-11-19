@@ -50,12 +50,30 @@ class PdfEngineMissing(RuntimeError):
     """WeasyPrint, or the native libraries it loads, is not installed."""
 
 
+# When the package is installed but its native libraries are not (Homebrew
+# glib without pango, say), the import gets as far as dlopen()ing gobject,
+# fails on pango, and the failed import's cffi handle closes gobject again —
+# but glib cannot be unloaded on macOS, so it keeps the strings gobject's
+# constructor interned. A second import re-opens gobject, its constructor
+# looks those up in now-unmapped memory, and the process segfaults: every
+# second PDF crashed the server. The first such failure is final for the
+# life of the process, so it is kept here and the import is never retried.
+_NATIVE_LOAD_FAILURE: OSError | None = None
+
+
 def _weasyprint():
     """(HTML, URLFetcher) — imported on first use, not at import time."""
+    global _NATIVE_LOAD_FAILURE
+    if _NATIVE_LOAD_FAILURE is not None:
+        raise PdfEngineMissing(WEASYPRINT_MISSING) from _NATIVE_LOAD_FAILURE
     try:
         from weasyprint import HTML, URLFetcher
-    except (ImportError, OSError) as exc:
-        # OSError: the package is there and its pango/gobject DLLs are not
+    except OSError as exc:
+        # the package is there and its pango/gobject libraries are not
+        _NATIVE_LOAD_FAILURE = exc
+        raise PdfEngineMissing(WEASYPRINT_MISSING) from exc
+    except ImportError as exc:
+        # nothing was loaded, so a later import (after an install) may work
         raise PdfEngineMissing(WEASYPRINT_MISSING) from exc
 
     return HTML, URLFetcher

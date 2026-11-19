@@ -255,7 +255,7 @@ def test_the_decimal_point_places_itself_when_on(browser):
         assert page.input_value("#p-amount") == "123.45"
         # a point typed yourself is kept
         page.focus("#p-amount")
-        page.keyboard.press("Control+a")
+        page.keyboard.press("ControlOrMeta+a")
         page.keyboard.type("100.")
         page.keyboard.press("Tab")
         assert float(page.input_value("#p-amount")) == 100
