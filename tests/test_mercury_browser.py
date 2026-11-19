@@ -70,7 +70,8 @@ def test_connect_map_sync_review_and_disconnect_in_browser(
                 "Mercury: 0 new, 1 already imported, 0 matched", exact=True
             ).wait_for()
             assert db_session.query(BankTransaction).count() == 1
-            page.get_by_text("Balance webhooks", exact=True).click()
+            # the details' summary, not the card note's entry of that name (#977)
+            page.locator("summary", has_text="Balance webhooks").click()
             registration = page.get_by_label("Mercury registration JSON").input_value()
             assert '"checkingAccount.balance.updated"' in registration
             page.get_by_label("Webhook signing secret").fill(SECRET)
@@ -229,7 +230,9 @@ def test_a_bookkeeper_on_an_unconnected_card_is_told_who_connects(client, db_ses
             note = card.locator("[data-admin-note]")
             note.wait_for()
             assert note.inner_text() == "An administrator connects the bank feed."
-            assert "then connect here" in card.inner_text()
+            # the card's teaching is behind its tortoise (#977)
+            assert "then connect here" in card.locator(".hint-pop").text_content()
+            assert "then connect here" not in card.inner_text()
             assert note.is_visible()
             # the connect form is an administrator's: drawn, but not shown
             assert card.locator("form[data-admin]").is_visible() is False

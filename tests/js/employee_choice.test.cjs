@@ -33,6 +33,7 @@ function iif(role) {
         fetch: async () => ({ ok: true, json: async () => ({ detected: 'time', errors: [], warnings: [] }) }),
     };
     vm.createContext(ctx);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), ctx);  // hint(), hintList() (#977)
     vm.runInContext(read('app/static/js/iif.js') + '\nthis.IIFPage = IIFPage;', ctx);
     return { P: ctx.IIFPage, els, sent };
 }
@@ -99,6 +100,7 @@ function migrate() {
         API: { get: async () => [], responseError: async () => 'failed' },
     };
     vm.createContext(ctx);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), ctx);  // hint(), hintList() (#977)
     vm.runInContext(read('app/static/js/migration.js') + '\nthis.MigrationPage = MigrationPage;', ctx);
     return { M: ctx.MigrationPage, els, sent };
 }

@@ -2607,8 +2607,17 @@ def test_a_link_in_running_text_has_the_halo_where_the_gate_reads_its_ground(
         _no_splash(page)
         # (Settings' developer.intuit.com link left with the QuickBooks
         # Online connector in 2.23.2)
-        for route, link in (("#/banking", 'a[href="https://bridge.simplefin.org"]'),):
+        # (the SimpleFIN card's line, link and all, is in its tortoise's
+        # note since #977: opened first, as a reader does)
+        for route, link, note in (
+            (
+                "#/banking",
+                'a[href="https://bridge.simplefin.org"]',
+                'button[aria-label="About Bank Feeds (SimpleFIN)"]',
+            ),
+        ):
             _visit(page, handled, route)
+            page.click(note)
             _keyed(page, f"document.querySelector('#page-content {link}')")
             _both_themes(page, (route, link), GOLD)
     finally:
