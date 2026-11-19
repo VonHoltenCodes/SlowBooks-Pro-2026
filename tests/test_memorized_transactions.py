@@ -1354,7 +1354,7 @@ def test_the_bill_number_rule_is_one_sentence(client, db_session, seed_accounts)
     rule = "Left blank, each bill is numbered the date and the vendor's initials"
     js = (ROOT / "app/static/js/memorized.js").read_text(encoding="utf-8")
     # behind the tortoise (#977): the note carries the id the field names
-    hint = js[js.index('<label>Bill Number ${hint(') :]
+    hint = js[js.index("<label>Bill Number ${hint(") :]
     hint = hint[: hint.index("'mem-bill-number-hint')")]
     assert rule in hint
     assert "-2, -3... after that, since a vendor's bill number cannot repeat" in hint
