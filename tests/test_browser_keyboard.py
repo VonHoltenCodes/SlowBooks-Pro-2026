@@ -2801,7 +2801,8 @@ def test_tab_through_settings_never_lands_under_its_save_bar(browser, company, b
             """() => { const bar = document.getElementById('settings-savebar'),
                     content = document.getElementById('content');
                 const b = [...document.querySelectorAll('#settings-form button')]
-                    .find(el => !bar.contains(el) && !el.disabled && el.offsetHeight > 14);
+                    .find(el => !bar.contains(el) && !el.disabled && el.offsetHeight > 14
+                        && !el.hasAttribute('data-hint'));  // past the headings' tortoises (#977)
                 content.scrollTop += b.getBoundingClientRect().top - (bar.getBoundingClientRect().top - 8);
                 const r = b.getBoundingClientRect();
                 b.dataset.half = '1';

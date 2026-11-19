@@ -28,12 +28,24 @@ const SettingsPage = {
     // read it as a truncated password (#447); the note below says what it is.
     _SECRET_PLACEHOLDER: '********',
 
-    // Said under a secret field whose value is the placeholder: the value is
-    // there, this is not it, and you only type to replace it.
+    // Said of a secret field whose value is the placeholder: the value is
+    // there, this is not it, and you only type to replace it. In the
+    // section's note since #977 (the field points at it, _secretDescribed).
     _secretNote(value) {
         return value === SettingsPage._SECRET_PLACEHOLDER
-            ? `<div class="form-hint" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Saved. Shown as a placeholder; type a new value only to change it.</div>`
+            ? 'Saved. Shown as a placeholder; type a new value only to change it.'
             : '';
+    },
+
+    // The secret's entry in its section's note, when it has something to say.
+    _secretEntry(value, name, id) {
+        const text = SettingsPage._secretNote(value);
+        return text ? { name: name, id: id, text: text } : null;
+    },
+
+    // ... and the field's pointer at that entry, only when there is one.
+    _secretDescribed(value, id) {
+        return SettingsPage._secretNote(value) ? ' aria-describedby="' + id + '"' : '';
     },
 
     // The fiscal-year start-month options, value "1".."12" (#444). Built with
@@ -94,11 +106,10 @@ const SettingsPage = {
         h += '<input type="checkbox" data-bool name="' + provider + '_clearing_enabled"';
         h += (on ? ' checked' : '');
         h += ' onchange="SettingsPage._toggleClearing(\'' + provider + '\')"';
+        // what clearing does is said once, in the Online Payments note (#977)
+        h += ' aria-describedby="settings-clearing-help"';
         h += ' style="width:auto; vertical-align:middle; margin-right:6px;">';
         h += 'Post to a clearing account</label>';
-        h += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">';
-        h += 'Payments wait in the clearing account until the payout reaches your bank; ';
-        h += "the processor's fee is booked as it's charged.</div>";
         // A plain wrapper carries [hidden] so the pickers really disappear
         // when the toggle is off — a .form-grid sets display:grid, which
         // would otherwise win over the hidden attribute.
@@ -166,10 +177,8 @@ const SettingsPage = {
             const gone = all.find(a => String(a.id) === sel);
             h += '<option value="' + escapeHtml(sel) + '" selected>(unavailable) ' + escapeHtml(gone ? accountWords(gone) : '#' + sel) + '</option>';
         }
-        h += '</select>';
-        h += '<div id="settings-default-deposit-account-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">';
-        h += 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.';
-        h += '</div></div>';
+        // its description is in the Deposits note (#977)
+        h += '</select></div>';
         let chosen = [];
         try { chosen = JSON.parse(s.deposit_account_ids || '[]'); } catch (err) { chosen = []; }
         chosen = (Array.isArray(chosen) ? chosen : []).map(String);
@@ -189,9 +198,7 @@ const SettingsPage = {
             h += box(id, '(unavailable) ' + (gone ? accountWords(gone) : '#' + id));
         }
         if (!banks.length && !chosen.length) h += '<div style="font-size:11px; color:var(--text-muted);">The chart has no active bank account.</div>';
-        h += '<div id="settings-deposit-accounts-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">';
-        h += 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.';
-        h += '</div></fieldset>';
+        h += '</fieldset>';
         h += '</div>';
         return h;
     },
@@ -219,10 +226,11 @@ const SettingsPage = {
             const sel = p.chosen ? String(p.chosen) : '';
             const defaultLabel = p.default ? 'Default (' + p.default.label + ')' : 'Default (not in the chart)';
             h += '<div class="form-group"><label>' + escapeHtml(p.label);
-            if (p.hint) h += ' <span class="form-hint">' + escapeHtml(p.hint) + '</span>';
+            // a piece's hint is its entry in the section's note (#977)
             // data-admin on the picker itself: its type-ahead box takes the
             // mark (combobox.js _takeName), so a bookkeeper sees it locked
-            h += '</label><select name="' + p.key + '" data-admin>';
+            h += '</label><select name="' + p.key + '"'
+                + (p.hint ? ' aria-describedby="' + SettingsPage._payrollHintId(p.key) + '"' : '') + ' data-admin>';
             h += '<option value=""' + (sel ? '' : ' selected') + '>' + escapeHtml(defaultLabel) + '</option>';
             let matched = false;
             const seen = new Set();
@@ -250,6 +258,18 @@ const SettingsPage = {
         }
         h += '</div>';
         return h;
+    },
+
+    // Each piece's hint from the server, as entries of the Payroll Accounts
+    // note (#977): the piece's own name over it.
+    _payrollAccountEntries(data) {
+        if (!data || !Array.isArray(data.pieces)) return [];
+        return data.pieces.filter(p => p.hint).map(p => ({
+            name: p.label, id: SettingsPage._payrollHintId(p.key), text: escapeHtml(p.hint),
+        }));
+    },
+    _payrollHintId(key) {
+        return 'settings-payroll-hint-' + String(key).replace(/[^A-Za-z0-9_-]/g, '-');
     },
 
     // Where each encrypted setting is entered again, for the notice below.
@@ -315,8 +335,12 @@ const SettingsPage = {
             + label + '</label>'
             + '<div id="' + id + '-hint" style="font-size:11px; color:var(--text-muted); margin:2px 0 0 22px;">' + hint + '</div></div>';
         return '<div class="settings-section" data-group="preferences" id="settings-my-preferences" data-own-preference role="group" aria-labelledby="settings-h-my-preferences">'
-            + '<h3 id="settings-h-my-preferences">My Preferences</h3>'
-            + '<p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">Yours alone: kept with your sign-in, saved as soon as you change one.</p>'
+            + '<div class="settings-h-row"><h3 id="settings-h-my-preferences">My Preferences</h3>'
+            + hintList('My Preferences', [
+                { id: 'settings-my-preferences-help', text: 'Yours alone: kept with your sign-in, saved as soon as you change one.' },
+                { name: 'Text size', id: 'pref-text-size-hint', text: SettingsPage._textSizeHelp() },
+                typeof FastRack !== 'undefined' ? { name: 'Fast Rack', id: 'fr-hint', text: FastRack.hintText() } : null,
+            ]) + '</div>'
             + box('pref-enter-moves', 'enter_moves', 'Enter key moves between fields',
                 'Enter goes to the next field; Enter in the last field (or Save) saves. Off: Enter saves the form, and posts the register&rsquo;s new entry.')
             + box('pref-auto-decimal', 'auto_decimal', 'Automatically place the decimal point',
@@ -335,16 +359,19 @@ const SettingsPage = {
     _textSizeHtml() {
         const sizes = typeof SlowbooksTextSize !== 'undefined' ? SlowbooksTextSize : null;
         const now = sizes ? sizes.read() : 100;
-        const keys = typeof App !== 'undefined' && App.isMac && App.isMac() ? '&#8984;' : 'Ctrl';
         return '<div class="form-group" style="margin:10px 0 6px;">'
             + '<label for="pref-text-size">Text size</label>'
             + '<select id="pref-text-size" data-text-size-control data-readonly-ok aria-describedby="pref-text-size-hint" style="width:auto; max-width:120px;"'
             + ' onchange="SlowbooksTextSize.apply(this.value)">'
             + [100, 115, 125, 150].map(n => '<option value="' + n + '"' + (n === now ? ' selected' : '') + '>' + n + '%</option>').join('')
-            + '</select>'
-            + '<div id="pref-text-size-hint" style="font-size:11px; color:var(--text-muted); margin-top:2px;">'
-            + 'Makes the text larger on this computer, for every company and sign-in. '
-            + 'In the desktop app, ' + keys + ' and + or &minus; change it too, and ' + keys + ' and 0 puts it back to 100%.</div></div>';
+            + '</select></div>';
+    },
+
+    // what Text size does, for the My Preferences note (#977)
+    _textSizeHelp() {
+        const keys = typeof App !== 'undefined' && App.isMac && App.isMac() ? '&#8984;' : 'Ctrl';
+        return 'Makes the text larger on this computer, for every company and sign-in. '
+            + 'In the desktop app, ' + keys + ' and + or &minus; change it too, and ' + keys + ' and 0 puts it back to 100%.';
     },
 
     loadMyPreferences() {
@@ -409,8 +436,16 @@ const SettingsPage = {
         return '<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px; font-size:12px;">'
             + '<input type="checkbox" id="' + id + '" name="' + key + '" value="true" data-bool'
             + ' aria-labelledby="' + id + '-label' + unit + '"'
+            + ' aria-describedby="' + (SettingsPage._WARN_HELP[id] || '') + '"'
             + ' style="width:auto; margin:0;"' + (on ? ' checked' : '') + '>'
             + '<label id="' + id + '-label" for="' + id + '" style="font-weight:normal; margin:0;">' + label + '</label>' + extra + '</div>';
+    },
+    // each box's entry in the section's note (#977)
+    _WARN_HELP: {
+        'warn-date-past': 'warn-date-help',
+        'warn-date-future': 'warn-date-help',
+        'warn-duplicate-check': 'warn-duplicate-check-help',
+        'warn-edit': 'warn-edit-help',
     },
     _warnDays(s, key, id, unit, fallback) {
         const value = escapeHtml(s[key] || String(fallback));
@@ -477,13 +512,23 @@ const SettingsPage = {
                 oninput="SettingsPage._updateDirty()" onchange="SettingsPage._updateDirty()">
                 <div class="hint hint--locked hidden" data-admin-note style="margin-bottom:10px;">Company settings are changed by an administrator.</div>
                 <div class="settings-section" data-group="company" role="group" aria-labelledby="settings-h-company-information">
-                    <h3 id="settings-h-company-information">Company Information</h3>
+                    <div class="settings-h-row"><h3 id="settings-h-company-information">Company Information</h3>${hintList('Company Information', [
+                        { name: 'Display name', id: 'settings-display-name-help', text: 'Shown on invoices, estimates, statements and receipts. Tax and payroll forms keep the company name.' },
+                        s.company_type === 'construction' ? { name: 'Contractor license #', id: 'company-license-help', text: 'Printed in the header of the estimate PDF.' } : null,
+                        s.company_type === 'construction' ? { name: 'Default estimate terms, inclusions and exclusions', id: 'estimate-terms-help', text: "A new estimate starts with this text; edit it on any estimate. It prints above the acceptance block on the owner's PDF." } : null,
+                        s.company_type === 'construction' ? { name: 'Estimate style', id: 'estimate-style-help', text: 'How a new estimate is laid out; an estimate that already uses packages, allowances, alternates or markups opens as a commercial bid.' } : null,
+                        s.company_type === 'construction' ? { name: 'Default markup (%)', id: 'estimate-default-markup-help', hidden: s.estimate_style !== 'line_markup', text: 'A new estimate line starts with this markup on its cost; change it on any line.' } : null,
+                        { name: 'Company Type', id: 'company-type-help', text: 'Nonprofit shows donors, pledges, donations and funds in place of customers, invoices, sales receipts and classes, and adds the net-asset accounts and statements. Construction adds the contractor accounts (retainage, customer deposits, use tax, Construction in Progress), the standard cost codes (only if you have none of your own yet), and a Sub vendor type. Your data does not change; switch back any time.' },
+                        { name: 'Entity type', id: 'entity-type-help', text: "Your company's legal form. It decides which tax return applies and, chosen before the first posting, the equity accounts: owner's equity and draw; partner capital and distributions; or common stock, paid-in capital and shareholder distributions. Once the books have postings the chart is yours to rename under Chart of Accounts; nothing is reseeded. It never changes your books." },
+                        { name: 'Taxed as', id: 'llc-tax-election-help', hidden: s.entity_type !== 'llc', text: 'How this LLC is taxed. A single-member LLC taxed as a sole proprietor files Schedule C; the others file a partnership or corporate return.' },
+                        { name: 'Use account numbers', id: 'use-account-numbers-help', text: 'On, the chart has a Number column, accounts list by number, and every picker and report names an account "6100 - Name". Off, for a business that does not number its accounts: the number is left off the chart, the pickers, the reports and the PDFs, accounts list by name within their type, and an imported account without a number stays without one. A number is optional either way; an account keeps the number it has.' },
+                        { name: 'First month of fiscal year', id: 'fiscal-year-start-month-help', text: "Reports' This/Last Fiscal Year presets, the dashboard's profit and nonprofit mode's year to date follow it. Payroll forms stay on the calendar year." },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group full-width"><label>Company Name *</label>
                             <input name="company_name" value="${escapeHtml(s.company_name || '')}" required></div>
                         <div class="form-group full-width"><label for="settings-display-name">Display name</label>
-                            <input id="settings-display-name" name="display_name" data-write aria-describedby="settings-display-name-help" value="${escapeHtml(s.display_name || '')}">
-                            <div id="settings-display-name-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Shown on invoices, estimates, statements and receipts. Tax and payroll forms keep the company name.</div></div>
+                            <input id="settings-display-name" name="display_name" data-write aria-describedby="settings-display-name-help" value="${escapeHtml(s.display_name || '')}"></div>
                         <div class="form-group"><label>Address Line 1</label>
                             <input name="company_address1" value="${escapeHtml(s.company_address1 || '')}"></div>
                         <div class="form-group"><label>Address Line 2</label>
@@ -503,86 +548,82 @@ const SettingsPage = {
                         <div class="form-group"><label>Tax ID / EIN</label>
                             <input name="company_tax_id" value="${escapeHtml(s.company_tax_id || '')}"></div>
                         ${s.company_type === 'construction' ? `<div class="form-group"><label for="company-license">Contractor license #</label>
-                            <input id="company-license" name="company_license" value="${escapeHtml(s.company_license || '')}">
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Printed in the header of the estimate PDF.</div></div>
+                            <input id="company-license" name="company_license" aria-describedby="company-license-help" value="${escapeHtml(s.company_license || '')}"></div>
                         <div class="form-group full-width"><label for="estimate-terms">Default estimate terms, inclusions and exclusions</label>
-                            <textarea id="estimate-terms" name="estimate_terms" rows="5">${escapeHtml(s.estimate_terms || '')}</textarea>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate starts with this text; edit it on any estimate. It prints above the acceptance block on the owner's PDF.</div></div>
+                            <textarea id="estimate-terms" name="estimate_terms" rows="5" aria-describedby="estimate-terms-help">${escapeHtml(s.estimate_terms || '')}</textarea></div>
                         <div class="form-group"><label for="estimate-style">Estimate style</label>
-                            <select id="estimate-style" name="estimate_style" onchange="SettingsPage._onEstimateStyleChange(this)">
+                            <select id="estimate-style" name="estimate_style" aria-describedby="estimate-style-help" onchange="SettingsPage._onEstimateStyleChange(this)">
                                 <option value="line_markup" ${s.estimate_style === 'line_markup' ? 'selected' : ''}>Markup per line</option>
                                 <option value="commercial_bid" ${s.estimate_style !== 'line_markup' ? 'selected' : ''}>Commercial bid (packages, allowances, alternates, markups under the subtotal)</option>
-                            </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">How a new estimate is laid out; an estimate that already uses packages, allowances, alternates or markups opens as a commercial bid.</div></div>
+                            </select></div>
                         <div class="form-group" id="estimate-default-markup-group" ${s.estimate_style !== 'line_markup' ? 'hidden' : ''}><label for="estimate-default-markup">Default markup (%)</label>
-                            <input id="estimate-default-markup" name="estimate_default_markup_pct" type="number" step="0.0001" min="0" max="1000" value="${escapeHtml(s.estimate_default_markup_pct || '')}">
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate line starts with this markup on its cost; change it on any line.</div></div>` : ''}
+                            <input id="estimate-default-markup" name="estimate_default_markup_pct" aria-describedby="estimate-default-markup-help" type="number" step="0.0001" min="0" max="1000" value="${escapeHtml(s.estimate_default_markup_pct || '')}"></div>` : ''}
                         <div class="form-group full-width"><label for="company-type">Company Type</label>
-                            <select id="company-type" name="company_type" data-prev="${s.company_type === 'nonprofit' ? 'nonprofit' : (s.company_type === 'construction' ? 'construction' : 'business')}" onchange="SettingsPage.changeCompanyType(this)">
+                            <select id="company-type" name="company_type" aria-describedby="company-type-help" data-prev="${s.company_type === 'nonprofit' ? 'nonprofit' : (s.company_type === 'construction' ? 'construction' : 'business')}" onchange="SettingsPage.changeCompanyType(this)">
                                 <option value="business" ${(s.company_type !== 'nonprofit' && s.company_type !== 'construction') ? 'selected' : ''}>Business</option>
                                 <option value="nonprofit" ${s.company_type === 'nonprofit' ? 'selected' : ''}>Nonprofit</option>
                                 <option value="construction" ${s.company_type === 'construction' ? 'selected' : ''}>Construction</option>
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Nonprofit shows donors, pledges, donations and funds in place of customers, invoices, sales receipts and classes, and adds the net-asset accounts and statements. Construction adds the contractor accounts (retainage, customer deposits, use tax, Construction in Progress), the standard cost codes (only if you have none of your own yet), and a Sub vendor type. Your data does not change; switch back any time.</div>
                         </div>
                         <div class="form-group"><label for="entity-type">Entity type</label>
-                            <select id="entity-type" name="entity_type" onchange="SettingsPage._onEntityTypeChange(this)">
+                            <select id="entity-type" name="entity_type" aria-describedby="entity-type-help" onchange="SettingsPage._onEntityTypeChange(this)">
                                 ${SettingsPage._entityOptions(s.entity_type)}
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Your company's legal form. It decides which tax return applies and, chosen before the first posting, the equity accounts: owner's equity and draw; partner capital and distributions; or common stock, paid-in capital and shareholder distributions. Once the books have postings the chart is yours to rename under Chart of Accounts; nothing is reseeded. It never changes your books.</div>
                             <div id="s-corp-note" style="font-size:10px; color:var(--text-muted); margin-top:4px;" ${SettingsPage._isSCorp(s) ? '' : 'hidden'}>${escapeHtml(SettingsPage.S_CORP_NOTE)}</div>
                         </div>
                         <div class="form-group" id="llc-election-group" ${s.entity_type === 'llc' ? '' : 'hidden'}>
                             <label for="llc-tax-election">Taxed as</label>
-                            <select id="llc-tax-election" name="llc_tax_election" onchange="SettingsPage._toggleSCorpNote()">
+                            <select id="llc-tax-election" name="llc_tax_election" aria-describedby="llc-tax-election-help" onchange="SettingsPage._toggleSCorpNote()">
                                 ${SettingsPage._llcElectionOptions(s.llc_tax_election)}
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">How this LLC is taxed. A single-member LLC taxed as a sole proprietor files Schedule C; the others file a partnership or corporate return.</div>
                         </div>
                         <div class="form-group full-width">
                             <label for="use-account-numbers" style="font-weight:normal;">
-                                <input type="checkbox" id="use-account-numbers" name="use_account_numbers" value="true" data-bool style="width:auto; vertical-align:middle; margin-right:6px;" ${s.use_account_numbers !== 'false' ? 'checked' : ''}>
+                                <input type="checkbox" id="use-account-numbers" name="use_account_numbers" value="true" data-bool aria-describedby="use-account-numbers-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.use_account_numbers !== 'false' ? 'checked' : ''}>
                                 Use account numbers
                             </label>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">On, the chart has a Number column, accounts list by number, and every picker and report names an account "6100 - Name". Off, for a business that does not number its accounts: the number is left off the chart, the pickers, the reports and the PDFs, accounts list by name within their type, and an imported account without a number stays without one. A number is optional either way; an account keeps the number it has.</div>
                         </div>
                         <div class="form-group full-width"><label for="fiscal-year-start-month">First month of fiscal year</label>
-                            <select id="fiscal-year-start-month" name="fiscal_year_start_month">
+                            <select id="fiscal-year-start-month" name="fiscal_year_start_month" aria-describedby="fiscal-year-start-month-help">
                                 ${SettingsPage._monthOptions(s.fiscal_year_start_month || '1')}
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Reports' This/Last Fiscal Year presets, the dashboard's profit and nonprofit mode's year to date follow it. Payroll forms stay on the calendar year.</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="settings-section" data-group="company" role="group" aria-labelledby="settings-h-company-logo">
-                    <h3 id="settings-h-company-logo">Company Logo</h3>
+                    <div class="settings-h-row"><h3 id="settings-h-company-logo">Company Logo</h3>${hintList('Company Logo', [
+                        SettingsPage._isAdmin() ? { name: 'Logo image', id: 'logo-upload-help', admin: true, text: 'PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.' } : null,
+                        s.company_logo_path ? { name: 'Show company logo on invoices', id: 'invoice-show-logo-help', text: 'Applies to PDF, Print, and emailed invoice attachments.' } : null,
+                        s.company_logo_path ? { name: 'Logo only', id: 'invoice-logo-only-help', text: 'Print the logo without the company name heading on invoices, estimates, statements and receipts. Only applies when a logo is set.' } : null,
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group">
                             ${s.company_logo_path && !(logo && logo.missing) ? `<img id="company-logo-preview" src="${escapeHtml(s.company_logo_path)}" style="max-width:200px; max-height:80px; margin-bottom:8px; display:block;">` : ''}
                             ${SettingsPage._logoNote(logo)}
-                            ${SettingsPage._isAdmin() ? `<input type="file" id="logo-upload" aria-label="Logo image" data-admin accept="image/*" onchange="SettingsPage.uploadLogo(this)">
-                            ${s.company_logo_path ? `<button type="button" class="btn btn-sm btn-secondary" data-admin data-write style="margin-left:6px;" onclick="SettingsPage.removeLogo()">Remove logo</button>` : ''}
-                            <div data-admin style="font-size:10px; color:var(--text-muted); margin-top:4px;">PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.</div>`
+                            ${SettingsPage._isAdmin() ? `<input type="file" id="logo-upload" aria-label="Logo image" aria-describedby="logo-upload-help" data-admin accept="image/*" onchange="SettingsPage.uploadLogo(this)">
+                            ${s.company_logo_path ? `<button type="button" class="btn btn-sm btn-secondary" data-admin data-write style="margin-left:6px;" onclick="SettingsPage.removeLogo()">Remove logo</button>` : ''}`
                             : `<div id="logo-admin-only" style="font-size:10px; color:var(--text-muted);">Only an administrator can change the logo.</div>`}
                             ${s.company_logo_path ? `<div style="margin-top:8px;">
                                 <label for="invoice-show-logo" style="font-weight:normal;">
-                                    <input type="checkbox" id="invoice-show-logo" name="invoice_show_logo" value="true" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_show_logo !== 'false' ? 'checked' : ''}>
+                                    <input type="checkbox" id="invoice-show-logo" name="invoice_show_logo" aria-describedby="invoice-show-logo-help" value="true" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_show_logo !== 'false' ? 'checked' : ''}>
                                     Show company logo on invoices
                                 </label>
-                                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Applies to PDF, Print, and emailed invoice attachments.</div>
                                 <label for="invoice-logo-only" style="font-weight:normal; display:block; margin-top:8px;">
                                     <input type="checkbox" id="invoice-logo-only" name="invoice_logo_only" value="true" data-bool data-write aria-describedby="invoice-logo-only-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_logo_only === 'true' ? 'checked' : ''}>
                                     Logo only
                                 </label>
-                                <div id="invoice-logo-only-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Print the logo without the company name heading on invoices, estimates, statements and receipts. Only applies when a logo is set.</div>
                             </div>` : ''}
                         </div>
                     </div>
                 </div>
 
                 <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-invoice-defaults">
-                    <h3 id="settings-h-invoice-defaults">${T('Invoice')} Defaults</h3>
+                    <div class="settings-h-row"><h3 id="settings-h-invoice-defaults">${T('Invoice')} Defaults</h3>${hintList(`${T('Invoice')} Defaults`, [
+                        { name: 'New lines and items are taxable', id: 'new-lines-taxable-help', text: `For a company that charges no sales tax. A line still takes its item's own setting, you can tick Tax on any line, and a tax-exempt ${T('customer')} is never charged.` },
+                        { name: 'Refuse a sale of more than is on hand', id: 'inventory-refuse-oversell-help', text: `Off, an ${T('invoice')} or sales receipt that sells more of a stock item than is on hand is saved and the form says so; the count goes below zero until the receiving bill is entered. On, the sale is refused, naming the item and how many short.` },
+                        { name: 'PDF Paper Size', id: 'pdf-paper-size-help', text: 'Checks, mailing labels and the IRS forms print on Letter whatever this says: they are measured for that stock.' },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group"><label>Default Terms</label>
                             <select name="default_terms">
@@ -602,14 +643,12 @@ const SettingsPage = {
                                 <option value="true" ${s.new_lines_taxable !== 'false' ? 'selected' : ''}>Yes: a new line's Tax box starts ticked, and a new item is taxable</option>
                                 <option value="false" ${s.new_lines_taxable === 'false' ? 'selected' : ''}>No: new lines and new items start untaxed</option>
                             </select>
-                            <div id="new-lines-taxable-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">For a company that charges no sales tax. A line still takes its item's own setting, you can tick Tax on any line, and a tax-exempt ${T('customer')} is never charged.</div>
                         </div>
                         <div class="form-group full-width">
                             <label for="inventory-refuse-oversell" style="font-weight:normal;">
-                                <input type="checkbox" id="inventory-refuse-oversell" name="inventory_refuse_oversell" value="true" data-bool style="width:auto; vertical-align:middle; margin-right:6px;" ${s.inventory_refuse_oversell === 'true' ? 'checked' : ''}>
+                                <input type="checkbox" id="inventory-refuse-oversell" name="inventory_refuse_oversell" value="true" data-bool aria-describedby="inventory-refuse-oversell-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.inventory_refuse_oversell === 'true' ? 'checked' : ''}>
                                 Refuse a sale of more than is on hand
                             </label>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Off, an ${T('invoice')} or sales receipt that sells more of a stock item than is on hand is saved and the form says so; the count goes below zero until the receiving bill is entered. On, the sale is refused, naming the item and how many short.</div>
                         </div>
                         <div class="form-group"><label>${`${T('Invoice')} Prefix`}</label>
                             <input name="invoice_prefix" value="${escapeHtml(s.invoice_prefix || '')}" placeholder="e.g. INV-"></div>
@@ -628,11 +667,10 @@ const SettingsPage = {
                         <div class="form-group full-width"><label>${`${T('Invoice')} Footer`}</label>
                             <input name="invoice_footer" value="${escapeHtml(s.invoice_footer || '')}"></div>
                         <div class="form-group"><label>PDF Paper Size</label>
-                            <select name="pdf_paper_size" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
+                            <select name="pdf_paper_size" aria-describedby="pdf-paper-size-help" title="The paper every document and report PDF is drawn on; checks, labels and the tax forms stay on Letter, the stock they print on">
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
-                            </select>
-                            <div class="form-hint" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Checks, mailing labels and the IRS forms print on Letter whatever this says: they are measured for that stock.</div></div>
+                            </select></div>
                         <div class="form-group"><label>Report Basis</label>
                             <select name="report_basis" title="${escapeHtml(`The basis the ${T('Profit & Loss')}, ${T('Balance Sheet')}, Trial Balance, General Ledger and related reports run on unless the report says otherwise`)}">
                                 <option value="accrual" ${s.report_basis !== 'cash' ? 'selected' : ''}>Accrual (income when billed)</option>
@@ -645,31 +683,32 @@ const SettingsPage = {
                      to outlive the app, so a relaunch reopened the company
                      without its password (explore 2.17.3, macbase1 S-j). -->
                 <div class="settings-section" data-group="security" id="settings-sign-in" hidden role="group" aria-labelledby="settings-h-sign-in">
-                    <h3 id="settings-h-sign-in">Sign-in</h3>
+                    <div class="settings-h-row"><h3 id="settings-h-sign-in">Sign-in</h3>${hintList('Sign-in', [
+                        { name: 'Ask for the password each time SlowBooks Pro starts', id: 'ask-password-on-start-help', text: `With Yes, the next start asks for the password even if you did not sign out.
+                                On Server Edition, a restart of the server signs everyone out.` },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group full-width">
                             <label for="ask-password-on-start">Ask for the password each time SlowBooks Pro starts</label>
-                            <select id="ask-password-on-start" name="ask_password_on_start">
+                            <select id="ask-password-on-start" name="ask_password_on_start" aria-describedby="ask-password-on-start-help">
                                 <option value="false" ${s.ask_password_on_start !== 'true' ? 'selected' : ''}>No: stay signed in until you sign out</option>
                                 <option value="true" ${s.ask_password_on_start === 'true' ? 'selected' : ''}>Yes: quitting the app signs this company out</option>
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-                                With Yes, the next start asks for the password even if you did not sign out.
-                                On Server Edition, a restart of the server signs everyone out.</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="settings-section" data-group="company" id="settings-closing-date" role="group" aria-labelledby="settings-h-closing-date">
-                    <h3 id="settings-h-closing-date">Closing Date</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Prevent modifications to transactions before this date.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-closing-date">Closing Date</h3>${hintList('Closing Date', [
+                        { id: 'closing-date-help', text: 'Prevent modifications to transactions before this date.' },
+                        { name: 'Password (optional)', id: 'closing-date-password-help', text: [SettingsPage._secretNote(s.closing_date_password), `With a password set, a change dated on or before the closing date asks for it
+                                and goes through when it is right. Without one, such changes are refused.`].filter(Boolean).join(' ') },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group"><label for="closing-date">Closing Date</label>
                             <div style="display:flex; gap:6px; align-items:center;">
                                 <input id="closing-date" name="closing_date" type="date" value="${escapeHtml(s.closing_date || '')}"
-                                    aria-describedby="closing-date-state"
+                                    aria-describedby="closing-date-state closing-date-help"
                                     oninput="SettingsPage.showClosingState()" onchange="SettingsPage.showClosingState()"
                                     oninvalid="SettingsPage.closingDateInvalid()">
                                 <button type="button" class="btn btn-sm btn-secondary" id="closing-date-clear" data-admin data-write
@@ -680,41 +719,35 @@ const SettingsPage = {
                             <div id="closing-date-state" role="status" aria-live="polite"
                                 style="font-size:11px; margin-top:4px;">${escapeHtml(SettingsPage._closingStateText(s.closing_date))}</div></div>
                         <div class="form-group"><label>Password (optional)</label>
-                            <input name="closing_date_password" type="password" value="${escapeHtml(s.closing_date_password || '')}"
-                                placeholder="Leave blank for no password" autocomplete="new-password">
-                            ${SettingsPage._secretNote(s.closing_date_password)}
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-                                With a password set, a change dated on or before the closing date asks for it
-                                and goes through when it is right. Without one, such changes are refused.</div></div>
+                            <input name="closing_date_password" type="password" aria-describedby="closing-date-password-help" value="${escapeHtml(s.closing_date_password || '')}"
+                                placeholder="Leave blank for no password" autocomplete="new-password"></div>
                     </div>
                 </div>
 
                 <div class="settings-section" data-group="preferences" id="settings-warnings" role="group" aria-labelledby="settings-h-warnings">
-                    <h3 id="settings-h-warnings">Transaction Warnings</h3>
-                    <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
-                        Questions every form asks before it saves, for everyone using these books. Each one can be answered
-                        &ldquo;save it anyway&rdquo;. Each is off until it is turned on here. Saved with Save Settings.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-warnings">Transaction Warnings</h3>${hintList('Transaction Warnings', [
+                        { id: 'settings-warnings-help', text: `Questions every form asks before it saves, for everyone using these books. Each one can be answered
+                        &ldquo;save it anyway&rdquo;. Each is off until it is turned on here. Saved with Save Settings.` },
+                        { name: 'Warn when a transaction is dated more than … days in the past or in the future', id: 'warn-date-help', text: `A typing slip in the year, or January&rsquo;s work landing in the old year. The closing date keeps its own lock.` },
+                        { name: 'Warn about duplicate check numbers', id: 'warn-duplicate-check-help', text: `A check, register payment or bill payment whose number is already used on that bank account asks:
+                        keep the number, or go back and edit it.` },
+                        { name: 'Warn when editing a transaction', id: 'warn-edit-help', text: 'Saving changes to a transaction that was already saved asks first.' },
+                    ])}</div>
                     ${SettingsPage._warnBox(s, 'warn_date_past', 'warn-date-past', 'Warn when a transaction is dated more than',
                         SettingsPage._warnDays(s, 'warn_date_past_days', 'warn-date-past-days', 'days in the past', 90))}
                     ${SettingsPage._warnBox(s, 'warn_date_future', 'warn-date-future', 'Warn when a transaction is dated more than',
                         SettingsPage._warnDays(s, 'warn_date_future_days', 'warn-date-future-days', 'days in the future', 30))}
-                    <div style="font-size:11px; color:var(--text-muted); margin:-2px 0 8px 22px;">
-                        A typing slip in the year, or January&rsquo;s work landing in the old year. The closing date keeps its own lock.</div>
                     ${SettingsPage._warnBox(s, 'warn_duplicate_check_number', 'warn-duplicate-check', 'Warn about duplicate check numbers', '')}
-                    <div style="font-size:11px; color:var(--text-muted); margin:-2px 0 8px 22px;">
-                        A check, register payment or bill payment whose number is already used on that bank account asks:
-                        keep the number, or go back and edit it.</div>
                     ${SettingsPage._warnBox(s, 'warn_edit_transaction', 'warn-edit', 'Warn when editing a transaction', '')}
-                    <div style="font-size:11px; color:var(--text-muted); margin:-2px 0 0 22px;">
-                        Saving changes to a transaction that was already saved asks first.</div>
                 </div>
 
                 <div class="settings-section" data-group="email" role="group" aria-labelledby="settings-h-email-smtp">
-                    <h3 id="settings-h-email-smtp">Email (SMTP)</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Configure SMTP for sending invoices by email.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-email-smtp">Email (SMTP)</h3>${hintList('Email (SMTP)', [
+                        { id: 'settings-email-smtp-help', text: 'Configure SMTP for sending invoices by email.' },
+                        SettingsPage._secretEntry(s.smtp_password, 'Password', 'smtp-password-help'),
+                        { name: 'Always CC', id: 'smtp-always-cc-help', text: 'Copied on every email sent. Separate addresses with commas.' },
+                        { name: 'Always BCC', id: 'smtp-always-bcc-help', text: "Blind-copied on every email sent; recipients don't see it." },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group"><label>SMTP Host</label>
                             <input name="smtp_host" value="${escapeHtml(s.smtp_host || '')}" placeholder="smtp.gmail.com"></div>
@@ -723,7 +756,7 @@ const SettingsPage = {
                         <div class="form-group"><label>Username</label>
                             <input name="smtp_user" value="${escapeHtml(s.smtp_user || '')}"></div>
                         <div class="form-group"><label>Password</label>
-                            <input name="smtp_password" type="password" value="${escapeHtml(s.smtp_password || '')}">${SettingsPage._secretNote(s.smtp_password)}</div>
+                            <input name="smtp_password" type="password"${SettingsPage._secretDescribed(s.smtp_password, 'smtp-password-help')} value="${escapeHtml(s.smtp_password || '')}"></div>
                         <div class="form-group"><label>From Email</label>
                             <input name="smtp_from_email" type="email" value="${escapeHtml(s.smtp_from_email || '')}"></div>
                         <div class="form-group"><label>From Name</label>
@@ -733,21 +766,20 @@ const SettingsPage = {
                                 <option value="true" ${s.smtp_use_tls !== 'false' ? 'selected' : ''}>Yes</option>
                                 <option value="false" ${s.smtp_use_tls === 'false' ? 'selected' : ''}>No</option>
                             </select></div>
-                        <div class="form-group"><label>Always CC <span class="form-hint">Copied on every email sent. Separate addresses with commas.</span></label>
-                            <input name="smtp_always_cc" value="${escapeHtml(s.smtp_always_cc || '')}" placeholder="office@example.com"></div>
-                        <div class="form-group"><label>Always BCC <span class="form-hint">Blind-copied on every email sent; recipients don't see it.</span></label>
-                            <input name="smtp_always_bcc" value="${escapeHtml(s.smtp_always_bcc || '')}" placeholder="books@example.com"></div>
+                        <div class="form-group"><label>Always CC</label>
+                            <input name="smtp_always_cc" aria-describedby="smtp-always-cc-help" value="${escapeHtml(s.smtp_always_cc || '')}" placeholder="office@example.com"></div>
+                        <div class="form-group"><label>Always BCC</label>
+                            <input name="smtp_always_bcc" aria-describedby="smtp-always-bcc-help" value="${escapeHtml(s.smtp_always_bcc || '')}" placeholder="books@example.com"></div>
                     </div>
                     <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.testEmail()" style="margin-top:8px;">
                         Send Test Email</button>
                 </div>
 
                 <div class="settings-section" data-group="email" id="settings-email-recent-sends" data-admin role="group" aria-labelledby="settings-h-email-recent-sends" hidden>
-                    <h3 id="settings-h-email-recent-sends">Recent sends</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Every invoice, statement, collection letter, portal invite and test email, newest first,
-                        with whether it sent and — when it didn't — why.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-email-recent-sends">Recent sends</h3>${hintList('Recent sends', [
+                        { id: 'settings-email-recent-sends-help', text: `Every invoice, statement, collection letter, portal invite and test email, newest first,
+                        with whether it sent and — when it didn't — why.` },
+                    ])}</div>
                     <label style="font-size:11px; display:inline-flex; align-items:center; gap:6px; margin-bottom:8px;">
                         <input type="checkbox" id="email-log-failed-only" onchange="SettingsPage.filterEmailLog(this.checked)">
                         Show failed only</label>
@@ -758,21 +790,19 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="payroll" role="group" aria-labelledby="settings-h-direct-deposit">
-                    <h3 id="settings-h-direct-deposit">Direct Deposit (ACH)</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        What the bank prints on its ACH origination agreement. With these saved, a processed
+                    <div class="settings-h-row"><h3 id="settings-h-direct-deposit">Direct Deposit (ACH)</h3>${hintList('Direct Deposit (ACH)', [
+                        { id: 'settings-direct-deposit-help', text: `What the bank prints on its ACH origination agreement. With these saved, a processed
                         pay run has a <strong>Direct deposit file</strong> button; upload the file to the bank.
-                        Employees' own accounts are entered on the employee, under Direct Deposit.
-                    </div>
+                        Employees' own accounts are entered on the employee, under Direct Deposit.` },
+                        { name: 'Company Account Number', id: 'ach-company-account-help', text: [SettingsPage._secretNote(s.ach_company_account), 'The account the net pay is paid from. Stored encrypted.'].filter(Boolean).join(' ') },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group"><label>Bank Routing Number</label>
                             <input name="ach_bank_routing" inputmode="numeric" maxlength="9" value="${escapeHtml(s.ach_bank_routing || '')}" placeholder="9 digits"></div>
                         <div class="form-group"><label>Bank Name</label>
                             <input name="ach_bank_name" maxlength="23" value="${escapeHtml(s.ach_bank_name || '')}"></div>
                         <div class="form-group"><label>Company Account Number</label>
-                            <input name="ach_company_account" type="password" inputmode="numeric" maxlength="17" value="${escapeHtml(s.ach_company_account || '')}" autocomplete="off">
-                            ${SettingsPage._secretNote(s.ach_company_account)}
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">The account the net pay is paid from. Stored encrypted.</div></div>
+                            <input name="ach_company_account" type="password" inputmode="numeric" maxlength="17" aria-describedby="ach-company-account-help" value="${escapeHtml(s.ach_company_account || '')}" autocomplete="off"></div>
                         <div class="form-group"><label>Immediate Origin</label>
                             <input name="ach_immediate_origin" maxlength="10" value="${escapeHtml(s.ach_immediate_origin || '')}" placeholder="1 + EIN unless the bank says otherwise"></div>
                         <div class="form-group"><label>Company Identification</label>
@@ -781,24 +811,25 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="payroll" id="settings-payroll-accounts" role="group" aria-labelledby="settings-h-payroll-accounts">
-                    <h3 id="settings-h-payroll-accounts">Payroll Accounts</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Where a pay run posts. Each piece goes to its usual account unless another is chosen here.
+                    <div class="settings-h-row"><h3 id="settings-h-payroll-accounts">Payroll Accounts</h3>${hintList('Payroll Accounts', [
+                        { id: 'settings-payroll-accounts-help', text: `Where a pay run posts. Each piece goes to its usual account unless another is chosen here.
                         Net pay leaves the bank account when the run is processed; choose 2300 Payroll Liabilities
                         (or another liability) to hold the wages until they are paid, then record the payment from
                         the bank against that account. A run already processed keeps the accounts it posted to,
-                        and voiding it reverses those.
-                    </div>
+                        and voiding it reverses those.` },
+                        ...SettingsPage._payrollAccountEntries(payrollAccounts),
+                    ])}</div>
                     ${SettingsPage._payrollAccountsHtml(payrollAccounts)}
                 </div>
 
                 <div class="settings-section" data-group="payroll" id="settings-leave-employer-share" role="group" aria-labelledby="settings-h-leave-employer-share">
-                    <h3 id="settings-h-leave-employer-share">Paid Leave Employer Share</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Washington PFML and Paid Leave Oregon charge the employer share only from a size of employer.
+                    <div class="settings-h-row"><h3 id="settings-h-leave-employer-share">Paid Leave Employer Share</h3>${hintList('Paid Leave Employer Share', [
+                        { id: 'settings-leave-employer-share-help', text: `Washington PFML and Paid Leave Oregon charge the employer share only from a size of employer.
                         A pay run counts the active employees when it is figured; the agency counts over its own period.
-                        The employee's share is withheld either way, and the stub says which applied and why.
-                    </div>
+                        The employee's share is withheld either way, and the stub says which applied and why.` },
+                        { name: 'Washington PFML: Employer share applies', id: 'settings-wa-pfml-employer-share-help', text: 'ESD tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.' },
+                        { name: 'Paid Leave Oregon: Employer share applies', id: 'settings-or-paid-leave-employer-share-help', text: 'OED tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.' },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group full-width"><label for="settings-wa-pfml-employer-share">Washington PFML: Employer share applies (as the agency determined)</label>
                             <select name="payroll_wa_pfml_employer_share" id="settings-wa-pfml-employer-share" aria-describedby="settings-wa-pfml-employer-share-help">
@@ -806,7 +837,6 @@ const SettingsPage = {
                                 <option value="yes" ${s.payroll_wa_pfml_employer_share === 'yes' ? 'selected' : ''}>Yes: ESD determined the employer share applies</option>
                                 <option value="no" ${s.payroll_wa_pfml_employer_share === 'no' ? 'selected' : ''}>No: ESD determined it does not apply</option>
                             </select>
-                            <div id="settings-wa-pfml-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">ESD tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
                         </div>
                         <div class="form-group full-width"><label for="settings-or-paid-leave-employer-share">Paid Leave Oregon: Employer share applies (as the agency determined)</label>
                             <select name="payroll_or_paid_leave_employer_share" id="settings-or-paid-leave-employer-share" aria-describedby="settings-or-paid-leave-employer-share-help">
@@ -814,25 +844,30 @@ const SettingsPage = {
                                 <option value="yes" ${s.payroll_or_paid_leave_employer_share === 'yes' ? 'selected' : ''}>Yes: OED determined the employer share applies</option>
                                 <option value="no" ${s.payroll_or_paid_leave_employer_share === 'no' ? 'selected' : ''}>No: OED determined it does not apply</option>
                             </select>
-                            <div id="settings-or-paid-leave-employer-share-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">OED tells the employer each year whether it owes the employer share. Choose its answer here and every pay run follows it; the run warns when its own headcount says otherwise.</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="settings-section" data-group="connections" id="settings-deposits" role="group" aria-labelledby="settings-h-deposits">
-                    <h3 id="settings-h-deposits">Deposits</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-deposits">Deposits</h3>${hintList('Deposits', [
+                        { id: 'settings-deposits-help', text: 'Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.' },
+                        { name: 'Default deposit account', id: 'settings-default-deposit-account-help', text: 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.' },
+                        { name: 'Deposit into these accounts', id: 'settings-deposit-accounts-help', text: 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.' },
+                    ])}</div>
                     ${SettingsPage._depositAccountsHtml(s, accounts)}
                 </div>
 
                 <div class="settings-section" data-group="connections" role="group" aria-labelledby="settings-h-online-payments">
-                    <h3 id="settings-h-online-payments">Online Payments</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Accept online payments on emailed invoice links. Enable any combination of
-                        providers — the customer pay page shows one button per enabled provider.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-online-payments">Online Payments</h3>${hintList('Online Payments', [
+                        { id: 'settings-online-payments-help', text: `Accept online payments on emailed invoice links. Enable any combination of
+                        providers — the customer pay page shows one button per enabled provider.` },
+                        SettingsPage._secretEntry(s.stripe_secret_key, 'Stripe Secret Key', 'stripe-secret-key-help'),
+                        SettingsPage._secretEntry(s.stripe_webhook_secret, 'Stripe Webhook Secret', 'stripe-webhook-secret-help'),
+                        SettingsPage._secretEntry(s.paypal_client_secret, 'PayPal Client Secret', 'paypal-client-secret-help'),
+                        SettingsPage._secretEntry(s.square_access_token, 'Square Access Token', 'square-access-token-help'),
+                        SettingsPage._secretEntry(s.square_webhook_signature_key, 'Square Webhook Signature Key', 'square-webhook-signature-key-help'),
+                        { name: 'Post to a clearing account', id: 'settings-clearing-help', text: "Payments wait in the clearing account until the payout reaches your bank; the processor's fee is booked as it's charged." },
+                    ])}</div>
                     <h4 id="settings-h-stripe" style="margin:8px 0 4px; font-size:12px;">Stripe</h4>
                     <div class="form-grid" role="group" aria-labelledby="settings-h-stripe">
                         <div class="form-group"><label>Stripe Payments</label>
@@ -843,9 +878,9 @@ const SettingsPage = {
                         <div class="form-group"><label>Publishable Key</label>
                             <input name="stripe_publishable_key" value="${escapeHtml(s.stripe_publishable_key || '')}" placeholder="pk_..."></div>
                         <div class="form-group"><label>Secret Key</label>
-                            <input name="stripe_secret_key" type="password" value="${escapeHtml(s.stripe_secret_key || '')}" placeholder="sk_...">${SettingsPage._secretNote(s.stripe_secret_key)}</div>
+                            <input name="stripe_secret_key" type="password"${SettingsPage._secretDescribed(s.stripe_secret_key, 'stripe-secret-key-help')} value="${escapeHtml(s.stripe_secret_key || '')}" placeholder="sk_..."></div>
                         <div class="form-group"><label>Webhook Secret</label>
-                            <input name="stripe_webhook_secret" type="password" value="${escapeHtml(s.stripe_webhook_secret || '')}" placeholder="whsec_...">${SettingsPage._secretNote(s.stripe_webhook_secret)}</div>
+                            <input name="stripe_webhook_secret" type="password"${SettingsPage._secretDescribed(s.stripe_webhook_secret, 'stripe-webhook-secret-help')} value="${escapeHtml(s.stripe_webhook_secret || '')}" placeholder="whsec_..."></div>
                     </div>
                     ${SettingsPage._clearingHtml('stripe', 'Stripe', s, accounts)}
                     <h4 id="settings-h-paypal" style="margin:12px 0 4px; font-size:12px;">PayPal</h4>
@@ -863,7 +898,7 @@ const SettingsPage = {
                         <div class="form-group"><label>Client ID</label>
                             <input name="paypal_client_id" value="${escapeHtml(s.paypal_client_id || '')}"></div>
                         <div class="form-group"><label>Client Secret</label>
-                            <input name="paypal_client_secret" type="password" value="${escapeHtml(s.paypal_client_secret || '')}">${SettingsPage._secretNote(s.paypal_client_secret)}</div>
+                            <input name="paypal_client_secret" type="password"${SettingsPage._secretDescribed(s.paypal_client_secret, 'paypal-client-secret-help')} value="${escapeHtml(s.paypal_client_secret || '')}"></div>
                         <div class="form-group"><label>Webhook ID</label>
                             <input name="paypal_webhook_id" value="${escapeHtml(s.paypal_webhook_id || '')}"
                                 placeholder="From the PayPal developer dashboard"></div>
@@ -882,11 +917,11 @@ const SettingsPage = {
                                 <option value="production" ${s.square_environment === 'production' ? 'selected' : ''}>Production</option>
                             </select></div>
                         <div class="form-group"><label>Access Token</label>
-                            <input name="square_access_token" type="password" value="${escapeHtml(s.square_access_token || '')}">${SettingsPage._secretNote(s.square_access_token)}</div>
+                            <input name="square_access_token" type="password"${SettingsPage._secretDescribed(s.square_access_token, 'square-access-token-help')} value="${escapeHtml(s.square_access_token || '')}"></div>
                         <div class="form-group"><label>Location ID</label>
                             <input name="square_location_id" value="${escapeHtml(s.square_location_id || '')}"></div>
                         <div class="form-group"><label>Webhook Signature Key</label>
-                            <input name="square_webhook_signature_key" type="password" value="${escapeHtml(s.square_webhook_signature_key || '')}">${SettingsPage._secretNote(s.square_webhook_signature_key)}</div>
+                            <input name="square_webhook_signature_key" type="password"${SettingsPage._secretDescribed(s.square_webhook_signature_key, 'square-webhook-signature-key-help')} value="${escapeHtml(s.square_webhook_signature_key || '')}"></div>
                         <div class="form-group"><label>Webhook Notification URL</label>
                             <input name="square_notification_url" value="${escapeHtml(s.square_notification_url || '')}"
                                 placeholder="Exact URL registered in the Square dashboard"></div>
@@ -895,12 +930,24 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="connections" id="settings-ai" role="group" aria-labelledby="settings-h-ai-insights">
-                    <h3 id="settings-h-ai-insights">AI Insights</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Bring-your-own-key access to Anthropic Claude, xAI Grok, Groq, Cloudflare Workers AI, OpenAI, or Google Gemini.
+                    <div class="settings-h-row"><h3 id="settings-h-ai-insights">AI Insights</h3>${hintList('AI Insights', [
+                        { id: 'settings-ai-help', text: `Bring-your-own-key access to Anthropic Claude, xAI Grok, Groq, Cloudflare Workers AI, OpenAI, or Google Gemini.
                         Used by the Analytics dashboard to generate observations, risks, and recommendations.
-                        API keys are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
-                    </div>
+                        API keys are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).` },
+                        // the chosen provider's line, filled in and kept up by the AI form
+                        { name: 'Provider', id: 'ai-settings-hint', hidden: true, text: '' },
+                        { name: 'Cloudflare Worker Gateway', id: 'ai-worker-help', hidden: true, text: `Deploy <code>cloudflare/worker.js</code> in your own
+                    Cloudflare account — the real AI credentials live inside
+                    Cloudflare as a Worker secret, not in Slowbooks' database.
+                    Slowbooks only holds the shared Bearer token. See
+                    <code>cloudflare/README.md</code> for the 5-minute setup.` },
+                        { name: 'Custom OpenAI-Compatible Endpoint', id: 'ai-endpoint-help', hidden: true, text: `Point Slowbooks at any OpenAI-compatible chat API on the
+                    public internet — another vendor's <code>/v1</code> base URL,
+                    or a gateway you host. <code>/chat/completions</code> is
+                    appended automatically if you don't include it. A model on
+                    this machine or your LAN cannot be reached this way: the
+                    address check below refuses it on purpose.` },
+                    ])}</div>
                     <div id="ai-config-container" class="ai-settings-form">
                         <div style="font-size:11px; color:var(--text-muted);">Loading…</div>
                     </div>
@@ -910,23 +957,20 @@ const SettingsPage = {
                      program is its own public repository; nothing of it runs
                      inside SlowBooks Pro, and this block has no setting. -->
                 <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
-                    <h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
+                    <div class="settings-h-row"><h3 id="settings-h-claude-agents">Claude and agents: SlowBooks Switchboard (sbplive)</h3>${hintList('Claude and agents', [
+                        { id: 'settings-switchboard-help', text: `SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
                         with a <strong>bookkeeper API token</strong> you make under Users and security, API Tokens
                         (read-only for an agent that only reports). It does only what that token's role allows,
                         and every change it makes is in the audit log as <code>token:&lt;label&gt;</code>.
-                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.
-                    </div>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        The token stays on this computer, and Switchboard sends nothing anywhere but this
+                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.` },
+                        { id: 'settings-switchboard-privacy', text: `The token stays on this computer, and Switchboard sends nothing anywhere but this
                         SlowBooks Pro. For Claude on the web it has a self-hosted door, <code>sbplive serve-http</code>,
                         behind your own Cloudflare Tunnel; nothing of the books can be reached from outside this
                         computer unless you set that door up. What Claude reads from the books goes to Claude,
-                        as with any agent.
-                    </div>
+                        as with any agent.` },
+                    ])}</div>
                     <div style="font-size:11px;">
                         <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
                         &middot;
@@ -937,51 +981,46 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="connections" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
-                    <h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        ${Terms.text('Local OCR for the Scan Receipt button on the Enter Sales Receipt, Enter Bill and Enter Expense forms.')}
+                    <div class="settings-h-row"><h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>${hintList('Receipt Scanning', [
+                        { id: 'settings-ocr-help', text: `${Terms.text('Local OCR for the Scan Receipt button on the Enter Sales Receipt, Enter Bill and Enter Expense forms.')}
                         Everything runs on this computer — no cloud, no data leaves the machine.
                         The desktop app ships with a built-in engine (Windows OCR / Apple Vision), so scanning
-                        works out of the box; Tesseract is an optional extra engine you can install yourself.
-                    </div>
+                        works out of the box; Tesseract is an optional extra engine you can install yourself.` },
+                        // said only when no engine is found (loadOcrStatus)
+                        { id: 'ocr-status-help', hidden: true, text: 'macOS and Windows normally use the engine built into the OS; installing Tesseract enables scanning anywhere.' },
+                        { name: 'OCR engine', id: 'ocr-engine-pref-help', text: `Optional: Tesseract can sharpen box re-reads on faded receipts. Install it with
+                        <code>sudo apt-get install tesseract-ocr</code> (Ubuntu),
+                        <code>brew install tesseract</code> (macOS), or the
+                        UB&nbsp;Mannheim build from
+                        <code>github.com/UB-Mannheim/tesseract</code> (Windows), then choose it here.` },
+                    ])}</div>
                     <div id="ocr-status" style="font-size:12px;">Checking…</div>
                     <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
                         <label for="ocr-engine-pref" style="font-size:11px;">OCR engine:</label>
-                        <select id="ocr-engine-pref" data-admin style="font-size:11px;"
+                        <select id="ocr-engine-pref" data-admin aria-describedby="ocr-engine-pref-help" style="font-size:11px;"
                             onchange="SettingsPage.saveOcrEngine(this.value)">
                             <option value="auto">Automatic (recommended) — built-in engine first</option>
                             <option value="tesseract">Prefer Tesseract (if installed)</option>
                         </select>
                     </div>
-                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-                        Optional: Tesseract can sharpen box re-reads on faded receipts. Install it with
-                        <code>sudo apt-get install tesseract-ocr</code> (Ubuntu),
-                        <code>brew install tesseract</code> (macOS), or the
-                        UB&nbsp;Mannheim build from
-                        <code>github.com/UB-Mannheim/tesseract</code> (Windows), then choose it here.
-                    </div>
                 </div>
 
                 <div class="settings-section" data-group="preferences" id="settings-sounds" role="group" aria-labelledby="settings-h-sounds">
-                    <h3 id="settings-h-sounds">Sounds</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        A personal preference, kept per sign-in: it follows you to another computer, and everyone sets their own.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-sounds">Sounds</h3>${hintList('Sounds', [
+                        { id: 'settings-sounds-help', text: `A personal preference, kept per sign-in: it follows you to another computer, and everyone sets their own.` },
+                        { name: 'Play a sound when a transaction posts', id: 'post-sound-pref-help', text: 'A short chime when a transaction posts — an invoice, bill, payment, deposit, check, journal entry, transfer or pay run. Deletes, voids and saved settings stay silent. Off by default (#476).' },
+                    ])}</div>
                     <label style="font-weight:normal; font-size:11px;">
-                        <input type="checkbox" id="post-sound-pref" style="width:auto; vertical-align:middle; margin-right:6px;"
+                        <input type="checkbox" id="post-sound-pref" aria-describedby="post-sound-pref-help" style="width:auto; vertical-align:middle; margin-right:6px;"
                             onchange="SettingsPage.savePostSound(this.checked)">
                         Play a sound when a transaction posts
                     </label>
-                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-                        A short chime when a transaction posts — an invoice, bill, payment, deposit, check, journal entry, transfer or pay run — the way QuickBooks Desktop beeped. Deletes, voids and saved settings stay silent. Off by default (#476).
-                    </div>
                 </div>
 
                 <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-late-fees">
-                    <h3 id="settings-h-late-fees">Late Fees</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Automatically apply late fees to overdue invoices. Use "Apply Late Fees" on the AR Aging report.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-late-fees">Late Fees</h3>${hintList('Late Fees', [
+                        { id: 'settings-late-fees-help', text: `Automatically apply late fees to overdue invoices. Use "Apply Late Fees" on the AR Aging report.` },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group"><label>Enable Late Fees</label>
                             <select name="late_fee_enabled">
@@ -996,40 +1035,36 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="sales" id="settings-collections" role="group" aria-labelledby="settings-h-collections">
-                    <h3 id="settings-h-collections">Collections</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Reminders go to a customer's email when an ${T('invoice')} is coming due or is overdue. Run them from the <a href="#/collections">Collections</a> page, or let SlowBooks Pro send them for you.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-collections">Collections</h3>${hintList('Collections', [
+                        { id: 'settings-collections-help', text: `Reminders go to a customer's email when an ${T('invoice')} is coming due or is overdue. Run them from the <a href="#/collections">Collections</a> page, or let SlowBooks Pro send them for you.` },
+                        { name: 'Send reminders automatically', id: 'invoice-reminders-auto-help', text: 'Once a day, when SlowBooks Pro is opened. Needs email set up.' },
+                        { name: `Remind about a sub-${T('customer').toLowerCase()} billed with its parent`, id: 'invoice-reminders-billed-sub-to-help', text: 'A tenant billed with its property, say. Whoever is written to must have an email and not be opted out.' },
+                        { name: 'Reminder rules', id: 'reminder-rules-help', text: `Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached. On or before the due date, "0 days overdue" is written as due today (or tomorrow, or in so many days).
+                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ due_status }} {{ company_name }}` },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group"><label for="invoice-reminders-auto">Send reminders automatically</label>
-                            <select name="invoice_reminders_auto" id="invoice-reminders-auto" data-no-search onchange="SettingsPage.previewAutoReminders(this)">
+                            <select name="invoice_reminders_auto" id="invoice-reminders-auto" aria-describedby="invoice-reminders-auto-help invoice-reminders-last-run" data-no-search onchange="SettingsPage.previewAutoReminders(this)">
                                 <option value="false" ${s.invoice_reminders_auto !== 'true' ? 'selected' : ''}>Off</option>
                                 <option value="true" ${s.invoice_reminders_auto === 'true' ? 'selected' : ''}>On</option>
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Once a day, when SlowBooks Pro is opened. Needs email set up.
-                                ${s.invoice_reminders_last_run ? `Last ran ${escapeHtml(formatDate(s.invoice_reminders_last_run))}.` : ''}</div></div>
+                            <div id="invoice-reminders-last-run" style="font-size:10px; color:var(--text-muted); margin-top:4px;">${s.invoice_reminders_last_run ? `Last ran ${escapeHtml(formatDate(s.invoice_reminders_last_run))}.` : ''}</div></div>
                         <div class="form-group"><label for="invoice-reminders-billed-sub-to">Remind about a sub-${T('customer').toLowerCase()} billed with its parent</label>
-                            <select name="invoice_reminders_billed_sub_to" id="invoice-reminders-billed-sub-to" data-no-search>
+                            <select name="invoice_reminders_billed_sub_to" id="invoice-reminders-billed-sub-to" aria-describedby="invoice-reminders-billed-sub-to-help" data-no-search>
                                 <option value="property" ${(s.invoice_reminders_billed_sub_to || 'property') === 'property' ? 'selected' : ''}>The parent (whose account it is billed to)</option>
                                 <option value="tenant" ${s.invoice_reminders_billed_sub_to === 'tenant' ? 'selected' : ''}>The sub-${T('customer').toLowerCase()} itself</option>
                                 <option value="both" ${s.invoice_reminders_billed_sub_to === 'both' ? 'selected' : ''}>Both</option>
-                            </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A tenant billed with its property, say. Whoever is written to must have an email and not be opted out.</div></div>
+                            </select></div>
                     </div>
                     <h4 id="settings-h-reminder-rules" style="margin:12px 0 4px; font-size:12px;">Reminder rules</h4>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached. On or before the due date, "0 days overdue" is written as due today (or tomorrow, or in so many days).
-                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ due_status }} {{ company_name }}
-                    </div>
-                    <div id="reminder-rules-list"></div>
+                    <div id="reminder-rules-list" role="group" aria-labelledby="settings-h-reminder-rules" aria-describedby="reminder-rules-help"></div>
                 </div>
 
                 <div class="settings-section" data-group="email" role="group" aria-labelledby="settings-h-email-templates">
-                    <h3 id="settings-h-email-templates">Email Templates</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Customize email templates for invoices, estimates, payment receipts, and collection notices.
-                        Templates use Jinja2 syntax. Available variables: {{ invoice }}, {{ customer_name }}, {{ company }}, {{ pay_url }}; the estimate email (estimate_email) gets {{ estimate }} in place of {{ invoice }}. The donation acknowledgment letter (nonprofit) also gets {{ donor }}, {{ donor_name }}, {{ gift }} and {{ irs.text }}.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-email-templates">Email Templates</h3>${hintList('Email Templates', [
+                        { id: 'settings-email-templates-help', text: `Customize email templates for invoices, estimates, payment receipts, and collection notices.
+                        Templates use Jinja2 syntax. Available variables: {{ invoice }}, {{ customer_name }}, {{ company }}, {{ pay_url }}; the estimate email (estimate_email) gets {{ estimate }} in place of {{ invoice }}. The donation acknowledgment letter (nonprofit) also gets {{ donor }}, {{ donor_name }}, {{ gift }} and {{ irs.text }}.` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-write>
                         <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.seedTemplates()">Seed Default Templates</button>
                     </div>
@@ -1037,13 +1072,12 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-payment-terms">
-                    <h3 id="settings-h-payment-terms">Payment Terms</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
+                    <div class="settings-h-row"><h3 id="settings-h-payment-terms">Payment Terms</h3>${hintList('Payment Terms', [
+                        { id: 'settings-payment-terms-help', text: `The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
                         the date; a date-driven term is due on a day of the month. Either can offer an early-payment discount, which Receive Payments and Pay Bills
                         suggest until its date passes. Each ${T('invoice')} or bill keeps the term it was saved under; a term on one keeps its rule, so make it inactive and add a new one to change it.
-                        A term added later never reaches what was saved before it: saving one again with exactly the same terms leaves it as it was, and picking any other terms (even the same words in other case) ties it to the term they name. A date-driven term is due on its next day of the month, or the one a month later when the document is dated fewer than the given number of days before that day.
-                    </div>
+                        A term added later never reaches what was saved before it: saving one again with exactly the same terms leaves it as it was, and picking any other terms (even the same words in other case) ties it to the term they name. A date-driven term is due on its next day of the month, or the one a month later when the document is dated fewer than the given number of days before that day.` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-admin data-write>
                         <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.editPaymentTerm()">+ Add Term</button>
                     </div>
@@ -1051,11 +1085,10 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-invoice-messages">
-                    <h3 id="settings-h-invoice-messages">${T('Invoice')} Messages</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Saved notes to choose from on the ${T('invoice')} form: how to pay, a thank-you, a season's greeting. The form offers them beside Notes and copies the chosen text in,
-                        where it can still be edited. The default one fills Notes on a new ${T('invoice')}; with no default, the Default ${T('Invoice')} Notes above do.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-invoice-messages">${T('Invoice')} Messages</h3>${hintList(`${T('Invoice')} Messages`, [
+                        { id: 'settings-invoice-messages-help', text: `Saved notes to choose from on the ${T('invoice')} form: how to pay, a thank-you, a season's greeting. The form offers them beside Notes and copies the chosen text in,
+                        where it can still be edited. The default one fills Notes on a new ${T('invoice')}; with no default, the Default ${T('Invoice')} Notes above do.` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-admin data-write>
                         <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.editInvoiceMessage()">+ Add Message</button>
                     </div>
@@ -1064,15 +1097,14 @@ const SettingsPage = {
 
                 ${Terms.isNonprofit() ? `
                 <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-giving-statement">
-                    <h3 id="settings-h-giving-statement">Giving Statement</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        The ministry's own words on the year-end giving statement. The Opening messages are saved
+                    <div class="settings-h-row"><h3 id="settings-h-giving-statement">Giving Statement</h3>${hintList('Giving Statement', [
+                        { id: 'settings-giving-statement-help', text: `The ministry's own words on the year-end giving statement. The Opening messages are saved
                         the same way as ${T('Invoice')} Messages above; the default one prints above the gift table
                         (a thank-you from the pastor or the board). The Footer text replaces the fixed footer (the
                         ministry's address, website, EIN, a verse). Both are plain text with line breaks, printed as
                         typed. The IRS acknowledgment sentence is always printed and is not editable here.
-                        A giving-statement message is at most 1500 characters and the footer at most 500 characters and 6 lines (a line longer than 90 characters wraps and counts as two). Save first, then preview.
-                    </div>
+                        A giving-statement message is at most 1500 characters and the footer at most 500 characters and 6 lines (a line longer than 90 characters wraps and counts as two). Save first, then preview.` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-admin data-write>
                         <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.editInvoiceMessage(null, 'giving_statement')">+ Add Opening Message</button>
                     </div>
@@ -1089,31 +1121,27 @@ const SettingsPage = {
                 </div>` : ''}
 
                 <div class="settings-section" data-group="preferences" role="group" aria-labelledby="settings-h-menu">
-                    <h3 id="settings-h-menu">Sidebar</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        A ticked item shows in the menu; untick the ones this company doesn't use (payroll done
+                    <div class="settings-h-row"><h3 id="settings-h-menu">Sidebar</h3>${hintList('Sidebar', [
+                        { id: 'settings-menu-help', text: `A ticked item shows in the menu; untick the ones this company doesn't use (payroll done
                         elsewhere, no inventory, …) to hide them. A hidden page still opens by its address, and
-                        this list always has every item, so a hidden one can be ticked to show it again.
-                    </div>
-                    <div id="hidden-menu-choices" style="columns:2; font-size:12px; margin-bottom:12px;">
+                        this list always has every item, so a hidden one can be ticked to show it again.` },
+                    ])}</div>
+                    <div id="hidden-menu-choices" role="group" aria-labelledby="settings-h-menu" aria-describedby="settings-menu-help" style="columns:2; font-size:12px; margin-bottom:12px;">
                         ${SettingsPage._hiddenMenuChoices(s.hidden_menu)}
                     </div>
                 </div>
 
                 <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-classes">
-                    <h3 id="settings-h-classes">${T('Classes')}</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Track income and expenses by department, location, or line of
-                        business. ${T('Classes')} appear on entry forms and the ${T('P&L by Class')} report.
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-classes">${T('Classes')}</h3>${hintList(T('Classes'), [
+                        { id: 'settings-classes-help', text: `Track income and expenses by department, location, or line of
+                        business. ${T('Classes')} appear on entry forms and the ${T('P&L by Class')} report.` },
+                        { name: `Warn when a transaction is saved without a ${T('class').toLowerCase()}`, id: 'class-warn-blank-help', text: `On, every entry form starts with no ${T('class').toLowerCase()} chosen and asks before saving a transaction that has none on its header or its lines — it would be reported under Uncategorized. Off, the forms start on Uncategorized and ask nothing. Saved with Save Settings.` },
+                    ])}</div>
                     <div style="margin-bottom:12px;">
                         <label for="class-warn-blank" style="font-weight:normal;">
-                            <input type="checkbox" id="class-warn-blank" name="class_warn_blank" value="true" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.class_warn_blank === 'true' ? 'checked' : ''}>
+                            <input type="checkbox" id="class-warn-blank" name="class_warn_blank" value="true" aria-describedby="class-warn-blank-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.class_warn_blank === 'true' ? 'checked' : ''}>
                             Warn when a transaction is saved without a ${T('class').toLowerCase()}
                         </label>
-                        <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-                            On, every entry form starts with no ${T('class').toLowerCase()} chosen and asks before saving a transaction that has none on its header or its lines — it would be reported under Uncategorized. Off, the forms start on Uncategorized and ask nothing. Saved with Save Settings.
-                        </div>
                     </div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-write>
                         <input type="text" id="new-class-name" placeholder="New ${T('class')} name" style="width:220px;">
@@ -1123,14 +1151,13 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-cost-types">
-                    <h3 id="settings-h-cost-types">Cost Types</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        How job costs roll up: labor, material, subcontract, equipment, other — add your own
+                    <div class="settings-h-row"><h3 id="settings-h-cost-types">Cost Types</h3>${hintList('Cost Types', [
+                        { id: 'settings-cost-types-help', text: `How job costs roll up: labor, material, subcontract, equipment, other — add your own
                         (permits, bonding, warranty…). A labor-type carries a burden % (employer taxes, benefits,
                         insurance) posted as its own line. The cost account is where a job-cost line lands when its
                         code has none; the offset accounts are the credit side of job cost entries (payroll clearing,
-                        applied equipment, applied overhead).
-                    </div>
+                        applied equipment, applied overhead).` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;" data-write>
                         <input type="text" id="new-ct-code" placeholder="Code (e.g. permits)" style="width:150px;">
                         <input type="text" id="new-ct-name" placeholder="Name" style="width:200px;">
@@ -1142,13 +1169,12 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-cost-codes">
-                    <h3 id="settings-h-cost-codes">Cost Codes</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        ${Terms.text('The job-costing chart: which part of a job a cost belongs to')}
+                    <div class="settings-h-row"><h3 id="settings-h-cost-codes">Cost Codes</h3>${hintList('Cost Codes', [
+                        { id: 'settings-cost-codes-help', text: `${Terms.text('The job-costing chart: which part of a job a cost belongs to')}
                         ("03 Concrete", "26 Electrical"), independent of the account it posts
                         to. Picked per line on bills, expenses, purchase orders and journal
-                        entries; ${Terms.text('the Job detail rolls costs up by code and cost type.')}
-                    </div>
+                        entries; ${Terms.text('the Job detail rolls costs up by code and cost type.')}` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;" data-write>
                         <input type="text" id="new-cc-code" placeholder="Code" style="width:90px;">
                         <input type="text" id="new-cc-name" placeholder="Name" style="width:220px;">
@@ -1168,11 +1194,10 @@ const SettingsPage = {
                 ${SettingsPage.tradePackagesSectionHtml()}
 
                 <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-equipment">
-                    <h3 id="settings-h-equipment">Equipment</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        ${Terms.text('Owned machines charged to jobs by the hour from a Job Cost Entry.')} The recovery account is
-                        the credit side (defaults to the equipment cost type's offset).
-                    </div>
+                    <div class="settings-h-row"><h3 id="settings-h-equipment">Equipment</h3>${hintList('Equipment', [
+                        { id: 'settings-equipment-help', text: `${Terms.text('Owned machines charged to jobs by the hour from a Job Cost Entry.')} The recovery account is
+                        the credit side (defaults to the equipment cost type's offset).` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;" data-write>
                         <input type="text" id="new-eq-code" placeholder="Code" style="width:90px;">
                         <input type="text" id="new-eq-name" placeholder="Name (Skid steer, F-250…)" style="width:220px;">
@@ -1183,21 +1208,32 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="payroll" role="group" aria-labelledby="settings-h-check-printing">
-                    <h3 id="settings-h-check-printing">Check Printing</h3>
+                    <div class="settings-h-row"><h3 id="settings-h-check-printing">Check Printing</h3>${hintList('Check Printing', [
+                        { name: 'Check Stock', id: 'settings-check-stock-help', text: 'Pre-printed stock already carries the "Pay to the order of", memo and signature lines. Choose it to print only the values — payee, amount, amount in words, date and memo — in their places, with no labels, lines or borders. The two stubs are unchanged either way.' },
+                        { name: 'Check Position', id: 'settings-check-position-help', text: 'Where the check sits on the sheet. Check at the bottom prints two stubs and then the check. Check on top prints the check first and two vouchers below it, the layout of standard top-check voucher stock, so that stock can be used. The stock and the nudges apply to the check either way.' },
+                        { name: 'Check memo', id: 'settings-check-memo-help', text: 'What Pay Bills puts on the memo line of the check: the number the bill was entered under (the vendor\'s own numbering), the bill\'s whole memo, or nothing. A check paying several bills lists their numbers (196132, 196140). A bill numbered by SlowBooks because its number was left blank has no reference, so its memo is used instead. The memo can still be changed on the payment before the check prints, and a memo typed there is kept.' },
+                        { name: 'Field layout', id: 'settings-check-fields-help', text: 'Move, size or bold one field of the check without moving the others, for stock whose boxes do not all sit where the check prints them. Left/right and up/down are inches from where the field prints today (-1 to 1; a positive offset moves it right and down), on top of the nudges. Size is in points (6 to 18); empty prints today\'s size. A field keeps its baseline as its size changes. It applies to the check at the bottom and on top and to every stock.' },
+                        { name: 'Leave the dollar sign off the amount', id: 'settings-check-amount-no-dollar-sign-help', text: 'For check stock that prints its own dollar sign beside the amount box: the amount prints as 1,234.56 instead of $1,234.56. The amount in words and the stubs are unchanged.' },
+                        { name: 'Print on blank check stock', id: 'settings-check-blank-stock-help', text: 'Prints everything a pre-printed check carries: the company logo, name and address, the bank\'s name and city, the check number and the MICR line with the routing, account and check numbers, taken from the bank account\'s details below. The labels, lines and borders print as on plain stock, and every field stays where it prints today. A bank reads the MICR line only when it is printed with MICR toner.' },
+                        { name: 'Encode the amount in the MICR line', id: 'settings-check-micr-amount-help', text: 'The amount field at the right end of the MICR line is normally encoded by the bank where the check is deposited. Turn this on to print it yourself, so the amount cannot be changed without it showing.' },
+                        { name: 'Bank account details for blank stock', id: 'settings-check-bank-details-help', text: 'Each bank account you write checks on keeps its own details. They are saved with their own button, apart from the settings above.' },
+                        { name: 'Print a test check', id: 'settings-check-test-help', text: 'Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges, field layout and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account\'s.' },
+                        { name: 'Deposit slip stock', id: 'settings-deposit-slip-stock-help', text: 'Pre-printed slips already carry the bank\'s labels, boxes and MICR line. Choose them to have Print on a deposit lay only the figures (the date, the account, the cash, each check\'s number and amount, the checks subtotal and the total) where the layout below puts them, with no labels, no MICR line and no routing or account numbers. Checks past the slip\'s lines continue on another page at the same lines, for the back of the slip or a second one. Plain paper prints the deposit slip as it always has.' },
+                        { name: 'Deposit slip layout', id: 'settings-deposit-slip-fields-help', text: 'Where each figure prints on your bank\'s slip, in inches from the slip\'s top-left corner as it feeds into the printer (0 to 11). Left is where a date, the account or a check number starts and where an amount ends, so the cents line up; top is the top of the figure. Amounts print without a dollar sign. Measure your slip with a ruler, then print a test slip and hold it against one. The check number and amount rows place the first check line; the rest follow at the spacing below. Clear Print to leave a figure off.' },
+                        { name: 'Print a test slip', id: 'settings-deposit-slip-test-help', text: 'Prints a sample deposit (two checks and some cash, made-up figures) laid out for pre-printed slips, using the layout and nudges as set here, saved or not. Print it on plain paper and hold it against a slip, or print it on a spare slip.' },
+                    ])}</div>
                     <div class="form-grid">
                         <div class="form-group full-width"><label>Check Stock</label>
-                            <select name="check_stock">
+                            <select name="check_stock" aria-describedby="settings-check-stock-help">
                                 <option value="plain" ${s.check_stock !== 'preprinted' ? 'selected' : ''}>Plain / voucher stock</option>
                                 <option value="preprinted" ${s.check_stock === 'preprinted' ? 'selected' : ''}>Pre-printed stock: values only</option>
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Pre-printed stock already carries the "Pay to the order of", memo and signature lines. Choose it to print only the values — payee, amount, amount in words, date and memo — in their places, with no labels, lines or borders. The two stubs are unchanged either way.</div>
                         </div>
                         <div class="form-group full-width"><label for="settings-check-position">Check Position</label>
                             <select name="check_position" id="settings-check-position" aria-describedby="settings-check-position-help" onchange="SettingsPage.checkFieldSizesFollowPosition(this.value)">
                                 <option value="bottom" ${s.check_position !== 'top' ? 'selected' : ''}>Check at the bottom (stub, stub, check)</option>
                                 <option value="top" ${s.check_position === 'top' ? 'selected' : ''}>Check on top (check, voucher, voucher)</option>
                             </select>
-                            <div id="settings-check-position-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Where the check sits on the sheet. Check at the bottom prints two stubs and then the check. Check on top prints the check first and two vouchers below it, the way QuickBooks Desktop's standard voucher checks are laid out, so that stock can be used. The stock and the nudges apply to the check either way.</div>
                         </div>
                         <div class="form-group full-width"><label for="settings-check-memo">Check memo</label>
                             <select name="check_memo" id="settings-check-memo" aria-describedby="settings-check-memo-help">
@@ -1205,7 +1241,6 @@ const SettingsPage = {
                                 <option value="memo" ${s.check_memo === 'memo' ? 'selected' : ''}>The bill's memo</option>
                                 <option value="none" ${s.check_memo === 'none' ? 'selected' : ''}>Nothing</option>
                             </select>
-                            <div id="settings-check-memo-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">What Pay Bills puts on the memo line of the check: the number the bill was entered under (the vendor's own numbering), the bill's whole memo, or nothing. A check paying several bills lists their numbers (196132, 196140). A bill numbered by SlowBooks because its number was left blank has no reference, so its memo is used instead. The memo can still be changed on the payment before the check prints, and a memo typed there is kept.</div>
                         </div>
                         <div class="form-group"><label>Horizontal nudge (in)</label>
                             <input name="check_nudge_x_in" type="number" min="-0.5" max="0.5" step="0.01"
@@ -1221,23 +1256,19 @@ const SettingsPage = {
                                 <input type="checkbox" id="settings-check-amount-no-dollar-sign" name="check_amount_no_dollar_sign" value="true" data-bool aria-describedby="settings-check-amount-no-dollar-sign-help" style="width:auto; margin:0;" ${s.check_amount_no_dollar_sign === 'true' ? 'checked' : ''}>
                                 <label for="settings-check-amount-no-dollar-sign" style="font-weight:normal; margin:0;">Leave the dollar sign off the amount</label>
                             </div>
-                            <div id="settings-check-amount-no-dollar-sign-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">For check stock that prints its own dollar sign beside the amount box: the amount prints as 1,234.56 instead of $1,234.56. The amount in words and the stubs are unchanged.</div>
                         </div>
                         <div class="form-group full-width">
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
                                 <input type="checkbox" id="settings-check-blank-stock" name="check_blank_stock" value="true" data-bool aria-describedby="settings-check-blank-stock-help" style="width:auto; margin:0;" ${s.check_blank_stock === 'true' ? 'checked' : ''}>
                                 <label for="settings-check-blank-stock" style="font-weight:normal; margin:0;">Print on blank check stock</label>
                             </div>
-                            <div id="settings-check-blank-stock-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints everything a pre-printed check carries: the company logo, name and address, the bank's name and city, the check number and the MICR line with the routing, account and check numbers, taken from the bank account's details below. The labels, lines and borders print as on plain stock, and every field stays where it prints today. A bank reads the MICR line only when it is printed with MICR toner.</div>
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;">
                                 <input type="checkbox" id="settings-check-micr-amount" name="check_micr_amount" value="true" data-bool aria-describedby="settings-check-micr-amount-help" style="width:auto; margin:0;" ${s.check_micr_amount === 'true' ? 'checked' : ''}>
                                 <label for="settings-check-micr-amount" style="font-weight:normal; margin:0;">Encode the amount in the MICR line</label>
                             </div>
-                            <div id="settings-check-micr-amount-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">The amount field at the right end of the MICR line is normally encoded by the bank where the check is deposited. Turn this on to print it yourself, so the amount cannot be changed without it showing.</div>
                         </div>
-                        <div class="form-group full-width" id="settings-check-bank-details" role="group" aria-labelledby="settings-check-bank-details-h">
+                        <div class="form-group full-width" id="settings-check-bank-details" role="group" aria-labelledby="settings-check-bank-details-h" aria-describedby="settings-check-bank-details-help">
                             <div id="settings-check-bank-details-h" style="font-weight:bold; font-size:12px; margin-bottom:4px;">Bank account details for blank stock</div>
-                            <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Each bank account you write checks on keeps its own details. They are saved with their own button, apart from the settings above.</div>
                             <div class="form-grid">
                                 <div class="form-group full-width"><label for="check-bank-account">Bank account</label>
                                     <select id="check-bank-account" data-admin onchange="SettingsPage.loadCheckBankDetails()">${SettingsPage._checkBankOptions(accounts)}</select></div>
@@ -1259,20 +1290,18 @@ const SettingsPage = {
                             </div>
                         </div>
                         <div class="form-group full-width">
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges, field layout and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account's.</div>
+                            <button type="button" class="btn btn-sm btn-secondary" aria-describedby="settings-check-test-help" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
                         </div>
                         ${SettingsPage._depositSlipHtml(s)}
                     </div>
                 </div>
 
                 <div class="settings-section" data-group="backups" id="settings-backups" role="group" aria-labelledby="settings-h-backup-restore">
-                    <h3 id="settings-h-backup-restore">Backup / Restore</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Backups of this company only, named for it. Restore replaces everything in this
+                    <div class="settings-h-row"><h3 id="settings-h-backup-restore">Backup / Restore</h3>${hintList('Backup / Restore', [
+                        { id: 'settings-backups-help', text: `Backups of this company only, named for it. Restore replaces everything in this
                         company with the backup; a safety backup of the books as they are is taken first,
-                        so a restore can be undone by restoring that one.
-                    </div>
+                        so a restore can be undone by restoring that one.` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-admin data-write>
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.createBackup()">Create Backup</button>
                     </div>
@@ -1289,13 +1318,12 @@ const SettingsPage = {
                 ${SettingsPage._isAdmin() ? '<div class="settings-section" data-group="backups" id="settings-legacy-files" data-admin hidden></div>' : ''}
 
                 <div class="settings-section" data-group="security" id="settings-users" data-admin hidden role="group" aria-labelledby="settings-h-users-server-edition">
-                    <h3 id="settings-h-users-server-edition">Users &mdash; Server Edition</h3>
-                    <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
-                        Add a second user and this deployment becomes
+                    <div class="settings-h-row"><h3 id="settings-h-users-server-edition">Users &mdash; Server Edition</h3>${hintList('Users — Server Edition', [
+                        { id: 'settings-users-help', text: `Add a second user and this deployment becomes
                         <strong>Server Edition</strong>: everyone signs in with a
                         username, every change is attributed in the audit log, and
-                        roles limit what each person can do.
-                    </p>
+                        roles limit what each person can do.` },
+                    ])}</div>
                     <div id="users-list" style="margin-bottom:12px;"></div>
                     <div class="form-grid" style="align-items:end;">
                         <div class="form-group"><label>Username</label>
@@ -1317,9 +1345,8 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section" data-group="security" id="settings-api-tokens" data-admin hidden role="group" aria-labelledby="settings-h-api-tokens-agents-integrations">
-                    <h3 id="settings-h-api-tokens-agents-integrations">API Tokens &mdash; agents &amp; integrations</h3>
-                    <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
-                        Scoped credentials for non-humans: AI agents, the receipt
+                    <div class="settings-h-row"><h3 id="settings-h-api-tokens-agents-integrations">API Tokens &mdash; agents &amp; integrations</h3>${hintList('API Tokens — agents & integrations', [
+                        { id: 'settings-api-tokens-help', text: `Scoped credentials for non-humans: AI agents, the receipt
                         service, scripts. A token wears a role just like a user —
                         give read-only to anything that only reports, and every
                         change it makes is attributed in the audit log as
@@ -1336,8 +1363,8 @@ const SettingsPage = {
                         stays revoked: make a new one instead. A bookkeeper token is
                         what <code>sbplive setup</code> asks for, to let Claude work
                         the books through SlowBooks Switchboard (Connections, Claude
-                        and agents); make a read-only one for an agent that only reports.
-                    </p>
+                        and agents); make a read-only one for an agent that only reports.` },
+                    ])}</div>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
                         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
@@ -1771,13 +1798,12 @@ const SettingsPage = {
                 <p style="margin:0 0 8px;">Nobody else should be using the company while this runs. Type the company's name to confirm.</p>
                 ${SettingsPage._nameConfirmField(company)}
                 ${asksPassword ? `<div class="form-group">
-                    <label for="encryption-password">Your sign-in password</label>
+                    <label for="encryption-password">Your sign-in password ${SettingsPage._hintWithId(desktopKey
+                        ? 'The password you signed in with, not a new one: SlowBooks Pro makes the recovery key for you and shows it once. Your sign-in unlocks the books from then on.'
+                        : 'The password you signed in with.', 'Your sign-in password', 'encryption-password-help')}</label>
                     <input type="password" id="encryption-password" name="password" autocomplete="current-password" required
                         aria-describedby="encryption-password-help"
                         oninput="SettingsPage._encryptionFormCheck(this.form)">
-                    <div id="encryption-password-help" style="font-size:11px; color:var(--text-muted); margin-top:2px;">${desktopKey
-                        ? 'The password you signed in with, not a new one: SlowBooks Pro makes the recovery key for you and shows it once. Your sign-in unlocks the books from then on.'
-                        : 'The password you signed in with.'}</div>
                 </div>` : ''}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -2049,13 +2075,21 @@ const SettingsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // A field's hint (#977) whose note keeps the id the field (and the
+    // tests) already point at: hint() makes its own id, swapped here.
+    _hintWithId(text, about, id) {
+        const html = hint(text, about);
+        const made = /aria-controls="([^"]+)"/.exec(html);
+        return made ? html.split('"' + made[1] + '"').join('"' + id + '"') : html;
+    },
+
     // Invite your accountant (#345): a sign-in with a one-time password
     // and, if the engagement has one, an end date; the answer is shown
     // once, with the address to send.
     showInvite() {
         openModal('Invite your accountant', `
             <form onsubmit="SettingsPage.sendInvite(event)">
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">The sign-in gets a one-time password, shown once; the person chooses their own at the first sign-in. Leave the end date empty for a sign-in with no end.</p>
+                <div style="margin-bottom:6px;">${hint('The sign-in gets a one-time password, shown once; the person chooses their own at the first sign-in. Leave the end date empty for a sign-in with no end.', 'Invitation')}</div>
                 <div class="form-grid">
                     <div class="form-group"><label>Username *</label><input name="username" required autocomplete="off"></div>
                     <div class="form-group"><label>Display name</label><input name="display_name" autocomplete="off"></div>
@@ -2065,8 +2099,7 @@ const SettingsPage = {
                             <option value="readonly">Read-only — reports and lookups</option>
                             <option value="bookkeeper">Bookkeeper — daily books, no admin</option>
                         </select></div>
-                    <div class="form-group"><label>Sign-in ends on <span style="font-weight:normal; color:var(--text-muted);">(optional)</span></label><input name="expires_on" type="date">
-                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Leave it empty for a sign-in with no end date.</div></div>
+                    <div class="form-group"><label>Sign-in ends on <span style="font-weight:normal; color:var(--text-muted);">(optional)</span> ${SettingsPage._hintWithId('Leave it empty for a sign-in with no end date.', 'Sign-in ends on', 'invite-expires-help')}</label><input name="expires_on" type="date" aria-describedby="invite-expires-help"></div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -2487,6 +2520,7 @@ const SettingsPage = {
     _onEntityTypeChange(sel) {
         const group = document.getElementById('llc-election-group');
         if (group) group.hidden = sel.value !== 'llc';
+        Hints.showEntry('llc-tax-election-help', sel.value === 'llc');
         SettingsPage._toggleSCorpNote();
         SettingsPage._updateDirty();
     },
@@ -2495,6 +2529,7 @@ const SettingsPage = {
     _onEstimateStyleChange(sel) {
         const group = document.getElementById('estimate-default-markup-group');
         if (group) group.hidden = sel.value !== 'line_markup';
+        Hints.showEntry('estimate-default-markup-help', sel.value === 'line_markup');
         SettingsPage._updateDirty();
     },
 
@@ -2607,6 +2642,7 @@ const SettingsPage = {
         try {
             const s = await API.get('/ocr/status');
             if (s.available) {
+                Hints.showEntry('ocr-status-help', false);
                 const langs = (s.languages || []).join(', ') || '—';
                 const engineNames = { tesseract: 'Tesseract OCR', vision: 'Apple Vision (built into macOS)', winrt: 'Windows OCR (built into Windows)' };
                 const engineLabel = engineNames[s.engine] || 'OCR engine';
@@ -2620,8 +2656,9 @@ const SettingsPage = {
                     + ` &middot; languages: ${escapeHtml(langs)}`
                     + pdfNote;
             } else {
+                // why, and what enables it, is in the Receipt Scanning note (#977)
+                Hints.showEntry('ocr-status-help', true);
                 el.innerHTML = '<strong style="color:var(--text-warning);">No OCR engine is available — scanning is disabled.</strong>'
-                    + '<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">macOS and Windows normally use the engine built into the OS; installing Tesseract enables scanning anywhere.</div>'
                     + '<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">'
                     + 'Ubuntu: <code>sudo apt-get install tesseract-ocr</code> &middot; '
                     + 'macOS: <code>brew install tesseract</code> &middot; '
@@ -2709,15 +2746,14 @@ const SettingsPage = {
                 + ' files from this folder; remove them once that is done.';
         }
         section.innerHTML = `
-            <h3>Files from earlier versions</h3>
-            <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                Before version 2.18, every company here kept its logo, attachments and employee documents in one
+            <div class="settings-h-row"><h3>Files from earlier versions</h3>${hintList('Files from earlier versions', [
+                { id: 'legacy-files-help', text: `Before version 2.18, every company here kept its logo, attachments and employee documents in one
                 shared folder. Each company now keeps its own copies inside its company file, so nothing uses that
                 folder any more, but it still holds ${escapeHtml(count)}. A document deleted since then still has
-                its old copy there.
-            </div>
+                its old copy there.` },
+            ])}</div>
             ${wait ? `<div id="legacy-files-pending" style="font-size:11px; margin-bottom:8px;">${escapeHtml(wait)}</div>` : ''}
-            <button type="button" class="btn btn-sm btn-secondary" id="legacy-files-remove" data-write
+            <button type="button" class="btn btn-sm btn-secondary" id="legacy-files-remove" aria-describedby="legacy-files-help" data-write
                 ${pending.length ? 'disabled' : ''} onclick="SettingsPage.removeLegacyFiles()">Remove them</button>`;
         SettingsPage._showSection(section, true);
     },
@@ -2886,29 +2922,21 @@ const SettingsPage = {
                         <input name="template_type" value="${escapeHtml(t.template_type)}" readonly style="background:var(--gray-100);"></div>
                     <div class="form-group full-width"><label>Subject Template</label>
                         <input name="subject_template" value="${escapeHtml(t.subject_template)}"></div>
-                    <div class="form-group full-width"><label>Body Template (HTML + Jinja2)</label>
-                        <textarea name="body_template" rows="10" style="font-family:monospace; font-size:11px;">${escapeHtml(t.body_template)}</textarea></div>
-                </div>
-                <div style="font-size:10px; color:var(--text-muted); margin:8px 0;">
-                    ${t.template_type !== 'estimate' ? `Variables: {{ invoice.invoice_number }}, {{ invoice.total }}, {{ invoice.due_date }}, {{ customer_name }},
-                    {{ company.company_name }}, {{ company.display_name }}, {{ doc_label }}, {{ pay_url }}. Filters: | currency, | fdate
-                    <br><span>{{ doc_label }} reads &ldquo;Invoice&rdquo; or &ldquo;Sales Receipt&rdquo; to match the document.
-                    {{ pay_url }} is only set when a payment provider is enabled &mdash; guard it with {% if pay_url %}.</span>` : `For an estimate: {{ estimate.estimate_number }}, {{ estimate.date }}, {{ estimate.expiration_date }}, {{ estimate.total }}, {{ customer_name }},
-                    {{ company.company_name }}, {{ company.display_name }}, {{ doc_label }}. Filters: | currency, | fdate
-                    <br><span>{{ estimate.expiration_date }} can be empty &mdash; guard it with {% if estimate.expiration_date %}. The Message typed in the send dialog goes above the template.</span>`}
+                    <div class="form-group full-width"><label>Body Template (HTML + Jinja2) ${SettingsPage._hintWithId(SettingsPage._templateVariablesHelp(t), 'Body Template', 'email-template-variables-help')}</label>
+                        <textarea name="body_template" rows="10" aria-describedby="email-template-variables-help" style="font-family:monospace; font-size:11px;">${escapeHtml(t.body_template)}</textarea></div>
                 </div>
                 ${t.template_type === 'invoice' ? `<div style="margin-top:12px;">
                     <label>Preview against ${T('invoice')}
                         <select id="email-template-invoice">${invoices.map(inv => `<option value="${inv.id}">#${escapeHtml(inv.invoice_number)} — ${escapeHtml(inv.customer_name || '')}</option>`).join('')}</select></label>
-                    <button type="button" class="btn btn-secondary" onclick="SettingsPage.previewTemplate()" ${invoices.length ? '' : 'disabled'}>Preview</button>
-                    <p style="font-size:11px; color:var(--text-muted);">Renders what you have typed, without saving or sending.</p>
+                    <button type="button" class="btn btn-secondary" aria-describedby="email-template-preview-help" onclick="SettingsPage.previewTemplate()" ${invoices.length ? '' : 'disabled'}>Preview</button>
+                    ${SettingsPage._hintWithId('Renders what you have typed, without saving or sending.', 'Preview', 'email-template-preview-help')}
                     <div id="email-template-preview"></div>
                 </div>` : ''}
                 ${t.template_type === 'estimate' ? `<div style="margin-top:12px;">
                     <label>Preview against estimate
                         <select id="email-template-estimate">${estimates.map(est => `<option value="${est.id}">#${escapeHtml(est.estimate_number)} — ${escapeHtml(est.customer_name || '')}</option>`).join('')}</select></label>
-                    <button type="button" class="btn btn-secondary" onclick="SettingsPage.previewTemplate()" ${estimates.length ? '' : 'disabled'}>Preview</button>
-                    <p style="font-size:11px; color:var(--text-muted);">${estimates.length ? 'Renders what you have typed, without saving or sending.' : 'There is no estimate to preview against yet.'}</p>
+                    <button type="button" class="btn btn-secondary"${estimates.length ? ' aria-describedby="email-template-preview-help"' : ''} onclick="SettingsPage.previewTemplate()" ${estimates.length ? '' : 'disabled'}>Preview</button>
+                    ${estimates.length ? SettingsPage._hintWithId('Renders what you have typed, without saving or sending.', 'Preview', 'email-template-preview-help') : '<p style="font-size:11px; color:var(--text-muted);">There is no estimate to preview against yet.</p>'}
                     <div id="email-template-preview"></div>
                 </div>` : ''}
                 <div class="form-actions">
@@ -2916,6 +2944,16 @@ const SettingsPage = {
                     <button type="submit" class="btn btn-primary">Save Template</button>
                 </div>
             </form>`);
+    },
+
+    // What a template can use (#977: behind the Body Template's tortoise).
+    _templateVariablesHelp(t) {
+        return `${t.template_type !== 'estimate' ? `Variables: {{ invoice.invoice_number }}, {{ invoice.total }}, {{ invoice.due_date }}, {{ customer_name }},
+                    {{ company.company_name }}, {{ company.display_name }}, {{ doc_label }}, {{ pay_url }}. Filters: | currency, | fdate
+                    <br><span>{{ doc_label }} reads &ldquo;Invoice&rdquo; or &ldquo;Sales Receipt&rdquo; to match the document.
+                    {{ pay_url }} is only set when a payment provider is enabled &mdash; guard it with {% if pay_url %}.</span>` : `For an estimate: {{ estimate.estimate_number }}, {{ estimate.date }}, {{ estimate.expiration_date }}, {{ estimate.total }}, {{ customer_name }},
+                    {{ company.company_name }}, {{ company.display_name }}, {{ doc_label }}. Filters: | currency, | fdate
+                    <br><span>{{ estimate.expiration_date }} can be empty &mdash; guard it with {% if estimate.expiration_date %}. The Message typed in the send dialog goes above the template.</span>`}`;
     },
 
     async previewTemplate() {
@@ -3406,7 +3444,6 @@ const SettingsPage = {
         }).join('');
         return `<div class="form-group full-width" id="settings-check-fields" role="group" aria-labelledby="settings-check-fields-h">
                             <h4 id="settings-check-fields-h" style="margin:4px 0; font-size:12px;">Field layout</h4>
-                            <div id="settings-check-fields-help" style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Move, size or bold one field of the check without moving the others, for stock whose boxes do not all sit where the check prints them. Left/right and up/down are inches from where the field prints today (-1 to 1; a positive offset moves it right and down), on top of the nudges. Size is in points (6 to 18); empty prints today's size. A field keeps its baseline as its size changes. It applies to the check at the bottom and on top and to every stock.</div>
                             <input type="hidden" name="check_field_layout" id="settings-check-field-layout" value="${escapeHtml(SettingsPage._checkLayoutJson(layout))}">
                             <table class="data-table" style="font-size:11px; width:auto;" aria-describedby="settings-check-fields-help">
                                 <thead><tr><th scope="col">Field</th><th scope="col">Left/right (in)</th><th scope="col">Up/down (in)</th><th scope="col">Size (pt)</th><th scope="col">Bold</th></tr></thead>
@@ -3518,7 +3555,6 @@ const SettingsPage = {
                                         <option value="plain" ${pre ? '' : 'selected'}>Plain paper: SlowBooks' own deposit slip</option>
                                         <option value="preprinted" ${pre ? 'selected' : ''}>Pre-printed deposit slips from the bank: figures only</option>
                                     </select>
-                                    <div id="settings-deposit-slip-stock-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Pre-printed slips already carry the bank's labels, boxes and MICR line. Choose them to have Print on a deposit lay only the figures (the date, the account, the cash, each check's number and amount, the checks subtotal and the total) where the layout below puts them, with no labels, no MICR line and no routing or account numbers. Checks past the slip's lines continue on another page at the same lines, for the back of the slip or a second one. Plain paper prints the deposit slip as it always has.</div>
                                 </div>
                                 <div class="form-group"><label for="settings-deposit-slip-nudge-x">Deposit slip left/right nudge (in)</label>
                                     <input name="deposit_slip_nudge_x_in" id="settings-deposit-slip-nudge-x" type="number" min="-0.5" max="0.5" step="0.01"
@@ -3528,7 +3564,6 @@ const SettingsPage = {
                                         title="Inches, -0.5 to 0.5, in 0.01 steps" value="${escapeHtml(s.deposit_slip_nudge_y_in || '0')}"></div>
                                 <div class="form-group full-width" id="settings-deposit-slip-fields" role="group" aria-labelledby="settings-deposit-slip-fields-h">
                                     <div id="settings-deposit-slip-fields-h" style="font-weight:bold; font-size:12px; margin-bottom:4px;">Deposit slip layout</div>
-                                    <div id="settings-deposit-slip-fields-help" style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Where each figure prints on your bank's slip, in inches from the slip's top-left corner as it feeds into the printer (0 to 11). Left is where a date, the account or a check number starts and where an amount ends, so the cents line up; top is the top of the figure. Amounts print without a dollar sign. Measure your slip with a ruler, then print a test slip and hold it against one. The check number and amount rows place the first check line; the rest follow at the spacing below. Clear Print to leave a figure off.</div>
                                     <input type="hidden" name="deposit_slip_layout" id="settings-deposit-slip-layout" value="${escapeHtml(SettingsPage._checkLayoutJson(layout))}">
                                     <table class="data-table" style="font-size:11px; width:auto;" aria-describedby="settings-deposit-slip-fields-help">
                                         <thead><tr><th scope="col">Figure</th><th scope="col">Left (in)</th><th scope="col">Top (in)</th><th scope="col">Size (pt)</th><th scope="col">Print</th></tr></thead>
@@ -3547,8 +3582,7 @@ const SettingsPage = {
                                     </div>
                                 </div>
                                 <div class="form-group full-width">
-                                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintDepositSlip()">Print a test slip</button>
-                                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample deposit (two checks and some cash, made-up figures) laid out for pre-printed slips, using the layout and nudges as set here, saved or not. Print it on plain paper and hold it against a slip, or print it on a spare slip.</div>
+                                    <button type="button" class="btn btn-sm btn-secondary" aria-describedby="settings-deposit-slip-test-help" onclick="SettingsPage.testPrintDepositSlip()">Print a test slip</button>
                                 </div>
                             </div>
                         </div>`;
@@ -3670,12 +3704,32 @@ const SettingsPage = {
             const cfg = await API.get('/analytics/ai-config');
             SettingsPage.aiConfigState = cfg;
             host.innerHTML = SettingsPage._renderAiConfig(cfg);
+            const providers = cfg.providers || [];
+            const chosen = cfg.provider || (providers[0] && providers[0].key) || '';
+            SettingsPage._aiHintFollow(providers.find(p => p.key === chosen) || providers[0] || {});
             SettingsPage._wireAiConfig(cfg);
         } catch (err) {
             host.innerHTML =
                 `<div style="font-size:11px; color:var(--danger,#c00);">` +
                 `Failed to load AI config: ${escapeHtml(err.message || String(err))}</div>`;
         }
+    },
+
+    // The AI Insights note's entries for the chosen provider (#977): its own
+    // line (free tier, where to get a key) and, for the two gateways, what
+    // their address is.
+    _aiHintFollow(spec) {
+        const hintEl = document.getElementById('ai-settings-hint');
+        if (hintEl) {
+            hintEl.innerHTML =
+                escapeHtml(spec.free_tier_hint || '') +
+                (spec.docs_url
+                    ? ` &middot; <a href="${escapeHtml(spec.docs_url)}" target="_blank" rel="noopener">Get a key</a>`
+                    : '');
+        }
+        Hints.showEntry('ai-settings-hint', !!(spec.free_tier_hint || spec.docs_url));
+        Hints.showEntry('ai-worker-help', !!spec.needs_worker_url);
+        Hints.showEntry('ai-endpoint-help', !!spec.needs_endpoint_url);
     },
 
     _renderAiConfig(cfg) {
@@ -3704,12 +3758,8 @@ const SettingsPage = {
             <div class="hidden" data-admin-note style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">AI settings are changed by an administrator.</div>
             <label class="form-field">
                 <span>Provider</span>
-                <select id="ai-settings-provider" data-admin>${providerOptions}</select>
+                <select id="ai-settings-provider" data-admin aria-describedby="ai-settings-hint">${providerOptions}</select>
             </label>
-            <div id="ai-settings-hint" class="ai-settings-hint">
-                ${escapeHtml(currentSpec.free_tier_hint || '')}
-                ${currentSpec.docs_url ? ` &middot; <a href="${escapeHtml(currentSpec.docs_url)}" target="_blank" rel="noopener">Get a key</a>` : ''}
-            </div>
             <label class="form-field">
                 <span><span id="ai-settings-model-label">Model</span> <button type="button" class="btn btn-sm" id="ai-settings-models-refresh" data-admin title="List the provider's models again">Refresh models</button></span>
                 <select id="ai-settings-model-select" data-admin aria-labelledby="ai-settings-model-label">
@@ -3730,16 +3780,9 @@ const SettingsPage = {
             <fieldset id="ai-settings-worker-wrap" class="ai-worker-section"
                       style="${needsWorker ? '' : 'display:none'}">
                 <legend>Cloudflare Worker Gateway</legend>
-                <p class="ai-worker-help">
-                    Deploy <code>cloudflare/worker.js</code> in your own
-                    Cloudflare account — the real AI credentials live inside
-                    Cloudflare as a Worker secret, not in Slowbooks' database.
-                    Slowbooks only holds the shared Bearer token. See
-                    <code>cloudflare/README.md</code> for the 5-minute setup.
-                </p>
                 <label class="form-field">
                     <span>Worker URL <em class="ai-worker-required">(https only)</em></span>
-                    <input type="url" id="ai-settings-worker-url" data-admin
+                    <input type="url" id="ai-settings-worker-url" data-admin aria-describedby="ai-worker-help"
                            value="${escapeHtml(cfg.worker_url || '')}"
                            placeholder="https://slowbooks-ai.yourname.workers.dev/v1/chat/completions"
                            autocomplete="off" spellcheck="false">
@@ -3754,17 +3797,9 @@ const SettingsPage = {
             <fieldset id="ai-settings-endpoint-wrap" class="ai-worker-section"
                       style="${needsEndpoint ? '' : 'display:none'}">
                 <legend>Custom OpenAI-Compatible Endpoint</legend>
-                <p class="ai-worker-help">
-                    Point Slowbooks at any OpenAI-compatible chat API on the
-                    public internet — another vendor's <code>/v1</code> base URL,
-                    or a gateway you host. <code>/chat/completions</code> is
-                    appended automatically if you don't include it. A model on
-                    this machine or your LAN cannot be reached this way: the
-                    address check below refuses it on purpose.
-                </p>
                 <label class="form-field">
                     <span>Base URL <em class="ai-worker-required">(https only)</em></span>
-                    <input type="url" id="ai-settings-endpoint-url" data-admin
+                    <input type="url" id="ai-settings-endpoint-url" data-admin aria-describedby="ai-endpoint-help"
                            value="${escapeHtml(cfg.endpoint_url || '')}"
                            placeholder="https://api.example.com/v1"
                            autocomplete="off" spellcheck="false">
@@ -3878,7 +3913,6 @@ const SettingsPage = {
     _wireAiConfig(cfg) {
         const providers = cfg.providers || [];
         const providerSel = document.getElementById('ai-settings-provider');
-        const hintEl = document.getElementById('ai-settings-hint');
         const modelSel = document.getElementById('ai-settings-model-select');
         const modelCustom = document.getElementById('ai-settings-model-custom');
         const cfWrap = document.getElementById('ai-settings-cf-wrap');
@@ -3923,11 +3957,7 @@ const SettingsPage = {
 
         providerSel.addEventListener('change', () => {
             const spec = providers.find(p => p.key === providerSel.value) || {};
-            hintEl.innerHTML =
-                escapeHtml(spec.free_tier_hint || '') +
-                (spec.docs_url
-                    ? ` &middot; <a href="${escapeHtml(spec.docs_url)}" target="_blank" rel="noopener">Get a key</a>`
-                    : '');
+            SettingsPage._aiHintFollow(spec);
             // The old provider's models aren't this one's: the picker
             // empties, and fills from the new provider once it has a key.
             // Back on the saved provider, the saved model is in the picker
@@ -4250,8 +4280,11 @@ SettingsPage._findWords = function () {
 // A section matches when every word typed is in its headings or in the
 // names of its fields.
 SettingsPage._matches = function (section, words) {
-    const text = [...section.querySelectorAll('h3, h4, label, legend')].map(el => el.textContent)
-        .concat([...section.querySelectorAll('[aria-label]')].map(el => el.getAttribute('aria-label')))
+    // the notes behind the tortoises too (#977): a description that moved
+    // off the page is still something to find its setting by
+    const text = [...section.querySelectorAll('h3, h4, label, legend, .hint-pop')].map(el => el.textContent)
+        // not the tortoises' "About ..." (#977): every section has one
+        .concat([...section.querySelectorAll('[aria-label]:not([data-hint]):not(.hint-pop)')].map(el => el.getAttribute('aria-label')))
         .join(' ').toLowerCase().replace(/\s+/g, ' ');
     return words.every(w => text.includes(w));
 };
@@ -4781,8 +4814,8 @@ SettingsPage.toggleCostCode = async function (id, active) {
 
 SettingsPage.showCostCodeImport = function () {
     openModal('Import Cost Codes', `
-        <p style="font-size:12px;margin:0 0 8px 0">Paste CSV rows as <code>code,name,cost_type,parent_code</code> (header optional). Existing codes are updated, parents linked afterwards, so order doesn't matter.</p>
-        <textarea id="cc-import-csv" rows="12" style="width:100%;font-family:monospace;font-size:12px" placeholder="03,Concrete,subcontract,
+        <div style="margin:0 0 6px 0">${SettingsPage._hintWithId("Paste CSV rows as <code>code,name,cost_type,parent_code</code> (header optional). Existing codes are updated, parents linked afterwards, so order doesn't matter.", 'Import Cost Codes', 'cc-import-csv-help')}</div>
+        <textarea id="cc-import-csv" rows="12" aria-label="Cost code CSV rows" aria-describedby="cc-import-csv-help" style="width:100%;font-family:monospace;font-size:12px" placeholder="03,Concrete,subcontract,
 03-300,Cast-in-place concrete,subcontract,03
 03-310,Footings,subcontract,03-300"></textarea>
         <div class="form-actions">
@@ -4812,12 +4845,11 @@ SettingsPage.tradePackagesSectionHtml = function () {
     if (!Terms.isConstruction()) return '';
     return `
                 <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-trade-packages">
-                    <h3 id="settings-h-trade-packages">Trade Packages</h3>
-                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Bid packages a general contractor awards — what a sub bids and
+                    <div class="settings-h-row"><h3 id="settings-h-trade-packages">Trade Packages</h3>${hintList('Trade Packages', [
+                        { id: 'settings-trade-packages-help', text: `Bid packages a general contractor awards — what a sub bids and
                         gets awarded. Each maps to the cost-code sections its costs
-                        post to; a package can span divisions.
-                    </div>
+                        post to; a package can span divisions.` },
+                    ])}</div>
                     <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;" data-write>
                         <input type="text" id="new-tp-name" placeholder="Package name" style="width:220px;" aria-label="Trade package name">
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.addTradePackage()">Add Trade Package</button>

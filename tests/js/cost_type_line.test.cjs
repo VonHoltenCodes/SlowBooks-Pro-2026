@@ -79,6 +79,8 @@ function settingsContext(construction) {
         openModal() {}, closeModal() {}, toast() {}, prompt() {}, confirm: () => true,
     };
     vm.createContext(context);
+    // the section notes' helper (#977), loaded before settings.js as on the page
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8'), context);
     vm.runInContext(
         fs.readFileSync(path.join(__dirname, '../../app/static/js/settings.js'), 'utf8') +
             '\nthis.SettingsPage = SettingsPage;',

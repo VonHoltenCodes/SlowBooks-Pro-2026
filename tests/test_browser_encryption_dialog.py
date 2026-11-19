@@ -53,8 +53,12 @@ def test_the_dialog_names_the_company_and_says_when_the_name_is_not_it_yet(
         assert name in page.text_content(help_)
         assert page.is_disabled(submit)
         # the label says which password, and that it is not a new one
-        assert page.text_content("label[for=encryption-password]").strip() == (
-            "Your sign-in password"
+        # the label's words; the line under it is behind its tortoise (#977)
+        assert page.evaluate(
+            "() => document.querySelector('label[for=encryption-password]').firstChild.textContent.trim()"
+        ) == ("Your sign-in password")
+        assert page.is_visible(
+            'label[for=encryption-password] button[aria-label="About Your sign-in password"]'
         )
         assert "not a new one" in page.text_content("#encryption-password-help")
         # not the name: the line says so, the button stays grey

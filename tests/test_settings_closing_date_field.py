@@ -96,7 +96,8 @@ def test_the_field_carries_the_state_line_and_the_clear_button():
         )
     ]
     assert 'id="closing-date" name="closing_date" type="date"' in section
-    assert 'aria-describedby="closing-date-state"' in section
+    # the state line, then the section's lead in its note (#977)
+    assert 'aria-describedby="closing-date-state closing-date-help"' in section
     assert 'onclick="SettingsPage.clearClosingDate()"' in section
     # disabled when there is nothing to clear; the state line is filled at render
     assert "${s.closing_date ? '' : 'disabled'}>Clear</button>" in section

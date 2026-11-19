@@ -51,7 +51,7 @@ def test_the_field_layout_is_set_saved_test_printed_and_reset(browser, company, 
         page.evaluate(
             "() => { window._opened = []; window.open = (u) => { window._opened.push(u); return null; }; }"
         )
-        page.click("text=Print a test check")
+        page.click("button:has-text('Print a test check')")
         (url,) = page.evaluate("() => window._opened")
         assert "check_field_layout=" in url
         from urllib.parse import parse_qs, urlparse
