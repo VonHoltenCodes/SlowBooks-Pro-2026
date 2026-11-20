@@ -1011,12 +1011,21 @@ def sales_by_item_csv(data: dict, company: str) -> str:
     return out.getvalue()
 
 
+# Income by Customer's count column, on the screen, the PDF and the CSV: a
+# terminology key (a nonprofit reads "Pledges, Invoices & Donations")
+INCOME_BY_CUSTOMER_COUNT = "Invoices & Receipts"
+
+
 def _income_by_customer_columns(data: dict, t) -> list[tuple[str, str]]:
     """(heading, key) for Income by Customer, the screen's columns: Not
     income only when the period has some (a security deposit's line)."""
+    # The count is of every sales document in the row: invoices and sales
+    # receipts, on a nonprofit pledges, program-fee invoices and donations.
+    # "Invoices" (a nonprofit's "Pledges") was true of only some of them,
+    # so the heading names them all, in the company's words.
     cols = [
         (t("Customer"), "customer_name"),
-        (t("Invoices"), "invoice_count"),
+        (t(INCOME_BY_CUSTOMER_COUNT), "invoice_count"),
         ("Sales", "total_sales"),
     ]
     if data.get("total_other") or any(

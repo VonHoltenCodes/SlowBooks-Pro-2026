@@ -289,6 +289,10 @@ def _sales_by_item(
             {
                 "quantity": Decimal("0"),
                 "amount": Decimal("0"),
+                # the cash basis's average price is worked from these, the
+                # paid part of each line before any rounding
+                "exact_quantity": Decimal("0"),
+                "exact_amount": Decimal("0"),
                 "line_count": 0,
                 "inv_ids": set(),
                 "cm_ids": set(),
@@ -307,6 +311,13 @@ def _sales_by_item(
         qty = Decimal(str(line.quantity or 0))
         b["quantity"] += qty if share is None else (qty * share).quantize(_QTY_Q)
         b["amount"] += amount
+        if share is not None:
+            b["exact_quantity"] += qty * share
+            b["exact_amount"] += (
+                Decimal(str(line.amount or 0))
+                * Decimal(str(inv.exchange_rate or 1))
+                * share
+            )
         b["line_count"] += 1
         if line.item_id:
             b["inv_ids"].add(inv.id)
@@ -359,7 +370,18 @@ def _sales_by_item(
         )
         qty = b["quantity"]
         amount = b["amount"]
-        avg_price = float(amount / qty) if qty != 0 else None
+        if basis == "cash":
+            # The paid part of a quantity is rounded to four places and the
+            # paid part of an amount to the cent, for the columns; dividing
+            # one rounded figure by the other gave an average a few cents
+            # off the only price the item sold at (3 at 1,333.33, a third
+            # paid: 1,333.37). The average is the paid part of what the
+            # lines billed over the paid part of what they sold, neither
+            # rounded first, so it is the price itself.
+            exact = b["exact_quantity"]
+            avg_price = float(_q(b["exact_amount"] / exact)) if exact != 0 else None
+        else:
+            avg_price = float(amount / qty) if qty != 0 else None
         cogs = None
         gross_margin = None
         margin_pct = None

@@ -42,6 +42,9 @@ NONPROFIT: dict[str, str] = {
     "Recent Invoices": "Recent Pledges & Invoices",
     "The last five invoices": "The last five pledges and invoices",
     "Total Invoiced": "Total Pledged",
+    # Income by Customer's count column: every sales document in the row,
+    # so a nonprofit's names all three kinds it counts
+    "Invoices & Receipts": "Pledges, Invoices & Donations",
     "Sales Receipt": "Donation",
     "Sales Receipts": "Donations",
     "Enter Sales Receipts": "Enter Donations",

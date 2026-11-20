@@ -181,6 +181,9 @@ receipt is what gets acknowledged.
   (whether a donor can deduct it depends on their own return: from tax year
   2026 non-itemizers may deduct some cash gifts and itemizers face a floor);
   non-cash gifts described without amounts; the IRS sentence at the foot.
+  A gift is money that came in: a donation receipt counts at what has been
+  paid on it (nothing, once its payment is voided), in the year it was
+  paid, and a foreign-currency gift is stated in dollars at its own rate.
 - **The ministry's own words** — Settings → Sales documents → Giving Statement (nonprofit mode)
   keeps the ministry's own message and footer on the statement. The **Opening
   messages** are saved the same way as Invoice Messages (a short list, one the
