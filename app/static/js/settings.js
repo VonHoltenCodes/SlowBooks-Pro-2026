@@ -1487,10 +1487,12 @@ const SettingsPage = {
     // SMTP error under it. The sentence is the one the API returns
     // (`failure`, from app/services/email_errors.py — the single mapping, so
     // the list and the test-email message never word an error two ways). The
-    // raw error is always shown so nothing is hidden.
+    // server's words (plain text from the API, one refused address per line)
+    // are shown under it, unless the sentence already says them.
     _emailLogFailure(row) {
-        const raw = (row.error_message || '').trim();
+        let raw = (row.error_message || '').trim();
         const sentence = (row.failure || '').trim() || 'The email could not be sent.';
+        if (raw && sentence.includes(raw.replace(/\s+/g, ' ').replace(/[.]$/, ''))) raw = '';
         return { sentence, raw };
     },
 
@@ -1519,7 +1521,7 @@ const SettingsPage = {
                 if (failed) {
                     const f = SettingsPage._emailLogFailure(r);
                     detail = `<div style="color:var(--danger, #b00); margin-top:2px;">${escapeHtml(f.sentence)}</div>` +
-                        (f.raw ? `<div style="color:var(--text-muted); font-family:var(--font-mono); word-break:break-word;">${escapeHtml(f.raw)}</div>` : '');
+                        (f.raw ? `<div style="color:var(--text-muted); font-family:var(--font-mono); word-break:break-word; white-space:pre-line;">${escapeHtml(f.raw)}</div>` : '');
                 }
                 return `<tr>
                     <td style="white-space:nowrap;">${escapeHtml(SettingsPage._emailLogWhen(r.sent_at))}</td>

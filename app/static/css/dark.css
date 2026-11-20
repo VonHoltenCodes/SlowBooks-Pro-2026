@@ -172,6 +172,17 @@
 
 [data-theme="dark"] tbody tr:nth-child(even) { background: #181a22; }
 [data-theme="dark"] tbody tr:hover { background: #222838; }
+/* the hovered row's status text (W-227): the dark theme's own values back
+   (style.css darkens them for the light hover blue), and its light grey,
+   4.12:1 on #222838, a step lighter */
+[data-theme="dark"] tbody tr:hover {
+    --danger:     #e46969;   /* 4.57 */
+    --qb-red:     #e46969;
+    --qb-orange:  #e08050;   /* 5.16 */
+    --success:    #4caf7a;   /* 5.40 */
+    --warning:    #e0a840;   /* 6.89 */
+    --text-light: #8f98aa;   /* 5.07 */
+}
 /* the pay-run view's Employee column keeps its own ground (style.css) */
 [data-theme="dark"] .pay-run-table tbody tr:nth-child(even) td:first-child { background: #181a22; }
 [data-theme="dark"] .pay-run-table tbody tr:hover td:first-child { background: #222838; }

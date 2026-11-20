@@ -326,7 +326,7 @@ def giving_statements_batch_email(
                 errors.append(
                     f"{customer.name}: the giving statement could not be sent. {why}"
                     if why
-                    else f"{customer.name}: email could not be sent"
+                    else f"{customer.name}: the giving statement could not be sent."
                 )
         except Exception:
             logger.exception("giving statement failed for customer %s", customer.id)

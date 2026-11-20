@@ -659,7 +659,10 @@ jobs:
           # 433 with round 25: three WeasyPrint cases, the long last line's shapes
           # (test_pdf_last_line_new271.py: line breaks, and the 2-line packaged bid)
           # and the other totals blocks (test_pdf_totals_labels_w214.py).
-          MAX_SKIPS: "433"
+          # 444 with round 26: ten WeasyPrint cases of the totals' right edge
+          # (test_pdf_totals_right_edge_w226.py, one per document) and the bid with
+          # tables' long scope line (test_pdf_bid_tables_long_line_new277.py).
+          MAX_SKIPS: "444"
         run: |
           total=0
           for f in shards/*/skips.txt; do

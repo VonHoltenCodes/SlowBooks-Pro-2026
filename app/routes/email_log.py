@@ -2,8 +2,9 @@
 # Recent sends — a read-only view of the email_log table (#447).
 #
 # Every send writes an email_log row (app/services/email_service.py). Who
-# reads what (#781): an administrator gets every row whole, the raw SMTP
-# error included. Every other role that may read the books (bookkeeper,
+# reads what (#781): an administrator gets every row whole, the mail
+# server's reply included, as plain words (NEW-275: never Python's tuple or
+# dict, from a row stored either way). Every other role that may read the books (bookkeeper,
 # read-only, accountant; a session or an API token) gets the same rows with
 # the raw error left out: `error_message` carries the bookkeeper's sentence
 # for the failure (email_errors.failure_sentence) instead, because the raw
@@ -22,7 +23,8 @@ from app.database import get_db
 from app.models.email_log import EmailLog
 from app.routes._roles import is_admin
 from app.routes.api_tokens import _utc_iso
-from app.services.email_errors import failure_sentence
+from app.services.email_errors import failure_sentence, server_words, scrub_secrets
+from app.services.settings_service import get_setting_raw
 
 router = APIRouter(prefix="/api/email-log", tags=["email_log"])
 
@@ -50,13 +52,16 @@ def list_email_log(
         .limit(limit)
         .all()
     )
+    # a row stored before round 26 kept the reply as Python wrote it, and
+    # could echo the password a server was given; neither is shown
+    hidden = [get_setting_raw(db, "smtp_password") or ""] if admin else []
     return {
         "total": total,
-        "rows": [_row(r, admin) for r in rows],
+        "rows": [_row(r, admin, hidden) for r in rows],
     }
 
 
-def _row(r: EmailLog, admin: bool) -> dict:
+def _row(r: EmailLog, admin: bool, hidden=()) -> dict:
     failure = failure_sentence(r.error_message or "") if r.status == "failed" else None
     return {
         "id": r.id,
@@ -72,7 +77,13 @@ def _row(r: EmailLog, admin: bool) -> dict:
         "status": r.status,
         # the raw SMTP text is an administrator's (hostnames, banners);
         # anyone else reads the sentence in its place
-        "error_message": r.error_message if admin else failure,
+        # — the server's own words as plain text (NEW-275), read the same
+        # from a row stored in the old Python form
+        "error_message": (
+            scrub_secrets(server_words(r.error_message), hidden)
+            if admin and r.error_message
+            else (r.error_message if admin else failure)
+        ),
         # the one wording of a failure (email_errors), so the list and the
         # test-email message agree
         "failure": failure,

@@ -50,6 +50,17 @@
        their headings never wrap. */
     table.activity .closing { width: 0; min-width: 100%; }
     table.activity > thead > tr > th, table.activity > tbody > tr > td.d, table.activity > tbody > tr > td.r { white-space: nowrap; }
+    /* Seven columns of six- and seven-figure amounts, and headings, none of
+       which wrap, ran the gift table, and the summary in its last cell,
+       past the page's width (W-226: 8.5 pt at six figures). Its figures
+       take less room as they grow, so the summary ends where it does at
+       $12.34 whatever the amounts. */
+    table.activity.figures-6 > thead > tr > th, table.activity.figures-6 > tbody > tr > td { padding-left: 5px; padding-right: 5px; }
+    table.activity.figures-6 > tbody > tr > td { font-size: 8.5pt; }
+    table.activity.figures-7 > thead > tr > th, table.activity.figures-7 > tbody > tr > td { padding-left: 4px; padding-right: 4px; }
+    table.activity.figures-7 > thead > tr > th { font-size: 7pt; }
+    table.activity.figures-7 > tbody > tr > td { font-size: 8pt; }
+    table.activity > tbody.doc-tail > tr.doc-end > td { padding-left: 0; padding-right: 0; }
     .summary { margin-left: auto; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
     /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
     .summary table { width: 300px; margin-left: auto; }
@@ -120,7 +131,9 @@
     <div class="irs">{{ st.irs_text }}</div>
     </div>{% endset %}
     <h3>Contributions</h3>
-    <table class="activity">
+    {# the largest figure the gift table prints (the running total ends at the total) decides how much room each gets (W-226) #}
+    {% set widest = [st.totals.amount | float, st.totals.fair_value | float, st.totals.deductible | float] | map('abs') | max %}
+    <table class="activity{% if widest >= 1000000 %} figures-7{% elif widest >= 10000 %} figures-6{% endif %}">
         <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th class="r">Amount</th><th class="r">Goods / services</th><th class="r">Deductible</th><th class="r">Running total</th></tr></thead>
         <tbody>
         {% set ns = namespace(running=0) %}

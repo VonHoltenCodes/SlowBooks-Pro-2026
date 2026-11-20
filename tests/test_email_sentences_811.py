@@ -56,7 +56,8 @@ CASES = [
     (
         "a 5xx data reply",
         smtplib.SMTPDataError(554, b"5.7.1 Message refused as spam"),
-        FALLBACK,
+        # no sentence of our own: the stage, in the server's words (NEW-276)
+        "The mail server refused the message: 554 5.7.1 Message refused as spam.",
     ),
     (
         "a rejected password",
@@ -66,7 +67,8 @@ CASES = [
     (
         "a server that will not take the connection",
         smtplib.SMTPConnectError(421, b"Service not available"),
-        UNREACHABLE,
+        # a 4xx greeting: reached, and told to come back (NEW-276)
+        LATER,
     ),
     (
         "a connection refused",
@@ -96,11 +98,12 @@ def test_each_exception_gives_its_sentence(what, error, sentence):
 def test_the_stored_text_of_each_exception_gives_the_same_sentence(
     what, error, sentence
 ):
-    # the email log keeps str(e); what is shown is read back from it.
-    # SMTPConnectError's text is a bare (421, ...) pair, which reads as a 4xx.
-    if isinstance(error, smtplib.SMTPConnectError):
-        sentence = LATER
+    # a row stored before round 26 keeps str(e); what is shown is read
+    # back from it, as from the plain words stored since
+    from app.services.email_errors import stored_text
+
     assert failure_sentence(str(error)) == sentence
+    assert failure_sentence(stored_text(error)) == sentence
 
 
 def test_a_refused_recipient_never_reads_as_an_unreachable_server():

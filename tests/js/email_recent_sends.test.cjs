@@ -80,3 +80,19 @@ test('a saved secret shows the placeholder note; an unset one shows nothing', ()
     assert.equal(SettingsPage._secretNote(''), '');
     assert.equal(SettingsPage._secretNote('a-real-value'), '');
 });
+
+test('the server words show once, as plain lines (NEW-275, NEW-276)', () => {
+    // the sentence already says them: no second copy under it
+    const said = SettingsPage._emailLogFailure({
+        error_message: '554 5.7.1 Message rejected as spam',
+        failure: 'The mail server refused the message: 554 5.7.1 Message rejected as spam.',
+    });
+    assert.equal(said.raw, '');
+    // one refused address per line, kept as lines and escaped
+    const html = SettingsPage._emailLogRowsHtml([
+        { sent_at: '2026-11-20T12:00:00+00:00', recipient: 'a@x.com', subject: 'S', entity_type: 'invoice', status: 'failed',
+          error_message: 'a@x.com: 550 5.1.1 User unknown\nb@x.com: 550 <no>', failure: 'The address was refused by the mail server: a@x.com, b@x.com. Check it and send again.' },
+    ]);
+    assert.match(html, /white-space:pre-line/);
+    assert.match(html, /a@x\.com: 550 5\.1\.1 User unknown\nb@x\.com: 550 &lt;no&gt;/);
+});

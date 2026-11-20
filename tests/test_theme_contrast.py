@@ -605,3 +605,84 @@ def test_every_page_and_notice_meets_aa_in_both_themes(browser, company, books):
     assert [len(items) for items in notices.values()] == [3, 3]
 
     assert (below_threshold(pages), below_threshold(notices)) == ([], [])
+
+
+# Every list's rows under the pointer (W-227): "Failed" in Recent sends was
+# #cc3333 on the hover blue, 4.46:1. A row is hovered by the mouse, as a
+# person does it, and only that row is swept.
+HOVERED_ROW_SWEEP = sweep_of("document.querySelector('tbody tr:hover')", cap=400)
+HOVER_ROUTES = (
+    "#/settings",
+    "#/invoices",
+    "#/estimates",
+    "#/customers",
+    "#/vendors",
+    "#/bills",
+    "#/purchase-orders",
+    "#/items",
+    "#/accounts",
+    "#/payments",
+    "#/jobs",
+)
+
+
+def test_a_hovered_rows_text_meets_aa_in_both_themes(browser, company, db_session):
+    """The first rows of every list on the pages above, and each failed send
+    in Recent sends, each under the pointer, in both themes."""
+    from app.models.email_log import EmailLog
+
+    for stored in (
+        "[data] 554 5.7.1 Message rejected as spam",
+        "[recipients] who@example.test: 550 5.1.1 User unknown",
+    ):
+        db_session.add(
+            EmailLog(
+                entity_type="invoice",
+                entity_id=0,
+                recipient="who@example.test",
+                subject="Invoice",
+                status="failed",
+                error_message=stored,
+            )
+        )
+    db_session.commit()
+    page, handled = _open(browser, company)
+    swept = {}
+    try:
+        # the splash is up over the page until it is dismissed
+        page.evaluate("() => document.getElementById('splash').classList.add('hidden')")
+        for route in HOVER_ROUTES:
+            _visit(page, handled, route)
+            if route == "#/settings":
+                page.wait_for_selector("#email-log-rows tbody tr", state="attached")
+                # its group open, as Settings → Email → Recent sends opens it
+                page.evaluate(
+                    "() => SettingsPage.showSetting("
+                    "document.getElementById('settings-email-recent-sends'))"
+                )
+                settle(page, handled)
+                rows = page.locator("#email-log-rows tbody tr")
+            else:
+                rows = page.locator("#page-content tbody tr")
+            count = min(rows.count(), 4)
+            for theme in ("dark", "light"):
+                _toggle_to(page, handled, theme)
+                for i in range(count):
+                    row = rows.nth(i)
+                    if not row.is_visible():
+                        continue
+                    row.scroll_into_view_if_needed()
+                    row.hover()
+                    items = page.evaluate(
+                        "(s) => document.querySelector('tbody tr:hover') ? eval(s) : []",
+                        HOVERED_ROW_SWEEP,
+                    )
+                    swept[(theme, f"{route} row {i + 1}")] = items
+            page.mouse.move(0, 0)
+    finally:
+        page.close()
+    texts = {it["text"] for items in swept.values() for it in items}
+    assert "Failed" in texts, sorted(texts)[:40]
+    # the sweep reads an element's text to its first full stop
+    assert any(t.startswith("The mail server refused the message") for t in texts)
+    assert below_threshold(swept) == []

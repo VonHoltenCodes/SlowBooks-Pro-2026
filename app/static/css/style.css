@@ -1239,6 +1239,18 @@ tbody td:last-child { border-right: none; }
 
 tbody tr:nth-child(even) { background: #f7f9fb; }
 tbody tr:hover { background: #e8f0f8; }
+/* Status text on a row under the pointer (W-227): the reds were 4.46:1 on
+   the hover blue ("Failed" in Recent sends), the orange 4.19, and the
+   green and amber never read as text there. Darker values on that row
+   alone; each is 5:1 or better on #e8f0f8, and darker is only better
+   under the white text of a button or badge that uses them as ground. */
+tbody tr:hover {
+    --danger:     #b52b2b;   /* 5.46 */
+    --qb-red:     #b52b2b;
+    --qb-orange:  #9a4a22;   /* 5.41 */
+    --success:    #1f7a4d;   /* 4.62 */
+    --warning:    #7a5c00;   /* 5.43 */
+}
 tbody tr:last-child td { border-bottom: none; }
 
 td.actions {
