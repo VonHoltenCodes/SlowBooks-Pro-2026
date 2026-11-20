@@ -47,6 +47,7 @@ from app.services.settings_service import (
     get_all_settings as get_settings,
 )
 from app.services.request_utils import content_disposition
+from app.services.tax_exemption import certificate_warning
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -308,6 +309,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     db.refresh(cm)
     resp = CreditMemoResponse.model_validate(cm)
     resp.customer_name = customer.name
+    resp.tax_note = certificate_warning(db, customer, cm.date)
     return resp
 
 

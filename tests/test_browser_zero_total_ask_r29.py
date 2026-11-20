@@ -378,3 +378,137 @@ def test_every_line_form_asks_before_saving_nothing(browser, company):
         finally:
             page.close()
 
+
+# ── a tax-exempt customer's certificate, on the sales forms ──────────────
+
+NO_CERTIFICATE = "No exemption certificate is on file for Cedar Hill School."
+EXPIRED = "Cedar Hill School's exemption certificate expired on June 30, 2026."
+NOTE = """(form) => {
+    const n = document.querySelector(form + ' .tax-exempt-warning');
+    return n ? { text: n.textContent, role: n.getAttribute('role'),
+                 shown: n.offsetParent !== null || !n.textContent } : null;
+}"""
+PICK = """([sel, id]) => {
+    const s = document.querySelector(sel);
+    s.value = String(id);
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+}"""
+SET_DATE = """([form, day]) => {
+    const f = document.querySelector(form);
+    const d = f.querySelector('[name="date"]') || f.querySelector('[name="start_date"]');
+    d.value = day;
+    d.dispatchEvent(new Event('change', { bubbles: true }));
+}"""
+
+
+def _note(page, handled, form):
+    settle(page, handled)
+    page.wait_for_timeout(100)
+    return page.evaluate(NOTE, form)
+
+
+def test_a_sales_form_warns_about_a_missing_or_expired_certificate(browser, company):
+    """Every sales form, in one pass: choosing a tax-exempt customer with
+    no certificate on file says so under the customer, in the open and
+    announced; a taxable customer takes it away; with an expired one on
+    file the sentence names the day, and follows the document's date. The
+    customer's own page says it beside Tax exempt."""
+    taxable = _first(company, "/api/customers")
+    exempt = _made(
+        company, "/api/customers", {"name": "Cedar Hill School", "is_taxable": False}
+    )["id"]
+    forms = [
+        (
+            "#/invoices",
+            "InvoicesPage.showForm()",
+            "#invoice-form",
+            "#inv-customer-select",
+        ),
+        (
+            "#/estimates",
+            "EstimatesPage.showForm()",
+            "#modal-body form",
+            "#est-customer-select",
+        ),
+        (
+            "#/sales-receipts",
+            "SalesReceiptsPage.showForm()",
+            "#sales-receipt-form",
+            "#sr-customer-select",
+        ),
+        (
+            "#/credit-memos",
+            "CreditMemosPage.showForm()",
+            "#modal-body form",
+            "#cm-customer-select",
+        ),
+        (
+            "#/recurring",
+            "RecurringPage.showForm()",
+            "#modal-body form",
+            "#rec-customer-select",
+        ),
+    ]
+    permit = None
+    for expected in (NO_CERTIFICATE, EXPIRED):
+        if expected == EXPIRED:
+            permit = _made(
+                company,
+                "/api/reseller-permits",
+                {
+                    "entity_type": "customer",
+                    "entity_id": exempt,
+                    "jurisdiction": "IL",
+                    "permit_number": "RP-2210",
+                    "expires_at": "2026-06-30",
+                },
+            )
+        for route, opener, form, picker in forms:
+            page, handled = _open_at(browser, company, route)
+            errors = []
+            page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
+            try:
+                page.evaluate(f"async () => {{ await {opener}; }}")
+                page.wait_for_function(MODAL_SHOWN)
+                settle(page, handled)
+                # nothing is said until there is something to say
+                assert page.evaluate(NOTE, form) is None, route
+                page.evaluate(SET_DATE, [form, "2026-09-21"])
+                page.evaluate(PICK, [picker, exempt])
+                note = _note(page, handled, form)
+                assert note == {
+                    "text": expected,
+                    "role": "status",
+                    "shown": True,
+                }, route
+                if expected == EXPIRED:
+                    # as of the document's date: dated while it ran, quiet
+                    page.evaluate(SET_DATE, [form, "2026-06-15"])
+                    assert _note(page, handled, form)["text"] == "", route
+                    page.evaluate(SET_DATE, [form, "2026-09-21"])
+                    assert _note(page, handled, form)["text"] == EXPIRED, route
+                # a taxable customer: the warning goes
+                page.evaluate(PICK, [picker, taxable])
+                assert _note(page, handled, form)["text"] == "", route
+                assert errors == [], route
+            finally:
+                page.close()
+    assert permit is not None
+
+    # the customer's own page, beside Tax exempt
+    page, handled = _open_at(browser, company, "#/customers")
+    try:
+        page.evaluate(f"async () => {{ await CustomersPage.showDetails({exempt}); }}")
+        page.wait_for_function(MODAL_SHOWN)
+        note = _note(page, handled, "#modal-body")
+        assert note["role"] == "status" and note["shown"]
+        assert note["text"].startswith(
+            "Cedar Hill School's exemption certificate expired on"
+        )
+        page.evaluate("() => closeModal()")
+        page.evaluate(f"async () => {{ await CustomersPage.showDetails({taxable}); }}")
+        page.wait_for_function(MODAL_SHOWN)
+        settle(page, handled)
+        assert page.evaluate(NOTE, "#modal-body") is None
+    finally:
+        page.close()
