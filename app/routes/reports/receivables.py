@@ -325,10 +325,19 @@ def income_by_customer_report(db: Session, start_date, end_date, basis=None) -> 
     Profit and Loss: Sales and Sales Tax are what the period's payments
     recognized of each invoice, read from their cash lines, and money not
     yet applied to an invoice is income (Unapplied Cash Payment Income).
-    Paid is then what came in for those sales, and Balance what is still
-    owed on the invoices listed, less the money not yet applied. A credit
-    memo counts for nothing there, as on the cash P&L: no cash came for
-    the part it credited."""
+    Not income is what the period's payments paid of a line that posts to
+    no income account (a security deposit, W-205). Paid is the money that
+    came in for those, so on the cash basis a row reads Sales + Not income
+    + Tax = Paid: the money received in the dates, every part of it in one
+    column. Balance there is not part of that sum (W-204): it is what is
+    still owed today on the invoices listed, less the money not yet
+    applied, and its heading and the report's note say so. A credit memo
+    counts for nothing there, as on the cash P&L: no cash came for the
+    part it credited.
+
+    The answer carries `row_rule`, the sentence saying which sum a row
+    holds on its basis, and `balance_heading`, for the screen, the PDF and
+    the CSV."""
     from app.services import cash_basis
     from app.services.contact_balances import home_amount, unapplied_payments
     from app.services.sales_income import non_income_by_invoice
@@ -486,6 +495,39 @@ def _income_by_customer_answer(by_customer: dict, start_date, end_date, basis: s
         "basis": basis,
         "items": items,
         **{k: float(v) for k, v in grand.items()},
+        **income_by_customer_rule(
+            basis, any(i["total_other"] for i in items) or bool(grand["total_other"])
+        ),
+    }
+
+
+def income_by_customer_rule(basis: str, with_other: bool = True) -> dict:
+    """What a row of Income by Customer adds up to on its basis (W-204), and
+    the Balance column's heading. On accrual the row runs from what was
+    billed to what is left: Sales + Not income + Sales Tax − Paid =
+    Balance. On cash it is the money received in the dates: Sales + Not
+    income + Sales Tax = Paid, and Balance, what is still owed today on
+    the invoices listed less the money not yet applied, stands apart.
+    `with_other`: the report has a Not income column (only when the
+    period has some), so the sentence names it."""
+    parts = "Sales + Not income + Sales Tax" if with_other else "Sales + Sales Tax"
+    if basis == "cash":
+        return {
+            "balance_heading": "Balance owed now",
+            "row_rule": (
+                f"Cash basis: on every row {parts} = Paid, the money received "
+                "in these dates. Balance owed now is what is still owed today "
+                "on the invoices listed, less money received and not yet "
+                "applied; it is not part of that sum."
+            ),
+        }
+    return {
+        "balance_heading": "Balance",
+        "row_rule": (
+            f"On every row {parts} − Paid = Balance: what the invoices and "
+            "credit memos in these dates billed and credited, less what has "
+            "been paid or credited on them and money not yet applied."
+        ),
     }
 
 
@@ -520,14 +562,18 @@ def _income_by_customer_cash(db: Session, start_date: date, end_date: date) -> d
         )
         for inv in invoices:
             got = recognized[inv.id]
-            if got["income"] == 0 and got["tax"] == 0:
+            other = got.get("other", Decimal(0))
+            if got["income"] == 0 and got["tax"] == 0 and other == 0:
                 continue
             name = inv.customer.full_name if inv.customer else "Unknown"
             r = _income_row(by_customer, inv.customer_id, name)
             r["invoice_count"] += 1
             r["total_sales"] += got["income"]
+            # the paid part of a line on an item that posts to no income
+            # account (a security deposit, W-205): received, not income
+            r["total_other"] += other
             r["total_tax"] += got["tax"]
-            r["total_paid"] += got["income"] + got["tax"]
+            r["total_paid"] += got["income"] + other + got["tax"]
             r["total_balance"] += home_amount(inv.balance_due, inv.exchange_rate)
     unapplied = cash_basis.unapplied_cash_income(db, start_date, end_date)
     if unapplied:

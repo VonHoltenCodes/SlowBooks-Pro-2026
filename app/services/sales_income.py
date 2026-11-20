@@ -50,6 +50,34 @@ def non_income_item_ids(db: Session) -> set[int]:
     return {iid for (iid,) in db.query(Item.id) if not to_income(iid)}
 
 
+def non_income_accounts(db: Session) -> set[int]:
+    """The accounts the items whose lines post to no income account sell
+    through (a security deposit's liability): the item's own account, or
+    the default income account for one with none when that is not an
+    income account. What a sale's line put there is billed but not income
+    (W-195, W-205)."""
+    from app.services.accounting import get_default_income_account_id
+    from app.services.control_accounts import MissingControlAccount
+
+    bad = non_income_item_ids(db)
+    if not bad:
+        return set()
+    out = {
+        aid
+        for (aid,) in db.query(Item.income_account_id).filter(Item.id.in_(bad))
+        if aid is not None
+    }
+    try:
+        default_id = get_default_income_account_id(db)
+    except MissingControlAccount:
+        default_id = None
+    if default_id is not None:
+        acct = db.get(Account, default_id)
+        if acct is not None and acct.account_type != AccountType.INCOME:
+            out.add(default_id)
+    return out
+
+
 def non_income_by_invoice(db: Session, invoice_ids) -> dict[int, Decimal]:
     """{invoice id: home amount} of each invoice's lines that post to no
     income account (a security deposit's), each line converted at its

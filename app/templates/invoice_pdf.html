@@ -61,6 +61,11 @@
        so the totals keep a row above them even when the rest of it ends a page. */
     table.line-items > tbody > tr.row-head > td { border-bottom: 0; padding-bottom: 0; }
     table.line-items > tbody > tr.row-end > td { padding-top: 0; }
+    /* W-201: a row's figures sit on its first line, so a cut row's are where
+       any row's are; a cut is at a line boundary of the layout, and the first
+       part's last line is set full so the join does not show. */
+    table.line-items > tbody > tr > td { vertical-align: top; }
+    table.line-items > tbody > tr.row-head.joined > td:first-child { text-align-last: justify; }
     /* The end of long notes and the footer are one block (W-188). */
     .doc-close { break-inside: avoid; page-break-inside: avoid; }
     .notes.notes-end { margin-top: 0; padding-top: 0; border-top: 0; break-before: auto; page-break-before: auto; }
@@ -182,15 +187,15 @@
             {% if loop.last and not rl and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {#- a long last line: its end opens the group (W-187) #}
             {%- set cut = loop.last and not rl and long_last %}
-            {%- set d_head, d_end = tail_split(line.description) if cut else (line.description or '', '') %}
+            {%- set d_head, d_end = line_cut(line.description) if cut else (line.description or '', '') %}
             {%- set untaxed %}{% if inv.tax_amount and not line.is_taxable and not nonprofit %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}{% endset %}
-            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut] | select | join(' ') }}"{% endif %}>
-                <td>{{ d_head }}{% if not cut %}{{ untaxed }}{% endif %}</td>
+            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
+                <td>{{ d_head }}{% if not d_end %}{{ untaxed }}{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}</td>
                 <td class="r">{{ line.rate | rate(cur) }}</td>
                 <td class="r">{{ line.amount | currency(cur) }}</td>
             </tr>
-            {% if cut %}</tbody><tbody class="doc-tail"><tr class="{% if loop.index is even %}alt {% endif %}row-end"><td>{{ d_end }}{{ untaxed }}</td><td colspan="3"></td></tr>{% endif %}
+            {% if cut %}</tbody><tbody class="doc-tail"><tr class="{% if loop.index is even %}alt {% endif %}row-end"><td>{{ d_end }}{% if d_end %}{{ untaxed }}{% endif %}</td><td colspan="3"></td></tr>{% endif %}
         {% endfor %}
         {# A pay application's invoice with no lines (#751, #815): the release,
            the retainage a lower percent gives back, or holds, named as its
@@ -199,8 +204,8 @@
             {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {%- set cut = loop.last and long_last %}
             {%- set even = (loop.index + (inv.lines|length)) is even %}
-            {%- set d_head, d_end = tail_split(row.description) if cut else (row.description, '') %}
-            <tr{% if even or cut %} class="{{ ['alt' if even, 'row-head' if cut] | select | join(' ') }}"{% endif %}>
+            {%- set d_head, d_end = line_cut(row.description) if cut else (row.description, '') %}
+            <tr{% if even or cut %} class="{{ ['alt' if even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
                 <td>{{ d_head }}</td>
                 <td class="r">1</td>
                 <td class="r">{{ row.amount | currency(cur) }}</td>

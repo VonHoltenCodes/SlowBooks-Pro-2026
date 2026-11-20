@@ -169,7 +169,16 @@ const ItemsPage = {
         // item credits a liability, not income.
         const incomeAccts = ItemsPage.withOtherAccounts(accounts, ['income'], item.income_account_id, refused);
         const expenseAccts = ItemsPage.withOtherAccounts(accounts, ['expense','cogs'], item.expense_account_id, refused);
-        const assetAccts = pickerAccounts(accounts, ['asset'], item.asset_account_id);
+        // The inventory asset account (W-207): the server's list of every
+        // account it would refuse there (a bank, Accounts Receivable,
+        // Undeposited Funds, retainage, any account not an Other Current
+        // Asset, one an item sells or buys through), so the list offers
+        // only the ones a stock item's purchases and sales can post to. The
+        // one the item already uses stays.
+        let refusedAsset = new Set();
+        try { refusedAsset = new Set((await API.get('/items/refused-accounts?field=asset_account_id')).map(r => Number(r.account_id))); } catch (e) { refusedAsset = new Set(); }
+        const assetAccts = pickerAccounts(accounts, ['asset'], item.asset_account_id)
+            .filter(a => !refusedAsset.has(Number(a.id)) || Number(a.id) === Number(item.asset_account_id));
         const acctLabel = a => accountLabel(a);
 
         // Phase 11 inventory only makes sense for tangible items.

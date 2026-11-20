@@ -348,8 +348,9 @@ TAX_RATE_DESCRIPTION = _TAX_RATE_DOC["description"]
 
 # A NEW sales document's rate (#1129): left out, or null, it is the company's
 # Default Tax Rate (Settings), as the app's form starts the document; 0 is
-# no tax and is kept. A tax-exempt customer or document keeps the rate and
-# is charged no tax on any line, as on the form. The routes fill it in with
+# no tax and is kept. A tax-exempt customer or document, or a document for
+# a tax-exempt job (its switch starts on, #864), keeps the rate and is
+# charged no tax on any line, as on the form. The routes fill it in with
 # app.services.settings_service.default_sales_tax_rate.
 _NEW_TAX_RATE_DOC = dict(
     _TAX_RATE_DOC,
@@ -357,8 +358,9 @@ _NEW_TAX_RATE_DOC = dict(
         TAX_RATE_DESCRIPTION
         + " Left out (or null) on a new document: the company's Default Tax "
         "Rate from Settings, as the app's form starts one; send 0 for no tax. "
-        "A non-taxable customer or a tax_exempt document keeps that rate and "
-        "is charged no tax."
+        "A non-taxable customer, a tax_exempt document, or a document for a "
+        "tax-exempt job (whose tax_exempt starts on, as on the form) keeps "
+        "that rate and is charged no tax."
     ),
 )
 NewTaxRate = Annotated[

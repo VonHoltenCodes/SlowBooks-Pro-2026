@@ -43,17 +43,110 @@ _ITEM_ACCOUNT_CONTROLS = {
 _ACCOUNT_FIELDS = {
     "income_account_id": "income",
     "expense_account_id": "expense or cost of goods",
+    "asset_account_id": "inventory asset",
 }
 
 
-def _refuse_item_accounts(db: Session, fields: dict, item=None) -> None:
-    """Refuse (422), in a sentence, an income or expense account an item may
-    not post through. An account the item already has is not refused, so an
-    item imported that way can still be edited."""
+def _other_items_on(db: Session, account_id: int, item=None):
+    """The first item (other than `item`) whose income or expense account is
+    `account_id`, or None: an invoice or bill line on it posts to the
+    account without the stock moving."""
+    q = db.query(Item).filter(
+        sqla_or_(
+            Item.income_account_id == account_id,
+            Item.expense_account_id == account_id,
+        )
+    )
+    if item is not None and getattr(item, "id", None) is not None:
+        q = q.filter(Item.id != item.id)
+    return q.order_by(Item.name).first()
+
+
+def item_account_problem(
+    db: Session, field: str, account: Account, tied: dict, item=None
+):
+    """Why `account` cannot be the item's `field` account, as the sentence
+    the API answers with, or None when it can.
+
+    Income and expense (#1038, W-196): not a bank or card account, not one
+    a sub-ledger keeps (Accounts Receivable, Accounts Payable, Undeposited
+    Funds, Inventory) and not any other account a Books Check row ties to
+    a sub-ledger.
+
+    The inventory asset account (W-207): an Other Current Asset account
+    that is not a bank, Accounts Receivable, Undeposited Funds or any other
+    tied account except an inventory one (1300 Inventory, or an account
+    another stock item already keeps its stock in), and that no item
+    invoices or buys through as its income or expense account. Every
+    purchase and sale of the item posts to it beside the stock's quantity
+    and cost, so anything else that moves it puts Books Check's Inventory
+    row out, and the stock moving it puts the other row out."""
     from app.services.control_accounts import is_control
 
+    what = _ACCOUNT_FIELDS[field]
+    number = str(account.account_number or "")
+    named = f"{number} {account.name}".strip()
+    start = f"An item's {what} account can't be {named}"
+    detail = getattr(account.detail_type, "value", account.detail_type)
+    if account.bank_kind:
+        kind = "card" if account.bank_kind == "credit_card" else "bank"
+        return (
+            f"{start}, a {kind} account: money into or out of it is "
+            "a deposit, a payment or a charge. Choose another account."
+        )
+    asset_field = field == "asset_account_id"
+    where = _ITEM_ACCOUNT_CONTROLS.get(number)
+    if (
+        where
+        and is_control(number, account.account_type)
+        and not (asset_field and number == "1300")
+    ):
+        return f"{start}, {where}; choose another account."
+    if detail == "accounts_receivable":
+        return (
+            f"{start}, an accounts receivable account, which only "
+            "invoices and customer payments post to; choose another account."
+        )
+    if detail == "accounts_payable":
+        return (
+            f"{start}, an accounts payable account, which only bills "
+            "and bill payments post to; choose another account."
+        )
+    if asset_field and detail != "other_current_asset":
+        return (
+            f"{start}: an item's stock is kept in an Other Current Asset "
+            "account, such as 1300 Inventory. Choose another account."
+        )
+    # Every other account a Books Check row ties to a sub-ledger (W-196):
+    # Sales Tax Payable, Accrued Job Costs, the payroll liabilities, the
+    # retainage accounts, an item's own inventory account. A line on one
+    # moves the account and not what it is tied to. The inventory accounts
+    # are what an item's asset account is for, so that field takes them.
+    if account.id in tied:
+        label, keeper = tied[account.id]
+        if not (asset_field and label == "Inventory"):
+            return (
+                f"{start}: Books Check ties it to {keeper}, and a line "
+                f"on an item would put its {label} row out by the line. Choose "
+                "another account."
+            )
+    if asset_field:
+        other = _other_items_on(db, account.id, item)
+        if other is not None:
+            return (
+                f"{start}: the item {other.name} posts its sales or purchases "
+                "to it, which would move it without the stock and put Books "
+                "Check's Inventory row out. Choose another account."
+            )
+    return None
+
+
+def _refuse_item_accounts(db: Session, fields: dict, item=None) -> None:
+    """Refuse (422), in a sentence, an income, expense or inventory asset
+    account an item may not post through. An account the item already has
+    is not refused, so an item imported that way can still be edited."""
     tied = None
-    for field, what in _ACCOUNT_FIELDS.items():
+    for field in _ACCOUNT_FIELDS:
         account_id = fields.get(field)
         if account_id is None or (
             item is not None and getattr(item, field) == account_id
@@ -63,50 +156,14 @@ def _refuse_item_accounts(db: Session, fields: dict, item=None) -> None:
         if account is None:
             raise HTTPException(
                 status_code=422,
-                detail=f"The {what} account chosen is not in the chart of accounts; choose another account.",
+                detail=f"The {_ACCOUNT_FIELDS[field]} account chosen is not in "
+                "the chart of accounts; choose another account.",
             )
-        number = str(account.account_number or "")
-        named = f"{number} {account.name}".strip()
-        start = f"An item's {what} account can't be {named}"
-        if account.bank_kind:
-            kind = "card" if account.bank_kind == "credit_card" else "bank"
-            raise HTTPException(
-                status_code=422,
-                detail=f"{start}, a {kind} account: money into or out of it is "
-                "a deposit, a payment or a charge. Choose another account.",
-            )
-        detail = getattr(account.detail_type, "value", account.detail_type)
-        where = _ITEM_ACCOUNT_CONTROLS.get(number)
-        if where and is_control(number, account.account_type):
-            raise HTTPException(
-                status_code=422, detail=f"{start}, {where}; choose another account."
-            )
-        if detail == "accounts_receivable":
-            raise HTTPException(
-                status_code=422,
-                detail=f"{start}, an accounts receivable account, which only "
-                "invoices and customer payments post to; choose another account.",
-            )
-        if detail == "accounts_payable":
-            raise HTTPException(
-                status_code=422,
-                detail=f"{start}, an accounts payable account, which only bills "
-                "and bill payments post to; choose another account.",
-            )
-        # Every other account a Books Check row ties to a sub-ledger (W-196):
-        # Sales Tax Payable, Accrued Job Costs, the payroll liabilities, the
-        # retainage accounts, an item's own inventory account. A line on one
-        # moves the account and not what it is tied to.
         if tied is None:
             tied = refused_item_accounts(db)
-        if account.id in tied:
-            label, keeper = tied[account.id]
-            raise HTTPException(
-                status_code=422,
-                detail=f"{start}: Books Check ties it to {keeper}, and a line "
-                f"on an item would put its {label} row out by the line. Choose "
-                "another account.",
-            )
+        problem = item_account_problem(db, field, account, tied, item)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
 
 
 def refused_item_accounts(db: Session) -> dict[int, tuple[str, str]]:
@@ -281,14 +338,32 @@ def low_stock_items(db: Session = Depends(get_db)):
 
 
 @router.get("/refused-accounts")
-def refused_accounts(db: Session = Depends(get_db)):
+def refused_accounts(
+    field: str = Query("income_account_id"), db: Session = Depends(get_db)
+):
     """The accounts the item form does not offer for an item's income or
     expense account beyond the bank, card, receivable, payable, Undeposited
     Funds and Inventory accounts it already leaves out: each with the reason
-    the server gives when one is sent (W-196)."""
+    the server gives when one is sent (W-196).
+
+    `field=asset_account_id`: every account the inventory asset account
+    may not be, each with the sentence the server refuses it with (W-207)."""
+    tied = refused_item_accounts(db)
+    if field == "asset_account_id":
+        out = []
+        for account in db.query(Account).order_by(Account.account_number):
+            problem = item_account_problem(db, field, account, tied)
+            if problem:
+                out.append({"account_id": account.id, "reason": problem})
+        return out
+    if field not in _ACCOUNT_FIELDS:
+        raise HTTPException(
+            status_code=422,
+            detail="Ask for the income, expense or inventory asset account's list.",
+        )
     return [
         {"account_id": aid, "books_check_row": label, "tied_to": keeper}
-        for aid, (label, keeper) in sorted(refused_item_accounts(db).items())
+        for aid, (label, keeper) in sorted(tied.items())
     ]
 
 

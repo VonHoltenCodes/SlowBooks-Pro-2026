@@ -645,7 +645,9 @@ jobs:
           # 410 with round 23 (#1140 #1141 #1146): test_browser_r23_relay_select.py, one
           # module without playwright, and test_tls_trust_new265.py's Mac simulation,
           # which skips where Windows loads its own store into every default context.
-          MAX_SKIPS: "410"
+          # 415 with round 23's long last line (#1137 #1138): five WeasyPrint cases
+          # (test_pdf_last_line_w200_w201.py, one per document kind).
+          MAX_SKIPS: "415"
         run: |
           total=0
           for f in shards/*/skips.txt; do

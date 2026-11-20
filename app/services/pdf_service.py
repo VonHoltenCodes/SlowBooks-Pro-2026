@@ -6,7 +6,7 @@ import re
 from contextvars import ContextVar
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, pass_context
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 _jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
@@ -271,6 +271,127 @@ def _tail_split(text, keep=DOC_TAIL_KEEP, most=DOC_TAIL_MOST):
 
 
 _jinja_env.globals["tail_split"] = _tail_split
+
+
+# A long last line (W-200, W-201, NEW-266, 2.32.0 round 23). The document is
+# first laid out with the line whole: when the whole line and the totals land on
+# one page (with room to spare, so a browser's print, whose pages run a
+# little differently, keeps them together too) it prints whole, with no
+# cut at all. Otherwise it is cut at a line boundary of that layout, so the
+# end carried with the totals is exactly its last DOC_TAIL_LINES lines and
+# the first part's last line is a full one: the two parts read as one row.
+# Qty, Rate and Amount sit at the top of every row (vertical-align: top),
+# so a cut row's figures are where any row's are: on its first line.
+DOC_TAIL_LINES = 2
+# the room (points) the group must leave at the foot of its page for the
+# whole line to be printed uncut: about five lines, more than Chromium's
+# and WeasyPrint's pages ever differ by over a document
+DOC_TAIL_SLACK = 72.0
+# When nothing can be laid out (no WeasyPrint): the end is about two lines
+# of the narrowest description column (some 60 characters a line), cut at
+# a sentence's end only within a third line.
+DOC_LINE_TAIL_KEEP = 120
+DOC_LINE_TAIL_MOST = 170
+_WORD = re.compile(r"\S+")
+
+
+def _cut_words(text: str, words: int):
+    """``(head, end)``: ``text`` with its last ``words`` words as the end."""
+    starts = [m.start() for m in _WORD.finditer(text)]
+    if words <= 0 or words >= len(starts):
+        return "", text
+    at = starts[-words]
+    return text[:at].rstrip(), text[at:]
+
+
+@pass_context
+def _line_cut(ctx, text):
+    """``(head, end)`` of a long last line, as the layout chose
+    (``last_line_cut`` in the template's context): "whole" leaves it uncut,
+    an int carries that many of its last words (its last lines) with the
+    totals, and nothing chosen falls back on the character count."""
+    text = (text or "").rstrip()
+    how = ctx.get("last_line_cut")
+    if how == "whole":
+        return text, ""
+    if isinstance(how, int) and not isinstance(how, bool):
+        return _cut_words(text, how)
+    return _tail_split(text, DOC_LINE_TAIL_KEEP, DOC_LINE_TAIL_MOST)
+
+
+_jinja_env.globals["line_cut"] = _line_cut
+
+
+def _box_classes(box) -> tuple:
+    element = getattr(box, "element", None)
+    if element is None:
+        return (), None
+    return tuple((element.get("class") or "").split()), element
+
+
+def _line_texts(box) -> list[str]:
+    """The text of each line box inside ``box``, in order."""
+    from weasyprint.formatting_structure import boxes as wb
+
+    out = []
+    for line in box.descendants():
+        if isinstance(line, wb.LineBox):
+            out.append(
+                "".join(t.text for t in line.descendants() if isinstance(t, wb.TextBox))
+            )
+    return out
+
+
+def choose_last_line(html_whole: str):
+    """How a document's long last line prints (see DOC_TAIL_LINES): "whole",
+    or the number of its last words to carry with the totals, read from a
+    layout of ``html_whole`` (the line uncut). None when it cannot be laid
+    out, and the character count decides."""
+    try:
+        HTML, _ = _weasyprint()
+        from weasyprint.formatting_structure import boxes as wb
+
+        document = HTML(string=html_whole, url_fetcher=_get_fetcher()).render()
+    except Exception:  # pragma: no cover - no WeasyPrint: the fallback cut
+        return None
+    head_pages, lines, tail = set(), [], None
+    for number, page in enumerate(document.pages):
+        page_box = page._page_box
+        for box in page_box.descendants():
+            classes, element = _box_classes(box)
+            if element is None:
+                continue
+            if (
+                isinstance(box, wb.TableRowBox)
+                and element.get("data-last-line") is not None
+            ):
+                cells = [c for c in box.children if isinstance(c, wb.TableCellBox)]
+                if cells:
+                    texts = _line_texts(cells[0])
+                    if any(t.strip() for t in texts):
+                        head_pages.add(number)
+                    lines.extend(texts)
+            elif (
+                tail is None
+                and isinstance(box, wb.TableRowGroupBox)
+                and "doc-tail" in classes
+            ):
+                foot = page_box.content_box_y() + page_box.height
+                bottom = box.position_y + box.margin_height()
+                tail = (number, foot - bottom)
+    if tail is None or not lines:
+        return None
+    page, room = tail
+    # whole: the line on one page, the totals' page, with room to spare; a
+    # line running over a page is cut, so what reaches the totals' page is
+    # its last two lines and not however many the break left
+    if head_pages == {page} and room >= DOC_TAIL_SLACK:
+        return "whole"
+    kept = [t for t in lines if t.strip()][-DOC_TAIL_LINES:]
+    words = sum(len(t.split()) for t in kept)
+    return words or None
+
+
 _jinja_env.filters["currency"] = _format_currency
 _jinja_env.filters["rate"] = _format_rate
 _jinja_env.filters["qty"] = _format_qty
@@ -371,8 +492,21 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
         context["company_logo_data_uri"] = _company_logo_data_uri(company_settings)
     # Letter or A4, from the setting (#807)
     context.setdefault("paper_size", paper_size_of(company_settings))
+    terms = terms_for(company_settings)
+    if "last_line_cut" in context:
+        return template.render(company=company_settings, terms=terms, **context)
+    # a long last line: laid out whole first, then whole or cut at a line
+    # boundary (choose_last_line, W-200, W-201)
+    whole = template.render(
+        company=company_settings, terms=terms, last_line_cut="whole", **context
+    )
+    if "data-last-line" not in whole:
+        return whole
+    how = choose_last_line(whole)
+    if how == "whole":
+        return whole
     return template.render(
-        company=company_settings, terms=terms_for(company_settings), **context
+        company=company_settings, terms=terms, last_line_cut=how, **context
     )
 
 
