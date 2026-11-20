@@ -44,6 +44,12 @@
        print alike. */
     table.activity > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
     table.activity > tbody.doc-tail > tr.doc-end > td { padding: 0; border-bottom: 0; font-size: 10pt; }
+    /* The summary and the IRS text sit in a cell spanning the gift table, but
+       take no part in its column widths (NEW-260): a box of no width of its
+       own, as wide as the cell once the columns are set. Dates, figures and
+       their headings never wrap. */
+    table.activity .closing { width: 0; min-width: 100%; }
+    table.activity > thead > tr > th, table.activity > tbody > tr > td.d, table.activity > tbody > tr > td.r { white-space: nowrap; }
     .summary { margin-left: auto; width: 300px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
     .summary td { padding: 3px 8px; font-size: 10pt; }
     .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
@@ -100,7 +106,7 @@
 
     {# The summary and the IRS statement: in the last row of the last gift
        table, with the last gift (#1047). #}
-    {% set closing %}
+    {% set closing %}<div class="closing">
     <div class="summary">
         <table>
             <tr><td class="label">Total contributions</td><td class="r">{{ st.totals.amount | currency }}</td></tr>
@@ -110,7 +116,7 @@
     </div>
 
     <div class="irs">{{ st.irs_text }}</div>
-    {% endset %}
+    </div>{% endset %}
     <h3>Contributions</h3>
     <table class="activity">
         <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th class="r">Amount</th><th class="r">Goods / services</th><th class="r">Deductible</th><th class="r">Running total</th></tr></thead>
@@ -120,7 +126,7 @@
             {% set ns.running = ns.running + (g.amount | float) %}
             {% if loop.last and not st.in_kind %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
-                <td>{{ g.date | fdate }}</td>
+                <td class="d">{{ g.date | fdate }}</td>
                 <td>{{ g.number or '' }}</td>
                 <td>{{ g.description or '' }}</td>
                 <td class="r">{{ g.amount | currency }}</td>
@@ -143,7 +149,7 @@
         <tbody>
         {% for g in st.in_kind %}
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
-            <tr><td>{{ g.date | fdate }}</td><td>{{ g.number }}</td><td>{% for ln in g.in_kind_lines %}{{ ln.description }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
+            <tr><td class="d">{{ g.date | fdate }}</td><td>{{ g.number }}</td><td>{% for ln in g.in_kind_lines %}{{ ln.description }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
         {% endfor %}
         <tr class="doc-end"><td colspan="3">
     <div style="font-size:8.5pt;color:#555;">Values of non-cash gifts are not stated; the donor determines fair market value.</div>
