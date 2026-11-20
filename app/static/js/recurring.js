@@ -215,6 +215,7 @@ const RecurringPage = {
             data.customer_id = parseInt(form.customer_id.value);
             data.start_date = form.start_date.value;
         }
+        if (!ZeroTotal.ask('Recurring ' + T('Invoice'), RecurringPage.recalc().total)) return;
         if (!(await ClassWarn.ok(form))) return;
         try {
             if (id) { await API.put(`/recurring/${id}`, data); toast('Recurring updated'); }

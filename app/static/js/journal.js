@@ -651,6 +651,7 @@ const JournalPage = {
         e.preventDefault();
         const form = e.target;
         const lines = JournalPage.collectLines();
+        if (!ZeroTotal.ask('Journal Entry', lines.reduce((sum, l) => sum + l.debit + l.credit, 0))) return;
         if (lines.length < 2) { toast('At least 2 lines required', 'error'); return; }
         // an entry already saved (opened from the journal or the register,
         // #388) asks before its changes save, as every edit does (#481)

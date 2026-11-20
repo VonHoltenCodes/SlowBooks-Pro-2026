@@ -220,7 +220,8 @@ const ExpensesPage = {
     },
 
     removeLine(btn) {
-        if (ExpensesPage.rows().length > 1) btn.closest('tr').remove();
+        // the last line goes like any other; a save with none is asked about
+        btn.closest('tr').remove();
         ExpensesPage.recalc();
     },
 
@@ -248,7 +249,6 @@ const ExpensesPage = {
         const leftEl = $('#expense-left');
         leftEl.textContent = formatCurrency(left);
         leftEl.style.color = left === 0 ? '' : 'var(--text-danger)';
-        document.querySelectorAll('#expense-lines .line-remove').forEach(b => { b.disabled = rows.length < 2; });
         return left;
     },
 
@@ -349,6 +349,7 @@ const ExpensesPage = {
                 is_billable: !!row.querySelector('.line-billable')?.checked,
             });
         });
+        if (!ZeroTotal.ask('Expense', lines.reduce((sum, l) => sum + l.amount, 0))) return;
         if (missing) {
             toast(`Choose an account for line ${missing.n}: where should it be recorded?`, 'error');
             missing.sel.focus();

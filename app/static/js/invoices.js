@@ -1100,6 +1100,9 @@ const InvoicesPage = {
             lines,
         };
 
+        // no lines, or lines that add up to $0.00: asked first (ZeroTotal)
+        const zero = ZeroTotal.ask(data.is_pledge ? 'Pledge' : 'Invoice', InvoicesPage.recalc().total, true);
+        if (!zero) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         if (!(await ClassWarn.ok(form, { rows: '#inv-lines tr', cls: 'line-class' }))) return;
         // Past the customer's credit limit? Say so, and let the user decide.
@@ -1117,7 +1120,7 @@ const InvoicesPage = {
                 // a new invoice carries the files attached before its first save (#881)
                 if (!id) body.pending_attachments = PendingFiles.ids();
                 return id ? API.put(`/invoices/${id}`, body) : API.post('/invoices', body);
-            }, InvoicesPage._overLimitOk ? { allow_over_credit_limit: true } : {});
+            }, { ...zero, ...(InvoicesPage._overLimitOk ? { allow_over_credit_limit: true } : {}) });
             if (!saved) return; // $0.00 and the user said no: the form stays open
             if (!id) PendingFiles.saved();
             toastPosted(Terms.text(id ? 'Invoice updated' : 'Invoice created'));

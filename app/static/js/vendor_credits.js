@@ -208,6 +208,7 @@ const VendorCreditsPage = {
     async save(e) {
         e.preventDefault();
         const form = e.target;
+        if (!ZeroTotal.ask('Vendor Credit', VendorCreditsPage.recalc())) return;
         if (VendorCreditsPage.recalc() <= 0) {
             toast('Enter the amount of the credit: a quantity and rate on at least one line.', 'error');
             return;

@@ -1813,6 +1813,32 @@ const TxnWarn = {
     },
 };
 
+// One question for every line form before it saves a document with no lines,
+// or whose lines add up to $0.00: the invoice's own ("This invoice adds up to
+// $0.00. Save it anyway?"), with the kind's name in the company's words. Yes
+// goes on to the save, and what the server will not take that way it refuses
+// in a sentence the form shows; No leaves the form as it stands. A locked
+// form never gets here: its submit is answered by App.lockForms.
+const ZeroTotal = {
+    // the kind as the company says it: 'Sales Receipt' is a nonprofit's 'donation'
+    // (an invoice's name is not swapped: a nonprofit's is a pledge only when
+    // it is flagged one, so the invoice form passes the name as it prints)
+    noun(kind, literal) {
+        return String(!literal && typeof T === 'function' ? T(kind) : kind).toLowerCase();
+    },
+    question(kind, literal) { return `This ${ZeroTotal.noun(kind, literal)} adds up to $0.00. Save it anyway?`; },
+    isZero(total) { return Math.round((Number(total) || 0) * 100) === 0; },
+    // Before a save: null for No, else the flags to send with it: {} when
+    // there is something to save, {allow_zero_total: true} when the person
+    // said yes, which the invoice's and credit memo's server check takes as
+    // its answer, so it is asked once.
+    ask(kind, total, literal) {
+        if (!ZeroTotal.isZero(total)) return {};
+        return confirm(ZeroTotal.question(kind, literal)) ? { allow_zero_total: true } : null;
+    },
+};
+window.ZeroTotal = ZeroTotal;
+
 // A question with two answers named for what they do, over whatever is
 // open: resolves true for `yes`, false for `no` (and for Escape). Focus
 // starts on `no`, the safe answer, and Tab stays between the two.
