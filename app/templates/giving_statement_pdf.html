@@ -128,7 +128,7 @@
             <tr>
                 <td class="d">{{ g.date | fdate }}</td>
                 <td>{{ g.number or '' }}</td>
-                <td>{{ g.description or '' }}</td>
+                <td>{{ g.description | desc }}</td>
                 <td class="r">{{ g.amount | currency }}</td>
                 <td class="r">{% if g.fair_value_amount %}{{ g.fair_value_amount | currency }}{% endif %}</td>
                 <td class="r">{{ g.deductible | currency }}</td>

@@ -80,7 +80,7 @@
         {% for line in co.lines %}
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
-                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description or '' }} <span style="color:#888;font-size:8pt;">({{ line.cost_type }})</span></td>
+                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description | desc }} <span style="color:#888;font-size:8pt;">({{ line.cost_type }})</span></td>
                 <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
                 <td class="r">{{ line.sell_amount | currency }}</td>
             </tr>

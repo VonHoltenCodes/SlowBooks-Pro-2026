@@ -110,7 +110,7 @@
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
                 <td>{{ line.item_no or '' }}</td>
-                <td>{{ line.description or '' }}</td>
+                <td>{{ line.description | desc }}</td>
                 <td class="r">{{ line.scheduled_value | currency }}</td>
                 <td class="r">{{ line.previous | currency }}</td>
                 <td class="r">{{ line.this_period | currency }}</td>
