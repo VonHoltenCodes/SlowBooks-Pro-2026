@@ -91,7 +91,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/apt-cache
-          key: apt-core-${{ steps.image.outputs.version }}-${{ hashFiles('scripts/ci_apt.sh') }}
+          key: apt-core-${{ steps.image.outputs.version }}
       - name: System deps for WeasyPrint + OCR integration tests
         # libjpeg62-turbo was dropped from Ubuntu 24.04 (noble); Pillow
         # ships bundled JPEG support so we don't need a system libjpeg
@@ -270,7 +270,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/apt-cache
-          key: apt-browser-${{ steps.image.outputs.version }}-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}-${{ hashFiles('scripts/ci_apt.sh') }}
+          key: apt-browser-${{ steps.image.outputs.version }}-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}
       - name: Cache Playwright's browsers
         uses: actions/cache@v4
         with:

@@ -43,7 +43,7 @@ printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\nBinar
 sudo apt-get update
 sudo apt-get install -y -f --no-install-recommends "$@"
 if [ -n "$browsers" ]; then
-  # shellcheck disable=SC2086  # a list of browser names
-  python -m playwright install-deps $browsers  # it runs apt through sudo
+  read -r -a names <<<"$browsers"
+  python -m playwright install-deps "${names[@]}" # it runs apt through sudo
 fi
 sudo chown -R "$(id -u):$(id -g)" "$cache"
