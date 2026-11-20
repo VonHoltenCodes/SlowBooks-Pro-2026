@@ -393,7 +393,7 @@ def income_by_customer_report(db: Session, start_date, end_date, basis=None) -> 
             r["total_paid"] += p.unapplied_home
             r["total_balance"] -= p.unapplied_home
 
-    _add_bank_entry_income(db, by_customer, start_date, end_date)
+    _add_direct_income(db, by_customer, start_date, end_date)
     return _income_by_customer_answer(by_customer, start_date, end_date, "accrual")
 
 
@@ -441,24 +441,33 @@ def _add_credit_memos(db: Session, by_customer: dict, start_date, end_date):
         r["total_balance"] -= _q(Decimal(str(cm.balance_remaining or 0)))
 
 
-def _add_bank_entry_income(db: Session, by_customer: dict, start_date, end_date):
-    """Money a customer paid that was recorded straight from the bank (#1065):
-    a register entry, or a bank-feed line added, whose income line names a
-    customer. It never had an invoice, so the report, reading invoices alone,
-    showed it under nobody. Each is that customer's Sales and, being money in
-    the bank already, Paid, on either basis. A voided entry counts for
-    nothing, and a refund out of the account to a customer lowers both."""
+# Money recorded straight to or from a bank or card account, whose lines on
+# an income account the P&L reads on both bases: a register entry or a
+# bank-feed line added (#1065), Make Deposits' lines for money never
+# invoiced (#792, NEW-272), a card charge and an expense.
+DIRECT_INCOME_SOURCES = ("bank_entry", "deposit", "cc_charge", "expense")
+NO_CUSTOMER = "No customer"
+
+
+def _add_direct_income(db: Session, by_customer: dict, start_date, end_date):
+    """Income recorded with no invoice, straight from the bank (#1065,
+    NEW-272): each line of DIRECT_INCOME_SOURCES on an income account, dated
+    in the period, is Sales and, being money in the bank already, Paid, on
+    either basis: under the customer the line names, else on one row for
+    income with no customer, so Sales ties to the P&L's income. A voided
+    entry counts for nothing, and money out of the account (a refund) lowers
+    both."""
     from app.models.accounts import Account, AccountType
     from app.models.transactions import Transaction, TransactionLine
     from app.services.bank_register import voided_transaction_ids
+    from app.services.terminology import terms_from_db
 
     lines = (
         db.query(TransactionLine, Transaction.id)
         .join(Transaction, TransactionLine.transaction_id == Transaction.id)
         .join(Account, TransactionLine.account_id == Account.id)
-        .filter(Transaction.source_type == "bank_entry")
+        .filter(Transaction.source_type.in_(DIRECT_INCOME_SOURCES))
         .filter(Transaction.date >= start_date, Transaction.date <= end_date)
-        .filter(TransactionLine.customer_id.isnot(None))
         .filter(Account.account_type == AccountType.INCOME)
         .all()
     )
@@ -469,14 +478,18 @@ def _add_bank_entry_income(db: Session, by_customer: dict, start_date, end_date)
     names = {
         c.id: c.full_name
         for c in db.query(Customer).filter(
-            Customer.id.in_({line.customer_id for line, _ in live})
+            Customer.id.in_({line.customer_id for line, _ in live} - {None})
         )
     }
+    nobody = terms_from_db(db).text(NO_CUSTOMER)
     for line, _ in live:
         amount = Decimal(str(line.credit or 0)) - Decimal(str(line.debit or 0))
-        r = _income_row(
-            by_customer, line.customer_id, names.get(line.customer_id, "Unknown")
-        )
+        if line.customer_id is None:
+            r = _income_row(by_customer, None, nobody)
+        else:
+            r = _income_row(
+                by_customer, line.customer_id, names.get(line.customer_id, "Unknown")
+            )
         r["total_sales"] += amount
         r["total_paid"] += amount
 
@@ -586,7 +599,7 @@ def _income_by_customer_cash(db: Session, start_date: date, end_date: date) -> d
             r["total_sales"] += amount
             r["total_paid"] += amount
             r["total_balance"] -= amount
-    _add_bank_entry_income(db, by_customer, start_date, end_date)
+    _add_direct_income(db, by_customer, start_date, end_date)
     return _income_by_customer_answer(by_customer, start_date, end_date, "cash")
 
 

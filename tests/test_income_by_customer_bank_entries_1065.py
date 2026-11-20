@@ -5,7 +5,8 @@ The report read invoices alone, so a register deposit (or a bank-feed line
 added) with a customer named on its income line showed under nobody: a
 bookkeeper who recorded sales from the feed saw no revenue by customer. Each
 such entry is that customer's Sales and Paid, on the accrual and the cash
-basis; a voided one counts for nothing, and invoice figures are unchanged."""
+basis; a voided one counts for nothing, and invoice figures are unchanged.
+Since NEW-272 an entry naming no customer is on a "No customer" row."""
 
 from app.models.accounts import Account
 from app.models.contacts import Customer
@@ -80,9 +81,11 @@ def test_a_voided_deposit_counts_for_nothing(client, db_session, seed_accounts):
         assert rows[cid]["total_sales"] == 300.00, (basis, rows)
 
 
-def test_a_deposit_with_no_customer_and_one_to_a_balance_sheet_account_stay_out(
+def test_a_deposit_with_no_customer_is_on_the_no_customer_row(
     client, db_session, seed_accounts
 ):
+    """NEW-272: income with no customer named is on a row of its own, so
+    Sales still ties to the P&L's income (it stayed out before)."""
     bank_id, income_id = _ids(db_session)
     cid = _customer(db_session, "Harbor Cafe")
     r = client.post(
@@ -97,7 +100,8 @@ def test_a_deposit_with_no_customer_and_one_to_a_balance_sheet_account_stay_out(
     )
     assert r.status_code == 201, r.text
     rows, body = _rows(client, "accrual")
-    assert cid not in rows and body["total_sales"] == 0
+    assert cid not in rows and body["total_sales"] == 90.00
+    assert rows[None]["customer_name"] == "No customer"
 
 
 def test_invoice_figures_are_unchanged_beside_a_deposit(
