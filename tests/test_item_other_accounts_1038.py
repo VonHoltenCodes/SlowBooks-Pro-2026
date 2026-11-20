@@ -206,17 +206,28 @@ def test_a_change_to_a_refused_account_is_refused_on_edit(
     assert "Accounts Receivable" in r.json()["detail"]
 
 
-def test_sales_tax_payable_and_equity_are_allowed(client, seed_accounts):
-    for number in ("2200", "3000"):
-        r = client.post(
-            "/api/items",
-            json={
-                "name": f"On {number}",
-                "item_type": "service",
-                "income_account_id": seed_accounts[number].id,
-            },
-        )
-        assert r.status_code == 201, r.text
+def test_equity_is_allowed_and_sales_tax_payable_is_not(client, seed_accounts):
+    """Sales Tax Payable is tied by Books Check to the tax the invoices
+    charge (W-196, tests/test_item_tied_accounts_w196.py walks the chart)."""
+    r = client.post(
+        "/api/items",
+        json={
+            "name": "On 3000",
+            "item_type": "service",
+            "income_account_id": seed_accounts["3000"].id,
+        },
+    )
+    assert r.status_code == 201, r.text
+    r = client.post(
+        "/api/items",
+        json={
+            "name": "On 2200",
+            "item_type": "service",
+            "income_account_id": seed_accounts["2200"].id,
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "Books Check ties it to" in r.json()["detail"]
 
 
 def test_an_imported_item_keeps_its_account_when_edited(

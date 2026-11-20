@@ -71,6 +71,13 @@ test('the account an item already uses stays listed, once', () => {
     assert.ok(numbers(P.withOtherAccounts(ACCOUNTS, ['income'], 9)).includes('2500'));
 });
 
+test('an account Books Check ties is not offered, unless the item already uses it (W-196)', () => {
+    const P = load();
+    const refused = new Set([8, 10]);
+    assert.deepEqual(numbers(P.withOtherAccounts(ACCOUNTS, ['income'], null, refused)), ['4000', '1700']);
+    assert.deepEqual(numbers(P.withOtherAccounts(ACCOUNTS, ['income'], 8, refused)), ['2450', '4000', '1700']);
+});
+
 test('the income options group income first, then Other accounts', () => {
     const P = load();
     const html = P.incomeOptions(P.withOtherAccounts(ACCOUNTS, ['income']), 8);
@@ -81,8 +88,10 @@ test('the income options group income first, then Other accounts', () => {
 
 test('the item form uses them for both pickers', () => {
     const src = fs.readFileSync(path.join(JS, 'items.js'), 'utf8');
-    assert.ok(src.includes("ItemsPage.withOtherAccounts(accounts, ['income'], item.income_account_id)"));
-    assert.ok(src.includes("ItemsPage.withOtherAccounts(accounts, ['expense','cogs'], item.expense_account_id)"));
+    assert.ok(src.includes("ItemsPage.withOtherAccounts(accounts, ['income'], item.income_account_id, refused)"));
+    assert.ok(src.includes("ItemsPage.withOtherAccounts(accounts, ['expense','cogs'], item.expense_account_id, refused)"));
+    // the server's list of the accounts Books Check ties (W-196)
+    assert.ok(src.includes("API.get('/items/refused-accounts')"));
     assert.ok(src.includes('ItemsPage.incomeOptions(incomeAccts, item.income_account_id)'));
     assert.ok(src.includes('PurchaseAccounts.options(expenseAccts, item.expense_account_id)'));
 });

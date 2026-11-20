@@ -84,15 +84,79 @@ def _has_ledger_match(db: Session, line: BankTransaction) -> bool:
     )
 
 
-def _matches(rule_type: str, pattern: str, payee: str) -> bool:
+# A rule's payee pattern (#1064, NEW-259): `*` stands for any run of
+# characters, as people type it ("T-MOBILE*"), and `\*` is a star itself,
+# the one banks print ("SQ \*JOES"); `\\` is a backslash before a star.
+# Every other character, a backslash before anything else included, is
+# itself. A rule made before the wildcard had its stars escaped by the
+# migration (c1064a5e7b2d), so it files exactly what it filed before.
+def pattern_parts(pattern: str | None) -> list[str | None]:
+    """The pattern as text runs and wildcards (None), in order."""
+    parts: list[str | None] = []
+    text: list[str] = []
+    chars = (pattern or "").strip()
+    i = 0
+    while i < len(chars):
+        c = chars[i]
+        if c == "\\" and i + 1 < len(chars) and chars[i + 1] in "*\\":
+            text.append(chars[i + 1])
+            i += 2
+            continue
+        if c == "*":
+            if text:
+                parts.append("".join(text))
+                text = []
+            if not parts or parts[-1] is not None:
+                parts.append(None)
+        else:
+            text.append(c)
+        i += 1
+    if text:
+        parts.append("".join(text))
+    return parts
+
+
+def escape_pattern(text: str | None) -> str:
+    """A pattern that matches `text` as it is written, every star in it a
+    star itself: what a pattern made from a payee or a vendor's name is."""
+    text = text or ""
+    out = []
+    for i, c in enumerate(text):
+        if c == "*":
+            out.append("\\*")
+        elif c == "\\" and i + 1 < len(text) and text[i + 1] in "*\\":
+            out.append("\\\\")
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+PATTERN_EMPTY = (
+    "A payee pattern needs some of the text the bank prints; a pattern of "
+    "only * or spaces would match nothing. To match a star the bank prints, "
+    "type \\*."
+)
+
+
+def pattern_problem(pattern: str | None) -> str | None:
+    """The sentence when a pattern has no text to match, else None."""
+    if any(p is not None and p.strip() for p in pattern_parts(pattern)):
+        return None
+    return PATTERN_EMPTY
+
+
+def _matches(rule_type: str, pattern: str, payee: str, literal: bool = False) -> bool:
     """`payee` is lower-cased. A `*` in the pattern stands for any run of
-    characters, as people type it ("T-MOBILE*"); without one the pattern is
-    plain text."""
-    pattern = (pattern or "").strip().lower()
-    if not pattern.strip("*").strip():
+    characters and `\\*` is a star itself (pattern_parts). `literal` reads
+    the whole pattern as plain text: a vendor's own name, whose star is the
+    one in the name."""
+    if literal:
+        pattern = escape_pattern((pattern or "").strip())
+    if pattern_problem(pattern):
         return False
-    if "*" in pattern:
-        rx = ".*".join(re.escape(part) for part in pattern.split("*"))
+    parts = [p if p is None else p.lower() for p in pattern_parts(pattern)]
+    if None in parts:
+        rx = "".join(".*" if p is None else re.escape(p) for p in parts)
         if rule_type == "exact":
             return re.fullmatch(rx, payee, re.S) is not None
         if rule_type == "starts_with":
@@ -100,12 +164,13 @@ def _matches(rule_type: str, pattern: str, payee: str) -> bool:
         if rule_type == "contains":
             return re.search(rx, payee, re.S) is not None
         return False
+    text = "".join(parts)
     if rule_type == "contains":
-        return pattern in payee
+        return text in payee
     if rule_type == "starts_with":
-        return payee.startswith(pattern)
+        return payee.startswith(text)
     if rule_type == "exact":
-        return payee == pattern
+        return payee == text
     return False
 
 
@@ -116,7 +181,9 @@ def _hit(rule, payee: str, vendor_names: dict | None = None) -> bool:
     if _matches(rule.rule_type, rule.pattern, payee):
         return True
     if rule.vendor_id and vendor_names:
-        return _matches(rule.rule_type, vendor_names.get(rule.vendor_id), payee)
+        return _matches(
+            rule.rule_type, vendor_names.get(rule.vendor_id), payee, literal=True
+        )
     return False
 
 
