@@ -31,8 +31,9 @@
        print alike. */
     table.items > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
     table.items > tbody.doc-tail > tr.doc-end > td { padding: 8px 0 0; border-bottom: 0; }
-    .summary { margin-left: auto; width: 300px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
-    .summary table { width: 100%; }
+    .summary { margin-left: auto; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
+    /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .summary table { width: 300px; margin-left: auto; }
     .summary td { padding: 3px 8px; font-size: 10pt; white-space: nowrap; }
     .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
     .summary .label { font-weight: 700; color: #4a4a6a; }
@@ -112,7 +113,7 @@
             <tr{% if (loop.index + (deposit.payments | length)) is even %} class="alt"{% endif %}>
                 <td class="nw">{{ deposit.date | fdate }}</td>
                 <td class="nw">{{ o.received_from }}</td>
-                <td class="desc">{{ o.account_name }}{% if o.memo %} ({{ o.memo }}){% endif %}</td>
+                <td class="desc">{{ o.account_name }}{% if o.memo %} ({{ o.memo | desc }}){% endif %}</td>
                 <td class="nw">{{ o.check_number }}</td>
                 <td class="nw">{{ o.method }}</td>
                 <td class="r">{{ o.amount | currency }}</td>
