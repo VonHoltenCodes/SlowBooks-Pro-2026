@@ -1835,7 +1835,10 @@ class PickerApi:
             time.sleep(0.15)
             try:
                 if window is not None:
-                    window.set_title(WINDOW_TITLE)  # no company open (W-206)
+                    try:
+                        window.set_title(WINDOW_TITLE)  # no company open (W-206)
+                    except Exception:
+                        pass
                     window.load_html(PICKER_HTML)
             except Exception:
                 pass  # the picker is a convenience; the app is still running
@@ -3771,9 +3774,12 @@ def main() -> int:
     # currency rate): the frozen macOS build's OpenSSL looks for its CAs in
     # the CI builder's folder; point it at the bundled certifi file instead
     # (NEW-265). The server child inherits the variable.
-    from app.tls_trust import use_bundled_ca_if_needed
+    try:
+        from app.tls_trust import use_bundled_ca_if_needed
 
-    use_bundled_ca_if_needed()
+        use_bundled_ca_if_needed()
+    except ImportError:
+        pass  # a source run from elsewhere imports app later, after its path
 
     # Not a user flag — the frozen server child (see start_server) and
     # argparse must never meet, so handle it before parsing.

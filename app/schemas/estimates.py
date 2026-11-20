@@ -347,9 +347,7 @@ class EstimateAccept(StrictModel):
 
 
 class EstimateLost(StrictModel):
-    # its length is checked in words by the route (W-202), as a To review
-    # memo's is (W-191)
-    reason: Optional[str] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class EstimateVoid(StrictModel):

@@ -98,15 +98,23 @@ test('the relay cannot be reached: said in words', async () => {
     const f = fixture({ '/switchboard/status': { ...CONNECTED, state: 'unreachable' } });
     await f.page.loadSwitchboard();
     assert.equal(state(f.panel.innerHTML), 'The relay cannot be reached');
-    // and a Connect that fails to reach it says so where the button was
-    const err = new Error('The relay at https://relay.sbplive.com did not answer: timed out.');
-    err.status = 502;
+    // and a Connect that fails to reach it says the server's sentence, kept
+    // through the panel's refresh, with Connect offered again (W-208): no
+    // link was made, so the state is Not connected
+    const sentence = 'The relay could not be reached. SlowBooks Pro is working normally; try again in a few minutes.';
+    const err = new Error(sentence);
+    err.status = 503;
     const g = fixture({ '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true }, 'POST /switchboard/connect': err });
     await g.page.loadSwitchboard();
     await g.page.connectClaude();
-    assert.equal(state(g.panel.innerHTML), 'The relay cannot be reached');
-    assert.ok(g.panel.innerHTML.includes('did not answer'));
+    assert.equal(state(g.panel.innerHTML), 'Not connected');
+    assert.ok(g.panel.innerHTML.includes(sentence));
     assert.ok(g.panel.innerHTML.includes('role="alert"'));
+    assert.ok(g.panel.innerHTML.includes('id="claude-connect"'));
+    await g.page.loadSwitchboard();
+    assert.ok(g.panel.innerHTML.includes(sentence));
+    g.page.dismissClaudeError();
+    assert.ok(!g.panel.innerHTML.includes(sentence));
 });
 
 test('a connection made in another company: whose it is, nothing to press', async () => {
@@ -148,9 +156,20 @@ test('disconnect: the confirm says the relay record is deleted', async () => {
 
 test('disconnect with the relay out of reach: the fallback and the name stay until dismissed', async () => {
     const sentence = 'This computer is unlinked here, but the relay could not be reached, so it still holds a record under relay name ztnqj8djvg. Send that name to support@slowbookspro.com to have it removed.';
-    const f = fixture({
-        '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true },
+    // the name comes from the server's status, which keeps it (NEW-269)
+    const answers = {
         'POST /switchboard/disconnect': { unlinked: false, revoked: true, deleted: false, devices_left: 0, slug: 'ztnqj8djvg', sentence },
+        'POST /switchboard/dismiss': { pending: [] },
+    };
+    const f = fixture(answers);
+    Object.defineProperty(answers, '/switchboard/status', {
+        get: () => ({
+            state: 'not_connected', linked: false, can_manage: true,
+            pending: [{
+                slug: 'ztnqj8djvg', sentence,
+                dismissed: f.sent.some(([m, p]) => m === 'POST' && p === '/switchboard/dismiss'),
+            }],
+        }),
     });
     await f.page.disconnectClaude();
     const html = f.panel.innerHTML;
@@ -160,6 +179,7 @@ test('disconnect with the relay out of reach: the fallback and the name stay unt
     assert.ok(buttons(html).includes('Dismiss'));
     await f.page.loadSwitchboard();  // asked again: still there
     assert.match(f.panel.innerHTML, /claude-relay-fallback-name/);
-    f.page.dismissClaudeFallback();
+    await f.page.dismissClaudeFallback();
+    assert.deepEqual(f.sent.at(-2), ['POST', '/switchboard/dismiss']);
     assert.doesNotMatch(f.panel.innerHTML, /claude-relay-fallback/);
 });
