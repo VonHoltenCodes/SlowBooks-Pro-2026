@@ -586,7 +586,7 @@ def _send_failed(what: str, entity_type: str, entity_id, db, ran=True) -> str:
     why = sentence_for_last_send(db, entity_type, entity_id) if ran else ""
     if why:
         return f"{what} could not be sent. {why}"
-    return f"{what} could not be sent (the email log has the reason)."
+    return f"{what} could not be sent."
 
 
 def _latest_log_id(db: Session, entity_type: str, entity_id: int):
@@ -1114,6 +1114,6 @@ def run_statements(db: Session, force: bool = False) -> dict:
         else:
             failed += 1
             # the month's row's sentence, the reason a single send gives
-            # (W-211), not a fixed "the email log has the reason"
+            # (W-211), not a pointer at a log
             errors.append(f"{customer.name}: {row.error}")
     return {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}

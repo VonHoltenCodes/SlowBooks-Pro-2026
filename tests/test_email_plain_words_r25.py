@@ -41,7 +41,14 @@ FAILURES = {
 }
 
 # Python's wrapping, any piece of which in an answer is W-216
-RAW = ("b'", 'b"', "', '", "{'", "('", "(5", "(4", "\\n", "5.7.", "5.1.1")
+RAW = ("b'", 'b"', "', '", "{'", "('", "(5", "(4", "\\n")
+# a refusal with no sentence of its own gives the server's words, as plain
+# text, after the stage (round 26, NEW-276); every other answer is the
+# sentence alone
+WORDS = {
+    "response-554": "The mail server refused the message: 554 5.7.1 Message rejected.",
+    "data-550": "The mail server refused the message: 550 5.7.1 Content refused.",
+}
 
 
 def _fake_smtp(error):
@@ -81,9 +88,13 @@ def _settings(db):
     _configure(db, 587, secrets.token_urlsafe(12))
 
 
-def _plain(text):
+def _plain(text, name=None):
     for piece in RAW:
         assert piece not in text, (piece, text)
+    if name in WORDS:
+        assert WORDS[name] in text, text
+    elif name is not None:
+        assert "5.7." not in text and "5.1.1" not in text, text
 
 
 @pytest.mark.parametrize("name", sorted(FAILURES))
@@ -94,7 +105,7 @@ def test_test_email_says_one_plain_sentence(client, db_session, monkeypatch, nam
     assert r.status_code == 502, r.text
     detail = r.json()["detail"]
     assert detail.startswith("Test email failed to send. The ")
-    _plain(detail)
+    _plain(detail, name)
     if name == "sender-530":
         assert detail == (
             "Test email failed to send. The mail server wants a sign-in, and "
@@ -119,7 +130,7 @@ def test_a_single_send_says_one_plain_sentence(
         json={"recipient": "a@b.com", "subject": "Invoice", "message": ""},
     )
     assert r.status_code == 502, r.text
-    _plain(r.json()["detail"])
+    _plain(r.json()["detail"], name)
 
 
 @pytest.mark.parametrize("name", sorted(FAILURES))
@@ -149,10 +160,10 @@ def test_batch_sends_say_one_plain_sentence(
     assert statement.startswith("Probe Co: the statement could not be sent")
     assert letter.startswith("Probe Co: the letter could not be sent")
     for text in (statement, letter):
-        _plain(text)
+        _plain(text, name)
     # and the list's sentence for every row
     for row in client.get("/api/email-log?status=failed").json()["rows"]:
-        _plain(row["failure"])
+        _plain(row["failure"], name)
 
 
 def test_the_server_reply_is_read_back_without_python_wrapping():

@@ -290,7 +290,7 @@ def send_email(
         part.add_header("Content-Disposition", "attachment", filename=attachment_name)
         msg.attach(part)
 
-    from app.services.email_errors import MailTLSError
+    from app.services.email_errors import MailTLSError, stored_text
 
     server = None
     try:
@@ -345,7 +345,9 @@ def send_email(
             bcc=log_bcc,
             subject=subject,
             status="failed",
-            error_message=str(e),
+            # the server's own words as plain text, the stage tagged and any
+            # echo of the password scrubbed (NEW-275), never str(e)
+            error_message=stored_text(e, hidden=[password], user=user),
         )
         db.add(log)
         db.commit()

@@ -1068,8 +1068,7 @@ def batch_email_statements(db: Session = Depends(get_db)):
             errors.append(
                 f"{customer.name}: the statement could not be sent. {why}".rstrip()
                 if why
-                else f"{customer.name}: the statement could not be sent (the "
-                "email log has the reason)"
+                else f"{customer.name}: the statement could not be sent."
             )
 
     return {"sent": sent, "failed": failed, "errors": errors}
@@ -1168,8 +1167,7 @@ def collection_letters(
                     errors.append(
                         f"{customer.name}: the letter could not be sent. {why}"
                         if why
-                        else f"{customer.name}: the letter could not be sent "
-                        "(the email log has the reason)"
+                        else f"{customer.name}: the letter could not be sent."
                     )
         except Exception:
             logger.exception(
