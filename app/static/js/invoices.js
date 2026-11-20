@@ -998,8 +998,8 @@ const InvoicesPage = {
 
     removeLine(idx) {
         const row = $(`[data-line="${idx}"]`);
-        if (row) row.remove();
-        InvoicesPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => InvoicesPage.recalc())) InvoicesPage.recalc();
     },
 
     itemSelected(idx) {

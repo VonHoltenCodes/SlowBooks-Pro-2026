@@ -228,9 +228,9 @@ const DepositsPage = {
     },
 
     removeOtherLine(btn) {
-        const row = btn && btn.closest('tr');
-        if (row) row.remove();
-        DepositsPage.recalcAll();
+        // the shared Remove line: the lines left are named by their place
+        // again, and the keyboard stays on the form
+        if (!LineOrder.removeLine(btn, () => DepositsPage.recalcAll())) DepositsPage.recalcAll();
     },
 
     // what the rows of one grid hold, as buildOtherLines reads them

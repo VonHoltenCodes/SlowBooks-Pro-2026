@@ -195,8 +195,8 @@ const CreditMemosPage = {
 
     removeLine(idx) {
         const row = $(`[data-cmline="${idx}"]`);
-        if (row) row.remove();
-        CreditMemosPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => CreditMemosPage.recalc())) CreditMemosPage.recalc();
     },
 
     itemSelected(idx) {
