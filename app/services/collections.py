@@ -1113,8 +1113,7 @@ def run_statements(db: Session, force: bool = False) -> dict:
             sent += 1
         else:
             failed += 1
-            errors.append(
-                f"{customer.name}: the statement could not be sent (the email "
-                "log has the reason)"
-            )
+            # the month's row's sentence, the reason a single send gives
+            # (W-211), not a fixed "the email log has the reason"
+            errors.append(f"{customer.name}: {row.error}")
     return {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}
