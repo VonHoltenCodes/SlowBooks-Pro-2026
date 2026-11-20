@@ -82,16 +82,25 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements*.txt
+      # apt's downloads are cached per runner image (scripts/ci_apt.sh): the
+      # Ubuntu mirror is sometimes slow enough to hold this step for minutes
+      - name: The runner image's version, for the apt cache
+        id: image
+        run: echo "version=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Cache apt's downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-cache
+          key: apt-core-${{ steps.image.outputs.version }}-${{ hashFiles('scripts/ci_apt.sh') }}
       - name: System deps for WeasyPrint + OCR integration tests
+        # libjpeg62-turbo was dropped from Ubuntu 24.04 (noble); Pillow
+        # ships bundled JPEG support so we don't need a system libjpeg
+        # for the runtime path. The remaining packages are what
+        # WeasyPrint's cairo/pango stack pulls in.
+        # tesseract-ocr + poppler-utils are needed for the integration
+        # tests in tests/test_ocr_integration.py (real OCR pipeline).
         run: |
-          sudo apt-get update
-          # libjpeg62-turbo was dropped from Ubuntu 24.04 (noble); Pillow
-          # ships bundled JPEG support so we don't need a system libjpeg
-          # for the runtime path. The remaining packages are what
-          # WeasyPrint's cairo/pango stack pulls in.
-          # tesseract-ocr + poppler-utils are needed for the integration
-          # tests in tests/test_ocr_integration.py (real OCR pipeline).
-          sudo apt-get install -y --no-install-recommends \
+          scripts/ci_apt.sh "$HOME/apt-cache" \
             libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
             libgdk-pixbuf-2.0-0 libffi-dev \
             libxml2 libxslt1.1 \
@@ -249,41 +258,37 @@ jobs:
           echo "engines=$engines" >> "$GITHUB_OUTPUT"
           echo "key=${engines// /-}" >> "$GITHUB_OUTPUT"
           echo "engines: $engines"
-      # apt's downloads are kept and cached: WebKit's system libraries are
-      # 126 MB from the Ubuntu mirror, which took 7 and 16 minutes on two of
-      # the four shards of this job's first run (300 kB/s) and under a
-      # minute on the others. The cache is restored from GitHub instead.
-      - name: Keep apt's downloads where the cache can find them
-        run: |
-          mkdir -p "$HOME/apt-cache/partial"
-          printf 'Dir::Cache::Archives "%s/apt-cache";\nAPT::Keep-Downloaded-Packages "true";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' "$HOME" \
-            | sudo tee /etc/apt/apt.conf.d/99ci-keep-debs
+      # apt's downloads are cached per runner image (scripts/ci_apt.sh):
+      # WebKit's system libraries are 126 MB from the Ubuntu mirror, which
+      # ran at 300 kB/s on some runners (7 and 16 minutes on two shards of
+      # this job's first run, under one on the others). With the cache, the
+      # packages are installed with dpkg and the mirror is never asked.
+      - name: The runner image's version, for the apt cache
+        id: image
+        run: echo "version=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Cache apt's downloads
         uses: actions/cache@v4
         with:
           path: ~/apt-cache
-          key: apt-browser-ubuntu-24.04-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}
+          key: apt-browser-${{ steps.image.outputs.version }}-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}-${{ hashFiles('scripts/ci_apt.sh') }}
       - name: Cache Playwright's browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: ms-playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}
-      - name: System deps for WeasyPrint
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
-            libgdk-pixbuf-2.0-0 libffi-dev \
-            libxml2 libxslt1.1 \
-            tesseract-ocr poppler-utils
       - name: Install deps and Playwright
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt "playwright==$PLAYWRIGHT_VERSION"
-      - name: Install the browsers and their system libraries
-        run: python -m playwright install --with-deps ${{ steps.engines.outputs.engines }}
-      - name: Let the cache read apt's downloads
-        run: sudo chown -R "$(id -u):$(id -g)" "$HOME/apt-cache"
+      - name: System deps for WeasyPrint and the browsers
+        run: |
+          scripts/ci_apt.sh "$HOME/apt-cache" --playwright "${{ steps.engines.outputs.engines }}" \
+            libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 libffi-dev \
+            libxml2 libxslt1.1 \
+            tesseract-ocr poppler-utils
+      - name: Install the browsers
+        run: python -m playwright install ${{ steps.engines.outputs.engines }}
       - name: This shard's browser modules
         run: |
           python scripts/ci_shards.py list --group browser --platform linux \
