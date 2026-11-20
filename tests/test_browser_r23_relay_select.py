@@ -116,6 +116,11 @@ def test_connect_with_the_relay_away_keeps_its_sentence_until_dismissed(
         page.evaluate("SettingsPage.loadSwitchboard()")
         page.wait_for_timeout(300)
         assert page.is_visible("#claude-relay-error")
+        # each Dismiss names what it dismisses (round 24's note)
+        assert (
+            page.get_attribute("#claude-relay-error-dismiss", "aria-label")
+            == "Dismiss the relay message"
+        )
         page.click("#claude-relay-error-dismiss")
         assert page.locator("#claude-relay-error").count() == 0
         assert not errors, errors
@@ -134,6 +139,12 @@ def test_a_relay_name_left_by_a_disconnect_shows_after_a_reload(relay, client, e
             _connections(page)
             page.wait_for_selector("#claude-relay-fallback")
             assert relay.slug in page.inner_text("#claude-relay-fallback")
+            said = page.inner_text("#claude-relay-fallback")
+            assert "will keep trying to remove that record itself" in said
+            assert "Send that name" not in said
+            assert page.get_by_role(
+                "button", name="Dismiss the removal notice", exact=True
+            ).is_visible()
             page.click("#claude-relay-fallback-dismiss")
             page.wait_for_function(
                 "() => !document.getElementById('claude-relay-fallback')"

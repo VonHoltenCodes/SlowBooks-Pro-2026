@@ -333,6 +333,18 @@ def _add_pending(record: dict) -> None:
     _start_retry()
 
 
+def pending_sentence(slug: str) -> str:
+    """The notice for a deletion the relay has not heard yet. SlowBooks Pro
+    keeps trying it by itself (NEW-269), so the name is there in case
+    support is ever needed, not as a step for the person to take."""
+    return (
+        "This computer is unlinked here, but the relay could not be reached, "
+        f"so it still holds a record under relay name {slug or '(unknown)'}. "
+        "SlowBooks Pro will keep trying to remove that record itself; the name "
+        f"is here in case you ever need to ask {account.SUPPORT} about it."
+    )
+
+
 def pending_notices() -> list:
     """The relay names still held on the relay, for the panel (never the
     credential)."""
@@ -341,7 +353,7 @@ def pending_notices() -> list:
     return [
         {
             "slug": i["slug"],
-            "sentence": account.unreachable_sentence(i["slug"]),
+            "sentence": pending_sentence(i["slug"]),
             "dismissed": bool(i.get("dismissed")),
         }
         for i in items
@@ -375,7 +387,9 @@ def _tell_relay_forget(item: dict) -> bool:
         return False
     if 200 <= code < 300 or code == 401:
         return True
-    logger.info("the relay answered %s to a pending deletion; tried again later", code)
+    logger.warning(
+        "the relay answered %s to a pending deletion; it is tried again later", code
+    )
     return False
 
 
@@ -388,7 +402,14 @@ def retry_pending_once() -> int:
         left = [i for i in _load_pending() if i["slug"] not in done]
         _save_pending(left)
     if done:
-        logger.info("the relay deleted %d record(s) left by a disconnect", len(done))
+        # WARNING, not INFO: the served app sets no handler of its own, so
+        # only WARNING and up reach launcher.log, and support reads this line
+        # there (W-212). The relay names only: no credential, no token.
+        logger.warning(
+            "the relay deleted %d record(s) left by a disconnect (relay name %s)",
+            len(done),
+            ", ".join(sorted(done)),
+        )
     return len(left)
 
 
@@ -862,5 +883,6 @@ def disconnect(db) -> dict:
         "deleted": deleted,
         "devices_left": left,
         "slug": record["slug"],
-        "sentence": done.sentence(),
+        # kept for the retry: the notice says so (not "send it to support")
+        "sentence": pending_sentence(record["slug"]) if not told else done.sentence(),
     }

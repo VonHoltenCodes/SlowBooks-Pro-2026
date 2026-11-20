@@ -671,8 +671,9 @@ def test_disconnect_with_the_relay_out_of_reach_gives_the_fallback(
     assert got["slug"] == relay.slug and got["deleted"] is False
     assert got["sentence"] == (
         "This computer is unlinked here, but the relay could not be reached, so it "
-        f"still holds a record under relay name {relay.slug}. Send that name to "
-        "support@slowbookspro.com to have it removed."
+        f"still holds a record under relay name {relay.slug}. SlowBooks Pro will "
+        "keep trying to remove that record itself; the name is here in case you "
+        "ever need to ask support@slowbookspro.com about it."
     )
     assert not link.link_path().exists()
     assert record["credential"] not in r.text
