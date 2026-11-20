@@ -1024,8 +1024,17 @@ def _income_by_customer_columns(data: dict, t) -> list[tuple[str, str]]:
     ):
         cols.append(("Not income", "total_other"))
     cols += [("Sales Tax", "total_tax"), ("Paid", "total_paid")]
-    cols.append(("Balance", "total_balance"))
+    # on the cash basis Balance is what is owed now, not part of the row's
+    # sum (W-204): its heading says so
+    cols.append((data.get("balance_heading") or "Balance", "total_balance"))
     return cols
+
+
+def _terms_text(t, sentence: str) -> str:
+    """A sentence in the company's words (a nonprofit's "pledges" for
+    invoices) when `t` is the company's Terms, else as written."""
+    text = getattr(t, "text", None)
+    return text(sentence) if callable(text) else sentence
 
 
 def income_by_customer_title(t=None) -> str:
@@ -1065,6 +1074,8 @@ def income_by_customer_sections(data: dict, t=None) -> list[dict]:
             + (" (cash basis)" if data.get("basis") == "cash" else ""),
             "columns": [head for head, _key in cols],
             "rows": rows,
+            # which sum a row holds on its basis (W-204)
+            "note": _terms_text(t, data.get("row_rule") or ""),
         }
     ]
 
@@ -1076,7 +1087,13 @@ def income_by_customer_csv(data: dict, company: str, t=None) -> str:
     cols = _income_by_customer_columns(data, t)
     out = io.StringIO()
     w = _SafeWriter(out)
-    _preamble(w, company, income_by_customer_title(t), _range(data))
+    w.writerow(["Company", company])
+    w.writerow(["Report", income_by_customer_title(t)])
+    w.writerow(["Period", _range(data)])
+    # which sum a row holds on its basis (W-204), as the screen and PDF say
+    if data.get("row_rule"):
+        w.writerow(["Note", _terms_text(t, data["row_rule"])])
+    w.writerow([])
     w.writerow([head for head, _key in cols])
 
     def cells(r: dict, name: str, count) -> list:

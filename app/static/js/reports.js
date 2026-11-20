@@ -2336,7 +2336,10 @@ const ReportsPage = {
             // to a balance-sheet account (a security deposit) is Not income,
             // a column shown only when the period has one (W-195). Paid
             // includes money not yet applied to an invoice, and Balance is
-            // net of it. A customer's name opens the customer's page (R9)
+            // net of it. The server's row_rule says which sum a row holds
+            // on its basis (W-204: on cash, Sales + Not income + Sales Tax =
+            // Paid, and the Balance owed now stands apart). A customer's
+            // name opens the customer's page (R9)
             const other = !!data.total_other || data.items.some(i => i.total_other);
             const otherCell = (v) => other ? `<td class="amount">${formatCurrency(v || 0)}</td>` : '';
             let rows = data.items.map(i =>
@@ -2366,9 +2369,10 @@ const ReportsPage = {
             return `${ReportsPage._exportButtons('income-by-customer', qs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. ${hint(escapeHtml(Terms.text('Sales is what was sold, before tax, and ties to the income on the Profit & Loss for the same dates. On the accrual basis a credit memo takes its credit off Sales on its date.')), T('Income by Customer'))}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th>${otherHead}<th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th>${otherHead}<th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">${escapeHtml(data.balance_heading || 'Balance')}</th></tr></thead>
                     <tbody>${rows || `<tr><td colspan="${cols}" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>`}</tbody>
-                </table></div>`;
+                </table></div>
+                ${data.row_rule ? `<p class="report-note" style="margin-top:8px; color:var(--gray-500);">${escapeHtml(Terms.text(data.row_rule))}</p>` : ''}`;
         }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null, ...basisOpts.params }, prefill, toolbar: basisOpts.toolbar });
     },
 

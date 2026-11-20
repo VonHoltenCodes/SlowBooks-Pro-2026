@@ -193,9 +193,12 @@ def recognized_sales(db: Session, start_date, end_date) -> dict[int, dict]:
     cash-basis Profit and Loss reads, so a sales report built on them
     counts a sale when it is paid and in the proportion paid, and ties to
     that P&L. `income` is the lines on income accounts, `tax` the lines on
-    Sales Tax Payable."""
+    Sales Tax Payable, `other` the lines on the accounts an item that posts
+    to no income account sells through (a security deposit's liability,
+    W-205): billed and paid, but not income."""
     from app.models.accounts import Account
     from app.services.control_accounts import MissingControlAccount
+    from app.services.sales_income import non_income_accounts
 
     try:
         from app.services.accounting import get_sales_tax_account_id
@@ -203,6 +206,7 @@ def recognized_sales(db: Session, start_date, end_date) -> dict[int, dict]:
         tax_id = get_sales_tax_account_id(db)
     except MissingControlAccount:
         tax_id = None
+    other_ids = non_income_accounts(db) - {tax_id}
     rows = (
         db.query(
             TransactionLine.recognizes_invoice_id,
@@ -229,10 +233,13 @@ def recognized_sales(db: Session, start_date, end_date) -> dict[int, dict]:
             key = "income"
         elif tax_id is not None and account_id == tax_id:
             key = "tax"
+        elif account_id in other_ids:
+            key = "other"
         else:
             continue
         entry = out.setdefault(
-            invoice_id, {"income": Decimal("0"), "tax": Decimal("0")}
+            invoice_id,
+            {"income": Decimal("0"), "tax": Decimal("0"), "other": Decimal("0")},
         )
         entry[key] += amount
     return out
