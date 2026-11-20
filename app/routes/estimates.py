@@ -95,7 +95,7 @@ def _refuse_void(estimate: Estimate, doing: str) -> None:
         raise HTTPException(
             status_code=409,
             detail={
-                "code": "estimate_void",
+                "code": "voided_estimate",
                 "message": (
                     f"Estimate {estimate.estimate_number} is void; a void "
                     f"estimate can't be {doing}."
@@ -623,7 +623,7 @@ def update_estimate(
         raise HTTPException(
             status_code=409,
             detail={
-                "code": "void_by_void",
+                "code": "use_the_void_route",
                 "message": (
                     "Void an estimate with Void (POST /api/estimates/{id}/void), "
                     "which keeps who voided it and why."

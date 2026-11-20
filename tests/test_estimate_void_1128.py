@@ -100,7 +100,7 @@ def test_a_void_estimate_is_never_changed_again(client, seed_customer):
     }
     for doing, r in tries.items():
         assert r.status_code == 409, (doing, r.text)
-        assert r.json()["detail"]["code"] == "estimate_void"
+        assert r.json()["detail"]["code"] == "voided_estimate"
         assert _message(r).endswith(f"a void estimate can't be {doing}."), _message(r)
 
 
