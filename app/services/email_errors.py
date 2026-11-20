@@ -17,7 +17,9 @@
 # ============================================================================
 
 import ast
+import re
 import smtplib
+import ssl
 
 
 def _clean_reason(error_text: str) -> str:
@@ -181,12 +183,119 @@ def _classify_text(text: str):
     return _by_code(code)
 
 
+# -- the secure connection to the mail server ---------------------------------
+#
+# send_email() verifies the mail server's certificate on every TLS send (no
+# setting turns it off). A failure there is stored on the log row as one of
+# the short texts below — never OpenSSL's own words — and read back into
+# the sentence a bookkeeper sees. Each says nothing was sent and the
+# password was not given: the check runs before LOGIN, so both are true.
+
+
+class MailTLSError(Exception):
+    """The secure connection was asked for and could not be set up or
+    verified; str() is the text stored on the email log row."""
+
+
+_CERT_TEXT = "Certificate not verified ({host}): {reason}"
+_TLS_TEXT = "Secure connection failed ({host})"
+_NO_STARTTLS_TEXT = "No secure connection offered ({host})"
+_TLS_STORED = re.compile(
+    r"^(Certificate not verified|Secure connection failed|No secure connection "
+    r"offered) \((.*?)\)(?:: (.+))?$",
+    re.S,
+)
+
+# OpenSSL's X509_V_ERR_* codes for the reasons people actually meet
+_ISSUER = "certificate is from an issuer this computer does not trust"
+_CERT_REASONS = {
+    62: "certificate is for another name",  # HOSTNAME_MISMATCH
+    18: "certificate is self-signed",  # DEPTH_ZERO_SELF_SIGNED_CERT
+    19: "certificate is self-signed",  # SELF_SIGNED_CERT_IN_CHAIN
+    10: "certificate has expired",  # CERT_HAS_EXPIRED
+    9: "certificate is not valid yet",  # CERT_NOT_YET_VALID
+    23: "certificate has been revoked",  # CERT_REVOKED
+    2: _ISSUER,  # UNABLE_TO_GET_ISSUER_CERT
+    20: _ISSUER,  # UNABLE_TO_GET_ISSUER_CERT_LOCALLY
+    21: _ISSUER,  # UNABLE_TO_VERIFY_LEAF_SIGNATURE
+}
+_CERT_UNVERIFIED = "certificate could not be verified"
+
+_CERT_SENTENCE = (
+    "SlowBooks Pro could not verify the mail server's security certificate, "
+    "so nothing was sent and your password was not given to it. Check the "
+    "server name under Settings → Email (SMTP), or ask your mail provider. "
+    "({host}: {reason})"
+)
+_TLS_SENTENCE = (
+    "SlowBooks Pro could not set up a secure connection to the mail server, "
+    "so nothing was sent and your password was not given to it. Check the "
+    "port and the Use TLS setting under Settings → Email (SMTP), or ask your "
+    "mail provider. ({host})"
+)
+_NO_STARTTLS_SENTENCE = (
+    "The mail server did not offer a secure connection, so nothing was sent "
+    "and your password was not given to it. Check the port and the Use TLS "
+    "setting under Settings → Email (SMTP), or ask your mail provider. ({host})"
+)
+
+
+def certificate_reason(error: ssl.SSLCertVerificationError) -> str:
+    """The plain words for why a certificate was refused."""
+    code = getattr(error, "verify_code", None)
+    if code in _CERT_REASONS:
+        return _CERT_REASONS[code]
+    words = str(getattr(error, "verify_message", "") or error).lower()
+    for needle, reason in (
+        ("hostname mismatch", _CERT_REASONS[62]),
+        ("ip address mismatch", _CERT_REASONS[62]),
+        ("self-signed", _CERT_REASONS[18]),
+        ("self signed", _CERT_REASONS[18]),
+        ("expired", _CERT_REASONS[10]),
+        ("not yet valid", _CERT_REASONS[9]),
+        ("issuer", _ISSUER),
+    ):
+        if needle in words:
+            return reason
+    return _CERT_UNVERIFIED
+
+
+def tls_failure_text(error: BaseException, host: str) -> str:
+    """The text stored on the log row for a failure setting up TLS."""
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return _CERT_TEXT.format(host=host, reason=certificate_reason(error))
+    return _TLS_TEXT.format(host=host)
+
+
+def no_starttls_text(host: str) -> str:
+    return _NO_STARTTLS_TEXT.format(host=host)
+
+
+def tls_sentence(text: str) -> str:
+    """The sentence for a stored TLS failure, or "" when it is not one."""
+    found = _TLS_STORED.match((text or "").strip())
+    if not found:
+        return ""
+    kind, host, reason = found.groups()
+    if kind == "Certificate not verified":
+        return _CERT_SENTENCE.format(host=host, reason=reason or _CERT_UNVERIFIED)
+    if kind == "No secure connection offered":
+        return _NO_STARTTLS_SENTENCE.format(host=host)
+    return _TLS_SENTENCE.format(host=host)
+
+
 def failure_sentence(error, host: str = "") -> str:
     """One sentence a person can act on for a failed send. `error` is the
     exception itself or the text stored on the email log row. The reply
     code decides first (#811); only an error with none falls back to the
     words: the hint for a common mistake, else "not configured", else a
     plain fallback."""
+    if isinstance(error, ssl.SSLCertVerificationError):
+        # a certificate is only checked in the handshake, before any login
+        error = MailTLSError(tls_failure_text(error, host))
+    tls = tls_sentence(str(error) if isinstance(error, BaseException) else error)
+    if tls:
+        return tls
     if isinstance(error, BaseException):
         kind, detail = _classify_exception(error)
         text = str(error)

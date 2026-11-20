@@ -576,6 +576,19 @@ def _html_body(text: str) -> str:
     return "<p>" + html.escape(text).replace("\n", "<br>") + "</p>"
 
 
+def _send_failed(what: str, entity_type: str, entity_id, db, ran=True) -> str:
+    """What a run records for a send that failed: the bookkeeper's sentence
+    for the reason when send_email() ran and the log row says (#811; a
+    certificate the mail server could not prove, say), the raw text staying
+    in the email log."""
+    from app.services.email_errors import sentence_for_last_send
+
+    why = sentence_for_last_send(db, entity_type, entity_id) if ran else ""
+    if why:
+        return f"{what} could not be sent. {why}"
+    return f"{what} could not be sent (the email log has the reason)."
+
+
 def _latest_log_id(db: Session, entity_type: str, entity_id: int):
     log = (
         db.query(EmailLog.id)
@@ -642,7 +655,7 @@ def _send_one(db, plan, settings, words, home, trigger):
         if ok:
             log_id = _latest_log_id(db, "reminder", inv.id)
         else:
-            error = "The email could not be sent (the email log has the reason)."
+            error = _send_failed("The email", "reminder", inv.id, db)
     except Exception:
         # The exception's own text stays in the log and the audit row; the
         # sentence that goes back to the screen names no internals.
@@ -1064,11 +1077,12 @@ def run_statements(db: Session, force: bool = False) -> dict:
         if row is None:
             skipped += 1
             continue
-        ok = False
+        ok = ran = False
         try:
             pdf = generate_statement_pdf(
                 customer, statement_activity(db, customer, today), settings, today
             )
+            ran = True
             ok = send_email(
                 db=db,
                 to_email=c["email"],
@@ -1091,7 +1105,7 @@ def run_statements(db: Session, force: bool = False) -> dict:
         row.error = (
             None
             if ok
-            else "The statement could not be sent (the email log has the reason)."
+            else _send_failed("The statement", "statement", customer.id, db, ran)
         )
         row.sent_at = _now()
         db.commit()

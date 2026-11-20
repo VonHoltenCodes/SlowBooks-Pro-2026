@@ -617,6 +617,7 @@ def test_email(db: Session = Depends(get_db)):
             from app.services.email_errors import (
                 explain_send_failure,
                 failure_sentence,
+                tls_sentence,
             )
 
             row = (
@@ -628,7 +629,8 @@ def test_email(db: Session = Depends(get_db)):
             error_text = row.error_message if row else ""
             reason, _ = explain_send_failure(error_text, settings.get("smtp_host", ""))
             detail = "Test email failed to send."
-            if reason:
+            # a secure-connection failure's sentence already carries its reason
+            if reason and not tls_sentence(error_text):
                 detail += f" {reason}"
             detail += " " + failure_sentence(error_text, settings.get("smtp_host", ""))
             detail += " The full list is under Settings → Email (SMTP) → Recent sends."

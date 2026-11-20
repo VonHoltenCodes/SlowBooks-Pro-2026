@@ -7,6 +7,7 @@ smtp_always_cc / smtp_always_bcc are added to every send so batch sends
 """
 
 import smtplib
+import ssl
 from email import message_from_string
 
 import pytest
@@ -32,7 +33,16 @@ def smtp(monkeypatch, db_session):
         def __init__(self, *a, **k):
             pass
 
-        def starttls(self):
+        def ehlo_or_helo_if_needed(self):
+            pass
+
+        def has_extn(self, name):
+            return name == "starttls"
+
+        def starttls(self, context=None):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+
+        def ehlo(self):
             pass
 
         def login(self, *a):

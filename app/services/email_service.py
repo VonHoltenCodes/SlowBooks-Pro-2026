@@ -6,6 +6,7 @@
 import logging
 import re
 import smtplib
+import ssl
 from email.utils import getaddresses
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -155,6 +156,50 @@ def _without(addresses: list, taken: list) -> list:
     return [a for a in addresses if a.lower() not in lower]
 
 
+def smtp_tls_context() -> ssl.SSLContext:
+    """The context every TLS connection to the mail server is made with:
+    the certificate verified against the system's (or, on the packaged Mac
+    build, the bundled — app/tls_trust.py) authorities, the host name
+    checked, TLS 1.2 at least. There is no setting that loosens it."""
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
+def _secure(server: smtplib.SMTP, host: str) -> None:
+    """EHLO → STARTTLS (verified) → EHLO, before anything else is said.
+
+    Raises MailTLSError when the server offers no STARTTLS or the
+    handshake or the certificate check fails; the caller then closes the
+    socket, so neither the login nor the message is ever sent."""
+    from app.services.email_errors import (
+        MailTLSError,
+        no_starttls_text,
+        tls_failure_text,
+    )
+
+    server.ehlo_or_helo_if_needed()
+    if not server.has_extn("starttls"):
+        logger.warning("Mail server %s did not offer STARTTLS; nothing sent", host)
+        raise MailTLSError(no_starttls_text(host))
+    try:
+        server.starttls(context=smtp_tls_context())
+    except ssl.SSLError as e:
+        # the raw OpenSSL reason, for whoever reads the server log; the
+        # password is not in it (nothing about the login exists yet)
+        logger.warning(
+            "TLS to mail server %s failed (nothing sent): %s: %s",
+            host,
+            type(e).__name__,
+            getattr(e, "verify_message", None) or e,
+        )
+        raise MailTLSError(tls_failure_text(e, host)) from e
+    except smtplib.SMTPResponseException as e:
+        logger.warning("Mail server %s refused STARTTLS: %s", host, e)
+        raise MailTLSError(tls_failure_text(e, host)) from e
+    server.ehlo()
+
+
 def send_email(
     db: Session,
     to_email: str,
@@ -245,13 +290,14 @@ def send_email(
         part.add_header("Content-Disposition", "attachment", filename=attachment_name)
         msg.attach(part)
 
+    from app.services.email_errors import MailTLSError
+
     server = None
     try:
+        server = smtplib.SMTP(host, port, timeout=30)
         if use_tls:
-            server = smtplib.SMTP(host, port, timeout=30)
-            server.starttls()
-        else:
-            server = smtplib.SMTP(host, port, timeout=30)
+            # verified every time; a failure raises before the login below
+            _secure(server, host)
 
         if user and password:
             server.login(user, password)
@@ -276,7 +322,10 @@ def send_email(
     except Exception as e:
         if server:
             try:
-                server.quit()
+                if isinstance(e, MailTLSError):
+                    server.close()  # say nothing more to an unverified server
+                else:
+                    server.quit()
             except Exception:
                 pass
         log = EmailLog(

@@ -8,6 +8,7 @@ the log row; the words are the fallback for an error with no code.
 """
 
 import smtplib
+import ssl
 import socket
 
 import pytest
@@ -146,7 +147,16 @@ def smtp(monkeypatch, db_session):
         def __init__(self, *a, **k):
             pass
 
-        def starttls(self):
+        def ehlo_or_helo_if_needed(self):
+            pass
+
+        def has_extn(self, name):
+            return name == "starttls"
+
+        def starttls(self, context=None):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+
+        def ehlo(self):
             pass
 
         def login(self, *a):
