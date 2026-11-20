@@ -23,8 +23,7 @@ from app.database import get_db
 from app.models.email_log import EmailLog
 from app.routes._roles import is_admin
 from app.routes.api_tokens import _utc_iso
-from app.services.email_errors import failure_sentence, server_words, scrub_secrets
-from app.services.settings_service import get_setting_raw
+from app.services.email_errors import FailureReader
 
 router = APIRouter(prefix="/api/email-log", tags=["email_log"])
 
@@ -52,17 +51,17 @@ def list_email_log(
         .limit(limit)
         .all()
     )
-    # a row stored before round 26 kept the reply as Python wrote it, and
-    # could echo the password a server was given; neither is shown
-    hidden = [get_setting_raw(db, "smtp_password") or ""] if admin else []
+    # the one reader of the stored text (W-228): scrubbed of any echo of
+    # the sign-in, the server's words an administrator's only
+    reader = FailureReader(db)
     return {
         "total": total,
-        "rows": [_row(r, admin, hidden) for r in rows],
+        "rows": [_row(r, admin, reader) for r in rows],
     }
 
 
-def _row(r: EmailLog, admin: bool, hidden=()) -> dict:
-    failure = failure_sentence(r.error_message or "") if r.status == "failed" else None
+def _row(r: EmailLog, admin: bool, reader: FailureReader) -> dict:
+    failure, words = reader.read(r, admin)
     return {
         "id": r.id,
         "sent_at": _utc_iso(r.sent_at),
@@ -79,11 +78,7 @@ def _row(r: EmailLog, admin: bool, hidden=()) -> dict:
         # anyone else reads the sentence in its place
         # — the server's own words as plain text (NEW-275), read the same
         # from a row stored in the old Python form
-        "error_message": (
-            scrub_secrets(server_words(r.error_message), hidden)
-            if admin and r.error_message
-            else (r.error_message if admin else failure)
-        ),
+        "error_message": words if admin else failure,
         # the one wording of a failure (email_errors), so the list and the
         # test-email message agree
         "failure": failure,

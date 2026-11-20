@@ -60,6 +60,9 @@ class DocType:
     source_types: tuple[str, ...] | None = None  # transactions: the kinds it may be
     number_fields: tuple[str, ...] = ()
     extra: tuple[str, ...] = field(default=())
+    # its form sends each kept line's id, so a line with no id is new and a
+    # line whose id is gone was removed, even when no old id is left (W-230)
+    line_ids: bool = False
 
 
 _TXN_LINES = (("transaction_lines", "transaction_id"),)
@@ -140,6 +143,7 @@ DOC_TYPES: dict[str, DocType] = {
         (("purchase_order_lines", "purchase_order_id"),),
         attachment_types=("purchase_order",),
         number_fields=("po_number",),
+        line_ids=True,
     ),
     "pay_application": DocType(
         "Pay Application",
@@ -986,19 +990,48 @@ def _is_total_field(name: str) -> bool:
     return name in _TOTAL_FIELDS or name.endswith("_total")
 
 
-def _share_something(words: _Words, b: dict, a: dict) -> bool:
+def _line_label(values: dict) -> str:
+    return next((str(values[f]) for f in _LINE_LABEL_FIELDS if values.get(f)), "")
+
+
+_LINE_AMOUNT_FIELDS = ("amount", "sell_amount", "scheduled_value", "debit", "credit")
+
+
+def _same_label(b: dict, a: dict) -> bool:
     """Two snapshots of a line with the same description (or none on
-    either), or the same amount."""
-    label_b = next((str(b[f]) for f in _LINE_LABEL_FIELDS if b.get(f)), "")
-    label_a = next((str(a[f]) for f in _LINE_LABEL_FIELDS if a.get(f)), "")
-    if label_b == label_a:
-        return True
-    for f in ("amount", "sell_amount", "scheduled_value", "debit", "credit"):
-        if b.get(f) not in (None, "") and _same_value(b.get(f), a.get(f)):
-            if f in ("debit", "credit") and _empty_or_zero(b.get(f)):
-                continue
-            return True
-    return False
+    either)."""
+    return _line_label(b) == _line_label(a)
+
+
+def _same_amount(b: dict, a: dict) -> bool:
+    """Two snapshots of a line with the same amount (a debit and a credit
+    of one figure are not the same) and the same quantity."""
+    found = False
+    for f in _LINE_AMOUNT_FIELDS:
+        vb, va = b.get(f), a.get(f)
+        if _empty_or_zero(vb) and _empty_or_zero(va):
+            continue
+        if not _same_value(vb, va):
+            return False
+        found = True
+    return found and _same_value(b.get("quantity"), a.get("quantity"))
+
+
+def _pair_leftovers(left: list[dict], added: list[dict]) -> list[tuple]:
+    """The lines a save rewrote with no ids, paired by what they are, never
+    by place (W-229): the same description first (an edit of its other
+    fields), then the same amount and quantity (an edit of its
+    description). Pairs leave `left` and `added`; what is left over was
+    removed or added."""
+    pairs = []
+    for same in (_same_label, _same_amount):
+        for a in list(added):
+            b = next((b for b in left if same(b, a)), None)
+            if b is not None:
+                pairs.append((b, a))
+                left.remove(b)
+                added.remove(a)
+    return pairs
 
 
 def _line_details(
@@ -1085,7 +1118,11 @@ def _line_details(
             # a save that kept some lines (a purchase order's form sends each
             # kept line's id) said by id what went and what came: a line
             # whose id is gone was removed, a new id was added (W-222)
-            kept_ids = bool(edits) or any(rid not in removed for rid in alive[table])
+            kept_ids = (
+                dt.line_ids
+                or bool(edits)
+                or any(rid not in removed for rid in alive[table])
+            )
             before = sorted(removed.values(), key=lambda v: _line_key(v, fk))
             after = sorted(inserted.values(), key=lambda v: _line_key(v, fk))
             if created and not before:
@@ -1102,17 +1139,12 @@ def _line_details(
                         left.remove(same)
                     else:
                         changed_after.append(a)
-                # with no ids, the rest by place: a line in the place of
-                # another is that line changed, unless the two share
-                # nothing (neither description nor amount), which reads
-                # better as one removed and one added (W-222)
-                pairs = []
-                if not kept_ids:
-                    for b, a in zip(list(left), list(changed_after)):
-                        if _share_something(words, b, a):
-                            pairs.append((b, a))
-                            left.remove(b)
-                            changed_after.remove(a)
+                # with no ids, the rest by what they are: a line that keeps
+                # its description or its amount is that line changed; one
+                # that keeps neither reads as removed and added (W-222,
+                # W-229)
+                pairs = [] if kept_ids else _pair_leftovers(left, changed_after)
+                pairs.sort(key=lambda pair: _line_key(pair[1], fk))
                 for b, a in pairs:
                     fields = _line_diff_fields(b, a, fk)
                     row = AuditLog(
@@ -1450,7 +1482,7 @@ def _deposit_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
 
 
 def _email_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
-    from app.services.email_errors import failure_sentence
+    from app.services.email_errors import FailureReader
 
     if not dt.email_types:
         return []
@@ -1461,6 +1493,7 @@ def _email_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
         .all()
     )
     out = []
+    reader = FailureReader(words.db) if rows else None
     for r in rows:
         who = words.who(r.username) if r.username else "someone (not recorded)"
         what = {
@@ -1476,7 +1509,8 @@ def _email_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
                 details.append(f"Cc: {r.cc}")
         else:
             text = f"An email to {r.recipient} by {who} could not be sent."
-            details = [failure_sentence(r.error_message or "")]
+            # the one reader of the stored text, scrubbed (W-228)
+            details = [reader.read(r, admin=False).sentence]
         out.append(
             _Event(
                 _utc(r.sent_at),

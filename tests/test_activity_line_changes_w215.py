@@ -122,12 +122,18 @@ def test_the_line_documents_say_only_what_changed(client, seed_accounts, db_sess
         json={"vendor_id": vendor["id"], "date": "2026-04-01", "lines": po_lines},
     )
     assert r.status_code == 201, r.text
+    po = client.get(f"/api/purchase-orders/{r.json()['id']}").json()
+    # the form sends each kept line's id (a line with none is a new one, W-230)
+    po_lines = [
+        {k: ln[k] for k in ("id", "description", "quantity", "rate")}
+        for ln in po["lines"]
+    ]
     _same_then_quantity(
         client,
         db_session,
         "purchase_order",
         "/api/purchase-orders",
-        r.json(),
+        po,
         po_lines,
         {"notes": "hi"},
     )

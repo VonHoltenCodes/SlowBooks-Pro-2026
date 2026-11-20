@@ -25,6 +25,7 @@ import ast
 import re
 import smtplib
 import ssl
+from typing import NamedTuple
 
 
 def _clean_reason(error_text: str) -> str:
@@ -36,13 +37,17 @@ def _clean_reason(error_text: str) -> str:
     back as a value (W-216), so no quote, comma or b'' of Python's is left
     in the reply. A row stored since round 26 carries a stage tag in front
     of the plain words (see stored_text), which is ours and not shown.
-    Leave anything we don't recognise untouched."""
+    Leave anything we don't recognize untouched, but for a socket failure's
+    plain cause (_plain_cause)."""
     text = (error_text or "").strip()
     if not text:
         return ""
     tagged = _TAGGED.match(text)
     if tagged:
-        return tagged.group(3).strip()
+        words = tagged.group(3).strip()
+        if tagged.group(1) in ("disconnected", "socket"):
+            words = _plain_cause(words)
+        return words
     if text[0] in "({" and len(text) <= 5000:
         try:
             value = ast.literal_eval(text)
@@ -57,7 +62,24 @@ def _clean_reason(error_text: str) -> str:
             return "\n".join(parts)
         if _code(value) is not None:
             return _reply_words(value)
-    return text
+    return _plain_cause(text)
+
+
+_CLOSED_BECAUSE = re.compile(r"^Connection unexpectedly closed: (.+)$", re.S)
+_ERRNO = re.compile(r"^\[(?:Errno|WinError) -?\d+\] ")
+
+
+def _plain_cause(words: str) -> str:
+    """A socket failure as its plain cause (W-232): smtplib's "Connection
+    unexpectedly closed: timed out" is "timed out" (nothing closed; the
+    server never answered), and Python's "[Errno 104] " is dropped from
+    "Connection reset by peer". A real close ("Connection unexpectedly
+    closed") stays as it is."""
+    words = (words or "").strip()
+    found = _CLOSED_BECAUSE.match(words)
+    if found:
+        words = found.group(1).strip()
+    return _ERRNO.sub("", words)
 
 
 def server_words(stored: str) -> str:
@@ -100,36 +122,97 @@ _TAGGED = re.compile(
 _STORED_LIMIT = 2000
 
 
-def scrub_secrets(text: str, hidden) -> str:
-    """`text` with each secret in `hidden` (the password, and its base64 in
-    an AUTH line a server might echo) replaced, so no reply that repeats a
-    credential is stored or shown."""
+_MASK = "••••"
+# A server that repeats the conversation back (W-228): the token after an
+# AUTH PLAIN / AUTH LOGIN, or a 334 continuation, is a credential whatever
+# it decodes to, including a password that has since been changed.
+_AUTH_TOKEN = re.compile(
+    r"(\bAUTH[ \t]+(?:PLAIN|LOGIN)|(?<![\w.])334)([ \t]+)[A-Za-z0-9+/]{4,}={0,2}",
+    re.I,
+)
+
+
+def _credential_forms(password: str, user: str = "") -> list[str]:
+    """Every form a server could echo of the sign-in it was given: the
+    password as typed, URL-quoted and quoted-printable; its base64; the
+    base64 of an AUTH PLAIN argument ("\\0user\\0password", with or
+    without the user again in front); the base64 of the user alone (an AUTH
+    LOGIN step). Base64 forms are kept without their "=" padding, which
+    the mask takes too."""
     import base64
+    import quopri
+    from urllib.parse import quote, quote_plus
+
+    def b64(raw: str) -> str:
+        data = raw.encode("utf-8", "replace")
+        return base64.b64encode(data).decode("ascii").rstrip("=")
 
     forms = set()
-    for secret in hidden or ():
-        if not secret:
+    if user:
+        forms.add(b64(user))
+    if password:
+        forms.update({password, quote(password, safe=""), quote_plus(password)})
+        qp = quopri.encodestring(password.encode("utf-8", "replace"))
+        forms.add(qp.decode("ascii", "replace").replace("=\n", "").strip())
+        forms.add(b64(password))
+        if user:
+            forms.add(b64(f"\0{user}\0{password}"))
+            forms.add(b64(f"{user}\0{user}\0{password}"))
+    # under 3 characters a form is too common to mask without garbling
+    return [f for f in forms if len(f) >= 3]
+
+
+def _echoed_sign_ins(text: str) -> list[str]:
+    """What the tokens after AUTH PLAIN / AUTH LOGIN / 334 in `text` decode
+    to: the password of an AUTH PLAIN argument, or an AUTH LOGIN step's
+    value, so the same password echoed as typed beside it is masked too,
+    even when it is no longer the one in Settings (W-228). A server's own
+    prompt ("Username:") is not one."""
+    import base64
+    import binascii
+
+    found = []
+    for m in _AUTH_TOKEN.finditer(text or ""):
+        token = m.group(0)[len(m.group(1)) + len(m.group(2)) :]
+        try:
+            raw = base64.b64decode(token + "=" * (-len(token) % 4), validate=True)
+            value = raw.decode("utf-8")
+        except (binascii.Error, ValueError):
             continue
-        forms.add(secret)
-        forms.add(base64.b64encode(secret.encode("utf-8", "replace")).decode("ascii"))
-    # the longest first, so a form inside another is not left half-replaced
-    for form in sorted(forms, key=len, reverse=True):
-        if len(form) >= 3:
-            text = text.replace(form, "••••")
-    return text
+        parts = [p for p in value.split("\0") if p]
+        if "\0" in value and parts:
+            found.append(parts[-1])
+        elif value and not value.endswith(":") and value.isprintable():
+            found.append(value)
+    return found
+
+
+def scrub_secrets(text: str, hidden=(), user: str = "") -> str:
+    """`text` with every echo of a credential masked (W-228): each password
+    in `hidden` and its sign-in forms with `user` (_credential_forms), and
+    any token following AUTH PLAIN, AUTH LOGIN or a 334. The one scrubbing
+    function: send_email() applies it before a row is stored, and
+    FailureReader applies it again whenever stored text is read."""
+    if not text:
+        return text
+    forms = set()
+    for secret in [*(hidden or ()), *_echoed_sign_ins(text)]:
+        forms.update(_credential_forms(secret or "", user))
+    if user and not forms:
+        forms.update(_credential_forms("", user))
+    if forms:
+        # the longest first, so a form inside another is not left half-replaced
+        pattern = "|".join(
+            re.escape(f) + "={0,2}" for f in sorted(forms, key=len, reverse=True)
+        )
+        text = re.sub(pattern, _MASK, text)
+    return _AUTH_TOKEN.sub(lambda m: m.group(1) + m.group(2) + _MASK, text)
 
 
 def stored_text(error: BaseException, hidden=(), user: str = "") -> str:
     """The text send_email() keeps on the log row for a failed send: plain
     words, never str() of the exception (which is a Python tuple or dict).
     `hidden` are secrets scrubbed out of whatever the server said."""
-    import base64
-
-    secrets_ = [s for s in hidden if s]
-    if user:
-        for secret in list(secrets_):
-            plain = f"\0{user}\0{secret}".encode("utf-8", "replace")
-            secrets_.append(base64.b64encode(plain).decode("ascii"))
     if isinstance(error, smtplib.SMTPRecipientsRefused):
         lines = [
             f"{addr}: {_reply_words(reply)}".rstrip(": ")
@@ -151,17 +234,21 @@ def stored_text(error: BaseException, hidden=(), user: str = "") -> str:
             stage = "data"
         text = f"[{stage}] " + _code_words(error.smtp_code, error.smtp_error)
     elif isinstance(error, smtplib.SMTPServerDisconnected):
-        text = "[disconnected] " + (_decoded(str(error)) or "Connection closed")
+        # "Connection unexpectedly closed: timed out" is a read that timed
+        # out, and nothing closed: the plain cause (W-232)
+        text = "[disconnected] " + (
+            _plain_cause(_decoded(str(error))) or "Connection closed"
+        )
     elif isinstance(error, OSError) and not isinstance(error, smtplib.SMTPException):
         # "Connection refused", "timed out", "Name or service not known":
         # the system's message, without Python's "[Errno 111]" in front
         words = getattr(error, "strerror", None) or str(error)
         if not words and isinstance(error, TimeoutError):
             words = "timed out"
-        text = "[socket] " + (_decoded(words) or type(error).__name__)
+        text = "[socket] " + (_plain_cause(_decoded(words)) or type(error).__name__)
     else:
         text = str(error)
-    text = scrub_secrets(text, secrets_)
+    text = scrub_secrets(text, hidden, user)
     if len(text) > _STORED_LIMIT:
         text = text[: _STORED_LIMIT - 1] + "…"
     return text
@@ -241,6 +328,8 @@ _SIGN_IN_NEEDS_TLS_SENTENCE = (
 # at, then the server's own words as plain text
 _CONNECTION_REFUSED_SENTENCE = "The mail server refused the connection: {}"
 _MESSAGE_REFUSED_SENTENCE = "The mail server refused the message: {}"
+# the same from a row stored the old way, which says neither stage nor words
+_OLD_REFUSED_SENTENCE = "The mail server refused the email."
 _UNREACHABLE_SENTENCE = (
     "The server could not be reached — check the host, port, and the "
     "Use TLS setting."
@@ -359,7 +448,14 @@ def _classify_text(text: str):
         return _sign_in_kind(message)
     if len(value) == 3 and isinstance(value[2], str) and code >= 500:
         return "sender", value[2]
-    return _by_code(code, message)
+    kind = _by_code(code, message)
+    if kind[0] == "message":
+        # a row stored before round 27 kept a refusal as Python wrote it:
+        # the stage is lost (a refused greeting and a refused message were
+        # the same tuple, W-231), and the words may echo a password since
+        # changed (W-228), so the sentence says neither
+        return "old-refusal", ""
+    return kind
 
 
 _LEADING_CODE = re.compile(r"^(\d{3})\b")
@@ -504,12 +600,13 @@ def tls_sentence(text: str) -> str:
     return _TLS_SENTENCE.format(host=host)
 
 
-def failure_sentence(error, host: str = "") -> str:
+def failure_sentence(error, host: str = "", hidden=(), user: str = "") -> str:
     """One sentence a person can act on for a failed send. `error` is the
-    exception itself or the text stored on the email log row. The reply
-    code decides first (#811); only an error with none falls back to the
-    words: the hint for a common mistake, else "not configured", else a
-    plain fallback."""
+    exception itself or the text stored on the email log row (read it with
+    FailureReader, never directly). The reply code decides first (#811);
+    only an error with none falls back to the words: the hint for a common
+    mistake, else "not configured", else a plain fallback. Server words in
+    the sentence are scrubbed of `hidden` (with `user`, see scrub_secrets)."""
     if isinstance(error, ssl.SSLCertVerificationError):
         # a certificate is only checked in the handshake, before any login
         error = MailTLSError(tls_failure_text(error, host))
@@ -536,8 +633,10 @@ def failure_sentence(error, host: str = "") -> str:
         return _STARTTLS_FIRST_SENTENCE
     if kind == "unreachable":
         return _UNREACHABLE_SENTENCE
+    if kind == "old-refusal":
+        return _OLD_REFUSED_SENTENCE
     if kind in ("connection", "message"):
-        words = _sentence_words(text)
+        words = _sentence_words(text, hidden, user)
         if words:
             template = (
                 _CONNECTION_REFUSED_SENTENCE
@@ -556,15 +655,66 @@ def failure_sentence(error, host: str = "") -> str:
     return _FALLBACK_SENTENCE
 
 
-def _sentence_words(text: str) -> str:
-    """The server's words for a sentence: on one line, ending in a full
-    stop, never so long the sentence is lost under them."""
-    words = " ".join(server_words(text).split())
+def _sentence_words(text: str, hidden=(), user: str = "") -> str:
+    """The server's words for a sentence: scrubbed (before any cut, so no
+    half of a secret is left), on one line, ending in a full stop, never so
+    long the sentence is lost under them."""
+    words = " ".join(scrub_secrets(server_words(text), hidden, user).split())
     if len(words) > 300:
         words = words[:299].rstrip() + "…"
     if words and words[-1] not in ".!?…":
         words += "."
     return words
+
+
+# -- reading a stored failure (W-228) ------------------------------------------
+#
+# The email log's error text is the mail server's own words, and a server
+# may repeat the sign-in it was given. FailureReader is the one place that
+# text leaves storage, for every reader: Recent sends and GET
+# /api/email-log, a document's Activity, Test Email, a document's Email and
+# the batch results. Nothing else reads EmailLog.error_message (a test
+# holds the app to that), so a new reader cannot skip the scrubbing.
+
+
+class LoggedFailure(NamedTuple):
+    """A stored send failure as one reader may see it: `sentence` for
+    everyone (None for a send that went out); `words` the server's own
+    words for an administrator, scrubbed (None for anyone else)."""
+
+    sentence: str | None
+    words: str | None
+
+
+class FailureReader:
+    """Reads email-log rows for showing, with the sign-in in Settings
+    today: each read scrubs every echo of the password and username it
+    knows (scrub_secrets), and a row stored the old way (Python's tuple,
+    before round 27) gives no server words in its sentence, because its
+    words may echo a password changed since."""
+
+    def __init__(self, db):
+        from app.services.settings_service import get_setting_raw
+
+        self.host = get_setting_raw(db, "smtp_host") or ""
+        self._user = get_setting_raw(db, "smtp_user") or ""
+        self._hidden = [get_setting_raw(db, "smtp_password") or ""]
+
+    def read(self, row, admin: bool) -> LoggedFailure:
+        stored = row.error_message
+        sentence = None
+        if row.status == "failed":
+            sentence = failure_sentence(
+                stored or "", self.host, hidden=self._hidden, user=self._user
+            )
+        words = None
+        if admin:
+            words = (
+                scrub_secrets(server_words(stored), self._hidden, self._user)
+                if stored
+                else stored
+            )
+        return LoggedFailure(sentence, words)
 
 
 def where_to_see_why(admin: bool) -> str:
@@ -583,7 +733,6 @@ def sentence_for_last_send(db, entity_type: str, entity_id) -> str:
     False: every run writes a row, so the newest one for the document is
     that send's. The raw SMTP text stays on the row, for an administrator."""
     from app.models.email_log import EmailLog
-    from app.services.settings_service import get_setting_raw
 
     row = (
         db.query(EmailLog)
@@ -596,9 +745,7 @@ def sentence_for_last_send(db, entity_type: str, entity_id) -> str:
     )
     if row is None or row.status != "failed":
         return ""
-    sentence = failure_sentence(
-        row.error_message or "", get_setting_raw(db, "smtp_host") or ""
-    )
+    sentence = FailureReader(db).read(row, admin=False).sentence
     return "" if sentence == _FALLBACK_SENTENCE else sentence
 
 

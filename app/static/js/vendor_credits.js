@@ -123,7 +123,7 @@ const VendorCreditsPage = {
                     <button type="submit" class="btn btn-primary">Create Vendor Credit</button>
                 </div>
             </form>`, { onClose: () => PendingFiles.discard() });
-        typeof LineOrder !== 'undefined' && LineOrder.attach('#vc-lines', { add: () => VendorCreditsPage.addLine(), changed: () => VendorCreditsPage.recalc() });
+        typeof LineOrder !== 'undefined' && LineOrder.attach('#vc-lines', { add: () => VendorCreditsPage.addLine(), changed: () => VendorCreditsPage.recalc(), remove: true });
     },
 
     lineHtml(idx) {

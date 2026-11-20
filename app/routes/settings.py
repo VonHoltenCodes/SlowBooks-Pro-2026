@@ -614,7 +614,7 @@ def test_email(db: Session = Depends(get_db)):
             # back so the failure can say the reason itself (#447) instead of
             # sending the user off to find a log that had no UI.
             from app.models.email_log import EmailLog
-            from app.services.email_errors import failure_sentence
+            from app.services.email_errors import FailureReader, failure_sentence
 
             row = (
                 db.query(EmailLog)
@@ -622,13 +622,16 @@ def test_email(db: Session = Depends(get_db)):
                 .order_by(EmailLog.id.desc())
                 .first()
             )
-            error_text = row.error_message if row else ""
             # the sentence stands alone (W-216): the server's raw reply,
             # which was pasted in front of it, stays on the log row for an
-            # administrator (Recent sends)
-            detail = "Test email failed to send. " + failure_sentence(
-                error_text, settings.get("smtp_host", "")
-            )
+            # administrator (Recent sends); read through the one reader,
+            # which scrubs any echo of the sign-in (W-228)
+            sentence = (
+                FailureReader(db).read(row, admin=False).sentence
+                if row is not None
+                else None
+            ) or failure_sentence("", settings.get("smtp_host", ""))
+            detail = "Test email failed to send. " + sentence
             detail += " The full list is under Settings → Email (SMTP) → Recent sends."
             raise HTTPException(status_code=502, detail=detail)
         return {"status": "sent"}
