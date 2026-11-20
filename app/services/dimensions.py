@@ -2,7 +2,7 @@
 archived (2.31.4: the feed's add, the register entry and the transfer took
 any integer and posted it)."""
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -139,10 +139,13 @@ def refuse_unknown_class_ids(db: Session, body) -> None:
         raise HTTPException(status_code=404, detail=unknown_class_sentence(missing[0]))
 
 
-async def class_ids_checked(request: Request, db: Session = Depends(get_db)) -> None:
+async def class_ids_checked(request: Request) -> None:
     """The app-wide dependency (main.py): a write whose schema declares a
     class has every class id in its body checked before the route runs.
-    A body that is not JSON is left to the route."""
+    A body that is not JSON is left to the route. The company's session is
+    opened only when the body holds a class id: a route that answers with
+    no company open (the sign-in, a served company whose file is missing)
+    never reaches one here."""
     if request.method not in _WRITES or not _route_declares_a_class(
         request.scope.get("route")
     ):
@@ -151,6 +154,21 @@ async def class_ids_checked(request: Request, db: Session = Depends(get_db)) -> 
         body = await request.json()
     except Exception:
         return  # the route's own validation says what is wrong with it
+    if not _class_ids(body, set()):
+        return
     from starlette.concurrency import run_in_threadpool
 
-    await run_in_threadpool(refuse_unknown_class_ids, db, body)
+    def check():
+        # get_db as the app resolves it (a test's override included)
+        make = request.app.dependency_overrides.get(get_db, get_db)
+        try:
+            sessions = make(request)
+        except TypeError:
+            sessions = make()
+        db = next(sessions)
+        try:
+            refuse_unknown_class_ids(db, body)
+        finally:
+            sessions.close()
+
+    await run_in_threadpool(check)
