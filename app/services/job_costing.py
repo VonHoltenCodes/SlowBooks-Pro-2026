@@ -1409,6 +1409,82 @@ def _is_construction(db: Session) -> bool:
     return terms_from_db(db).is_construction
 
 
+def voided_invoice_line_dims(db: Session, lines) -> dict:
+    """{line id: (cost_code_id, cost_type)} for the lines of an invoice's
+    void posted before the void carried each line's code and type
+    (NEW-262, 2.32.0 gate): read as the line of the invoice it reverses, so
+    a company voided under an older build reads right with no migration.
+
+    `lines` is [(TransactionLine, Transaction, Account)]. A line of an
+    "invoice_void" entry with no code and no type is paired with a line of
+    the invoice's own posting on the same account, its debit and credit
+    swapped and its memo the void's ("VOID: " + the original's), each
+    original line used once. Lines that are alike in all of those but the
+    code read in posting order; any pairing of them nets each row to the
+    same figure, since each void line takes back one original line's
+    amount whole. A line that pairs with nothing (a late fee's, a cost of
+    goods reversal) keeps its own."""
+    from app.models.invoices import Invoice
+
+    void_ids = {
+        txn.source_id
+        for ln, txn, _acct in lines
+        if txn.source_type == "invoice_void"
+        and ln.cost_code_id is None
+        and not ln.cost_type
+    }
+    if not void_ids:
+        return {}
+    rows = (
+        db.query(Invoice.id, Invoice.transaction_id, Invoice.job_id)
+        .filter(Invoice.id.in_(void_ids), Invoice.transaction_id.isnot(None))
+        .all()
+    )
+    postings = {inv_id: txn_id for inv_id, txn_id, _job in rows}
+    if not postings:
+        return {}
+    header_job = {txn_id: job for _inv, txn_id, job in rows}
+    pool: dict = {}
+    for ol in (
+        db.query(TransactionLine)
+        .filter(TransactionLine.transaction_id.in_(set(postings.values())))
+        .order_by(TransactionLine.id)
+    ):
+        if ol.cost_code_id is None and not ol.cost_type:
+            continue
+        # a line on another job than the invoice's: the old void put its
+        # reversal on the invoice's job, which this does not move
+        if ol.job_id is not None and ol.job_id != header_job[ol.transaction_id]:
+            continue
+        key = (
+            ol.transaction_id,
+            ol.account_id,
+            Decimal(str(ol.debit or 0)),
+            Decimal(str(ol.credit or 0)),
+            void_line_memo(ol.description),
+        )
+        pool.setdefault(key, []).append((ol.cost_code_id, ol.cost_type))
+    out = {}
+    for ln, txn, _acct in lines:
+        if (
+            txn.source_type != "invoice_void"
+            or ln.cost_code_id is not None
+            or ln.cost_type
+            or txn.source_id not in postings
+        ):
+            continue
+        key = (
+            postings[txn.source_id],
+            ln.account_id,
+            Decimal(str(ln.credit or 0)),
+            Decimal(str(ln.debit or 0)),
+            ln.description or "",
+        )
+        if pool.get(key):
+            out[ln.id] = pool[key].pop(0)
+    return out
+
+
 def job_cost_tree(
     db: Session,
     job_id: int,
@@ -1462,6 +1538,7 @@ def job_cost_tree(
     if end_date:
         q = q.filter(Transaction.date <= end_date)
     lines = q.order_by(Transaction.date, Transaction.id, TransactionLine.id).all()
+    void_dims = voided_invoice_line_dims(db, lines)
 
     # committed = the remaining, unbilled part of each open commitment line
     # (amount − billed_amount), so the number stays "open PO value not yet
@@ -1519,7 +1596,8 @@ def job_cost_tree(
         return ("uncoded", t or "other")
 
     for ln, txn, acct in lines:
-        k = key_for(ln.cost_code_id, ln.cost_type)
+        code_id, line_ct = void_dims.get(ln.id, (ln.cost_code_id, ln.cost_type))
+        k = key_for(code_id, line_ct)
         is_income = acct.account_type == AccountType.INCOME
         if is_income and k == ("uncoded", "other") and not ln.cost_type:
             # revenue with no cost code and no cost type has a row of its
@@ -1533,13 +1611,13 @@ def job_cost_tree(
             # revenue is compared by section as well
             f["act_revenue"] += amt
             if construction:
-                section_cell(ln.cost_code_id)["act_revenue"] += amt
+                section_cell(code_id)["act_revenue"] += amt
             kind = "income"
         else:
             amt = Decimal(str(ln.debit)) - Decimal(str(ln.credit))
             f["actual"] += amt
             if construction:
-                section_cell(ln.cost_code_id)["actual"] += amt
+                section_cell(code_id)["actual"] += amt
             kind = "cost"
         line_rows.setdefault(k, []).append(
             {

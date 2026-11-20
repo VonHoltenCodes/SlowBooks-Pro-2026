@@ -215,6 +215,41 @@ def _build_rows(db: Session, *, active: str) -> list[dict]:
     for cid, subtotal in cm.all():
         credits[cid] = _q(Decimal(str(subtotal or 0)))
 
+    # A line on an item that posts to a balance-sheet account (a security
+    # deposit, #1038) is billed but not a sale (W-195): off the invoices'
+    # sales, and a credit memo's such line off its credit.
+    from app.models.credit_memos import CreditMemoLine
+    from app.models.invoices import InvoiceLine
+    from app.services.sales_income import non_income_item_ids
+
+    bad = non_income_item_ids(db)
+    if bad:
+        deposits = _for_customers(
+            db.query(
+                Invoice.customer_id, Invoice.exchange_rate, func.sum(InvoiceLine.amount)
+            )
+            .join(InvoiceLine, InvoiceLine.invoice_id == Invoice.id)
+            .join(Customer, Invoice.customer_id == Customer.id)
+            .filter(Invoice.status != InvoiceStatus.VOID)
+            .filter(InvoiceLine.item_id.in_(bad)),
+            active,
+        ).group_by(Invoice.customer_id, Invoice.exchange_rate)
+        for cid, rate, amount in deposits.all():
+            if cid in invoice_figures:
+                invoice_figures[cid]["sales"] -= home_amount(amount or 0, rate)
+        returned = _for_customers(
+            db.query(CreditMemo.customer_id, func.sum(CreditMemoLine.amount))
+            .join(CreditMemoLine, CreditMemoLine.credit_memo_id == CreditMemo.id)
+            .join(Customer, CreditMemo.customer_id == Customer.id)
+            .filter(CreditMemo.status != CreditMemoStatus.VOID)
+            .filter(CreditMemo.is_write_off.isnot(True))
+            .filter(CreditMemo.discount_payment_id.is_(None))
+            .filter(CreditMemoLine.item_id.in_(bad), CreditMemoLine.amount > 0),
+            active,
+        ).group_by(CreditMemo.customer_id)
+        for cid, amount in returned.all():
+            credits[cid] = credits.get(cid, ZERO) - _q(Decimal(str(amount or 0)))
+
     rows = []
     for c in customers:
         jobs = jobs_by_customer.get(c.id, [])

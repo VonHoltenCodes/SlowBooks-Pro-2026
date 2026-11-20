@@ -243,14 +243,24 @@ def unapplied_cash_income(db: Session, start_date, end_date) -> dict[int, Decima
     basis counts from `start_date` to `end_date`, by the customer whose
     payment it is: money received and not yet applied to an invoice, less
     what was applied later (the cash P&L's 4950 line)."""
+    out: dict[int, Decimal] = {}
+    for payment, amount in unapplied_cash_payments(db, start_date, end_date):
+        out[payment.customer_id] = out.get(payment.customer_id, Decimal("0")) + amount
+    return {k: v for k, v in out.items() if v != 0}
+
+
+def unapplied_cash_payments(db: Session, start_date, end_date) -> list[tuple]:
+    """[(payment, amount)]: unapplied_cash_income by payment, in date
+    order, each payment's 4950 cash lines netted (a payment applied in full
+    since nets to nothing and is left out)."""
     from app.models.accounts import Account
 
     number, _name, _type = UNAPPLIED_INCOME
     rows = (
-        db.query(Payment.customer_id, TransactionLine.debit, TransactionLine.credit)
-        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        db.query(Payment, TransactionLine.debit, TransactionLine.credit)
+        .join(Transaction, Payment.transaction_id == Transaction.id)
+        .join(TransactionLine, TransactionLine.transaction_id == Transaction.id)
         .join(Account, TransactionLine.account_id == Account.id)
-        .join(Payment, Payment.transaction_id == Transaction.id)
         .filter(
             TransactionLine.basis == BASIS_CASH,
             TransactionLine.recognizes_invoice_id.is_(None),
@@ -260,13 +270,15 @@ def unapplied_cash_income(db: Session, start_date, end_date) -> dict[int, Decima
             Transaction.date >= start_date,
             Transaction.date <= end_date,
         )
+        .order_by(Transaction.date, Payment.id)
         .execution_options(**reading(READ_ALL))
     )
-    out: dict[int, Decimal] = {}
-    for customer_id, debit, credit in rows:
+    out: dict[int, list] = {}
+    for payment, debit, credit in rows:
         amount = Decimal(str(credit or 0)) - Decimal(str(debit or 0))
-        out[customer_id] = out.get(customer_id, Decimal("0")) + amount
-    return {k: v for k, v in out.items() if v != 0}
+        entry = out.setdefault(payment.id, [payment, Decimal("0")])
+        entry[1] += amount
+    return [(p, amount) for p, amount in out.values() if amount != 0]
 
 
 def unapplied_income_id(db: Session) -> int:
