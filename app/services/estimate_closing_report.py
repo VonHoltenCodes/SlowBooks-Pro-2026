@@ -11,7 +11,8 @@
 # was emailed from SlowBooks, else its date; the decision is decided_at,
 # which the status change stamps (app/models/estimates.py). An estimate
 # decided before decided_at existed and with nothing to date it from is
-# left out of the average and counted in `undated`. Nothing is posted.
+# left out of the average and counted in `undated`. A void estimate (#1128)
+# is left out altogether. Nothing is posted.
 # ============================================================================
 
 from datetime import date, datetime, timezone
@@ -23,7 +24,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.email_log import EmailLog
-from app.models.estimates import Estimate, estimate_outcome
+from app.models.estimates import Estimate, EstimateStatus, estimate_outcome
 from app.services.accounting import _q
 from app.services.fiscal_year import fiscal_year_start
 
@@ -133,6 +134,9 @@ def estimate_closing_report(
         db.query(Estimate)
         .options(joinedload(Estimate.customer), joinedload(Estimate.job))
         .filter(Estimate.date >= start_date, Estimate.date <= end_date)
+        # a void estimate was made in error (#1128): no bid went out, so it
+        # is not sent, won, lost or open
+        .filter(Estimate.status.is_distinct_from(EstimateStatus.VOID))
     )
     if customer_id is not None:
         q = q.filter(Estimate.customer_id == customer_id)

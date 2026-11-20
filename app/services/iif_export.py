@@ -31,7 +31,7 @@ from app.models.contacts import Customer, Vendor
 from app.models.items import Item
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
-from app.models.estimates import Estimate, EstimateLine
+from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.services.addresses import city_line
 from app.services.csv_export import _Identifier, _csv_safe
 from app.services.currency import convert_lines, to_home
@@ -810,6 +810,8 @@ def export_estimates(db: Session) -> str:
             joinedload(Estimate.customer),
             joinedload(Estimate.lines).joinedload(EstimateLine.item),
         )
+        # a void estimate stays home, as a void invoice does (#1128)
+        .filter(Estimate.status.is_distinct_from(EstimateStatus.VOID))
         .order_by(Estimate.date, Estimate.id)
         .all()
     )
