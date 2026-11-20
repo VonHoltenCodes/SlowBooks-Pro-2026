@@ -328,7 +328,7 @@ def test_the_migration_adds_the_column_and_walks_back(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision(REVISION).down_revision == BELOW
-    assert script.get_heads() == ["a1075c4d8e2f"]  # #1075 is the head above it
+    assert script.get_heads() == ["c1064a5e7b2d"]  # the rule star (NEW-259) is the head
     command.upgrade(cfg, BELOW)  # the step below it
     with sqlite3.connect(db) as conn:
         conn.execute("INSERT INTO vendors (id, name, is_active) VALUES (1, 'V', 1)")
