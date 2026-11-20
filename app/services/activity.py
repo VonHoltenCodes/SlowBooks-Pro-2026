@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from itertools import count
 
 from sqlalchemy import Text, cast, or_, select
 from sqlalchemy.orm import Session
@@ -60,8 +61,10 @@ class DocType:
     source_types: tuple[str, ...] | None = None  # transactions: the kinds it may be
     number_fields: tuple[str, ...] = ()
     extra: tuple[str, ...] = field(default=())
-    # its form sends each kept line's id, so a line with no id is new and a
-    # line whose id is gone was removed, even when no old id is left (W-230)
+    # its form keeps each line's id (a purchase order sends them; a pay
+    # application's lines are its schedule's), so a line with no id is new
+    # and a line whose id is gone was removed, even when no old id is left:
+    # pass 0 of _compare_lines
     line_ids: bool = False
 
 
@@ -150,6 +153,7 @@ DOC_TYPES: dict[str, DocType] = {
         "pay_applications",
         (("pay_application_lines", "pay_application_id"),),
         number_fields=("application_no", "number"),
+        line_ids=True,
     ),
     "change_order": DocType(
         "Change Order",
@@ -254,6 +258,7 @@ _QUIET_FIELDS = {
     "checkout_external_id",
     "posted_by",
     "replaced_by_id",
+    "replaces_id",
     "billed_amount",
     "received_qty",
     "last_emailed_at",
@@ -667,69 +672,52 @@ def _empty_or_zero(value) -> bool:
         return False
 
 
-def _line_words(words: _Words, values: dict) -> str:
-    """A line as a sentence names it: its description (or account, item)
-    and its amount."""
-    label = ""
-    for f in _LINE_LABEL_FIELDS:
-        if values.get(f):
-            label = str(values[f])
-            break
+def _line_title(words: _Words, values: dict) -> str:
+    """A line's name: its description, else its item's name, else its
+    account's name; "" for a line with none. Never an id."""
+    label = _line_label(values)
     if not label:
-        for f in ("item_id", "account_id"):
-            if values.get(f):
-                label = words.value(f, values[f])
+        for f, table in (
+            ("item_id", "items"),
+            ("account_id", "accounts"),
+            ("debit_account_id", "accounts"),
+        ):
+            label = words.name_of(table, values.get(f)).strip()
+            if label:
                 break
-    if len(label) > 80:
-        label = label[:77] + "..."
-    money = ""
-    for f in ("amount", "sell_amount", "scheduled_value"):
-        if values.get(f) not in (None, ""):
-            money = money_text(values[f])
-            break
-    if not money:
-        debit, credit = values.get("debit"), values.get("credit")
-        if debit not in (None, "", "0", "0.00", 0):
-            money = f"debit {money_text(debit)}"
-        elif credit not in (None, "", "0", "0.00", 0):
-            money = f"credit {money_text(credit)}"
+    return label[:77] + "..." if len(label) > 80 else label
+
+
+def _line_money(values: dict) -> str:
+    """A line's amount as its sentence says it: "$60.00", or a journal
+    line's "debit $60.00"."""
+    amount = _line_amount(values)
+    if amount is None:
+        return ""
+    side, number = amount
+    return money_text(number) if side == "amount" else f"{side} {money_text(number)}"
+
+
+def _line_words(words: _Words, values: dict) -> str:
+    """A line as the document's creation lists it: its name and its
+    amount; a line with no name, its amount."""
+    label, money = _line_title(words, values), _line_money(values)
     if label and money:
         return f"{label}, {money}"
     return label or money or "a line"
 
 
-def _edited_line_name(words: _Words, dt: DocType, r: AuditLog) -> str:
-    """An edited line as a person knows it. An edit's snapshot carries only
-    the fields that moved, so the line's description (or item, account) is
-    read from the line itself; a line with none is named by its position on
-    the document, "line 2" (W-210: it read "Line a line: …")."""
-    row = _row(words.db, r.table_name, r.record_id)
-    values = {**row, **(r.old_values or {}), **(r.new_values or {})}
-    name = _line_words(words, values)
-    if name != "a line" and any(
-        values.get(f) for f in (*_LINE_LABEL_FIELDS, "item_id", "account_id")
-    ):
-        return name
-    position = _line_position(words, dt, r, row)
-    if position:
-        return f"{position}" + (f" ({name})" if name != "a line" else "")
-    return name
-
-
-def _line_position(words: _Words, dt: DocType, r: AuditLog, row: dict) -> int:
-    """The line's place among its document's lines, 1-based (0 if unknown)."""
-    fk = dict(dt.lines).get(r.table_name)
-    tbl = Base.metadata.tables.get(r.table_name)
-    if not row or not fk or tbl is None or fk not in tbl.c:
-        return 0
-    order = [tbl.c[c] for c in ("line_no", "line_order") if c in tbl.c] + [tbl.c.id]
-    ids = [
-        x
-        for (x,) in words.db.execute(
-            select(tbl.c.id).where(tbl.c[fk] == row.get(fk)).order_by(*order)
-        )
-    ]
-    return ids.index(row["id"]) + 1 if row.get("id") in ids else 0
+def _line_name(words: _Words, values: dict, place: int, alone: bool = False) -> str:
+    """A line as a change names it, the same on every kind: by its
+    description, else its item's name, else its account's name, each with
+    its amount ("Patch, $55.00"); a line with none of those by its place
+    among the document's lines ("2 ($200.00)" after the word Line, "Line 2
+    ($200.00)" when it stands `alone`). Never an id."""
+    label, money = _line_title(words, values), _line_money(values)
+    if label:
+        return f"{label}, {money}" if money else label
+    text = f"{place} ({money})" if money else str(place)
+    return f"Line {text}" if alone else text
 
 
 def _action_sentence(words: _Words, after: str, who: str, changed, new) -> str:
@@ -759,6 +747,14 @@ def _number(dt: DocType, values: dict) -> str:
         if values.get(f) not in (None, ""):
             return str(values[f])
     return ""
+
+
+def _other_number(words: _Words, dt: DocType, doc_id: int, other_id) -> str:
+    """The number of the document this one replaced or was replaced by,
+    when it tells the two apart: a copy that kept the original's number (a
+    check number, a reference) is not named by it."""
+    number = _number(dt, _row(words.db, dt.table, other_id))
+    return "" if number == _number(dt, _row(words.db, dt.table, doc_id)) else number
 
 
 def _status_words(value) -> str:
@@ -924,22 +920,61 @@ def _row(db: Session, table: str, row_id) -> dict:
 
 
 # a line's own bookkeeping, never what a person changed on it
-_LINE_SKIP = {"line_order", "line_no", "sort_order"}
+_LINE_ORDER_FIELDS = ("line_order", "line_no", "sort_order", "position")
+_LINE_SKIP = set(_LINE_ORDER_FIELDS)
+# the fields that hold a line's amount (its extended total), first found
+_LINE_AMOUNT_FIELDS = ("amount", "sell_amount", "scheduled_value")
+# what differs between a document and its corrected copy without anyone
+# having changed it: where a line was cleared, deposited or billed on
+_COPY_LINE_SKIP = frozenset(
+    {
+        "cleared",
+        "reconciliation_id",
+        "deposit_transaction_id",
+        "billed_invoice_line_id",
+        "purchase_order_line_id",
+        "recognizes_invoice_id",
+        "recognizes_bill_id",
+    }
+)
+_COPY_SKIP = frozenset(
+    {
+        "is_voided",
+        "voided_by",
+        "void_reason",
+        "replaces_id",
+        "source_id",
+        "source_type",
+        "exchange_rate",
+    }
+)
+# each snapshot of a line carries the row it is a snapshot of ("_row"), so
+# a line kept by id is known from one deleted and made again under an id
+# SQLite gave out twice
+_ROW_SERIAL = count(1)
 
 
-def _line_key(values: dict, fk: str) -> tuple:
-    return (
-        int(values.get("line_order") or values.get("line_no") or 0),
-        int(values.get("id") or 0),
-    )
+def _line_key(values: dict) -> tuple:
+    order = next((values[f] for f in _LINE_ORDER_FIELDS if values.get(f)), 0)
+    try:
+        return (int(order), int(values.get("id") or 0))
+    except (TypeError, ValueError):
+        return (0, int(values.get("id") or 0))
 
 
-def _line_diff_fields(before: dict, after: dict, fk: str) -> list[str]:
+def _line_diff_fields(before: dict, after: dict, fk: str, skip=frozenset()) -> list:
     """The fields a person could have changed that differ between two
     snapshots of a line."""
     out = []
     for f in dict.fromkeys([*before, *after]):
-        if f in _QUIET_FIELDS or f in _LINE_SKIP or f == fk or f.endswith("_at"):
+        if (
+            f in _QUIET_FIELDS
+            or f in _LINE_SKIP
+            or f in skip
+            or f == fk
+            or f.startswith("_")
+            or f.endswith("_at")
+        ):
             continue
         if _same_value(before.get(f), after.get(f)):
             continue
@@ -990,75 +1025,204 @@ def _is_total_field(name: str) -> bool:
     return name in _TOTAL_FIELDS or name.endswith("_total")
 
 
+def _decimal(value) -> Decimal | None:
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return number if number.is_finite() else None
+
+
 def _line_label(values: dict) -> str:
-    return next((str(values[f]) for f in _LINE_LABEL_FIELDS if values.get(f)), "")
+    """The line's description as typed (a memo, an item number), or ""."""
+    for f in _LINE_LABEL_FIELDS:
+        text = str(values.get(f) or "").strip()
+        if text:
+            return text
+    return ""
 
 
-_LINE_AMOUNT_FIELDS = ("amount", "sell_amount", "scheduled_value", "debit", "credit")
-
-
-def _same_label(b: dict, a: dict) -> bool:
-    """Two snapshots of a line with the same description (or none on
-    either)."""
-    return _line_label(b) == _line_label(a)
-
-
-def _same_amount(b: dict, a: dict) -> bool:
-    """Two snapshots of a line with the same amount (a debit and a credit
-    of one figure are not the same) and the same quantity."""
-    found = False
+def _line_amount(values: dict) -> tuple | None:
+    """The line's amount, its extended total, and the side it is on: a
+    journal line's is its debit or its credit, and a debit and a credit of
+    one figure are not the same amount."""
     for f in _LINE_AMOUNT_FIELDS:
-        vb, va = b.get(f), a.get(f)
-        if _empty_or_zero(vb) and _empty_or_zero(va):
-            continue
-        if not _same_value(vb, va):
-            return False
-        found = True
-    return found and _same_value(b.get("quantity"), a.get("quantity"))
+        number = _decimal(values.get(f))
+        if number is not None:
+            return ("amount", number)
+    for side in ("debit", "credit"):
+        number = _decimal(values.get(side))
+        if number:
+            return (side, number)
+    return None
 
 
-def _pair_leftovers(left: list[dict], added: list[dict]) -> list[tuple]:
-    """The lines a save rewrote with no ids, paired by what they are, never
-    by place (W-229): the same description first (an edit of its other
-    fields), then the same amount and quantity (an edit of its
-    description). Pairs leave `left` and `added`; what is left over was
-    removed or added."""
-    pairs = []
-    for same in (_same_label, _same_amount):
-        for a in list(added):
-            b = next((b for b in left if same(b, a)), None)
-            if b is not None:
-                pairs.append((b, a))
-                left.remove(b)
-                added.remove(a)
-    return pairs
+def _line_subject(values: dict) -> tuple:
+    """What stands for a line that has no description, the way its name
+    does: its item, else its account (a journal line's with the side it is
+    on), else nothing at all."""
+    try:
+        if values.get("item_id") not in (None, ""):
+            return ("item", int(values["item_id"]))
+        if values.get("account_id") not in (None, ""):
+            side = ""
+            if "debit" in values or "credit" in values:
+                amount = _line_amount(values)
+                side = amount[0] if amount else ""
+            return ("account", int(values["account_id"]), side)
+    except (TypeError, ValueError):
+        pass
+    return ("nothing",)
 
 
-def _line_details(
-    words: _Words, dt: DocType, doc_id: int, groups: list[list[AuditLog]]
-) -> dict[int, list[str]]:
-    """What each save did to the document's lines, in words, by the index
-    of its group (W-215).
+def _compare_lines(
+    before: list[dict],
+    after: list[dict],
+    fk: str,
+    keeps_ids: bool = False,
+    skip=frozenset(),
+) -> tuple[list[tuple[dict, dict]], list[dict], list[dict]]:
+    """THE RULE for how Activity compares a document's lines before and
+    after a save, the same for every kind of document. Returns (the pairs,
+    each one line before and after; the lines removed; the lines added).
 
-    A save that rewrites the lines (an invoice, estimate, bill or purchase
-    order deletes and inserts them; a change order bulk-deletes them, which
-    writes no audit row, and inserts them at 0 before its recompute) is read
-    as one change of the line set: the lines before the save against the
-    lines after it. A line found unchanged says nothing; a line whose place
-    holds a changed one names each field old → new; only a line truly added
-    or removed says so, once, with its real amount."""
-    tables = dict(dt.lines)
-    if not tables:
-        return {}
-    current: dict[str, set] = {}
-    last_group: dict[tuple, int] = {}
-    for gi, group in enumerate(groups):
-        for r in group:
-            if r.table_name in tables:
-                last_group[(r.table_name, r.record_id)] = gi
-    for table, fk in tables.items():
+    The lines before and the lines after are two lists. They are paired in
+    passes. A line paired in one pass is out of the later ones, and within
+    a pass the lines pair in their original order, so the same save always
+    reads the same way.
+
+    0. Identity. A line the save kept by its id (the same row, edited in
+       place or left alone) pairs with itself. Where the kind's form keeps
+       line ids (`keeps_ids`: a purchase order, a pay application), that is
+       the whole of who is who: an old id that is gone is a line removed,
+       and a line with no id is a line added, even when no old id survives.
+    1. Identical. Lines equal in every compared field pair, wherever they
+       sit. So a reorder alone, on any kind, names no line.
+    2. The same description. Lines whose description (not an empty one) is
+       the same pair as one edited line.
+    3. The same subject, for lines with no description. Such a line is
+       known by what its name falls back on: its item, else its account
+       (a journal entry line's account and the side it is on), else nothing
+       at all. Two lines with no description and the same subject pair as
+       one edited line. This is what keeps a journal entry with no
+       descriptions from pairing across accounts. A line that has a
+       description is not in this pass: two described lines on one item or
+       one account are two lines, and only pass 4 can make them one.
+    4. The same amount. Lines whose amount (the extended total; a debit is
+       not a credit) is the same pair as one edited line, whatever else
+       changed: description, quantity, rate.
+    5. What is left was removed, and added.
+
+    Passes 2 to 4 are for the kinds that rewrite their lines with no ids.
+    The stated consequence: on those kinds, a described line that changes
+    both its description and its amount reads as one removed and one
+    added.
+
+    `skip` names fields left out of every comparison (a corrected copy
+    against the document it replaces)."""
+    left, new = list(before), list(after)
+    pairs: list[tuple[dict, dict]] = []
+
+    def take(same) -> None:
+        for b in list(left):
+            i = next((i for i, a in enumerate(new) if same(b, a)), None)
+            if i is not None:
+                pairs.append((b, new.pop(i)))
+                del left[next(j for j, x in enumerate(left) if x is b)]
+
+    def identity(b, a):
+        return b.get("_row") is not None and b.get("_row") == a.get("_row")
+
+    def identical(b, a):
+        return not _line_diff_fields(b, a, fk, skip)
+
+    def description(b, a):
+        return bool(_line_label(b)) and _line_label(b) == _line_label(a)
+
+    def subject(b, a):
+        return (
+            not _line_label(b)
+            and not _line_label(a)
+            and _line_subject(b) == _line_subject(a)
+        )
+
+    def amount(b, a):
+        return _line_amount(b) is not None and _line_amount(b) == _line_amount(a)
+
+    take(identity)
+    take(identical)
+    if not keeps_ids:
+        take(description)
+        take(subject)
+        take(amount)
+    return pairs, left, new
+
+
+def _field_changes(words: _Words, table, before: dict, after: dict, fields) -> list:
+    """Each of `fields` old → new, numbers as a person reads them (W-223:
+    "Quantity 1 → 3", not "1.0000 → 3.0")."""
+    row = AuditLog(
+        table_name=table,
+        record_id=after.get("id") or 0,
+        action="UPDATE",
+        changed_fields=list(fields),
+        old_values={f: _tidy(before.get(f)) for f in fields},
+        new_values={f: _tidy(after.get(f)) for f in fields},
+    )
+    return _changes(words, row)
+
+
+def _line_changes(
+    words: _Words,
+    table: str,
+    fk: str,
+    before: list[dict],
+    after: list[dict],
+    keeps_ids: bool = False,
+    skip=frozenset(),
+) -> list[str]:
+    """One save's change of a document's lines in sentences: each edited
+    line field by field, then each line added, then each removed, once,
+    with its real amount. The pairing is `_compare_lines`, the one rule."""
+    pairs, removed, added = _compare_lines(before, after, fk, keeps_ids, skip)
+    place_before = {id(b): i + 1 for i, b in enumerate(before)}
+    place_after = {id(a): i + 1 for i, a in enumerate(after)}
+    said = []
+    for b, a in sorted(pairs, key=lambda pair: place_after[id(pair[1])]):
+        moved = _field_changes(words, table, b, a, _line_diff_fields(b, a, fk, skip))
+        if moved:
+            name = _line_name(words, a, place_after[id(a)])
+            said.append(f"Line {name}: " + "; ".join(moved))
+    said.extend(
+        f"Line added: {_line_name(words, a, place_after[id(a)], alone=True)}"
+        for a in added
+    )
+    said.extend(
+        f"Line removed: {_line_name(words, b, place_before[id(b)], alone=True)}"
+        for b in removed
+    )
+    return said
+
+
+class _LineReplay:
+    """One table of a document's lines, walked save by save through the
+    audit log's rows: `save` takes one save's rows and gives the lines as
+    they were before it and as it left them, each in the document's order.
+
+    A save that rewrites the lines (an invoice, estimate or bill deletes
+    and inserts them; a change order bulk-deletes them, which writes no
+    audit row, and inserts them at 0 before its recompute) leaves deleted
+    and inserted rows; a save that keeps a line by its id (a purchase
+    order, a pay application) leaves an edit of that row, or nothing."""
+
+    def __init__(self, words: _Words, table: str, fk: str, doc_id: int, last_seen):
+        self.words, self.table, self.fk, self.doc_id = words, table, fk, doc_id
+        self.last_seen = last_seen  # (table, row id) → its last save's index
+        self.alive: dict[int, dict] = {}
         tbl = Base.metadata.tables.get(table)
-        current[table] = (
+        self.current = (
             {
                 x
                 for (x,) in words.db.execute(
@@ -1069,8 +1233,99 @@ def _line_details(
             else set()
         )
 
-    alive: dict[str, dict[int, dict]] = {t: {} for t in tables}
+    def _known(self, rid: int, values: dict) -> dict:
+        return {**values, "id": rid, "_row": next(_ROW_SERIAL)}
+
+    def _stored(self, rid: int) -> dict:
+        """The line as the table has it now, when it is still this
+        document's (for a line made before the audit log kept its rows)."""
+        row = _row(self.words.db, self.table, rid)
+        return row if _same(row.get(self.fk), self.doc_id) else {}
+
+    def save(self, gi: int, rows: list[AuditLog]) -> tuple[list[dict], list[dict]]:
+        fk, doc_id = self.fk, self.doc_id
+        before = dict(self.alive)
+        after = dict(self.alive)
+        made: set[int] = set()
+        for r in rows:
+            rid = r.record_id
+            old, new = r.old_values or {}, r.new_values or {}
+            if r.action == "INSERT":
+                # over a living line: SQLite gave a new line the id of one
+                # deleted with no row of its own, so it replaced that one
+                after[rid] = self._known(rid, new)
+                made.add(rid)
+            elif r.action == "DELETE":
+                if rid not in made:
+                    before[rid] = (
+                        {**before[rid], **old}
+                        if rid in before
+                        else self._known(rid, old)
+                    )
+                after.pop(rid, None)
+            else:
+                moved = fk in (r.changed_fields or [])
+                if rid not in after:
+                    if moved and not _same(old.get(fk), doc_id):
+                        # a line that came to this document from another
+                        after[rid] = self._known(rid, {**self._stored(rid), **new})
+                        made.add(rid)
+                        continue
+                    before[rid] = after[rid] = self._known(
+                        rid, {**self._stored(rid), **old}
+                    )
+                if moved and not _same(new.get(fk), doc_id):
+                    after.pop(rid)  # it left for another document
+                    continue
+                after[rid] = {**after[rid], **new}
+        if made:
+            # lines that left the document with no row of their own (a bulk
+            # delete) went with the save that wrote their successors
+            for rid in list(after):
+                if (
+                    rid not in made
+                    and rid not in self.current
+                    and self.last_seen.get((self.table, rid), -1) < gi
+                ):
+                    del after[rid]
+        self.alive = after
+        return (
+            sorted(before.values(), key=_line_key),
+            sorted(after.values(), key=_line_key),
+        )
+
+
+def _last_seen(tables, groups: list[list[AuditLog]]) -> dict[tuple, int]:
+    seen: dict[tuple, int] = {}
+    for gi, group in enumerate(groups):
+        for r in group:
+            if r.table_name in tables:
+                seen[(r.table_name, r.record_id)] = gi
+    return seen
+
+
+def _line_details(
+    words: _Words, dt: DocType, doc_id: int, groups: list[list[AuditLog]]
+) -> tuple[dict[int, list[str]], dict[int, dict[str, list[dict]]]]:
+    """What each save did to the document's lines, in words, by the index
+    of its group (W-215), and the lines the document was made with, by the
+    index of the group that made it.
+
+    Each save is read as one change of the line set: the lines before it
+    against the lines after it, paired by `_compare_lines` (the rule is in
+    its docstring). A line found unchanged says nothing; an edited one
+    names each field old → new; a line added or removed says so, once,
+    with its real amount."""
+    tables = dict(dt.lines)
     out: dict[int, list[str]] = {}
+    made: dict[int, dict[str, list[dict]]] = {}
+    if not tables:
+        return out, made
+    last_seen = _last_seen(tables, groups)
+    replay = {
+        table: _LineReplay(words, table, fk, doc_id, last_seen)
+        for table, fk in tables.items()
+    }
     for gi, group in enumerate(groups):
         created = any(
             r.table_name == dt.table and r.record_id == doc_id and r.action == "INSERT"
@@ -1081,118 +1336,74 @@ def _line_details(
             rows = [r for r in group if r.table_name == table]
             if not rows:
                 continue
-            inserted: dict[int, dict] = {}
-            removed: dict[int, dict] = {}
-            edits: list[AuditLog] = []
-            for r in rows:
-                if r.action == "INSERT":
-                    inserted[r.record_id] = {
-                        **(r.new_values or {}),
-                        "id": r.record_id,
-                    }
-                elif r.action == "DELETE":
-                    removed[r.record_id] = {
-                        **alive[table].get(r.record_id, {}),
-                        **(r.old_values or {}),
-                        "id": r.record_id,
-                    }
-                elif r.record_id in inserted and fk not in (r.changed_fields or []):
-                    # made in this save and then filled in (a change order's
-                    # line, inserted at 0 before its recompute)
-                    inserted[r.record_id].update(r.new_values or {})
-                else:
-                    edits.append(r)
-            if inserted:
-                # lines that left the document with no row of their own (a
-                # bulk delete) went with the save that wrote their successors
-                # (SQLite may give a new line the id of one just deleted, so
-                # a line inserted over a living one replaced it)
-                for rid, values in list(alive[table].items()):
-                    if rid in removed:
-                        continue
-                    if rid in inserted or (
-                        rid not in current[table]
-                        and last_group.get((table, rid), -1) < gi
-                    ):
-                        removed[rid] = values
-            # a save that kept some lines (a purchase order's form sends each
-            # kept line's id) said by id what went and what came: a line
-            # whose id is gone was removed, a new id was added (W-222)
-            kept_ids = (
-                dt.line_ids
-                or bool(edits)
-                or any(rid not in removed for rid in alive[table])
-            )
-            before = sorted(removed.values(), key=lambda v: _line_key(v, fk))
-            after = sorted(inserted.values(), key=lambda v: _line_key(v, fk))
+            before, after = replay[table].save(gi, rows)
             if created and not before:
                 said.extend(f"Line: {_line_words(words, v)}" for v in after)
+                made.setdefault(gi, {})[table] = after
             else:
-                # the same line saved again says nothing
-                left = list(before)
-                changed_after = []
-                for a in after:
-                    same = next(
-                        (b for b in left if not _line_diff_fields(b, a, fk)), None
-                    )
-                    if same is not None:
-                        left.remove(same)
-                    else:
-                        changed_after.append(a)
-                # with no ids, the rest by what they are: a line that keeps
-                # its description or its amount is that line changed; one
-                # that keeps neither reads as removed and added (W-222,
-                # W-229)
-                pairs = [] if kept_ids else _pair_leftovers(left, changed_after)
-                pairs.sort(key=lambda pair: _line_key(pair[1], fk))
-                for b, a in pairs:
-                    fields = _line_diff_fields(b, a, fk)
-                    row = AuditLog(
-                        table_name=table,
-                        record_id=a["id"],
-                        action="UPDATE",
-                        changed_fields=fields,
-                        old_values={**b, **{f: _tidy(b.get(f)) for f in fields}},
-                        new_values={**a, **{f: _tidy(a.get(f)) for f in fields}},
-                    )
-                    moved = _changes(words, row)
-                    if moved:
-                        line = _edited_line_name(words, dt, row)
-                        said.append(f"Line {line}: " + "; ".join(moved))
-                said.extend(
-                    f"Line added: {_line_words(words, a)}" for a in changed_after
-                )
-                said.extend(f"Line removed: {_line_words(words, b)}" for b in left)
-            for r in edits:
-                # a kept line edited in place reads as tidily as a rewritten
-                # one: "Quantity 1 → 3", not "1.0000 → 3.0" (W-223)
-                fields = r.changed_fields or []
-                r = AuditLog(
-                    table_name=r.table_name,
-                    record_id=r.record_id,
-                    action=r.action,
-                    changed_fields=fields,
-                    old_values={
-                        **(r.old_values or {}),
-                        **{f: _tidy((r.old_values or {}).get(f)) for f in fields},
-                    },
-                    new_values={
-                        **(r.new_values or {}),
-                        **{f: _tidy((r.new_values or {}).get(f)) for f in fields},
-                    },
-                )
-                moved = _changes(words, r)
-                if moved:
-                    line = _edited_line_name(words, dt, r)
-                    said.append(f"Line {line}: " + "; ".join(moved))
-            for rid in removed:
-                alive[table].pop(rid, None)
-            alive[table].update(inserted)
-            for r in edits:
-                if r.record_id in alive[table]:
-                    alive[table][r.record_id].update(r.new_values or {})
+                said.extend(_line_changes(words, table, fk, before, after, dt.line_ids))
         out[gi] = said
-    return out
+    return out, made
+
+
+def _lines_left(words: _Words, table: str, fk: str, doc_id: int) -> list[dict]:
+    """A document's lines of one table as its last save left them, read
+    from the audit log (the document a corrected copy replaced)."""
+    groups = _group(_child_rows(words.db, table, fk, doc_id))
+    replay = _LineReplay(words, table, fk, doc_id, _last_seen({table}, groups))
+    lines: list[dict] = []
+    for gi, group in enumerate(groups):
+        _before, lines = replay.save(gi, group)
+    return lines
+
+
+def _values_left(db: Session, table: str, doc_id: int) -> dict:
+    """A document's own fields as its last save left them, from the audit
+    log; nothing when the log does not hold its making."""
+    values: dict = {}
+    seen = False
+    for r in _own_rows(db, table, doc_id):
+        if r.action == "INSERT":
+            values, seen = dict(r.new_values or {}), True
+        elif r.action == "UPDATE":
+            values.update(r.new_values or {})
+    return values if seen else {}
+
+
+def _copy_details(
+    words: _Words,
+    dt: DocType,
+    old_id: int,
+    new_values: dict,
+    new_lines: dict[str, list[dict]],
+) -> list[str]:
+    """What a corrected copy changed from the document it replaced: its own
+    fields old → new, its lines by the one rule, then its totals."""
+    old_values = _values_left(words.db, dt.table, old_id)
+    fields = [
+        f
+        for f in (new_values if old_values else {})
+        if f not in _COPY_SKIP
+        and f not in dt.number_fields
+        and not _same_value(old_values.get(f), new_values.get(f))
+    ]
+    totals = [f for f in fields if _is_total_field(f)]
+    fields = [f for f in fields if f not in totals]
+    said = _field_changes(words, dt.table, old_values, new_values, fields)
+    for table, fk in dt.lines:
+        if table in new_lines:
+            said.extend(
+                _line_changes(
+                    words,
+                    table,
+                    fk,
+                    _lines_left(words, table, fk, old_id),
+                    new_lines[table],
+                    skip=_COPY_LINE_SKIP,
+                )
+            )
+    said.extend(_field_changes(words, dt.table, old_values, new_values, totals))
+    return said
 
 
 def _audit_events(
@@ -1209,7 +1420,9 @@ def _audit_events(
     line_tables = {t for t, _ in dt.lines}
     events: list[_Event] = []
     groups = _group(own + lines + attachments + [r for _, r in related])
-    line_said = _line_details(words, dt, doc_id, groups)
+    line_said, made_lines = _line_details(words, dt, doc_id, groups)
+    replaced_said: set = set()  # the copies this document's replacement named
+    copies_said: set = set()  # the documents this one said it corrects
     for gi, group in enumerate(groups):
         first = group[0]
         lines_said = False
@@ -1221,6 +1434,10 @@ def _audit_events(
         # a void's reason, said after its sentence as typed (no vocabulary
         # swap in the person's own words)
         reasons: dict[int, str] = {}  # id() of the head tuple → reason
+        # details that belong to one sentence of the save, not to its edit
+        own_details: dict[int, list[str]] = {}
+        made: dict = {}  # the document's own fields as this save made it
+        copy_of = None  # the document this one is a corrected copy of
         # what an approve/convert/promote in this save wrote, on any of the
         # document's rows of it (the status and the stamps may flush apart)
         folded: set = set()
@@ -1237,6 +1454,8 @@ def _audit_events(
         for r in group:
             if r.table_name == dt.table and r.record_id == doc_id:
                 if r.action == "INSERT":
+                    made = dict(r.new_values or {})
+                    copy_of = made.get("replaces_id") or copy_of
                     num = _number(dt, r.new_values or {})
                     heads.append(
                         (
@@ -1250,6 +1469,10 @@ def _audit_events(
                     changed = r.changed_fields or []
                     old, new = r.old_values or {}, r.new_values or {}
                     voided = False
+                    if made and r.action == "UPDATE":
+                        made.update(new)
+                    if "replaces_id" in changed and new.get("replaces_id"):
+                        copy_of = new["replaces_id"]
                     if "status" in changed:
                         after = _status_words(new.get("status"))
                         if after in _VOID_STATUSES:
@@ -1279,9 +1502,23 @@ def _audit_events(
                                 f"{new['reversal_transaction_id']})",
                             )
                         )
-                    if "replaced_by_id" in changed and new.get("replaced_by_id"):
+                    copy = new.get("replaced_by_id")
+                    if (
+                        "replaced_by_id" in changed
+                        and copy
+                        and copy not in replaced_said
+                    ):
+                        # the replacement writes the field and an entry of
+                        # its own: said once (W-237), with the copy's number
+                        replaced_said.add(copy)
+                        num = _other_number(words, dt, doc_id, copy)
                         heads.append(
-                            ("replaced", f"Replaced by a corrected copy by {who}")
+                            (
+                                "replaced",
+                                "Replaced by a corrected copy"
+                                + (f" ({num})" if num else "")
+                                + f" by {who}",
+                            )
                         )
                     # the document's totals after the lines that moved them
                     # (W-223): a line's own change is said first
@@ -1315,6 +1552,23 @@ def _audit_events(
                 if sentence:
                     heads.append((kinds[r.id], f"{sentence} by {who}"))
         details.extend(tail)
+        if copy_of and copy_of not in copies_said:
+            copies_said.add(copy_of)
+            # a corrected copy says whose, and what it changed (W-237: it
+            # read "Replaces set to 1")
+            num = _other_number(words, dt, doc_id, copy_of)
+            head = (
+                "replaces",
+                "Corrected copy of "
+                + (num or f"an earlier {noun.lower()}")
+                + f" by {who}",
+            )
+            own_details[id(head)] = (
+                _copy_details(words, dt, copy_of, made, made_lines.get(gi, {}))
+                if made
+                else []
+            )
+            heads.append(head)
         if not heads and details:
             heads.append(("edited", f"Edited by {who}"))
         if not heads:
@@ -1339,7 +1593,7 @@ def _audit_events(
                     who,
                     kind,
                     text + ("" if text.endswith((".", "!", "?")) else "."),
-                    details if i == primary else [],
+                    (details if i == primary else []) + own_details.get(id(head), []),
                 )
             )
     return events

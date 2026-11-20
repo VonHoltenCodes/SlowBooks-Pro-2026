@@ -534,12 +534,24 @@ Canonical list of security measures lives in [SECURITY.md](../SECURITY.md); engi
 Every document's view has an **Activity** panel under its Attachments (#894): invoices, sales receipts, estimates, credit memos, bills, vendor credits, bill payments, expenses, credit card charges, register entries (checks and deposits typed into a register), deposits, journal entries, payments received, purchase orders, pay applications and change orders, and the page of each job, customer and vendor. It opens closed as "Activity (N)" and reads its rows when opened. Newest first, each event is a sentence with who and when, on the company's clock:
 
 - made, and by whom: a sign-in by its name, an API token as "an API token (its name)", the machine as "the system", and an import's rows as "the system, in the IIF import" (or the Xero, CSV, QuickBooks Online export ... import), with who ran it;
-- edited, one line per field changed, in words, old → new ("Due date 2026-11-30 → 2026-12-15"), a long note as "Notes changed", a line added or removed by its description and amount, a line changed field by field;
-- voided (a register entry's, an expense's, a deposit's or a journal entry's void with the reversing entry's memo when it has one), status changes ("Marked sent"), replaced by a corrected copy;
+- edited, one line per field changed, in words, old → new ("Due date 2026-11-30 → 2026-12-15"), a long note as "Notes changed", a line added or removed by its description and amount, a line changed field by field (see "How an edit's lines are read" below);
+- voided (a register entry's, an expense's, a deposit's or a journal entry's void with the reversing entry's memo when it has one), status changes ("Marked sent");
+- corrected by replacement (an expense, a credit card charge, a credit memo, a vendor credit, a payment and a bill payment are changed by voiding them and posting a corrected copy): the original says "Replaced by a corrected copy (its number)", once, and the copy says "Corrected copy of (the original's number)" with what it changed from the original, its lines read by the same rule as an edit's;
 - emailed, to whom and by whom, from the email log, and a send that failed says so with the reason in a sentence;
 - printed to PDF where the document check (document audit) recorded it;
 - a file attached or removed, by name;
 - a payment applied to an invoice or taken off it, a credit memo or vendor credit applied, a bill payment applied, a deposit taking a payment (and the payment saying which deposit took it), each as the related record's own event where it touches this document.
+
+**How an edit's lines are read.** One rule, the same on every kind of document. The lines before the save and the lines after it are paired in steps, and a line paired in one step is out of the later ones:
+
+1. where the form keeps each line's id (a purchase order, a pay application), a line is itself by its id: an id that is gone is a line removed, and a line with no id is a line added;
+2. lines that are the same in every field pair wherever they sit, so putting the lines in another order names no line (and a save that changed nothing else writes no entry);
+3. lines with the same description pair as one line edited;
+4. lines with no description pair by what names them instead: the same item, else the same account (on a journal entry, the same account on the same side, so a debit never pairs with another account's credit);
+5. lines with the same amount pair as one line edited, whatever else changed (its description, quantity or rate);
+6. what is left was removed, or added, each said once with its amount.
+
+So on a document with no line ids, a described line that changes both its description and its amount in one save reads as one line removed and one added. An edited line names each field old → new ("Line Patch, $55.00: Rate $50.00 → $55.00; Amount $50.00 → $55.00"), quantities as the document shows them ("Quantity 1 → 3"), and comes before the document's Subtotal and Total. A line is named by its description, else its item's name, else its account's name, else its place among the lines ("Line 2 ($200.00)").
 
 The words are the company's own (a nonprofit reads Pledge and Donor). It is a read for every role, read-only and accountant sign-ins and API tokens included; nothing writes through it. The administrator's Audit Log page is as it was. It reads the audit log, which writes a row for every insert, edit and delete on every table with who made it, the email log (which keeps who sent each email from 2.32.0; a send from before says "someone (not recorded)"), the document checks and the attachments.
 
