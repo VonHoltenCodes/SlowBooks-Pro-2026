@@ -642,7 +642,10 @@ jobs:
           # 407 with round 22's tortoise notes (#1123 #1124): test_browser_hints_r22.py, one module without playwright.
           # 408 with the estimate void's browser test (#1128,
           # test_browser_estimate_void_1128.py: one module without playwright).
-          MAX_SKIPS: "408"
+          # 410 with round 23 (#1140 #1141 #1146): test_browser_r23_relay_select.py, one
+          # module without playwright, and test_tls_trust_new265.py's Mac simulation,
+          # which skips where Windows loads its own store into every default context.
+          MAX_SKIPS: "410"
         run: |
           total=0
           for f in shards/*/skips.txt; do

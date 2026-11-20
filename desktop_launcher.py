@@ -1382,6 +1382,24 @@ class DocumentViewerApi:
         return _reveal(self._path)
 
 
+# The window's title (W-206): the product's name on the picker, and
+# "<company> — SlowBooks Pro 2026" while a company is open, as the page's
+# own document.title reads (app.js showCompany). WebView2 and macOS's
+# WebKit window never take a page's title, so the page hands the company's
+# name over (set_window_title) and the picker puts the plain one back.
+# Nothing finds the window by its title: a second launch is caught by the
+# port (_server_already_running), the gate's tools find it by its process
+# (Windows) or owner name (macOS), and DevTools targets by the page's title.
+WINDOW_TITLE = "SlowBooks Pro 2026"
+
+
+def window_title_for(company: str = "") -> str:
+    """The title for a company's name: control characters out, the name cut
+    to 100 characters; the plain product name for none."""
+    name = re.sub(r"[\x00-\x1f\x7f]+", " ", str(company or "")).strip()[:100].strip()
+    return f"{name} — {WINDOW_TITLE}" if name else WINDOW_TITLE
+
+
 class PickerApi:
     """js_api bridge, available as window.pywebview.api on both the company
     picker AND the main app window (the same Window object is reused --
@@ -1452,7 +1470,10 @@ class PickerApi:
             import webview
 
             webview.create_window(
-                title or "SlowBooks Pro 2026", html=html, zoomable=True
+                title or "SlowBooks Pro 2026",
+                html=html,
+                zoomable=True,
+                text_select=True,
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -1482,7 +1503,9 @@ class PickerApi:
         try:
             import webview
 
-            webview.create_window(title or "SlowBooks Pro 2026", url, zoomable=True)
+            webview.create_window(
+                title or "SlowBooks Pro 2026", url, zoomable=True, text_select=True
+            )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
         return {"success": True}
@@ -1587,7 +1610,11 @@ class PickerApi:
             except OSError:
                 url, api = dest.as_uri(), None
             webview.create_window(
-                title or "SlowBooks Pro 2026", url, js_api=api, zoomable=True
+                title or "SlowBooks Pro 2026",
+                url,
+                js_api=api,
+                zoomable=True,
+                text_select=True,
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -1727,6 +1754,17 @@ class PickerApi:
     def _set_startup_status(self, text: str) -> None:
         self._startup_status = text
 
+    def set_window_title(self, company: str = "") -> dict:
+        """The open company's name in the window's title (W-206); "" puts
+        the plain product name back."""
+        title = window_title_for(company)
+        try:
+            if self._window is not None:
+                self._window.set_title(title)
+        except Exception:
+            return {"success": False}
+        return {"success": True, "title": title}
+
     def text_size(self) -> dict:
         """The Text size setting for the company picker (#813). The picker
         is the launcher's own page, with no origin, so it cannot read the
@@ -1797,6 +1835,10 @@ class PickerApi:
             time.sleep(0.15)
             try:
                 if window is not None:
+                    try:
+                        window.set_title(WINDOW_TITLE)  # no company open (W-206)
+                    except Exception:
+                        pass
                     window.load_html(PICKER_HTML)
             except Exception:
                 pass  # the picker is a convenience; the app is still running
@@ -2881,7 +2923,7 @@ def run_window(port: int, log_fh=None) -> int:
     geometry = restore_window_geometry(load_window_geometry(geometry_path), placement)
     api = PickerApi(port, log_fh)
     api._window = webview.create_window(
-        "SlowBooks Pro 2026",
+        WINDOW_TITLE,
         html=PICKER_HTML,
         js_api=api,
         width=geometry["width"],
@@ -2891,6 +2933,12 @@ def run_window(port: int, log_fh=None) -> int:
         maximized=geometry["maximized"],
         min_size=MIN_WINDOW_SIZE,
         zoomable=True,
+        # pywebview's default (False) puts body { user-select: none } on every
+        # page, so no figure, name or sentence could be selected or copied
+        # (W-209); never chosen, only never changed. The app's own CSS keeps
+        # the chrome (sidebar, top bar, buttons, headings of columns) from
+        # selecting instead (style.css, "What can be selected").
+        text_select=True,
     )
     geometry_tracker = WindowGeometryTracker(geometry, screens=screens)
     try:
@@ -3436,6 +3484,16 @@ def run_smoke_test(port: int = 3999) -> int:
         print("smoke: FAIL the encrypted scratch file did not read back")
         return 1
 
+    # NEW-265: outbound HTTPS with Python's default context (the relay, the
+    # currency rate) finds certificate authorities in the bundle
+    if sys.platform == "darwin":
+        from app.tls_trust import default_context_has_cas
+
+        print(f"smoke: SSL_CERT_FILE={os.environ.get('SSL_CERT_FILE', '')}")
+        if not default_context_has_cas():
+            print("smoke: FAIL a default TLS context loads no certificate authority")
+            return 1
+
     print("smoke: PASS")
     return 0
 
@@ -3711,6 +3769,17 @@ def main() -> int:
                 _stream.reconfigure(encoding="utf-8", errors="replace")
             except (AttributeError, OSError, ValueError):
                 pass  # not a TextIOWrapper (test harness, log redirect)
+
+    # Before anything can make an HTTPS connection (the relay's line, the
+    # currency rate): the frozen macOS build's OpenSSL looks for its CAs in
+    # the CI builder's folder; point it at the bundled certifi file instead
+    # (NEW-265). The server child inherits the variable.
+    try:
+        from app.tls_trust import use_bundled_ca_if_needed
+
+        use_bundled_ca_if_needed()
+    except ImportError:
+        pass  # a source run from elsewhere imports app later, after its path
 
     # Not a user flag — the frozen server child (see start_server) and
     # argparse must never meet, so handle it before parsing.

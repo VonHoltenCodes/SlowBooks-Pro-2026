@@ -355,6 +355,10 @@ _NAMED_TABLES = {
 }
 _LINE_LABEL_FIELDS = ("description", "memo", "item_no")
 _VOID_STATUSES = {"void", "voided"}
+# What a void itself writes beside the status (#1128 and the construction
+# documents): who and when are the event's own, the reason its sentence's
+# (W-203: they read as a second "Edited by" entry with raw fields)
+_VOID_FIELDS = {"voided_at", "voided_by", "void_reason"}
 
 
 # ---------------------------------------------------------------------------
@@ -595,13 +599,17 @@ def _child_rows(
 # ---------------------------------------------------------------------------
 
 
-def _changes(words: _Words, row: AuditLog) -> list[str]:
+def _changes(words: _Words, row: AuditLog, skip=frozenset()) -> list[str]:
     """One line per field an UPDATE moved, in words: old → new."""
     out = []
     old = row.old_values or {}
     new = row.new_values or {}
     for f in row.changed_fields or []:
-        if f in _QUIET_FIELDS or f == "status":
+        if f in _QUIET_FIELDS or f == "status" or f in skip:
+            continue
+        if f.endswith("_at"):
+            # a stamp (approved_at, sent_at, …) is the moment of the save
+            # the entry already carries, and read as a raw ISO time (W-203)
             continue
         label = words.field(f)
         before, after = old.get(f), new.get(f)
@@ -844,6 +852,9 @@ def _audit_events(
         who = words.who(first.username, first.source)
         heads: list[tuple[str, str]] = []  # (kind, sentence)
         details: list[str] = []
+        # a void's reason, said after its sentence as typed (no vocabulary
+        # swap in the person's own words)
+        reasons: dict[int, str] = {}  # id() of the head tuple → reason
         created = False
         for r in group:
             if r.table_name == dt.table and r.record_id == doc_id:
@@ -861,14 +872,21 @@ def _audit_events(
                 else:
                     changed = r.changed_fields or []
                     old, new = r.old_values or {}, r.new_values or {}
+                    voided = False
                     if "status" in changed:
                         after = _status_words(new.get("status"))
                         if after in _VOID_STATUSES:
-                            heads.append(("voided", f"Voided by {who}"))
+                            voided = True
                         elif after and after != _status_words(old.get("status")):
                             heads.append(("status", f"Marked {after} by {who}"))
                     if "is_voided" in changed and new.get("is_voided") is True:
-                        heads.append(("voided", f"Voided by {who}"))
+                        voided = True
+                    if voided:
+                        reason = str(new.get("void_reason") or "").strip()
+                        head = ("voided", f"Voided by {who}")
+                        if reason and reason != REDACTED:
+                            reasons[id(head)] = reason
+                        heads.append(head)
                     if "reversal_transaction_id" in changed and new.get(
                         "reversal_transaction_id"
                     ):
@@ -888,7 +906,9 @@ def _audit_events(
                             ("replaced", f"Replaced by a corrected copy by {who}")
                         )
                     details.extend(
-                        c for c in _changes(words, r) if not c.startswith("Void ")
+                        c
+                        for c in _changes(words, r, skip=_VOID_FIELDS)
+                        if not c.startswith("Void ")
                     )
             elif r.table_name in line_tables:
                 if created and r.action == "INSERT":
@@ -931,14 +951,18 @@ def _audit_events(
         if details and heads[primary][0] not in ("created", "edited"):
             heads.insert(0, ("edited", f"Edited by {who}"))
             primary = 0
-        for i, (kind, sentence) in enumerate(heads):
+        for i, head in enumerate(heads):
+            kind, sentence = head
+            text = words.text(sentence)
+            if id(head) in reasons:
+                text += ": " + reasons[id(head)]
             events.append(
                 _Event(
                     when,
                     first.id * 10 + i,
                     who,
                     kind,
-                    words.text(sentence) + ".",
+                    text + ("" if text.endswith((".", "!", "?")) else "."),
                     details if i == primary else [],
                 )
             )

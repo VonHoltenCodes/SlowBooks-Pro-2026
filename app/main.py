@@ -750,6 +750,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         _claude_line.stop()
+        _claude_line.stop_retry(timeout=1.0)
         await _scheduler.stop(_auto_enter)
 
 
