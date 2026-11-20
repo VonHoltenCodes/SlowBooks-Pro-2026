@@ -7,6 +7,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.services.settings_service import default_sales_tax_rate
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
 from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
@@ -118,6 +119,10 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     # Refused here rather than skipped at every run: a template that adds up
     # to nothing generated $0.00 invoices that then showed as overdue.
     resolve_line_taxable(db, data.lines, customer)
+    # No rate sent: the company's Default Tax Rate, as the form starts a
+    # schedule (#1129); a rate sent, 0 included, is kept.
+    if data.tax_rate is None:
+        data.tax_rate = float(default_sales_tax_rate(db))
     refuse_zero_total(
         compute_line_totals(data.lines, data.tax_rate)[2], _schedule_noun(db)
     )

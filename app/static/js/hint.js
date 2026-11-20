@@ -12,22 +12,37 @@
  * The text stays in the page, hidden until opened, and the button names it
  * with aria-describedby, so a screen reader reads it at the button without
  * opening anything. Click, Enter or Space opens a small note under the
- * icon; Escape closes it and keeps focus on the button; a click elsewhere,
- * or Tab out, closes it; one is open at a time. Nothing opens on hover.
+ * icon and moves focus to it, so a screen reader reads it as it opens
+ * (NEW-263: VoiceOver said only "expanded"); Escape closes it and puts
+ * focus back on the button; a click elsewhere, or focus leaving the
+ * tortoise and its note in any way, closes it (W-189); one is open at a
+ * time. Nothing opens on hover.
+ *
+ * A tortoise inside a field's <label> is not part of the field's name
+ * (NEW-263): Hints.nameFields gives the field the label's own words by
+ * aria-labelledby, so neither "About CC" nor an open note's text is read
+ * as the field's name.
  */
 let _hintSeq = 0;
+let _hintNameSeq = 0;
 
 // `text` is page markup (a hint may carry <strong> or a link): the caller
 // escapes what a user typed, as with any template. `about` is the field's
 // own name, shown in bold at the head of the note and read as the button's
 // name ("About CC"); with none the button is "About this field". `id` names
-// the note when a field already points at it with aria-describedby (a hidden
-// note still describes its field); with none it is hint-N.
+// the note's text when a field already points at it with aria-describedby
+// (a hidden note still describes its field); with none it is hint-N. The
+// note itself is `${id}-note`. The description points at the text, not at
+// the note: WebKit gives no description from a hidden element whose role
+// takes no name from its content (role="note"), so VoiceOver read none
+// (NEW-263); the text's own span describes in WebKit and Chromium alike.
 function hint(text, about = '', id = '') {
     id = id || `hint-${++_hintSeq}`;
+    const note = `${id}-note`;
     const name = about ? `About ${about}` : 'About this field';
-    const head = about ? `<strong class="hint-pop-title">${escapeHtml(about)}</strong>` : '';
-    return `<span class="hint-wrap"><button type="button" class="hint-icon" data-hint aria-label="${escapeHtml(name)}" aria-expanded="false" aria-controls="${id}" aria-describedby="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="22" alt="" aria-hidden="true"></button><span class="hint-pop" id="${id}" role="note" hidden><img class="hint-pop-mark" src="/static/img/tortoise-info.png" srcset="/static/img/tortoise-info@2x.png 2x" width="28" height="28" alt="" aria-hidden="true"><span class="hint-pop-body">${head}${text}</span></span></span>`;
+    // a space after the bold name: WebKit reads the block's words run together without one
+    const head = about ? `<strong class="hint-pop-title">${escapeHtml(about)}</strong> ` : '';
+    return `<span class="hint-wrap"><button type="button" class="hint-icon" data-hint aria-label="${escapeHtml(name)}" aria-expanded="false" aria-controls="${note}" aria-describedby="${id}"><img src="/static/img/tortoise-hint.png" srcset="/static/img/tortoise-hint@2x.png 2x" width="22" height="22" alt="" aria-hidden="true"></button><span class="hint-pop" id="${note}" role="note" tabindex="-1" hidden><img class="hint-pop-mark" src="/static/img/tortoise-info.png" srcset="/static/img/tortoise-info@2x.png 2x" width="28" height="28" alt="" aria-hidden="true"><span class="hint-pop-body" id="${id}">${head}${text}</span></span></span>`;
 }
 
 const Hints = {
@@ -38,11 +53,11 @@ const Hints = {
     // A hint whose text follows a choice on the form: swap the body's words
     // and keep the field name at its head. `text` is plain text.
     setText(id, text) {
-        const note = document.getElementById(id);
-        const body = note && note.querySelector('.hint-pop-body');
+        const el = document.getElementById(id);
+        const body = el && (el.classList && el.classList.contains('hint-pop-body') ? el : el.querySelector('.hint-pop-body'));
         if (!body) return;
         const head = body.querySelector('.hint-pop-title');
-        body.textContent = text;
+        body.textContent = head ? ` ${text}` : text;
         if (head) body.insertBefore(head, body.firstChild);
     },
 
@@ -58,17 +73,30 @@ const Hints = {
         // as the page or a dialog scrolls, and as the window changes size
         if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('resize', Hints.onMove);
         if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('scroll', Hints.onMove, true);
+        // a field's note takes focus, named by its text, so a screen reader
+        // reads it as it opens (a section's list is reached by Tab, as
+        // before). Named only while open: a shut note is no label on the page.
+        if (note.getAttribute && note.getAttribute('tabindex') === '-1' && note.focus) {
+            note.setAttribute('aria-labelledby', button.getAttribute('aria-describedby'));
+            note.focus({ preventScroll: true });
+        }
     },
 
     close() {
         const button = Hints._open;
         if (!button) return;
         const note = Hints.note(button);
-        if (note) note.hidden = true;
+        // focus in the note goes back to its button, not to the page's top
+        const held = note && typeof document !== 'undefined' && note.contains && note.contains(document.activeElement);
+        if (note) {
+            note.hidden = true;
+            if (note.removeAttribute) note.removeAttribute('aria-labelledby');
+        }
         button.setAttribute('aria-expanded', 'false');
         Hints._open = null;
         if (typeof window !== 'undefined' && window.removeEventListener) window.removeEventListener('resize', Hints.onMove);
         if (typeof document !== 'undefined' && document.removeEventListener) document.removeEventListener('scroll', Hints.onMove, true);
+        if (held && button.isConnected !== false && button.focus) button.focus({ preventScroll: true });
     },
 
     toggle(button) {
@@ -97,10 +125,61 @@ const Hints = {
         if (button.focus) button.focus();
     },
 
+    // Whether an element is the open tortoise, its note or inside them
+    _within(button, el) {
+        if (!el) return false;
+        const wrap = button.closest && button.closest('.hint-wrap');
+        const note = Hints.note(button);
+        return !!((wrap && wrap.contains(el)) || (note && note.contains && note.contains(el)));
+    },
+
+    // Focus leaving the tortoise and its note closes the note (W-189). Tab
+    // from the page's last control leaves the page, or wraps to its top,
+    // with no relatedTarget to compare: then where focus has gone is looked
+    // at once the move is over, and the note stays open only if focus is
+    // still inside it (the window itself losing focus keeps it).
     onFocusout(e) {
-        if (!Hints._open) return;
-        const wrap = Hints._open.closest('.hint-wrap');
-        if (wrap && e.relatedTarget && !wrap.contains(e.relatedTarget)) Hints.close();
+        const button = Hints._open;
+        if (!button) return;
+        if (e.relatedTarget) {
+            if (!Hints._within(button, e.relatedTarget)) Hints.close();
+            return;
+        }
+        setTimeout(() => {
+            if (Hints._open !== button) return;
+            const now = typeof document !== 'undefined' ? document.activeElement : null;
+            if (!Hints._within(button, now)) Hints.close();
+        }, 0);
+    },
+
+    // A field whose <label> holds a tortoise is named by the label's own
+    // words (NEW-263): the label's text, outside the tortoise and any field
+    // in it, goes in spans the field points at with aria-labelledby. A field
+    // already named another way is left alone.
+    nameFields(root) {
+        if (!root || !root.querySelectorAll) return;
+        const labels = [...root.querySelectorAll('label')];
+        if (root.matches && root.matches('label')) labels.unshift(root);
+        labels.forEach((label) => {
+            const field = label.control;
+            if (!field || field.hasAttribute('aria-labelledby') || field.hasAttribute('aria-label')) return;
+            const kids = [...label.childNodes];
+            if (!kids.some((n) => n.nodeType === 1 && n.classList.contains('hint-wrap'))) return;
+            const ids = [];
+            let run = null;
+            kids.forEach((n) => {
+                const apart = n.nodeType === 1 && n.matches('.hint-wrap, input, select, textarea, button');
+                if (apart || (n.nodeType !== 1 && !run && !n.textContent.trim())) { run = null; return; }
+                if (!run) {
+                    run = document.createElement('span');
+                    run.id = `hint-name-${++_hintNameSeq}`;
+                    label.insertBefore(run, n);
+                    ids.push(run.id);
+                }
+                run.appendChild(n);
+            });
+            if (ids.length) field.setAttribute('aria-labelledby', ids.join(' '));
+        });
     },
 
     init() {
@@ -108,6 +187,13 @@ const Hints = {
         // capture: before a dialog's own Escape handler
         document.addEventListener('keydown', Hints.onKeydown, true);
         document.addEventListener('focusout', Hints.onFocusout);
+        // every page and dialog is drawn after this runs: name their fields as they come
+        if (typeof MutationObserver !== 'undefined' && document.documentElement) {
+            new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n) => {
+                if (n.nodeType === 1) Hints.nameFields(n);
+            }))).observe(document.documentElement, { childList: true, subtree: true });
+            Hints.nameFields(document);
+        }
     },
 };
 

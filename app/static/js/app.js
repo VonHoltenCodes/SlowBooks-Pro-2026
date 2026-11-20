@@ -2240,7 +2240,7 @@ const App = {
     // body's markup swapped (a list and a template link, so not
     // Hints.setText's plain words), the field's name kept at its head
     csvImportHelp(entity) {
-        const body = $('#csv-import-help .hint-pop-body');
+        const body = $('#csv-import-help');  // the note's text: hint()'s id names it
         if (!body) return;
         const head = body.querySelector('.hint-pop-title');
         body.innerHTML = App._csvImportHelpHtml(entity);

@@ -1,7 +1,13 @@
 from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, field_validator, model_validator, field_serializer
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+    field_serializer,
+)
 
 from app.schemas.common import (
     check_line_fits,
@@ -9,7 +15,8 @@ from app.schemas.common import (
     clean_line_cost_type,
     quantity_text,
     StrictModel,
-    TaxRateFloat,
+    NewTaxRateFloat,
+    TAX_RATE_DESCRIPTION,
     TaxRateOut,
     validate_non_negative_line,
     WholeCents,
@@ -76,9 +83,18 @@ class CreditMemoCreate(StrictModel):
     customer_id: int
     date: dt_date
     original_invoice_id: Optional[int] = None
-    # Left out: the original invoice's rate when one is named, else 0 (the
-    # Credit Memo form fills in the company's default rate itself).
-    tax_rate: Optional[TaxRateFloat] = None
+    # Left out: the original invoice's rate when one is named, else the
+    # company's Default Tax Rate (#1129), as the Credit Memo form starts.
+    tax_rate: NewTaxRateFloat = Field(
+        None,
+        description=(
+            TAX_RATE_DESCRIPTION
+            + " Left out (or null): the rate of original_invoice_id when one is "
+            "named, else the company's Default Tax Rate from Settings, as the "
+            "app's form starts a credit memo; send 0 for no tax. A non-taxable "
+            "customer keeps that rate and is credited no tax."
+        ),
+    )
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
