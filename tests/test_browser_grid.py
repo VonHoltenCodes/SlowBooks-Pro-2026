@@ -666,7 +666,14 @@ def test_choosing_columns_says_filtered_and_rides_on_the_address_and_exports(
         assert "Drywall" not in _heads(page)
         assert _query(_hash(page))["show"] == "active"
         page.select_option("#grid-show", "all")
-        page.wait_for_function("() => !document.querySelector('.grid-filtered')")
+        # the report drawn again with every class: while it reloads there is
+        # no .grid-filtered and no heading either, so the wait is for the
+        # heading itself (#1095: read mid-redraw on CI, the heads were [])
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('#report-content thead th')]"
+            ".some(t => t.textContent.trim() === 'Drywall (archived)')"
+        )
+        assert not page.locator(".grid-filtered").count()
         assert "Drywall (archived)" in _heads(page)
 
         # the choice reopens from a saved report

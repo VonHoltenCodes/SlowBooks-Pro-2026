@@ -98,10 +98,13 @@ def _page(browser):
 
 def _show(page):
     # the app draws its first page when it starts; on a slow machine that
-    # finished after the view below was shown, and drew over it
+    # finished after the view below was shown, and drew over it. The status
+    # bar says "Ready" in index.html before App.navigate has begun, so that
+    # word alone is not the first page done (it raced on CI, #1095): the
+    # page's own "<label> — Ready", or any other word navigate ends on.
     page.wait_for_function(
         "() => { const t = (document.getElementById('status-text') || {}).textContent || '';"
-        " return t !== '' && !/^Loading /.test(t); }"
+        " return t !== '' && t !== 'Ready' && !/^Loading /.test(t); }"
     )
     page.evaluate("() => BankingPage.showReconcileView(7)")
     page.wait_for_selector("#recon-view tbody tr[data-line]")

@@ -910,6 +910,24 @@ def test_the_classes_list_and_a_class_page_refuse_from_after_to_typed(
         page.close()
 
 
+def _mark_register_bar(page):
+    page.evaluate(
+        "() => { document.getElementById('reg-start').closest('.toolbar')"
+        ".dataset.beforeChange = '1'; }"
+    )
+
+
+def _register_redrawn(page):
+    """The register drawn again after a change of its dates: its date bar
+    is a new one, without the mark. A date typed before the redraw went
+    into the old bar, which the redraw then replaced (#1095: seen on CI,
+    where settle()'s quiet moment came before the redraw)."""
+    page.wait_for_function(
+        "() => { const s = document.getElementById('reg-start');"
+        " return !!s && !s.closest('.toolbar').dataset.beforeChange; }"
+    )
+
+
 def test_a_register_refuses_from_after_to_typed_before_touching_its_address(
     browser, company, books
 ):
@@ -947,14 +965,18 @@ def test_a_register_refuses_from_after_to_typed_before_touching_its_address(
         assert page.locator("#page-content tbody tr").count() == rows
 
         # only a To in use: From typed past it is refused, and "to" is kept
+        _mark_register_bar(page)
         page.get_by_role("button", name="Clear", exact=True).click()
         page.wait_for_function(
             "() => document.getElementById('reg-start').value === ''"
         )
+        _register_redrawn(page)
         settle(page, handled)
+        _mark_register_bar(page)
         page.fill("#reg-end", "2026-08-31")
         page.dispatch_event("#reg-end", "change")
         page.wait_for_function("() => location.hash.includes('end_date=2026-08-31')")
+        _register_redrawn(page)
         settle(page, handled)
         page.fill("#reg-start", "2026-09-01")
         page.dispatch_event("#reg-start", "change")

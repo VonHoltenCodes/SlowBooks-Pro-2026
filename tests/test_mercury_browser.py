@@ -11,6 +11,26 @@ from tests.test_mercury_webhooks import SECRET, deliver, event
 sync_api = pytest.importorskip("playwright.sync_api")
 
 
+def _sync_and_redraw(page, said):
+    """Sync Mercury, and wait for what follows it: the toast, and then the
+    Banking page drawn again (syncMercury calls BankingPage.go after the
+    toast, without waiting). A click made between the two landed on the old
+    page, and the redraw took it away: the Balance webhooks panel opened and
+    was replaced, closed, and its secret field never became visible (#1095,
+    under CI's load). The old page's mapping select is marked; the new one
+    has no mark."""
+    page.evaluate(
+        "() => document.querySelectorAll('.mercury-map')"
+        ".forEach(m => { m.dataset.beforeSync = '1'; })"
+    )
+    page.get_by_role("button", name="Sync Mercury", exact=True).click()
+    page.get_by_text(said, exact=True).wait_for()
+    page.wait_for_function(
+        "() => { const m = document.querySelector('.mercury-map');"
+        " return !!m && !m.dataset.beforeSync; }"
+    )
+
+
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_connect_map_sync_review_and_disconnect_in_browser(
     client, db_session, bank, transport, tmp_path, theme
@@ -61,14 +81,8 @@ def test_connect_map_sync_review_and_disconnect_in_browser(
             choice = mapping.locator("option", has_text="(Mercury LLC)")
             mapping.select_option(label=choice.inner_text().strip())
             page.get_by_label("Import transactions posted since").fill("2026-08-01")
-            page.get_by_role("button", name="Sync Mercury", exact=True).click()
-            page.get_by_text(
-                "Mercury: 1 new, 0 already imported, 0 matched", exact=True
-            ).wait_for()
-            page.get_by_role("button", name="Sync Mercury", exact=True).click()
-            page.get_by_text(
-                "Mercury: 0 new, 1 already imported, 0 matched", exact=True
-            ).wait_for()
+            _sync_and_redraw(page, "Mercury: 1 new, 0 already imported, 0 matched")
+            _sync_and_redraw(page, "Mercury: 0 new, 1 already imported, 0 matched")
             assert db_session.query(BankTransaction).count() == 1
             # the details' summary, not the card note's entry of that name (#977)
             page.locator("summary", has_text="Balance webhooks").click()

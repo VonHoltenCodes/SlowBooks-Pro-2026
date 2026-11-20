@@ -927,6 +927,13 @@ def test_a_date_picked_from_the_calendar_applies_at_once(browser):
         page.wait_for_function(
             "() => location.hash === '#/banking/1?start_date=2026-08-03'"
         )
+        # the register is drawn again for the new From (a bar without the
+        # mark); a pick made before that lands on the old bar, which the
+        # redraw then replaces, and the To is lost (#1095, under CI's load)
+        page.wait_for_function(
+            f"() => !!document.getElementById('reg-start')"
+            f" && {BAR}.dataset.probe !== 'typing'"
+        )
         assert page.input_value("#reg-start") == "2026-08-03"
         # and To, with nothing typed in it
         page.evaluate(PICK, ["#reg-end", "2026-08-31"])
