@@ -472,7 +472,7 @@ def test_books_from_before_2_9_get_the_default_asset_type_at_the_upgrade(tmp_pat
     assert script.get_revision("407d52f22d78").down_revision == "d7b3f9a1c5e2"
     assert script.get_heads() == [
         "c1128e5a7d0f"
-    ]  # the estimate void (#1128) is the head above it
+    ]  # the estimate void (#1128) is the head
     command.upgrade(cfg, "407d52f22d78")
     types, accounts = _after_upgrade(db)
     expense = accounts["Depreciation Expense"]

@@ -601,6 +601,20 @@ def add_all(
         q = q.filter(BankTransaction.id.in_(only or [-1]))
     rows = q.order_by(BankTransaction.date, BankTransaction.id).all()
     added, skipped, no_vendor = 0, [], []
+
+    def skip(bt, reason):
+        # each line not added is named by its date, the bank's text and
+        # its amount, for the page to say which one and why (W-190)
+        skipped.append(
+            {
+                "id": bt.id,
+                "reason": reason,
+                "date": bt.date.isoformat() if bt.date else None,
+                "payee": bt.payee or bt.description or None,
+                "amount": str(bt.amount),
+            }
+        )
+
     if only is not None:
         found = {bt.id for bt in rows}
         skipped += [
@@ -611,16 +625,9 @@ def add_all(
         waiting = []
         for bt in rows:
             if bt.transaction_line_id or bt.match_status in ("added", "auto", "manual"):
-                skipped.append(
-                    {"id": bt.id, "reason": "That line is already in the books"}
-                )
+                skip(bt, "That line is already in the books")
             elif bt.match_status != "unmatched":
-                skipped.append(
-                    {
-                        "id": bt.id,
-                        "reason": "That line is excluded; restore it to add it",
-                    }
-                )
+                skip(bt, "That line is excluded; restore it to add it")
             else:
                 waiting.append(bt)
         rows = waiting
@@ -630,7 +637,7 @@ def add_all(
                 add(db, bt, **picks.get(bt.id, {}))
             added += 1
         except HTTPException as exc:
-            skipped.append({"id": bt.id, "reason": exc.detail})
+            skip(bt, exc.detail)
             continue
         if needs_vendor(db, bt):
             no_vendor.append(bt.id)

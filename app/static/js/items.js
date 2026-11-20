@@ -123,11 +123,18 @@ const ItemsPage = {
     // Accounts Receivable, Accounts Payable, Undeposited Funds or
     // Inventory, whose figures the invoices, bills, deposits and items
     // keep. PurchaseAccounts.isBalanceSheet is that one rule.
-    withOtherAccounts(accounts, types, keepId) {
-        const own = pickerAccounts(accounts, types, keepId);
+    // `refused` is the server's list of the other accounts Books Check ties
+    // to a sub-ledger (Sales Tax Payable, Accrued Job Costs, the payroll
+    // liabilities, retainage, W-196): not offered either, but the one the
+    // item already uses stays, as an import may have given it one.
+    withOtherAccounts(accounts, types, keepId, refused = new Set()) {
+        const keep = Number(keepId);
+        const own = pickerAccounts(accounts, types, keepId)
+            .filter(a => !refused.has(Number(a.id)) || Number(a.id) === keep);
         const ids = new Set(own.map(a => Number(a.id)));
         return own.concat((accounts || []).filter(a => !ids.has(Number(a.id))
-            && a.is_active !== false && PurchaseAccounts.isBalanceSheet(a)));
+            && a.is_active !== false && PurchaseAccounts.isBalanceSheet(a)
+            && !refused.has(Number(a.id))));
     },
     // The income accounts, then everything else under Other accounts, as
     // the bill line's picker groups them.
@@ -151,6 +158,8 @@ const ItemsPage = {
         if (id) item = await API.get(`/items/${id}`);
 
         const accounts = await API.get('/accounts');
+        let refused = new Set();
+        try { refused = new Set((await API.get('/items/refused-accounts')).map(r => Number(r.account_id))); } catch (e) { refused = new Set(); }
         // Income means income accounts only — the list used to offer COGS
         // and expense accounts too, and a business's 4400 In-Kind
         // Contributions (W-L13). The account an item already uses stays
@@ -158,8 +167,8 @@ const ItemsPage = {
         // Both also offer, as Other accounts, the balance-sheet accounts a
         // bill line offers (#1038): a security deposit invoiced through an
         // item credits a liability, not income.
-        const incomeAccts = ItemsPage.withOtherAccounts(accounts, ['income'], item.income_account_id);
-        const expenseAccts = ItemsPage.withOtherAccounts(accounts, ['expense','cogs'], item.expense_account_id);
+        const incomeAccts = ItemsPage.withOtherAccounts(accounts, ['income'], item.income_account_id, refused);
+        const expenseAccts = ItemsPage.withOtherAccounts(accounts, ['expense','cogs'], item.expense_account_id, refused);
         const assetAccts = pickerAccounts(accounts, ['asset'], item.asset_account_id);
         const acctLabel = a => accountLabel(a);
 

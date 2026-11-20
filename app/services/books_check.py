@@ -1954,6 +1954,70 @@ def _label_invoices_by_their_face(db: Session, rows, t) -> None:
                 d["type_label"] = document_label(inv, t)
 
 
+def tied_accounts(db: Session) -> dict[int, tuple[str, str]]:
+    """{account id: (the Books Check row's control label, what keeps the
+    sub-ledger beside it)} for every account a Books Check row sets beside a
+    sub-ledger: read from the same lookups the rows make, so it cannot drift
+    from them. A line posted to one of these by a document that is not part
+    of its sub-ledger (an invoice line on an item pointed at it, W-196)
+    moves the account and not the sub-ledger, and puts that row out by the
+    line. The retainage rows are a contractor's, but their accounts are
+    tied whatever the company type, so a switch to construction mode finds
+    nothing posted to them out of turn."""
+    from app.services.accrued_job_costs import account_id as accrued_id
+    from app.services.inventory_service import get_inventory_asset_account_id
+    from app.services.retainage_report import PAYABLE_ACCOUNT, RECEIVABLE_ACCOUNT
+    from app.services.undeposited_funds import uf_account_id
+    from app.models.items import Item
+
+    out: dict[int, tuple[str, str]] = {}
+
+    def put(account_id, label, keeper):
+        if account_id is not None and account_id not in out:
+            out[account_id] = (label, keeper)
+
+    put(
+        control_accounts.find(db, "1100"),
+        "Accounts Receivable",
+        "the invoices and customer payments",
+    )
+    put(
+        control_accounts.find(db, "2000"),
+        "Accounts Payable",
+        "the bills and bill payments",
+    )
+    put(
+        uf_account_id(db),
+        "Undeposited Funds",
+        "the customer payments waiting to be deposited",
+    )
+    inventory = db.query(Account).filter(Account.account_number == "1300").first()
+    if inventory is not None:
+        put(inventory.id, "Inventory", "the stock items' quantity and cost")
+    for item in db.query(Item).filter(Item.track_inventory.is_(True)):
+        put(
+            get_inventory_asset_account_id(db, item),
+            "Inventory",
+            "the stock items' quantity and cost",
+        )
+    for acct_id in _payroll_liability_accounts(db):
+        put(acct_id, "Payroll Liabilities", "the pay runs and what was paid of them")
+    put(
+        control_accounts.find(db, "2200"),
+        "Sales Tax Payable",
+        "the sales tax the invoices charge and the tax payments",
+    )
+    put(accrued_id(db), "Accrued Job Costs", "the job cost accruals")
+    for name, keeper in (
+        (RECEIVABLE_ACCOUNT, "the retainage held on pay applications"),
+        (PAYABLE_ACCOUNT, "the retainage held from subcontractors' bills"),
+    ):
+        acct = db.query(Account).filter(Account.name == name).first()
+        if acct is not None:
+            put(acct.id, name, keeper)
+    return out
+
+
 def books_check(db: Session, as_of: Optional[date] = None) -> dict:
     """Every pair, as of a date (today by default): the rows, how many
     differ, and the sentence the dashboard widget shows."""

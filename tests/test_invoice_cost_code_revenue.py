@@ -306,7 +306,7 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == [
         "c1128e5a7d0f"
-    ]  # the estimate void (#1128) is the head above it
+    ]  # the estimate void (#1128) is the head
     assert script.get_revision("e1055c0de4a1").down_revision == "e986b4d2a7c3"
     command.upgrade(cfg, "e986b4d2a7c3")
     command.upgrade(cfg, "e1055c0de4a1")  # its own step (#770)

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.bank_rules import BankRule
 from app.models.contacts import Vendor
+from app.services.bank_rules_engine import escape_pattern
 
 
 def vendor_rules(db: Session, vendor_ids) -> dict[int, BankRule]:
@@ -60,7 +61,8 @@ def set_vendor_rule(db: Session, vendor: Vendor, wanted: bool) -> BankRule | Non
     else:
         rule = BankRule(
             name=vendor.name,
-            pattern=vendor.name,
+            # the name as it is written: a star in it is a star (NEW-259)
+            pattern=escape_pattern(vendor.name),
             rule_type="contains",
             priority=0,
             vendor_id=vendor.id,

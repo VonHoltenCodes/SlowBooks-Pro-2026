@@ -270,8 +270,8 @@ def test_the_migration_adds_void_and_walks_back(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == ["c1128e5a7d0f"]
-    assert script.get_revision("c1128e5a7d0f").down_revision == "a1075c4d8e2f"
-    command.upgrade(cfg, "a1075c4d8e2f")
+    assert script.get_revision("c1128e5a7d0f").down_revision == "c1064a5e7b2d"
+    command.upgrade(cfg, "c1064a5e7b2d")
     command.upgrade(cfg, "c1128e5a7d0f")  # its own step (#770)
     with sqlite3.connect(db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(estimates)")}
@@ -283,7 +283,7 @@ def test_the_migration_adds_void_and_walks_back(tmp_path):
             "INSERT INTO estimates (id, estimate_number, customer_id, status, date)"
             " VALUES (1, 'E-1', 1, 'VOID', '2026-11-19')"
         )
-    command.downgrade(cfg, "a1075c4d8e2f")
+    command.downgrade(cfg, "c1064a5e7b2d")
     with sqlite3.connect(db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(estimates)")}
         assert not {"voided_at", "voided_by", "void_reason"} & cols

@@ -16,7 +16,7 @@ Idempotent, column by column (a database built by create_all already has
 them).
 
 Revision ID: c1128e5a7d0f
-Revises: a1075c4d8e2f
+Revises: c1064a5e7b2d
 Create Date: 2026-11-19
 """
 
@@ -26,7 +26,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "c1128e5a7d0f"
-down_revision: Union[str, None] = "a1075c4d8e2f"
+down_revision: Union[str, None] = "c1064a5e7b2d"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

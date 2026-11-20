@@ -17,7 +17,7 @@ import time as _time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
@@ -35,6 +35,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import DataError
 
 from app.services.control_accounts import MissingControlAccount
+from app.services.dimensions import class_ids_checked
 from app.services.rate_limit import limiter
 
 from app.routes import (
@@ -456,14 +457,17 @@ def _refuse_a_database_behind_head(target=None) -> None:
     # #769: a file from before 2.29.0 is not migrated by this build. Said in
     # one sentence, and recorded for the desktop launcher's wait, which
     # names it instead of a timeout.
+    # W-186: one a newer SlowBooks Pro last opened, the same way, before
+    # the head check below calls it a database "behind" this build.
     from app.services import migration_floor
 
-    if migration_floor.is_below_floor(current):
+    refused = migration_floor.refusal([current])
+    if refused:
         if target is None:  # the company this server starts for
             from app.services import startup_progress
 
-            startup_progress.refuse(migration_floor.BELOW_FLOOR_MESSAGE)
-        raise migration_floor.BelowMigrationFloor()
+            startup_progress.refuse(refused)
+        migration_floor.refuse(refused)
 
     try:
         from alembic.config import Config
@@ -756,6 +760,8 @@ app = FastAPI(
     title="SlowBooks Pro 2026",
     version=__version__,
     lifespan=lifespan,
+    # every write that names a class names one of this company's (W-199)
+    dependencies=[Depends(class_ids_checked)],
     description=(
         "Local bookkeeping API. Conventions an agent needs before writing:\n\n"
         "- **Unknown fields are rejected** (422 naming the field); nothing is "
