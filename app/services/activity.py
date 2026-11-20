@@ -359,6 +359,20 @@ _VOID_STATUSES = {"void", "voided"}
 # documents): who and when are the event's own, the reason its sentence's
 # (W-203: they read as a second "Edited by" entry with raw fields)
 _VOID_FIELDS = {"voided_at", "voided_by", "void_reason"}
+# What an approve, convert or promote writes beside the status: the action's
+# own, said in its sentence ("Approved by … on <date>"), never a second
+# "Edited by" entry of raw fields (W-210)
+_ACTION_FIELDS = {
+    "approved": {
+        "approved_on",
+        "approved_by",
+        "contract_sum_original",
+        "contract_sum_to_date",
+        "invoice_id",
+    },
+    "converted": {"converted_invoice_id"},
+    "promoted": {"promoted_to_id"},
+}
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +439,9 @@ class _Words:
         word = _FIELD_WORDS.get(name)
         if word is None:
             word = name[:-3] if name.endswith("_id") else name
+            # a percentage reads as its label does on the form: Markup %
+            if word.endswith("_pct"):
+                word = word[:-4] + " %"
             word = word.replace("_", " ").strip().capitalize()
         return word
 
@@ -622,7 +639,9 @@ def _changes(words: _Words, row: AuditLog, skip=frozenset()) -> list[str]:
             out.append(f"{label} changed")
             continue
         b, a = words.value(f, before), words.value(f, after)
-        if b == a:
+        if b == a or _empty_or_zero(before) and _empty_or_zero(after):
+            # an empty number saved as zero (a markup filled in on approval,
+            # W-210) is no change a person made
             continue
         if not b:
             out.append(f"{label} set to {a}")
@@ -631,6 +650,17 @@ def _changes(words: _Words, row: AuditLog, skip=frozenset()) -> list[str]:
         else:
             out.append(f"{label} {b} → {a}")
     return out
+
+
+def _empty_or_zero(value) -> bool:
+    if value is None or value == "":
+        return True
+    if isinstance(value, bool):
+        return False
+    try:
+        return Decimal(str(value)) == 0
+    except (InvalidOperation, ValueError):
+        return False
 
 
 def _line_words(words: _Words, values: dict) -> str:
@@ -662,6 +692,62 @@ def _line_words(words: _Words, values: dict) -> str:
     if label and money:
         return f"{label}, {money}"
     return label or money or "a line"
+
+
+def _edited_line_name(words: _Words, dt: DocType, r: AuditLog) -> str:
+    """An edited line as a person knows it. An edit's snapshot carries only
+    the fields that moved, so the line's description (or item, account) is
+    read from the line itself; a line with none is named by its position on
+    the document, "line 2" (W-210: it read "Line a line: …")."""
+    row = _row(words.db, r.table_name, r.record_id)
+    values = {**row, **(r.old_values or {}), **(r.new_values or {})}
+    name = _line_words(words, values)
+    if name != "a line" and any(
+        values.get(f) for f in (*_LINE_LABEL_FIELDS, "item_id", "account_id")
+    ):
+        return name
+    position = _line_position(words, dt, r, row)
+    if position:
+        return f"{position}" + (f" ({name})" if name != "a line" else "")
+    return name
+
+
+def _line_position(words: _Words, dt: DocType, r: AuditLog, row: dict) -> int:
+    """The line's place among its document's lines, 1-based (0 if unknown)."""
+    fk = dict(dt.lines).get(r.table_name)
+    tbl = Base.metadata.tables.get(r.table_name)
+    if not row or not fk or tbl is None or fk not in tbl.c:
+        return 0
+    order = [tbl.c[c] for c in ("line_no", "line_order") if c in tbl.c] + [tbl.c.id]
+    ids = [
+        x
+        for (x,) in words.db.execute(
+            select(tbl.c.id).where(tbl.c[fk] == row.get(fk)).order_by(*order)
+        )
+    ]
+    return ids.index(row["id"]) + 1 if row.get("id") in ids else 0
+
+
+def _action_sentence(words: _Words, after: str, who: str, changed, new) -> str:
+    """The status change in words, with what the action itself wrote."""
+    if after == "approved":
+        on = new.get("approved_on") if "approved_on" in changed else None
+        text = f"Approved by {who}" + (f" on {on}" if on else "")
+        if "invoice_id" in changed and new.get("invoice_id"):
+            num = words.value("invoice_id", new["invoice_id"])
+            text += f"; {words.t('Invoice').lower()} {num} made"
+        return text
+    if after == "converted" and new.get("converted_invoice_id"):
+        num = words.name_of(
+            "invoices", new["converted_invoice_id"], ("invoice_number",)
+        )
+        return f"Converted to {words.t('Invoice').lower()} {num} by {who}".replace(
+            "  ", " "
+        )
+    if after == "promoted" and new.get("promoted_to_id"):
+        num = words.name_of("change_orders", new["promoted_to_id"], ("number",))
+        return f"Promoted to change order {num} by {who}".replace("  ", " ")
+    return f"Marked {after} by {who}"
 
 
 def _number(dt: DocType, values: dict) -> str:
@@ -856,6 +942,19 @@ def _audit_events(
         # swap in the person's own words)
         reasons: dict[int, str] = {}  # id() of the head tuple → reason
         created = False
+        # what an approve/convert/promote in this save wrote, on any of the
+        # document's rows of it (the status and the stamps may flush apart)
+        folded: set = set()
+        for r in group:
+            if (
+                r.table_name == dt.table
+                and r.record_id == doc_id
+                and r.action == "UPDATE"
+                and "status" in (r.changed_fields or [])
+            ):
+                folded |= _ACTION_FIELDS.get(
+                    _status_words((r.new_values or {}).get("status")), set()
+                )
         for r in group:
             if r.table_name == dt.table and r.record_id == doc_id:
                 if r.action == "INSERT":
@@ -878,7 +977,8 @@ def _audit_events(
                         if after in _VOID_STATUSES:
                             voided = True
                         elif after and after != _status_words(old.get("status")):
-                            heads.append(("status", f"Marked {after} by {who}"))
+                            action = _action_sentence(words, after, who, changed, new)
+                            heads.append(("status", action))
                     if "is_voided" in changed and new.get("is_voided") is True:
                         voided = True
                     if voided:
@@ -907,7 +1007,7 @@ def _audit_events(
                         )
                     details.extend(
                         c
-                        for c in _changes(words, r, skip=_VOID_FIELDS)
+                        for c in _changes(words, r, skip=_VOID_FIELDS | folded)
                         if not c.startswith("Void ")
                     )
             elif r.table_name in line_tables:
@@ -924,9 +1024,7 @@ def _audit_events(
                 else:
                     moved = _changes(words, r)
                     if moved:
-                        line = _line_words(
-                            words, {**(r.old_values or {}), **(r.new_values or {})}
-                        )
+                        line = _edited_line_name(words, dt, r)
                         details.append(f"Line {line}: " + "; ".join(moved))
             elif r.table_name == "attachments":
                 vals = (r.new_values if r.action == "INSERT" else r.old_values) or {}

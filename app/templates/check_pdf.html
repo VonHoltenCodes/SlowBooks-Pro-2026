@@ -215,7 +215,7 @@
             <table class="voucher-table">
                 <tbody>
                 {% for d in check.details %}
-                <tr><td>{{ d.description }}</td><td class="r">{{ d.amount | currency }}</td></tr>
+                <tr><td>{{ d.description | desc }}</td><td class="r">{{ d.amount | currency }}</td></tr>
                 {% endfor %}
                 {% if not check.details %}
                 <tr><td>Payment</td><td class="r">{{ check.amount | currency }}</td></tr>
@@ -244,7 +244,7 @@
                 <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
                 <tbody>
                 {% for d in check.details %}
-                <tr><td>{{ d.description }}</td><td class="r">{{ d.amount | currency }}</td></tr>
+                <tr><td>{{ d.description | desc }}</td><td class="r">{{ d.amount | currency }}</td></tr>
                 {% endfor %}
                 {% if not check.details %}
                 <tr><td>Payment</td><td class="r">{{ check.amount | currency }}</td></tr>
@@ -268,7 +268,7 @@
                 <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
                 <tbody>
                 {% for d in check.details %}
-                <tr><td>{{ d.description }}</td><td class="r">{{ d.amount | currency }}</td></tr>
+                <tr><td>{{ d.description | desc }}</td><td class="r">{{ d.amount | currency }}</td></tr>
                 {% endfor %}
                 {% if not check.details %}
                 <tr><td>Payment</td><td class="r">{{ check.amount | currency }}</td></tr>

@@ -239,3 +239,35 @@ def test_only_an_administrator_dismisses(relay, client):
     person = _sign_in("bookkeeper", client)
     r = person.post("/api/switchboard/dismiss", json={"slug": "abcdefghjk"})
     assert r.status_code == 403
+
+
+def test_the_retry_says_in_the_launcher_log_that_it_deleted_the_record(
+    relay, quick_retry, client, caplog
+):
+    """W-212 (round 24): the retry's outcome reaches the log a person reads.
+    The served app (the desktop's --_serve child, a server) sets no handler
+    on the root logger, so Python's last-resort handler writes WARNING and up
+    to launcher.log and nothing below; the line is logged at a level it
+    keeps, and names no credential, token or device."""
+    _connected(relay, client)
+    record = json.loads(link.link_path().read_text())
+    _away(record)
+    client.post("/api/switchboard/disconnect")
+    link.stop_retry()
+    path = link.pending_path()
+    kept = json.loads(path.read_text())
+    for p in kept["pending"]:
+        p["relay"] = relay.url
+    path.write_text(json.dumps(kept))
+    caplog.clear()
+    caplog.set_level(logging.WARNING)
+    assert link.retry_pending_once() == 0
+    said = [
+        r
+        for r in caplog.records
+        if "deleted" in r.getMessage() and "left by a disconnect" in r.getMessage()
+    ]
+    assert said and all(r.levelno >= logging.lastResort.level for r in said)
+    assert relay.slug in said[0].getMessage()
+    for secret in (record["credential"], record["token"]):
+        assert secret not in caplog.text

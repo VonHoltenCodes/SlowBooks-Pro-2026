@@ -100,7 +100,7 @@
             <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td class="nw">{{ p.date | fdate }}</td>
                 <td class="nw">{{ p.received_from }}</td>
-                <td class="desc">{{ p.description }}{% if p.document %} ({{ p.document }}){% endif %}</td>
+                <td class="desc">{{ p.description | desc }}{% if p.document %} ({{ p.document }}){% endif %}</td>
                 <td class="nw">{{ p.check_number or p.payment_reference or p.reference }}</td>
                 <td class="nw">{{ p.method }}</td>
                 <td class="r">{{ p.amount | currency }}</td>

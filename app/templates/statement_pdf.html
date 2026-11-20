@@ -100,7 +100,7 @@
                 <td class="nw">{{ line.date | fdate }}</td>
                 <td class="nw">{{ line.type }}</td>
                 <td class="nw">{{ line.number }}</td>
-                <td class="desc">{{ line.description }}</td>
+                <td class="desc">{{ line.description | desc }}</td>
                 <td class="r"{% if line.amount < 0 %} style="color: #006600;"{% endif %}>{{ money(line.amount) }}</td>
                 <td class="r">{{ money(line.balance) }}</td>
             </tr>

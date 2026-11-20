@@ -974,8 +974,8 @@ const SettingsPage = {
                         (it may not make anything up), and after a create it is told what was left blank. On the desktop the
                         connection is up only while SlowBooks Pro is open. Disconnect ends it, revokes the token and has the
                         relay delete its record of these books. The <strong>relay name</strong> shown while connected is how
-                        that record is known: if Disconnect cannot reach the relay, send the name to
-                        support@slowbookspro.com and the record is removed by hand.` },
+                        that record is known: if Disconnect cannot reach the relay, SlowBooks Pro will keep trying to remove
+                        the record itself, and the name stays here in case you ever need to ask support@slowbookspro.com about it.` },
                         { id: 'settings-switchboard-help', text: `<strong>Without the relay: SlowBooks Switchboard.</strong> SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
@@ -2696,10 +2696,11 @@ const SettingsPage = {
         if (error) {
             html += '<div id="claude-relay-error" role="alert" style="margin-top:4px;">'
                 + `<div style="color:var(--text-danger);">${escapeHtml(error)}</div>`
-                + '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-error-dismiss" onclick="SettingsPage.dismissClaudeError()">Dismiss</button></div>'
+                + '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-error-dismiss" aria-label="Dismiss the relay message" onclick="SettingsPage.dismissClaudeError()">Dismiss</button></div>'
                 + '</div>';
         }
-        // Disconnect could not reach the relay: the name to send to support,
+        // Disconnect could not reach the relay: the relay name (in case support is
+        // ever needed; SlowBooks Pro keeps trying the deletion itself),
         // kept by the server until the relay deletes the record (NEW-269:
         // it lived only in the page, lost on a restart); Dismiss hides it
         // while the quiet retry goes on
@@ -2712,7 +2713,7 @@ const SettingsPage = {
                 + '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:6px;">'
                 + copyLineHtml('claude-relay-fallback-name', 'Relay name', shown.slug, 'SettingsPage.copyClaudeFallbackName()')
                 + '</div>'
-                + (admin ? '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>' : '')
+                + (admin ? '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" aria-label="Dismiss the removal notice" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>' : '')
                 + '</div>';
         }
         if (!admin) return html;

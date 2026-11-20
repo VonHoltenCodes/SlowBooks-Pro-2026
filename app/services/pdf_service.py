@@ -304,18 +304,85 @@ def _cut_words(text: str, words: int):
     return text[:at].rstrip(), text[at:]
 
 
+def _plain_lines(value) -> str:
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _desc(value):
+    """A line's description as it prints (W-213): escaped, each line break
+    a <br>, so a description typed as separate lines prints as them. What
+    ``line_cut`` already made is passed through."""
+    from markupsafe import Markup, escape
+
+    if isinstance(value, Markup):
+        return value
+    return escape(_plain_lines(value)).replace("\n", Markup("<br>"))
+
+
+_jinja_env.filters["desc"] = _desc
+
+
+def _joined_head(head: str, last_is_full: bool = True, blanks: int = 0):
+    """The first part of a cut line. The row's cell is set full on its last
+    line (text-align-last: justify), and text-align-last also justifies each
+    line before a forced break, so what comes before the description's last
+    line break is a block of its own set as usual (``.lead``); when the cut
+    itself falls at a line break, the whole first part is."""
+    from markupsafe import Markup
+
+    if last_is_full:
+        if "\n" not in head:
+            return head
+        before, _, last = head.rpartition("\n")
+    else:
+        before, last = head, ""
+    # a blank line the description has where the cut falls stays at the
+    # first part's foot (a no-break space holds the line open in both engines)
+    gap = Markup("<br>&nbsp;") * blanks
+    return (
+        Markup('<div class="lead">')
+        + _desc(before)
+        + gap
+        + Markup("</div>")
+        + _desc(last)
+    )
+
+
 @pass_context
 def _line_cut(ctx, text):
     """``(head, end)`` of a long last line, as the layout chose
     (``last_line_cut`` in the template's context): "whole" leaves it uncut,
     an int carries that many of its last words (its last lines) with the
-    totals, and nothing chosen falls back on the character count."""
-    text = (text or "").rstrip()
+    totals, and nothing chosen falls back on the character count.
+
+    A cut between two of the layout's lines falls at a word's start. When it
+    falls where the description has a line break, the first part's last line
+    is a short one of its own and is not set full; a blank line there opens
+    the end, so none is lost (W-213)."""
+    text = _plain_lines(text).rstrip()
     how = ctx.get("last_line_cut")
     if how == "whole":
         return text, ""
+    # an int: the words carried; (words, 1): and the blank line above them,
+    # which the layout counted as one of the two lines carried
+    if isinstance(how, tuple):
+        how, end_blanks = how
+    else:
+        end_blanks = 0
     if isinstance(how, int) and not isinstance(how, bool):
-        return _cut_words(text, how)
+        from markupsafe import Markup
+
+        head, end = _cut_words(text, how)
+        if not head:
+            return head, end
+        breaks = text[len(head) : len(text) - len(end)].count("\n")
+        if breaks:
+            end_blanks = min(end_blanks, breaks - 1)
+            return (
+                _joined_head(head, False, breaks - 1 - end_blanks),
+                Markup("&nbsp;<br>") * end_blanks + _desc(end),
+            )
+        return _joined_head(head), end
     return _tail_split(text, DOC_LINE_TAIL_KEEP, DOC_LINE_TAIL_MOST)
 
 
@@ -387,8 +454,14 @@ def choose_last_line(html_whole: str):
     # its last two lines and not however many the break left
     if head_pages == {page} and room >= DOC_TAIL_SLACK:
         return "whole"
-    kept = [t for t in lines if t.strip()][-DOC_TAIL_LINES:]
+    # the last two lines of the layout, a blank one (two line breaks in the
+    # description) counted as a line (W-213)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    kept = lines[-DOC_TAIL_LINES:]
     words = sum(len(t.split()) for t in kept)
+    if words and not kept[0].strip():
+        return (words, 1)
     return words or None
 
 

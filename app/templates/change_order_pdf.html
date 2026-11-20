@@ -28,11 +28,12 @@
        Chromium's print alike. */
     table.line-items > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
     table.line-items > tbody.doc-tail > tr.doc-end > td { padding: 16px 0 0; border-bottom: 0; }
-    .totals { margin-left: auto; width: 260px; break-inside: avoid; page-break-inside: avoid; }
-    .totals table { width: 100%; }
+    .totals { margin-left: auto; break-inside: avoid; page-break-inside: avoid; }
+    /* the block's table is 260px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214) */
+    .totals table { width: 260px; margin-left: auto; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
-    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    .totals .label { font-weight: 700; color: #4a4a6a; }
+    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .totals .label { font-weight: 700; color: #4a4a6a; white-space: nowrap; }
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
@@ -80,7 +81,7 @@
         {% for line in co.lines %}
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
-                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description or '' }} <span style="color:#888;font-size:8pt;">({{ line.cost_type }})</span></td>
+                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description | desc }} <span style="color:#888;font-size:8pt;">({{ line.cost_type }})</span></td>
                 <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
                 <td class="r">{{ line.sell_amount | currency }}</td>
             </tr>
