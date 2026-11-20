@@ -86,15 +86,12 @@ jobs:
       # Ubuntu mirror is sometimes slow enough to hold this step for minutes
       - name: The runner image's version, for the apt cache
         id: image
-        run: |
-          echo "os=$ImageOS" >> "$GITHUB_OUTPUT"
-          echo "version=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+        run: echo "version=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Cache apt's downloads
         uses: actions/cache@v4
         with:
           path: ~/apt-cache
-          key: apt-core-${{ steps.image.outputs.version }}
-          restore-keys: apt-core-${{ steps.image.outputs.os }}-
+          key: apt2-core-${{ steps.image.outputs.version }}
       - name: System deps for WeasyPrint + OCR integration tests
         # libjpeg62-turbo was dropped from Ubuntu 24.04 (noble); Pillow
         # ships bundled JPEG support so we don't need a system libjpeg
@@ -268,15 +265,12 @@ jobs:
       # packages are installed with dpkg and the mirror is never asked.
       - name: The runner image's version, for the apt cache
         id: image
-        run: |
-          echo "os=$ImageOS" >> "$GITHUB_OUTPUT"
-          echo "version=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+        run: echo "version=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
       - name: Cache apt's downloads
         uses: actions/cache@v4
         with:
           path: ~/apt-cache
-          key: apt-browser-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}-${{ steps.image.outputs.version }}
-          restore-keys: apt-browser-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}-${{ steps.image.outputs.os }}-
+          key: apt2-browser-${{ env.PLAYWRIGHT_VERSION }}-${{ steps.engines.outputs.key }}-${{ steps.image.outputs.version }}
       - name: Cache Playwright's browsers
         uses: actions/cache@v4
         with:

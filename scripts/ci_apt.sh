@@ -3,9 +3,9 @@
 #
 # The Ubuntu mirror the runners use is sometimes slow: 300 kB/s, which
 # turned a 20-second apt step into 4 to 16 minutes on some shards. The job
-# caches the .deb files apt downloaded (saved per runner image, restored
-# from any image of the same OS); with them here, this installs the ones the
-# image lacks with dpkg and never asks the mirror for anything, not even
+# caches the .deb files apt downloaded, keyed on the runner image's version
+# (several are served at once, so each has its own); with them here, this
+# installs them with dpkg and never asks the mirror for anything, not even
 # `apt-get update`. Without them, or if dpkg refuses them, it is the
 # ordinary apt install, keeping what it downloads for the cache to save.
 #
@@ -26,25 +26,13 @@ fi
 mkdir -p "$cache/partial"
 
 if compgen -G "$cache/*.deb" >/dev/null; then
-  # Only the packages this image lacks: a cache saved on another image
-  # (the runners are served from several at once) never downgrades or
-  # replaces what the image has. A deb that needs a newer library than the
-  # image's fails dpkg here, and apt below puts it right.
-  missing=()
-  for deb in "$cache"/*.deb; do
-    pkg=$(dpkg-deb -f "$deb" Package)
-    arch=$(dpkg-deb -f "$deb" Architecture)
-    if ! dpkg-query -W -f='${Status}' "$pkg:$arch" 2>/dev/null | grep -q "ok installed"; then
-      missing+=("$deb")
-    fi
-  done
-  echo "${#missing[@]} of $(ls "$cache"/*.deb | wc -l) cached packages to install with dpkg"
-  ok=1
-  if [ "${#missing[@]}" -gt 0 ]; then
-    sudo DEBIAN_FRONTEND=noninteractive dpkg -i "${missing[@]}" >/dev/null || ok=0
-  fi
-  # whole: every package asked for is in, and dpkg has nothing half-done
-  if [ "$ok" = 1 ] && dpkg -s "$@" >/dev/null 2>&1 && [ -z "$(dpkg --audit)" ]; then
+  # the whole set apt chose for this image, so its versions agree with
+  # each other and with the image (the cache key is the image's version:
+  # a set saved on another image can need newer libraries than this one
+  # has, which is how a restore across images broke dpkg on run 44653809362)
+  echo "installing $(ls "$cache"/*.deb | wc -l) cached packages with dpkg"
+  if sudo DEBIAN_FRONTEND=noninteractive dpkg -i "$cache"/*.deb >/dev/null \
+    && dpkg -s "$@" >/dev/null 2>&1 && [ -z "$(dpkg --audit)" ]; then
     echo "from the cache, without the mirror"
     exit 0
   fi
