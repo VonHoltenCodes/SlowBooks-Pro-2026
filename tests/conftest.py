@@ -283,6 +283,65 @@ if _pdf_service is not None:
     _pdf_service.PdfEngineMissing.__init__ = _counting_engine_missing_init
 
 
+# ---- A test that walks the migrations in subprocesses has its own budget ----
+# `python -m alembic` in a subprocess gets none of the migration cache above:
+# each `upgrade head` walks the whole chain on a real file, which takes 25 to
+# 60 s for the test on a Windows runner and has gone past the job's 120 s
+# per-test limit when the runner was busy. Windows has only pytest-timeout's
+# thread method, which ends the whole worker with os._exit: under xdist that
+# reads "worker crashed", says nothing about time, and leaves the alembic
+# child running with the SQLite file open.
+#
+# The rule: such a test runs alembic through the `alembic_cli` fixture and
+# nowhere else. Using the fixture gives the test ALEMBIC_WALK_TEST_BUDGET as
+# its pytest-timeout budget (a marker, which outranks the job's --timeout),
+# and every alembic call in the test draws on one shared
+# ALEMBIC_WALK_SUBPROCESS_BUDGET, which is smaller. So a walk that is too slow
+# ends as subprocess.TimeoutExpired, an ordinary failure with the child
+# killed and its output shown, before the worker's limit is reached; a walk
+# that hangs still fails, at four minutes rather than never.
+import subprocess as _subprocess  # noqa: E402
+import time as _time  # noqa: E402
+
+ALEMBIC_WALK_TEST_BUDGET = 300  # seconds: the test's pytest-timeout budget
+ALEMBIC_WALK_SUBPROCESS_BUDGET = 240  # seconds: every alembic call in one test
+
+
+def pytest_collection_modifyitems(items):  # noqa: F811 (the hook names it)
+    for item in items:
+        if "alembic_cli" not in getattr(item, "fixturenames", ()):
+            continue
+        if item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(ALEMBIC_WALK_TEST_BUDGET))
+
+
+@pytest.fixture
+def alembic_cli():
+    """`run = alembic_cli(db_path)`, then `run("upgrade", "head")`: alembic's
+    command line in a subprocess against that SQLite file, returning the
+    CompletedProcess. All the calls one test makes share one time budget."""
+    root = Path(__file__).resolve().parents[1]
+
+    def for_file(db_path, budget=ALEMBIC_WALK_SUBPROCESS_BUDGET):
+        env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_path}"}
+        deadline = _time.monotonic() + budget
+
+        def run(*args):
+            cmd = [sys.executable, "-m", "alembic", *args]
+            left = deadline - _time.monotonic()
+            if left <= 0:
+                raise _subprocess.TimeoutExpired(cmd, budget)
+            # on expiry subprocess.run kills the child and waits for it
+            # before raising, so the file is closed when the test fails
+            return _subprocess.run(
+                cmd, cwd=root, env=env, capture_output=True, text=True, timeout=left
+            )
+
+        return run
+
+    return for_file
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item):
     seen_before = _ENGINE_MISSING_SEEN
