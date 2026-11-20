@@ -653,7 +653,10 @@ jobs:
           # (test_pdf_line_breaks_w213.py), six of the totals labels
           # (test_pdf_totals_labels_w214.py), and test_print_r24_browser.py, one module
           # without playwright.
-          MAX_SKIPS: "428"
+          # 430 with round 24's Mac fixes: two WeasyPrint cases of the long last line
+          # with other fonts (test_pdf_last_line_new271.py, the fonts as shipped and a
+          # wider family).
+          MAX_SKIPS: "430"
         run: |
           total=0
           for f in shards/*/skips.txt; do
