@@ -190,12 +190,16 @@ def test_an_invoices_activity_lists_each_event_in_order(
     assert "Line: work, $100.00" in created["details"]
     assert edited["text"] == f"Edited by {who}."
     assert "Due date 2026-06-30 → 2026-07-15" in edited["details"]
-    # the line in the first place, changed (W-215: not removed and re-added)
-    assert (
-        "Line more work, $200.00: Description work → more work; Quantity 1 → 2; "
-        "Amount $100.00 → $200.00"
-    ) in edited["details"]
-    assert "Total $100.00 → $200.00" in edited["details"]
+    # a rewritten line that shares nothing with the one before it (neither
+    # description nor amount) reads as one removed and one added (W-222),
+    # before the totals it moved (W-223)
+    assert edited["details"] == [
+        "Due date 2026-06-30 → 2026-07-15",
+        "Line added: more work, $200.00",
+        "Line removed: work, $100.00",
+        "Subtotal $100.00 → $200.00",
+        "Total $100.00 → $200.00",
+    ], edited["details"]
     assert emailed["text"] == f"Emailed to ap@probe.test by {who}."
     assert attached["text"] == f"receipt.pdf attached by {who}."
     assert voided["text"] == f"Voided by {who}."

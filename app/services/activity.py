@@ -971,6 +971,36 @@ def _same_value(a, b) -> bool:
         return False
 
 
+_TOTAL_FIELDS = {
+    "subtotal",
+    "total",
+    "tax_amount",
+    "balance_due",
+    "amount_due",
+    "total_amount",
+    "amount",
+}
+
+
+def _is_total_field(name: str) -> bool:
+    return name in _TOTAL_FIELDS or name.endswith("_total")
+
+
+def _share_something(words: _Words, b: dict, a: dict) -> bool:
+    """Two snapshots of a line with the same description (or none on
+    either), or the same amount."""
+    label_b = next((str(b[f]) for f in _LINE_LABEL_FIELDS if b.get(f)), "")
+    label_a = next((str(a[f]) for f in _LINE_LABEL_FIELDS if a.get(f)), "")
+    if label_b == label_a:
+        return True
+    for f in ("amount", "sell_amount", "scheduled_value", "debit", "credit"):
+        if b.get(f) not in (None, "") and _same_value(b.get(f), a.get(f)):
+            if f in ("debit", "credit") and _empty_or_zero(b.get(f)):
+                continue
+            return True
+    return False
+
+
 def _line_details(
     words: _Words, dt: DocType, doc_id: int, groups: list[list[AuditLog]]
 ) -> dict[int, list[str]]:
@@ -1052,6 +1082,10 @@ def _line_details(
                         and last_group.get((table, rid), -1) < gi
                     ):
                         removed[rid] = values
+            # a save that kept some lines (a purchase order's form sends each
+            # kept line's id) said by id what went and what came: a line
+            # whose id is gone was removed, a new id was added (W-222)
+            kept_ids = bool(edits) or any(rid not in removed for rid in alive[table])
             before = sorted(removed.values(), key=lambda v: _line_key(v, fk))
             after = sorted(inserted.values(), key=lambda v: _line_key(v, fk))
             if created and not before:
@@ -1068,9 +1102,18 @@ def _line_details(
                         left.remove(same)
                     else:
                         changed_after.append(a)
-                # the rest by place: a line in the place of another is that
-                # line changed
-                for b, a in zip(left, changed_after):
+                # with no ids, the rest by place: a line in the place of
+                # another is that line changed, unless the two share
+                # nothing (neither description nor amount), which reads
+                # better as one removed and one added (W-222)
+                pairs = []
+                if not kept_ids:
+                    for b, a in zip(list(left), list(changed_after)):
+                        if _share_something(words, b, a):
+                            pairs.append((b, a))
+                            left.remove(b)
+                            changed_after.remove(a)
+                for b, a in pairs:
                     fields = _line_diff_fields(b, a, fk)
                     row = AuditLog(
                         table_name=table,
@@ -1084,12 +1127,28 @@ def _line_details(
                     if moved:
                         line = _edited_line_name(words, dt, row)
                         said.append(f"Line {line}: " + "; ".join(moved))
-                n = min(len(left), len(changed_after))
                 said.extend(
-                    f"Line added: {_line_words(words, a)}" for a in changed_after[n:]
+                    f"Line added: {_line_words(words, a)}" for a in changed_after
                 )
-                said.extend(f"Line removed: {_line_words(words, b)}" for b in left[n:])
+                said.extend(f"Line removed: {_line_words(words, b)}" for b in left)
             for r in edits:
+                # a kept line edited in place reads as tidily as a rewritten
+                # one: "Quantity 1 → 3", not "1.0000 → 3.0" (W-223)
+                fields = r.changed_fields or []
+                r = AuditLog(
+                    table_name=r.table_name,
+                    record_id=r.record_id,
+                    action=r.action,
+                    changed_fields=fields,
+                    old_values={
+                        **(r.old_values or {}),
+                        **{f: _tidy((r.old_values or {}).get(f)) for f in fields},
+                    },
+                    new_values={
+                        **(r.new_values or {}),
+                        **{f: _tidy((r.new_values or {}).get(f)) for f in fields},
+                    },
+                )
                 moved = _changes(words, r)
                 if moved:
                     line = _edited_line_name(words, dt, r)
@@ -1126,6 +1185,7 @@ def _audit_events(
         who = words.who(first.username, first.source)
         heads: list[tuple[str, str]] = []  # (kind, sentence)
         details: list[str] = []
+        tail: list[str] = []  # the document's totals, said after its lines
         # a void's reason, said after its sentence as typed (no vocabulary
         # swap in the person's own words)
         reasons: dict[int, str] = {}  # id() of the head tuple → reason
@@ -1191,10 +1251,20 @@ def _audit_events(
                         heads.append(
                             ("replaced", f"Replaced by a corrected copy by {who}")
                         )
+                    # the document's totals after the lines that moved them
+                    # (W-223): a line's own change is said first
+                    totals = {f for f in changed if _is_total_field(f)}
                     details.extend(
                         c
-                        for c in _changes(words, r, skip=_VOID_FIELDS | folded)
+                        for c in _changes(words, r, skip=_VOID_FIELDS | folded | totals)
                         if not c.startswith("Void ")
+                    )
+                    tail.extend(
+                        _changes(
+                            words,
+                            r,
+                            skip=_VOID_FIELDS | folded | (set(changed) - totals),
+                        )
                     )
             elif r.table_name in line_tables:
                 # the save's lines, said once as one change of the set (W-215)
@@ -1212,6 +1282,7 @@ def _audit_events(
                 sentence = _related_sentence(words, kinds[r.id], r, doc_id)
                 if sentence:
                     heads.append((kinds[r.id], f"{sentence} by {who}"))
+        details.extend(tail)
         if not heads and details:
             heads.append(("edited", f"Edited by {who}"))
         if not heads:
