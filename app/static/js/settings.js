@@ -762,11 +762,7 @@ const SettingsPage = {
                             <input name="smtp_from_email" type="email" value="${escapeHtml(s.smtp_from_email || '')}"></div>
                         <div class="form-group"><label>From Name</label>
                             <input name="smtp_from_name" value="${escapeHtml(s.smtp_from_name || '')}"></div>
-                        <div class="form-group"><label>Use TLS</label>
-                            <select name="smtp_use_tls">
-                                <option value="true" ${s.smtp_use_tls !== 'false' ? 'selected' : ''}>Yes</option>
-                                <option value="false" ${s.smtp_use_tls === 'false' ? 'selected' : ''}>No</option>
-                            </select></div>
+                        ${SettingsPage._useTlsFieldHtml(s)}
                         <div class="form-group"><label>Always CC</label>
                             <input name="smtp_always_cc" aria-describedby="smtp-always-cc-help" value="${escapeHtml(s.smtp_always_cc || '')}" placeholder="office@example.com"></div>
                         <div class="form-group"><label>Always BCC</label>
@@ -2475,6 +2471,28 @@ const SettingsPage = {
             document.getElementById('company-logo-preview')?.remove();
             document.getElementById('company-logo-note')?.remove();
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Use TLS, with its warning beside it while it is No: shown in the open
+    // (it is a warning, not teaching text), tied to the select so a screen
+    // reader hears it on the control, and a polite live region so choosing
+    // No is announced. The element is always there and holds the sentence
+    // or nothing. It changes nothing about what is saved or how mail is sent.
+    TLS_OFF_WARNING: 'With Use TLS off, your mail password and your mail are sent without encryption.',
+
+    _useTlsFieldHtml(s) {
+        const off = s.smtp_use_tls === 'false';
+        return `<div class="form-group"><label>Use TLS</label>
+                            <select name="smtp_use_tls" aria-describedby="smtp-tls-off-warning" onchange="SettingsPage.tlsChanged(this)">
+                                <option value="true" ${off ? '' : 'selected'}>Yes</option>
+                                <option value="false" ${off ? 'selected' : ''}>No</option>
+                            </select>
+                            <div id="smtp-tls-off-warning" role="status" style="color:var(--text-warning); font-size:11px; font-weight:600; margin-top:4px;">${off ? escapeHtml(SettingsPage.TLS_OFF_WARNING) : ''}</div></div>`;
+    },
+
+    tlsChanged(select) {
+        const note = document.getElementById('smtp-tls-off-warning');
+        if (note) note.textContent = select.value === 'false' ? SettingsPage.TLS_OFF_WARNING : '';
     },
 
     async testEmail() {
