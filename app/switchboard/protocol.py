@@ -55,11 +55,110 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 UNSUPPORTED_PROTOCOL_VERSION = -32022  # 2026-07-28
 
+# Who the server is (Implementation, in both eras). The name is what
+# clients key on and never changes; the title is what a person sees.
+SERVER_NAME = "sbplive"
+SERVER_TITLE = "SlowBooks Pro"
+WEBSITE_URL = "https://www.slowbookspro.com/connect/"
 SERVER_INFO = {
-    "name": "sbplive",
-    "title": "SlowBooks Switchboard",
+    "name": SERVER_NAME,
+    "title": SERVER_TITLE,
     "version": __version__,
+    "websiteUrl": WEBSITE_URL,
 }
+
+# The icon files a server with a web address of its own serves at its root:
+# path, MIME type, sizes. PNG first, which every client that shows icons
+# must take; SVG, which it should, last.
+ICON_FILES = (
+    ("/icon-48.png", "image/png", "48x48"),
+    ("/icon-96.png", "image/png", "96x96"),
+    ("/icon-192.png", "image/png", "192x192"),
+    ("/icon-512.png", "image/png", "512x512"),
+    ("/icon.svg", "image/svg+xml", "any"),
+)
+
+# -- ICON: the block below is written by tools/make_icons.py --
+# The icon as data: URIs (PNG, 64 colors), for a server with no web
+# address of its own: stdio and a self-hosted door. A server that has one
+# points at its own files instead (icons_at).
+_ICON_PNG_48 = (
+    "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAMAAABg3Am1AAAAwFBMVEX////+/v79/v38/fz6/Pr3"
+    "+fXz9/Pw9vDs8uvp8ejq7+Xk7uTi7OHg6+De6t3d59jY5tfU5NTQ4c/N38zJ3cjbzqLD2MK81Lu1"
+    "0LSzzK2ryamox6bdunWzwpefwZ3QokXMmTOXvJWRuI+LtYmIsYODr4GFqnR+rHx8q3p3qHRxpG5r"
+    "oGhmnWNfmFxZlFZWklNRkE5PjkxLi0dDhkA/hDw9gTg3fzM1fTIxey0ueCkrdycpdiUodSQndCMm"
+    "dCIlcyGoio+GAAAB9UlEQVR42u2V/bZyQBTGFSVvKlII6SD5zmek0tz/XR0zdM46L9bqAnr+MWN+"
+    "e2bvxwaGffQR0kq1bHX1Nr7wAdTTId/j2Rzi9zQKtbd4PAXlab/dKlDbNwI21emw/XppMsiNyWkz"
+    "kC6nyFIQrRy+Bipnj/ENgDLUKAwTYAW7Q81vPVP514fPTfDSTScW8Foe98o+A+DcgxNmlYjuo6Ye"
+    "WZIU3uiGQh/wDrh0+ekZeigxrsZSDDMncLxsDvMM6wyc7v4BWk0nCzNDG8vrV3r1GWHXJB2thdTx"
+    "0VD5zHkFFKGMd7sAJZxQ5xYqOb5Cg6tA9PqJuubOei2fc0zRjNR+/5dVbEkcJba8S/ItnxEDbWA4"
+    "QRStwqYQnrSqNnTXz48StMrA5F1uIueven2i/4TGwRufOeJkrhc/zzuYuinVX3IRORqPjRktekLn"
+    "XVnTL8AmDACigT6dLAXNb/cuBedZP/QNhkzQOwX4lyy9gl9dJdSEcW3eHYZ3kiIEM2gC0rNnyhxO"
+    "3VFcvWT2HlGLRL4E42ZGy1DQUQommfUEqLCDXRrDZmtRNexGhiqy09XOTujua5kGMj0TjSAH/+mZ"
+    "WOKsxyJyY8RVGXuWLgvrJT0nSZyc0QzL7zTbT+IjN/rbqrrvqPx8NPhdWIoSO/6dMpvp56fw0V99"
+    "A5DOcbjl1vD+AAAAAElFTkSuQmCC"
+)
+_ICON_PNG_96 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAAwFBMVEX////+/v79/v38/fz6/Pr3"
+    "+vf2+PPw9vDu9O3q8urq8Obl7uTi7OHo6dfc6NvZ5tjX5dbV5NTT49Pj38PM3svF2sTA17++07i0"
+    "z7PfwIG3yaaqyKinxqWkxKKewZyUupKQuI6MtYqHs4XRokbMmTTMmTOSqm9/rX16qXh1p3Nvomxr"
+    "oGhkm2FfmFxak1NVklJSkE9Rj01MjElIikVHiEJChj87gTc3fzM1fTEyey4veisteCkrdiYodSQm"
+    "dCIlcyEaYSv7AAAEc0lEQVR42u1YWZuiOhCNioiYVlvZHGS3L7sbrijy///VIDYSwZ4Od+yX+ThP"
+    "EsmppFJ1qgIANWrUqFGjRo1/BS04YvrkT7H31eU5TnDZ6MMfoGf8OMfF7b2YnjAv8QMO7Ev5yXlc"
+    "xGn0Qv4m4p5wM3cdy9SUV25BvnHvrClDkfTb2/gT9Iv424cr/cZoTAxj9oFi8hoDQkK/NT5m5EcR"
+    "s9fkhBWfZzNjMiGNkoXxSwx48X+TX6Zj9yYlA//HRwQFIfUwMo+j9JDdMUo9HhuVDRCM6m9TstPG"
+    "FmE27GQhyuRbmPR19c2oZmBkHR9zaS4Q6R9aNhDQmYUJf4rj5dh4w6dnF3EZW/76l5g/s+OJ8WFM"
+    "xmq6z72Ar5Si/MxAHHtJMvWR55UqCFPrkG0JV+aTBR0kqB+eWNiPQOMYf4EtHj99kzKfJpU7Vbjy"
+    "Xcdxl7vYBWCNkh7D/PcCi3+4zxbLgU4SMZelwvYad51oFwxclOniegLX4qNiVZLcMZEIACd2k8Hu"
+    "SJiKPPueJkSz4CKfpUYMlyjssYtzvOjsy1XkSd7a5Q7xSTAs+T7cXN84cxj81Bbl15qAUh6PetvK"
+    "86BQ1HD4G97jjKYcFmh40HkWXHFkY1WDKTJlNwC9Uml0wJMNhIEvd7ECqIesNxyA99Jal20wOD2M"
+    "rAW6ia8PNjJTAMMS/6YLyOBhZNGuIm9DpBdxAdyX1k8Bwn30fL+SPCOTD91WSYxcErScxyG7Wi+Y"
+    "buASOLrEQyAVGx85SQnvcexcraHT4stC4zqfklBwkJfUGxgUjJrVCpgqwQEnKqZlW2xhA0FSCBpS"
+    "MSfCbiV+Sg+ibKoIlii9kERi3y/FvwwqeigH2831wuMSesqMSvxLohJ/A1UhKGR5pFzPkVKe1Jgj"
+    "BBSs0vCjKtdWU9coaZi/W6cn4hOygFyfJXwDJipDwNq5Uro8SnxenPcMIJJTuWBbGJzzJPOz0+tK"
+    "PuL6k6/Jqnd7L4CgkQrLhcPfQLRbu7rE0VnXJc/Ra0yodHqyZcnQSkbtpMtV70eB10l0OsgNhlX8"
+    "gt/XsGNHtyohLXi0O1pWUFNA0Iyoe9uyywOKzkaP6Rbb+QKm37I6y2C1Wvjz4MuGJxoRq/uDVgiK"
+    "3XeS3dBO8Z+xm6LScet+qFysvo+krrKIvuA+zE1x0ALtXal/y1vUNY73O4yko2qzdm1dFhgauTYV"
+    "DDRybcW9wiLVZFXwq77KkVUZsapsM+ih4kT2PQsPLcy7VyFQ7mkB+yMEQzqTUWIkmqsI10eDz7zd"
+    "u9Lwljs9VlQsLwifKOlmbsk8JG5Zqa0kXLUL3Wm/kX4I4hVvF3+HKLCn/eticJK5fTg64vUiTfHm"
+    "8hTjY++IWLUfcsmGW6y+zhXutJm7liaLAseMIOx8ogfhO8MLkqI799zfmCzGObd55/b+ceVqU25A"
+    "YX246HOS7m2SO5fF/bGENjk7TPNWYihQHcS7qPuB9qV008r2NNeFv/0w1uO5p59DBootMwT4MRAk"
+    "qFGjRo0aNWr8u/gNTcXIDcapHjUAAAAASUVORK5CYII="
+)
+# -- ICON: end of the generated block --
+
+
+def data_icons() -> list:
+    """The icons as data: URIs: for stdio and a self-hosted door, which
+    have no web address of their own to point at (docs/PROTOCOL.md, "Who
+    the server is")."""
+    return [
+        {
+            "src": "data:image/png;base64," + png,
+            "mimeType": "image/png",
+            "sizes": [f"{size}x{size}"],
+        }
+        for size, png in ((48, _ICON_PNG_48), (96, _ICON_PNG_96))
+    ]
+
+
+def icons_at(origin: str) -> list:
+    """The icons as the files served at origin's root (the server's own
+    address: the specification asks a client to take icons from the
+    server's origin only)."""
+    origin = origin.rstrip("/")
+    return [
+        {"src": origin + path, "mimeType": mime, "sizes": [sizes]}
+        for path, mime, sizes in ICON_FILES
+    ]
+
+
+def make_server_info(icons: list | None = None) -> dict:
+    """serverInfo with icons: the given ones, or the data: URIs."""
+    info = dict(SERVER_INFO)
+    info["icons"] = data_icons() if icons is None else [dict(i) for i in icons]
+    return info
+
 
 log = logging.getLogger("sbplive")
 
@@ -91,9 +190,12 @@ class Session:
     """One process's client: the handshake state, if the client opened with
     initialize, and the request handlers of both eras."""
 
-    def __init__(self, registry: Registry, instructions: str = ""):
+    def __init__(self, registry: Registry, instructions: str = "", server_info=None):
         self.registry = registry
         self.instructions = instructions
+        # initialize's serverInfo and server/discover's; every other modern
+        # result names the server without the icons (SERVER_INFO).
+        self.server_info = make_server_info() if server_info is None else server_info
         self.initialized = False  # initialize answered
         self.ready = False  # notifications/initialized received
         self.client_info: dict = {}
@@ -283,7 +385,9 @@ class Session:
             result = dict(reply["result"])
             result["resultType"] = "complete"
             result_meta = dict(result.get("_meta") or {})
-            result_meta[META_SERVER_INFO] = dict(SERVER_INFO)
+            result_meta[META_SERVER_INFO] = dict(
+                self.server_info if method == "server/discover" else SERVER_INFO
+            )
             result["_meta"] = result_meta
             if method in ("server/discover", "tools/list"):
                 result["ttlMs"] = CACHE_TTL_MS
@@ -331,7 +435,7 @@ class Session:
         result: dict = {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": _capabilities(),
-            "serverInfo": dict(SERVER_INFO),
+            "serverInfo": dict(self.server_info),
         }
         if self.instructions:
             result["instructions"] = self.instructions

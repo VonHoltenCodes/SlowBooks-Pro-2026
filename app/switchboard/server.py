@@ -21,6 +21,8 @@ from app.switchboard.protocol import (
     META_VERSION,
     MODERN_VERSIONS,
     Session,
+    icons_at,
+    make_server_info,
     serve_stdio,
 )
 from app.switchboard.registry import (
@@ -48,14 +50,26 @@ INSTRUCTIONS = (
     "per payment so a retry can never book it twice; void instead of delete. "
     "Never invent a value for a record. A create with little on it comes back "
     "with ask_first and the empty fields: ask the person for them before "
-    "calling again, and after a create say what left_blank lists."
+    "calling again. After a create, tell the person what left_blank lists "
+    "(still empty) and what defaulted lists (not given, so SlowBooks Pro used "
+    "its default: the value is there). A sales document sent without "
+    "tax_rate takes the company's default rate, as the app's form does; pass "
+    "tax_note on."
 )
 
 _ASKS = (
     " {what} with little on it is not created at first: the answer lists the "
     "empty fields worth asking the user for (ask_first), and a second call "
     "with asked_user creates it. A created record's answer lists what is "
-    "still empty in left_blank."
+    "still empty in left_blank, and in defaulted what SlowBooks Pro filled "
+    "with its default."
+)
+
+_TAX = (
+    " {what} sent without tax_rate takes the company's Default Tax Rate (a "
+    "credit memo for an invoice, that invoice's rate), as the app's form "
+    "does; the answer's tax_note says so. A tax_rate you give, 0 included, "
+    "is used as given."
 )
 
 _DATA = (
@@ -242,7 +256,8 @@ def build_registry(client: ApiClient) -> Registry:
             + _ASKS.format(
                 what="A new customer, vendor, item, employee, account, invoice, "
                 "bill, estimate or purchase order"
-            ),
+            )
+            + _TAX.format(what="A new invoice, estimate, sales receipt or credit memo"),
             path=_WRITE_PATH,
             params=_PARAMS,
             body="The request body, when the operation takes one.",
@@ -314,7 +329,9 @@ def build_registry(client: ApiClient) -> Registry:
                 fn,
                 WRITE,
                 what + " If the answer is lost, check with search before "
-                "trying again." + (_ASKS.format(what=asks) if asks else ""),
+                "trying again."
+                + (_ASKS.format(what=asks) if asks else "")
+                + (_TAX.format(what="An invoice") if name == "create_invoice" else ""),
                 **params,
             )
         )
@@ -383,13 +400,22 @@ class Mcp:
         self.registry = registry
         self.instructions = instructions
         self.sessions = Sessions() if sessions is None else sessions
+        # serverInfo, its icons as data: URIs until use_origin gives the
+        # door a web address of its own.
+        self.server_info = make_server_info()
         # The modern era needs no state: one Session that never sees
         # initialize answers every stateless request (and, for a request
         # with neither a version nor a session, says how to begin).
         self.stateless = self.session()
 
+    def use_origin(self, origin: str) -> None:
+        """Point serverInfo's icons at the files served at origin's root
+        (a door with a web address of its own that serves them)."""
+        self.server_info = make_server_info(icons_at(origin))
+        self.stateless.server_info = self.server_info
+
     def session(self) -> Session:
-        return Session(self.registry, self.instructions)
+        return Session(self.registry, self.instructions, self.server_info)
 
 
 def serve_mcp(mcp: Mcp, message, headers, owner: str = "secret") -> tuple:

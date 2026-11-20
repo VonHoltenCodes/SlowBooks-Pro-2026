@@ -602,19 +602,24 @@ def post_operation(
             template = lookup(client, "post", path)[1]
         except ValueError:
             template = None  # _send says what is wrong
-    if template in tools.ASK_FIRST:
-        held = tools.ask_first(
-            template,
-            body,
-            asked_user,
-            "post_operation",
-            None if asked_user else tools.body_fields(client, template),
-        )
+    if template in tools.ASK_FIRST or template in tools.SALES_TAX_ROUTES:
+        tax = tools.sales_tax(client, template, body)
+        held = None
+        if template in tools.ASK_FIRST:
+            held = tools.ask_first(
+                template,
+                body,
+                asked_user,
+                "post_operation",
+                None if asked_user else tools.body_fields(client, template),
+                tax,
+            )
         if held is not None:
             build_request(client, "post", path, params, body, idempotency_key)
             return held
-        answer = _send(client, "post", path, params, body, idempotency_key)
-        return tools.with_left_blank(template, body, answer)
+        sent = tools.with_tax_rate(body, tax)
+        answer = _send(client, "post", path, params, sent, idempotency_key)
+        return tools.with_left_blank(template, body, answer, tax)
     return _send(client, "post", path, params, body, idempotency_key)
 
 

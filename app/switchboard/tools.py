@@ -9,6 +9,7 @@
 import difflib
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 from app.switchboard.client import (
     ApiClient,
@@ -482,9 +483,10 @@ def body_fields(client: ApiClient, route: str):
     return set(props) if isinstance(props, dict) else None
 
 
-def ask_first(route: str, data, asked_user: bool, tool: str, known=None):
+def ask_first(route: str, data, asked_user: bool, tool: str, known=None, tax=None):
     """The ask-first answer for a bare create, or None to send it. known is
-    the set of fields the route takes, when the app's document says."""
+    the set of fields the route takes, when the app's document says; tax is
+    sales_tax's plan, whose ask adds the sales tax rate to the empty fields."""
     rule = ASK_FIRST.get(route)
     if rule is None or asked_user is True or not isinstance(data, dict):
         return None
@@ -495,16 +497,20 @@ def ask_first(route: str, data, asked_user: bool, tool: str, known=None):
     empty = left_blank(rule, data)
     if len(rule.fields) - len(empty) >= rule.need:
         return None
+    rows = [
+        {"label": label, "field": _field_names(keys)}
+        for label, keys in rule.fields
+        if label in empty
+    ]
+    if tax is not None and tax["ask"]:
+        empty.append(TAX_LABEL)
+        rows.append({"label": TAX_LABEL, "field": "tax_rate"})
     labels = ", ".join(empty)
     return {
         "created": False,
         "ask_first": True,
         "record": rule.record.split(" ", 1)[1],
-        "empty": [
-            {"label": label, "field": _field_names(keys)}
-            for label, keys in rule.fields
-            if label in empty
-        ],
+        "empty": rows,
         "next": (
             f"Nothing was created yet: {rule.record} with this little on it "
             f"may need checking first. Ask the user whether they have any of "
@@ -515,24 +521,213 @@ def ask_first(route: str, data, asked_user: bool, tool: str, known=None):
     }
 
 
-def with_left_blank(route: str, data, answer):
-    """A create's answer with left_blank: the rule's fields still empty."""
+# ---------------------------------------------------------------------------
+# Sales tax on a new sales document. The API takes a missing tax_rate as 0%,
+# while the app's own forms start a new invoice, estimate, sales receipt or
+# credit memo at the company's Default Tax Rate (Settings), and a credit memo
+# for an invoice at that invoice's rate. So when the assistant gives no
+# tax_rate, Switchboard does what the form does and says so in the answer
+# (tax_rate_source, tax_note); a tax_rate the assistant gives, 0 included, is
+# always sent as given. A non-taxable customer or a document marked
+# tax_exempt is charged no tax by the app whatever the rate (the form keeps
+# the default rate on it too). With no default rate (0%) and a taxable
+# customer, "Sales tax rate" is one of the fields to ask about. The API's
+# own default is not changed: that is for every API user to keep.
+# ---------------------------------------------------------------------------
+
+SALES_TAX_ROUTES = (
+    "/api/invoices",
+    "/api/estimates",
+    "/api/sales-receipts",
+    "/api/credit-memos",
+)
+TAX_LABEL = "Sales tax rate"
+_RATE_PLACES = Decimal("0.000001")  # the API keeps a rate to six places
+
+
+def _percent(value: Decimal) -> str:
+    text = format(value.normalize(), "f")
+    return (text.rstrip("0").rstrip(".") if "." in text else text) + "%"
+
+
+def _default_percent(client: ApiClient):
+    """The company's Default Tax Rate as a percent, or None unreadable."""
+    try:
+        settings = client.get("/api/settings")
+    except ApiError:
+        return None
+    raw = settings.get("default_tax_rate") if isinstance(settings, dict) else None
+    try:
+        pct = Decimal(str(raw if raw not in (None, "") else "0"))
+    except InvalidOperation:
+        return None
+    return pct if pct.is_finite() and 0 <= pct <= 100 else None
+
+
+def _exempt_reason(client: ApiClient, data: dict):
+    """Why the app charges this document no tax whatever its rate, or None."""
+    if data.get("tax_exempt") is True:
+        return "the document is marked tax exempt"
+    cid = data.get("customer_id")
+    if isinstance(cid, bool) or not isinstance(cid, (int, str)) or cid == "":
+        return None
+    try:
+        customer = client.get(f"/api/customers/{cid}")
+    except ApiError:
+        return None  # the API says what is wrong with the customer
+    if isinstance(customer, dict) and customer.get("is_taxable") is False:
+        name = customer.get("name") or "the customer"
+        return f"{name} is non-taxable (reseller or exempt)"
+    return None
+
+
+def sales_tax(client: ApiClient, route: str, data):
+    """The plan for tax_rate on a new sales document sent without one:
+    {"rate": the fraction to send or None (with "shown", the percent),
+    "source", "note", "ask"}; None
+    when there is nothing to do (another record, or a tax_rate given)."""
+    if route not in SALES_TAX_ROUTES or not isinstance(data, dict):
+        return None
+    if data.get("tax_rate") is not None:
+        return None  # the assistant's rate, 0 included, is sent as given
+    if route == "/api/credit-memos" and _has(data.get("original_invoice_id")):
+        return {
+            "rate": None,
+            "source": "the credited invoice's rate",
+            "note": (
+                "No tax_rate was given, so SlowBooks Pro used the rate of the "
+                "invoice being credited, as its own form does: the tax goes "
+                "back the way it was charged."
+            ),
+            "ask": False,
+        }
+    pct = _default_percent(client)
+    exempt = _exempt_reason(client, data)
+    if pct is None:
+        return {
+            "rate": None,
+            "source": "none: the company's default rate could not be read",
+            "note": (
+                "No tax_rate was given and the company's Default Tax Rate "
+                "could not be read, so the document has a 0% sales tax rate. "
+                "Ask the user what rate applies."
+            ),
+            "ask": exempt is None,
+        }
+    if pct > 0:
+        shown = _percent(pct)
+        if exempt:
+            note = (
+                f"No tax_rate was given, so the company's default rate, {shown}, "
+                f"was used, as SlowBooks Pro's form does; {exempt}, so no sales "
+                "tax is charged."
+            )
+        else:
+            note = (
+                f"No tax_rate was given, so SlowBooks Pro used the company's "
+                f"default sales tax rate, {shown}, as its own form does. Tell "
+                "the user; if this sale is taxed at another rate, change the "
+                "document's tax_rate (a fraction: 0.0159 is 1.59%)."
+            )
+        return {
+            "rate": (pct / 100).quantize(_RATE_PLACES),
+            "shown": shown,
+            "source": f"company default ({shown})",
+            "note": note,
+            "ask": False,
+        }
+    if exempt:
+        return {
+            "rate": None,
+            "source": "none: no sales tax applies",
+            "note": f"No tax_rate was given; {exempt}, so no sales tax is charged.",
+            "ask": False,
+        }
+    return {
+        "rate": None,
+        "source": "none: the company's default rate is 0%",
+        "note": (
+            "No tax_rate was given and the company's Default Tax Rate is 0%, "
+            "so no sales tax was charged. Ask the user whether this sale is "
+            "taxed, and at what rate."
+        ),
+        "ask": True,
+    }
+
+
+def with_tax_rate(data, tax):
+    """data with the plan's rate in it (a number, as the API's schema says)."""
+    if tax is None or tax["rate"] is None or not isinstance(data, dict):
+        return data
+    return {**data, "tax_rate": float(tax["rate"])}
+
+
+def _shown(label: str, value) -> str:
+    if isinstance(value, bool):
+        if label.startswith("Sales Tax"):
+            return "taxable" if value else "exempt"
+        return "yes" if value else "no"
+    return str(value)
+
+
+def _defaulted_value(label: str, keys: tuple, answer: dict):
+    """What the app filled in for a field the assistant did not give, from
+    the created record; None when it is still empty there."""
+    if keys == (_LINES,):
+        return None
+    present = [(k, answer.get(k)) for k in keys if _has(answer.get(k))]
+    if not present:
+        return None
+    # an id (payment_term_id) says nothing to a person beside the words
+    named = [(k, v) for k, v in present if not k.endswith("_id")]
+    present = named or present
+    if len(present) == 1:
+        return _shown(label, present[0][1])
+    return ", ".join(f"{k.replace('_', ' ')} {_shown(label, v)}" for k, v in present)
+
+
+def with_left_blank(route: str, data, answer, tax=None):
+    """A create's answer with left_blank (the rule's fields still empty on
+    the record) and defaulted (those the assistant did not give that
+    SlowBooks Pro filled with its default: [{label, value}]), and, for a
+    sales document sent without a tax_rate, tax_rate_source and tax_note."""
     rule = ASK_FIRST.get(route)
-    if rule is None or not isinstance(data, dict):
+    if (rule is None and tax is None) or not isinstance(data, dict):
         return answer
-    blank = left_blank(rule, data)
+    record = answer if isinstance(answer, dict) else {}
+    blank, defaulted = [], []
+    for label, keys in rule.fields if rule else ():
+        if _given(data, keys):
+            continue
+        value = _defaulted_value(label, keys, record)
+        if value is None:
+            blank.append(label)
+        else:
+            defaulted.append({"label": label, "value": value})
+    extra: dict = {}
+    if tax is not None:
+        if tax["rate"] is not None:
+            defaulted.append(
+                {"label": TAX_LABEL, "value": f"{tax['shown']} (the company's default)"}
+            )
+        elif tax["ask"]:
+            blank.append(TAX_LABEL)
+        extra = {"tax_rate_source": tax["source"], "tax_note": tax["note"]}
+    out = {"left_blank": blank, "defaulted": defaulted, **extra}
     if isinstance(answer, dict):
-        return {**answer, "left_blank": blank}
-    return {"created": True, "answer": answer, "left_blank": blank}
+        return {**answer, **out}
+    return {"created": True, "answer": answer, **out}
 
 
 def _create(client: ApiClient, route: str, data, asked_user: bool, tool: str):
+    tax = sales_tax(client, route, data)
     held = None
     if not asked_user and route in ASK_FIRST:
-        held = ask_first(route, data, asked_user, tool, body_fields(client, route))
+        held = ask_first(route, data, asked_user, tool, body_fields(client, route), tax)
     if held is not None:
         return held
-    return with_left_blank(route, data, _write(client, route, data))
+    answer = _write(client, route, with_tax_rate(data, tax))
+    return with_left_blank(route, data, answer, tax)
 
 
 def create_customer(client: ApiClient, data: dict, asked_user: bool = False):
