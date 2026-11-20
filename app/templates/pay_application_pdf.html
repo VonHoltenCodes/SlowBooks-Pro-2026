@@ -15,12 +15,13 @@
     .meta-table { width: 100%; margin-bottom: 16px; }
     .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; }
     .meta-label { font-weight: 700; color: #4a4a6a; width: 120px; }
-    .cert { float: right; width: 300px; margin-bottom: 16px; }
-    .cert table { width: 100%; }
+    .cert { float: right; margin-bottom: 16px; }
+    /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .cert table { width: 300px; margin-left: auto; }
     .cert td { padding: 3px 8px; font-size: 9pt; }
     /* nowrap: a negative amount breaks after its minus sign otherwise, leaving "-" alone on a line. */
     .cert td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .cert .label { font-weight: 700; color: #4a4a6a; }
+    .cert .label { font-weight: 700; color: #4a4a6a; white-space: nowrap; }
     .cert .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     h2.sheet { clear: both; font-size: 11pt; color: #003366; margin: 22px 0 8px 0; text-transform: uppercase; letter-spacing: 0.03em; }
     table.cont { width: 100%; border-collapse: collapse; }
