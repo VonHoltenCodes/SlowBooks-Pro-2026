@@ -190,8 +190,11 @@ def test_an_invoices_activity_lists_each_event_in_order(
     assert "Line: work, $100.00" in created["details"]
     assert edited["text"] == f"Edited by {who}."
     assert "Due date 2026-06-30 → 2026-07-15" in edited["details"]
-    assert "Line removed: work, $100.00" in edited["details"]
-    assert "Line added: more work, $200.00" in edited["details"]
+    # the line in the first place, changed (W-215: not removed and re-added)
+    assert (
+        "Line more work, $200.00: Description work → more work; Quantity 1 → 2; "
+        "Amount $100.00 → $200.00"
+    ) in edited["details"]
     assert "Total $100.00 → $200.00" in edited["details"]
     assert emailed["text"] == f"Emailed to ap@probe.test by {who}."
     assert attached["text"] == f"receipt.pdf attached by {who}."
@@ -426,12 +429,10 @@ def test_a_journal_entrys_activity(client, seed_accounts, db_session):
     ], events
     assert events[3]["text"].startswith("Journal Entry created by ")
     edited = events[2]["details"]
-    assert any(
-        d.startswith("Line removed: ") and "debit $100.00" in d for d in edited
-    ), edited
-    assert any(
-        d.startswith("Line added: ") and "debit $150.00" in d for d in edited
-    ), edited
+    # each line changed in its place (W-215), not removed and added again
+    assert any(d.endswith(": Debit $100.00 → $150.00") for d in edited), edited
+    assert any(d.endswith(": Credit $100.00 → $150.00") for d in edited), edited
+    assert not any(d.startswith(("Line removed", "Line added")) for d in edited)
 
 
 # ---------------------------------------------------------------------------
