@@ -35,10 +35,13 @@
 # cannot use or end it from there.
 # ============================================================================
 
+import http.client
 import json
 import logging
 import os
+import socket
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -86,13 +89,14 @@ RELAY_AWAY = (
 )
 # a 5xx: the relay was just updated (it restarts for a moment) or is busy
 RELAY_BUSY = "The relay was just updated or is busy. Try again in a couple of minutes."
-# How long a press waits on the relay, per step (connecting, then each read).
-# The relay answers these small requests in well under a second; ten
-# seconds still allows a slow or busy connection, where the vendored
-# client's 30 seconds, or Windows' own ~21-second connect timeout when a
-# firewall drops the packets, left "Connecting…" up for half a minute. The
-# background line is not on this path: it keeps its own backoff (1 s
-# doubling to 60 s).
+# How long a press waits on the relay, for the whole attempt: every address
+# the relay's name has, the connection, TLS and the answer. The relay answers
+# these small requests in well under a second; ten seconds still allows a
+# slow or busy connection, where the vendored client's 30 seconds, or
+# Windows' own ~21-second connect timeout when a firewall drops the packets,
+# left "Connecting…" up for half a minute, and a limit for each address in
+# turn waited 40 s on a name with four (NEW-270). The background line is not
+# on this path: it keeps its own backoff (1 s doubling to 60 s).
 PRESS_TIMEOUT = 10.0
 DAMAGED = (
     "The AI assistant connection kept in the data folder cannot be read. "
@@ -643,11 +647,95 @@ def status() -> dict:
 # -- the administrator's three buttons ----------------------------------------------
 
 
+def _connect_by(deadline: float):
+    """socket.create_connection with one deadline for every address the
+    name has, in place of its limit for each address in turn (NEW-270):
+    each address gets what is left, and the socket keeps what is left for
+    TLS and the answer."""
+
+    def create(address, timeout=None, source_address=None, *_args, **_kw):
+        host, port = address
+        last = None
+        for family, kind, proto, _name, where in socket.getaddrinfo(
+            host, port, 0, socket.SOCK_STREAM
+        ):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            sock = socket.socket(family, kind, proto)
+            try:
+                sock.settimeout(left)
+                if source_address:
+                    sock.bind(source_address)
+                sock.connect(where)
+            except OSError as exc:
+                sock.close()
+                last = exc
+                continue
+            sock.settimeout(max(deadline - time.monotonic(), 0.01))
+            return sock
+        if last is not None and deadline > time.monotonic():
+            raise last
+        raise TimeoutError("timed out")
+
+    return create
+
+
+def _by(connection_class, deadline: float):
+    def make(host, **kw):
+        made = connection_class(host, **kw)
+        made._create_connection = _connect_by(deadline)
+        return made
+
+    return make
+
+
+class _HttpBy(urllib.request.HTTPHandler):
+    def __init__(self, deadline: float):
+        super().__init__()
+        self._deadline = deadline
+
+    def http_open(self, req):
+        return self.do_open(_by(http.client.HTTPConnection, self._deadline), req)
+
+
+class _HttpsBy(urllib.request.HTTPSHandler):
+    def __init__(self, deadline: float, context):
+        super().__init__(context=context)
+        self._deadline = deadline
+
+    def https_open(self, req):
+        return self.do_open(
+            _by(http.client.HTTPSConnection, self._deadline),
+            req,
+            context=self._context,
+        )
+
+
+def _opener_by(deadline: float):
+    """The vendored client's opener (its verified TLS context, no
+    redirects), its connections bound by ``deadline``."""
+    made = account._opener(None)
+    context = next(
+        h._context for h in made.handlers if isinstance(h, urllib.request.HTTPSHandler)
+    )
+    keep = [
+        h
+        for h in made.handlers
+        if not isinstance(h, (urllib.request.HTTPHandler, urllib.request.HTTPSHandler))
+    ]
+    out = urllib.request.OpenerDirector()
+    for h in [*keep, _HttpBy(deadline), _HttpsBy(deadline, context)]:
+        out.add_handler(h)
+    return out
+
+
 def _relay_call(relay: str, path: str, body, headers: dict):
-    """account._post's request with PRESS_TIMEOUT in place of the vendored
-    client's 30 seconds (app/switchboard is vendored and kept as shipped):
-    (status, decoded JSON or None, raw body). A relay that does not answer
-    raises OSError (urllib's URLError is one)."""
+    """account._post's request within PRESS_TIMEOUT for the whole attempt,
+    in place of the vendored client's 30 seconds (app/switchboard is
+    vendored and kept as shipped): (status, decoded JSON or None, raw
+    body). A relay that does not answer raises OSError (urllib's URLError
+    is one)."""
     data = json.dumps(body).encode("utf-8") if body is not None else b""
     hdrs = {
         "Accept": "application/json",
@@ -658,7 +746,8 @@ def _relay_call(relay: str, path: str, body, headers: dict):
     hdrs.update(headers)
     req = urllib.request.Request(relay + path, data=data, headers=hdrs, method="POST")
     try:
-        with account._opener(None).open(req, timeout=PRESS_TIMEOUT) as resp:
+        deadline = time.monotonic() + PRESS_TIMEOUT
+        with _opener_by(deadline).open(req, timeout=PRESS_TIMEOUT) as resp:
             status, raw = resp.status, resp.read(1 << 20)
     except urllib.error.HTTPError as exc:
         status, raw = exc.code, exc.read(1 << 20)
