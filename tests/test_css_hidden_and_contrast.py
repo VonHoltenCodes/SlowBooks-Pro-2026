@@ -281,3 +281,48 @@ def test_the_bill_forms_line_table_scrolls_sideways_with_room_for_every_box():
     scroll = STYLE[STYLE.index(".table-container--scroll {") :]
     scroll = scroll[: scroll.index("}")]
     assert "margin-bottom: 12px;" in scroll, scroll
+
+
+def test_status_text_on_a_hovered_row_meets_aa_in_both_themes():
+    """W-227: "Failed" in Recent sends was #cc3333 on the hover blue,
+    4.46:1. The status colours a hovered row's text is drawn in (red,
+    orange, green, amber, the greys), each as that row defines it (or as
+    the theme does, where the row leaves it), on the hovered row, in both
+    themes."""
+    import re
+
+    def block(css, selector):
+        m = re.search(re.escape(selector) + r" \{([^}]*--danger[^}]*)\}", css)
+        assert m, f"no status colours on {selector}"
+        return m.group(1)
+
+    light_bg = _hex(
+        re.search(r"tbody tr:hover \{ background: (#[0-9a-f]{6})", STYLE).group(1)
+    )
+    dark_bg = _hex(
+        re.search(
+            r'\[data-theme="dark"\] tbody tr:hover \{ background: (#[0-9a-f]{6})', DARK
+        ).group(1)
+    )
+    light_row = block(STYLE, "\ntbody tr:hover")
+    dark_row = block(DARK, '[data-theme="dark"] tbody tr:hover')
+    names = (
+        "--danger",
+        "--qb-red",
+        "--qb-orange",
+        "--success",
+        "--warning",
+        "--sb-green",
+        "--text-muted",
+        "--text-light",
+        "--text-secondary",
+        "--gray-500",
+    )
+    for theme, row, css, bg in (
+        ("light", light_row, STYLE, light_bg),
+        ("dark", dark_row, DARK, dark_bg),
+    ):
+        for name in names:
+            colour = _token(row, name) if f"{name}:" in row else _token(css, name)
+            r = _ratio(colour, bg)
+            assert r >= 4.5, f"{name} on a hovered row in {theme} is {r:.2f}:1"
