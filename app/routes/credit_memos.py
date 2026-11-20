@@ -42,7 +42,10 @@ from app.services.closing_date import check_closing_date
 from app.services.jobs_service import refuse_other_customers_jobs
 from app.services.sub_customers import refuse_unless_pays_for
 from app.services.numbering import next_credit_memo_number
-from app.services.settings_service import get_all_settings as get_settings
+from app.services.settings_service import (
+    default_sales_tax_rate,
+    get_all_settings as get_settings,
+)
 from app.services.request_utils import content_disposition
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
@@ -160,7 +163,9 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
             tax_rate = original.tax_rate
         exempt = bool(original.tax_exempt)
     if tax_rate is None:
-        tax_rate = 0
+        # no invoice named and no rate sent: the company's Default Tax Rate,
+        # as the Credit Memo form starts (#1129); it was 0
+        tax_rate = default_sales_tax_rate(db)
 
     # Tax follows the lines the way an invoice's does: an item's own flag,
     # and nothing at all for a non-taxable customer or an exempt invoice.

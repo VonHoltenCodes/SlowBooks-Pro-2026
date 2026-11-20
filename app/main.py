@@ -767,7 +767,11 @@ app = FastAPI(
         "is written off (`POST /api/invoices/{id}/write-off`), not voided.\n"
         "- **`tax_rate` on a document is a fraction** (0.089 = 8.9%), kept "
         "to six places (0.08875 = 8.875%); `default_tax_rate` in settings is "
-        'a percent string ("8.9"). Divide by 100.\n'
+        'a percent string ("8.9"). Divide by 100. A new invoice, sales '
+        "receipt, estimate, credit memo or recurring invoice sent without "
+        "`tax_rate` starts at `default_tax_rate`, as the app's forms do (a "
+        "credit memo for an invoice at that invoice's rate); send 0 for no "
+        "tax. An update without it keeps the rate.\n"
         "- **`terms` names an entry on `/api/payment-terms`** (its rule gives "
         "the due date and any early-payment discount; the document keeps the "
         "term it was saved under); text that is neither on the list nor "

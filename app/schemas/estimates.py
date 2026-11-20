@@ -13,6 +13,7 @@ from pydantic import (
 from app.models.estimates import EstimateStatus
 from app.schemas.common import (
     StrictModel,
+    NewTaxRate,
     TaxRate,
     choice_error,
     TaxRateOut,
@@ -208,7 +209,7 @@ class EstimateCreate(StrictModel):
     customer_id: int
     date: dt_date
     expiration_date: Optional[dt_date] = None
-    tax_rate: TaxRate = Decimal("0")
+    tax_rate: NewTaxRate = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None

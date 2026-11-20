@@ -65,7 +65,11 @@ from app.schemas.common import StrictModel, check_line_fits
 from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.numbering import next_estimate_number, next_invoice_number
-from app.services.settings_service import get_all_settings as get_settings, set_setting
+from app.services.settings_service import (
+    default_sales_tax_rate,
+    get_all_settings as get_settings,
+    set_setting,
+)
 from app.services.request_utils import content_disposition
 from app.services.accounting import (
     _q,
@@ -437,6 +441,10 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     # (#864); on, no line is taxed
     exempt = settle_tax_exempt(db, data.tax_exempt, customer, data.job_id)
     resolve_line_taxable(db, data.lines, customer, exempt)
+    # No rate sent: the company's Default Tax Rate, as the form starts one
+    # (#1129); a rate sent, 0 included, is kept.
+    if data.tax_rate is None:
+        data.tax_rate = default_sales_tax_rate(db)
     # The markups are a construction-mode field: a Business or Nonprofit
     # estimate stores 0 whatever an API caller sent, so its totals, PDF and
     # the pure bid math all agree without a company gate inside the math.
