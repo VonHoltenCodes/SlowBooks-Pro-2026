@@ -110,8 +110,10 @@ def test_collection_letters(client, db_session, stub):
         json={"letter_type": "30", "send_email": True},
     )
     assert r.status_code == 200, r.text
-    (error,) = r.json()["errors"]
-    assert error.startswith("Mail Probe: the letter could not be emailed. " + SENTENCE)
+    # the same sentence as the other four paths (W-218)
+    assert r.json()["errors"] == [
+        "Mail Probe: the letter could not be sent. " + SENTENCE
+    ]
 
 
 def test_giving_statements(client, db_session, seed_accounts, seed_customer, stub):

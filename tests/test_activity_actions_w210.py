@@ -58,6 +58,7 @@ def test_a_pay_applications_approval_is_one_entry(
 ):
     job, sov = _two_line_job(client, seed_customer.id)
     app = _new_app(client, job["id"])
+    _age(db_session)
     _edit(
         client,
         app["id"],
@@ -133,7 +134,9 @@ def test_a_line_with_no_description_is_named_by_its_place(
     edited = _events(client, "change_order", co["id"])[0]
     assert edited["kind"] == "edited", edited
     said = " | ".join(edited["details"])
-    assert "Line 2 ($200.00): Amount $0.00 → $200.00" in said, said
+    # only what changed: each line's own markup (W-215)
+    assert "Line 2 ($200.00): Markup % set to 15%" in said, said
+    assert "Amount" not in said and "Line added" not in said, said
     assert "a line" not in said, said
 
 

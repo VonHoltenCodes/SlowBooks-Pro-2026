@@ -300,6 +300,15 @@ def send_email(
             _secure(server, host)
 
         if user and password:
+            if not use_tls:
+                server.ehlo_or_helo_if_needed()
+                if not server.has_extn("auth") and server.has_extn("starttls"):
+                    # sign-in is offered only after STARTTLS (Gmail on 587);
+                    # say so rather than "SMTP AUTH extension not supported
+                    # by server." (W-217). Nothing has been sent.
+                    from app.services.email_errors import sign_in_needs_tls_text
+
+                    raise MailTLSError(sign_in_needs_tls_text(host))
             server.login(user, password)
 
         server.sendmail(from_email, [to_email] + cc_list + bcc_list, msg.as_string())

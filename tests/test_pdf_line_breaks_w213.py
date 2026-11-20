@@ -188,14 +188,22 @@ NOT_A_LINE = (
 )
 
 
+# the check's face memo is one line on the stock (a credit memo's number is
+# no memo); a deposit's memo on a line
+# of money never invoiced (#792) is a line's, typed by the person (W-219)
+NOT_A_LINE_MEMO = ("check.memo", "memo_number")
+
+
 def test_every_line_description_a_document_prints_keeps_its_breaks():
     from app.services.pdf_service import TEMPLATE_DIR
 
     missed = []
     for path in sorted(TEMPLATE_DIR.glob("*.html")):
-        for m in re.finditer(r"\{\{([^}]*\bdescription\b[^}]*)\}\}", path.read_text()):
+        for m in re.finditer(
+            r"\{\{([^}]*\b(?:description|memo)\b[^}]*)\}\}", path.read_text()
+        ):
             said = m[1]
-            if "| desc" in said or any(k in said for k in NOT_A_LINE):
+            if "| desc" in said or any(k in said for k in NOT_A_LINE + NOT_A_LINE_MEMO):
                 continue
             missed.append(f"{path.name}: {{{{{said}}}}}")
     assert not missed, "\n".join(missed)
@@ -228,3 +236,33 @@ def test_a_change_orders_line_prints_its_breaks_escaped(
     html = client.get(f"/api/change-orders/{r.json()['id']}/pdf").text
     assert "Demolition<br>&lt;b&gt;Haul&lt;/b&gt; &amp; dispose" in html
     assert "<b>Haul" not in html
+
+
+def test_a_deposits_never_invoiced_line_prints_its_memos_breaks():
+    # W-219: "Service Income (Alpha … Bravo … Charlie)" printed as one
+    # paragraph, the blank line lost
+    from app.services.pdf_service import render_deposit_html
+
+    html = render_deposit_html(
+        {
+            "date": "2026-11-02",
+            "payments": [],
+            "other_lines": [
+                {
+                    "received_from": "",
+                    "account_name": "Service Income",
+                    "memo": "Alpha part one\nBravo <b>part</b> two\n\nCharlie & three",
+                    "check_number": "",
+                    "method": "Cash",
+                    "amount": 25,
+                }
+            ],
+            "total": 25,
+            "payments_total": 0,
+        },
+        {},
+    )
+    assert (
+        "Service Income (Alpha part one<br>Bravo &lt;b&gt;part&lt;/b&gt; two"
+        "<br><br>Charlie &amp; three)"
+    ) in html

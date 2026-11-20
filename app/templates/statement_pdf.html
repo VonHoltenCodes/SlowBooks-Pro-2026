@@ -37,8 +37,9 @@
     .aging-table th:first-child { text-align: left; }
     .aging-table td { padding: 5px 8px; font-size: 10pt; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
     .aging-table td:first-child { text-align: left; }
-    .summary { margin-left: auto; width: 260px; margin-top: 16px; break-inside: avoid; page-break-inside: avoid; }
-    .summary table { width: 100%; }
+    .summary { margin-left: auto; margin-top: 16px; break-inside: avoid; page-break-inside: avoid; }
+    /* the table is 260px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .summary table { width: 260px; margin-left: auto; }
     .summary td { padding: 3px 8px; font-size: 10pt; white-space: nowrap; }
     .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
     .summary .label { font-weight: 700; color: #4a4a6a; }

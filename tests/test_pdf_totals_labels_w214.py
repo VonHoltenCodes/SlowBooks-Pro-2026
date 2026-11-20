@@ -133,3 +133,107 @@ def test_a_change_orders_totals_labels_sit_on_one_line(
     co = _owner_co(client, job["id"], 1000)
     html = client.get(f"/api/change-orders/{co['id']}/pdf").text
     _check("change order", html, 260)
+
+
+# Round 25 (NEW-273): the giving statement's "Less goods and services
+# received" wrapped in its 300px summary. Every other printed totals block
+# #1158 did not cover takes the same treatment and is checked here from its
+# own template's stylesheet, with its own labels beside a figure in the
+# millions: the statement's and the deposit slip's summary, the pay
+# application's certificate. (A paystub's net box is one label in a flex
+# row, the 1096's totals are the form's boxes, and the reports' totals are a
+# row of their full-width table: none is a narrow block of labels.)
+BLOCKS = {
+    "giving_statement_pdf.html": (
+        "summary",
+        300,
+        (
+            "Total contributions",
+            "Less goods and services received",
+            "Deductible contributions",
+        ),
+    ),
+    "statement_pdf.html": (
+        "summary",
+        260,
+        (
+            "Total Invoiced",
+            "Total Payments",
+            "Total Credits",
+            "Balance Due",
+            "Retainage held, not yet due",
+        ),
+    ),
+    "deposit_pdf.html": (
+        "summary",
+        300,
+        ("12 checks", "Cash", "Payments", "Other deposits", "Total deposit"),
+    ),
+    "pay_application_pdf.html": (
+        "cert",
+        300,
+        (
+            "Original contract sum",
+            "Net change by change orders",
+            "Retainage held, previous applications",
+            "Less previous payment applications",
+            "Total earned less retainage",
+            "Current payment due",
+        ),
+    ),
+}
+
+
+def _block_html(template, cls, labels):
+    from app.services.pdf_service import TEMPLATE_DIR
+
+    source = (TEMPLATE_DIR / template).read_text()
+    style = re.search(r"<style>(.*?)</style>", source, re.S)[1]
+    style = re.sub(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", "", style, flags=re.S)
+    rows = "".join(
+        f'<tr><td class="label">{text}</td><td class="r">{FIGURE}</td></tr>'
+        for text in labels
+    )
+    return (
+        f"<html><head><style>{style}</style></head><body>"
+        f'<div class="{cls}"><table>{rows}</table></div></body></html>'
+    )
+
+
+def _block_layout(html, cls):
+    from weasyprint import HTML
+    from weasyprint.formatting_structure import boxes as wb
+
+    rows, right = [], None
+    for page in HTML(string=html).render().pages:
+        box = page._page_box
+        right = box.content_box_x() + box.width
+        for d in box.descendants():
+            if not isinstance(d, wb.TableRowBox):
+                continue
+            cells = [c for c in d.children if isinstance(c, wb.TableCellBox)]
+            ys = [
+                {
+                    round(x.position_y, 1)
+                    for x in c.descendants()
+                    if isinstance(x, wb.LineBox)
+                }
+                for c in cells
+            ]
+            edge = cells[1].position_x + cells[1].border_width()
+            rows.append((len(ys[0]), ys[0] == ys[1], edge))
+    return rows, right
+
+
+def test_the_other_printed_totals_blocks_never_wrap_a_label():
+    pytest.importorskip("weasyprint")
+    wrong = []
+    for template, (cls, _width, labels) in BLOCKS.items():
+        rows, right = _block_layout(_block_html(template, cls, labels), cls)
+        assert len(rows) == len(labels), template
+        for label, (lines, beside, edge) in zip(labels, rows):
+            if lines != 1 or not beside:
+                wrong.append(f"{template}: {label!r} wraps or sits off its figure")
+            if edge > right + 0.5:
+                wrong.append(f"{template}: {label!r}'s figure runs past the page")
+    assert not wrong, "\n".join(wrong)

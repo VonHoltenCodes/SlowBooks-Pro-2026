@@ -614,11 +614,7 @@ def test_email(db: Session = Depends(get_db)):
             # back so the failure can say the reason itself (#447) instead of
             # sending the user off to find a log that had no UI.
             from app.models.email_log import EmailLog
-            from app.services.email_errors import (
-                explain_send_failure,
-                failure_sentence,
-                tls_sentence,
-            )
+            from app.services.email_errors import failure_sentence
 
             row = (
                 db.query(EmailLog)
@@ -627,12 +623,12 @@ def test_email(db: Session = Depends(get_db)):
                 .first()
             )
             error_text = row.error_message if row else ""
-            reason, _ = explain_send_failure(error_text, settings.get("smtp_host", ""))
-            detail = "Test email failed to send."
-            # a secure-connection failure's sentence already carries its reason
-            if reason and not tls_sentence(error_text):
-                detail += f" {reason}"
-            detail += " " + failure_sentence(error_text, settings.get("smtp_host", ""))
+            # the sentence stands alone (W-216): the server's raw reply,
+            # which was pasted in front of it, stays on the log row for an
+            # administrator (Recent sends)
+            detail = "Test email failed to send. " + failure_sentence(
+                error_text, settings.get("smtp_host", "")
+            )
             detail += " The full list is under Settings → Email (SMTP) → Recent sends."
             raise HTTPException(status_code=502, detail=detail)
         return {"status": "sent"}

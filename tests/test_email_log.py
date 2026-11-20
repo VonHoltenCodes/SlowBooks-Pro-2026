@@ -198,7 +198,9 @@ def test_test_email_failure_states_reason_and_hint(client, monkeypatch):
     r = client.post("/api/settings/test-email")
     assert r.status_code == 502
     detail = r.json()["detail"]
-    assert "535" in detail
+    # the sentence stands alone (W-216): no raw reply in front of it
+    assert detail.startswith("Test email failed to send. Google will not accept")
+    assert "535" not in detail
     assert "app password" in detail.lower()
     assert "Recent sends" in detail
     # and the failure is in the list the message points at
@@ -325,7 +327,7 @@ def _failed_letters(client, monkeypatch):
 
 
 @pytest.mark.parametrize("role", ["admin", "bookkeeper"])
-def test_a_failed_collection_letter_says_who_can_see_why(
+def test_a_failed_collection_letter_reads_like_the_other_batch_sends(
     client, db_session, seed_accounts, monkeypatch, role
 ):
     from app.models.invoices import Invoice, InvoiceStatus
@@ -337,11 +339,9 @@ def test_a_failed_collection_letter_says_who_can_see_why(
     if role == "bookkeeper":
         _bookkeeper_login(client, db_session)
     error = _failed_letters(client, monkeypatch)
-    assert error.startswith("Probe Co: the letter could not be emailed.")
-    if role == "admin":
-        assert "Settings → Email (SMTP) → Recent sends" in error
-    else:
-        assert "An administrator can see why under Settings → Recent sends." in error
+    # the same words as every other batch send, for each role (W-218)
+    assert error.startswith("Probe Co: the letter could not be sent")
+    assert "emailed" not in error
 
 
 _TOAST_PROBE = r"""

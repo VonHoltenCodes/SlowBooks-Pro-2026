@@ -147,8 +147,12 @@ class StubSMTP:
     real TLS handshake on STARTTLS, AUTH, MAIL/RCPT/DATA. `commands` is
     every line received; `raw` every byte."""
 
-    def __init__(self, certfile=None, keyfile=None, offer_starttls=True):
+    def __init__(
+        self, certfile=None, keyfile=None, offer_starttls=True, auth_after_tls=False
+    ):
         self.offer_starttls = offer_starttls
+        # offer AUTH only once STARTTLS is done, as Gmail does on 587
+        self.auth_after_tls = auth_after_tls
         self.context = None
         if certfile:
             self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -198,7 +202,9 @@ class StubSMTP:
             self.commands.append(text)
             verb = text.split(" ", 1)[0].upper()
             if verb in ("EHLO", "HELO"):
-                lines = ["250-stub", "250-AUTH PLAIN LOGIN"]
+                lines = ["250-stub"]
+                if tls or not self.auth_after_tls:
+                    lines.append("250-AUTH PLAIN LOGIN")
                 if self.offer_starttls and not tls:
                     lines.append("250-STARTTLS")
                 lines.append("250 OK")

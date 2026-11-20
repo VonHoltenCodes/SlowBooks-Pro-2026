@@ -50,10 +50,12 @@
        their headings never wrap. */
     table.activity .closing { width: 0; min-width: 100%; }
     table.activity > thead > tr > th, table.activity > tbody > tr > td.d, table.activity > tbody > tr > td.r { white-space: nowrap; }
-    .summary { margin-left: auto; width: 300px; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
+    .summary { margin-left: auto; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
+    /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .summary table { width: 300px; margin-left: auto; }
     .summary td { padding: 3px 8px; font-size: 10pt; }
-    .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    .summary .label { font-weight: 700; color: #4a4a6a; }
+    .summary td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .summary .label { font-weight: 700; color: #4a4a6a; white-space: nowrap; }
     .summary .grand { font-size: 13pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .irs { clear: both; margin-top: 18px; padding: 10px 12px; border: 1px solid #999; font-size: 9pt; line-height: 1.45; }
     h3 { font-size: 10pt; color: #003366; margin: 14px 0 4px; }

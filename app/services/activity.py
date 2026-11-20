@@ -919,6 +919,191 @@ def _row(db: Session, table: str, row_id) -> dict:
     return dict(row) if row else {}
 
 
+# a line's own bookkeeping, never what a person changed on it
+_LINE_SKIP = {"line_order", "line_no", "sort_order"}
+
+
+def _line_key(values: dict, fk: str) -> tuple:
+    return (
+        int(values.get("line_order") or values.get("line_no") or 0),
+        int(values.get("id") or 0),
+    )
+
+
+def _line_diff_fields(before: dict, after: dict, fk: str) -> list[str]:
+    """The fields a person could have changed that differ between two
+    snapshots of a line."""
+    out = []
+    for f in dict.fromkeys([*before, *after]):
+        if f in _QUIET_FIELDS or f in _LINE_SKIP or f == fk or f.endswith("_at"):
+            continue
+        if _same_value(before.get(f), after.get(f)):
+            continue
+        out.append(f)
+    return out
+
+
+def _tidy(value):
+    """A number as a person reads it: 2.0000 and 2.0 are both 2."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return value
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return value
+    if not number.is_finite():
+        return value
+    text = format(number.normalize(), "f")
+    return text
+
+
+def _same_value(a, b) -> bool:
+    """Equal as stored: a number sent as 1.0 is the 1.0000 the column kept."""
+    if a == b:
+        return True
+    if isinstance(a, bool) or isinstance(b, bool):
+        return False
+    if a in (None, "") or b in (None, ""):
+        return a in (None, "") and b in (None, "")
+    try:
+        return Decimal(str(a)) == Decimal(str(b))
+    except (InvalidOperation, ValueError):
+        return False
+
+
+def _line_details(
+    words: _Words, dt: DocType, doc_id: int, groups: list[list[AuditLog]]
+) -> dict[int, list[str]]:
+    """What each save did to the document's lines, in words, by the index
+    of its group (W-215).
+
+    A save that rewrites the lines (an invoice, estimate, bill or purchase
+    order deletes and inserts them; a change order bulk-deletes them, which
+    writes no audit row, and inserts them at 0 before its recompute) is read
+    as one change of the line set: the lines before the save against the
+    lines after it. A line found unchanged says nothing; a line whose place
+    holds a changed one names each field old → new; only a line truly added
+    or removed says so, once, with its real amount."""
+    tables = dict(dt.lines)
+    if not tables:
+        return {}
+    current: dict[str, set] = {}
+    last_group: dict[tuple, int] = {}
+    for gi, group in enumerate(groups):
+        for r in group:
+            if r.table_name in tables:
+                last_group[(r.table_name, r.record_id)] = gi
+    for table, fk in tables.items():
+        tbl = Base.metadata.tables.get(table)
+        current[table] = (
+            {
+                x
+                for (x,) in words.db.execute(
+                    select(tbl.c.id).where(tbl.c[fk] == doc_id)
+                )
+            }
+            if tbl is not None and fk in tbl.c
+            else set()
+        )
+
+    alive: dict[str, dict[int, dict]] = {t: {} for t in tables}
+    out: dict[int, list[str]] = {}
+    for gi, group in enumerate(groups):
+        created = any(
+            r.table_name == dt.table and r.record_id == doc_id and r.action == "INSERT"
+            for r in group
+        )
+        said: list[str] = []
+        for table, fk in tables.items():
+            rows = [r for r in group if r.table_name == table]
+            if not rows:
+                continue
+            inserted: dict[int, dict] = {}
+            removed: dict[int, dict] = {}
+            edits: list[AuditLog] = []
+            for r in rows:
+                if r.action == "INSERT":
+                    inserted[r.record_id] = {
+                        **(r.new_values or {}),
+                        "id": r.record_id,
+                    }
+                elif r.action == "DELETE":
+                    removed[r.record_id] = {
+                        **alive[table].get(r.record_id, {}),
+                        **(r.old_values or {}),
+                        "id": r.record_id,
+                    }
+                elif r.record_id in inserted and fk not in (r.changed_fields or []):
+                    # made in this save and then filled in (a change order's
+                    # line, inserted at 0 before its recompute)
+                    inserted[r.record_id].update(r.new_values or {})
+                else:
+                    edits.append(r)
+            if inserted:
+                # lines that left the document with no row of their own (a
+                # bulk delete) went with the save that wrote their successors
+                # (SQLite may give a new line the id of one just deleted, so
+                # a line inserted over a living one replaced it)
+                for rid, values in list(alive[table].items()):
+                    if rid in removed:
+                        continue
+                    if rid in inserted or (
+                        rid not in current[table]
+                        and last_group.get((table, rid), -1) < gi
+                    ):
+                        removed[rid] = values
+            before = sorted(removed.values(), key=lambda v: _line_key(v, fk))
+            after = sorted(inserted.values(), key=lambda v: _line_key(v, fk))
+            if created and not before:
+                said.extend(f"Line: {_line_words(words, v)}" for v in after)
+            else:
+                # the same line saved again says nothing
+                left = list(before)
+                changed_after = []
+                for a in after:
+                    same = next(
+                        (b for b in left if not _line_diff_fields(b, a, fk)), None
+                    )
+                    if same is not None:
+                        left.remove(same)
+                    else:
+                        changed_after.append(a)
+                # the rest by place: a line in the place of another is that
+                # line changed
+                for b, a in zip(left, changed_after):
+                    fields = _line_diff_fields(b, a, fk)
+                    row = AuditLog(
+                        table_name=table,
+                        record_id=a["id"],
+                        action="UPDATE",
+                        changed_fields=fields,
+                        old_values={**b, **{f: _tidy(b.get(f)) for f in fields}},
+                        new_values={**a, **{f: _tidy(a.get(f)) for f in fields}},
+                    )
+                    moved = _changes(words, row)
+                    if moved:
+                        line = _edited_line_name(words, dt, row)
+                        said.append(f"Line {line}: " + "; ".join(moved))
+                n = min(len(left), len(changed_after))
+                said.extend(
+                    f"Line added: {_line_words(words, a)}" for a in changed_after[n:]
+                )
+                said.extend(f"Line removed: {_line_words(words, b)}" for b in left[n:])
+            for r in edits:
+                moved = _changes(words, r)
+                if moved:
+                    line = _edited_line_name(words, dt, r)
+                    said.append(f"Line {line}: " + "; ".join(moved))
+            for rid in removed:
+                alive[table].pop(rid, None)
+            alive[table].update(inserted)
+            for r in edits:
+                if r.record_id in alive[table]:
+                    alive[table][r.record_id].update(r.new_values or {})
+        out[gi] = said
+    return out
+
+
 def _audit_events(
     words: _Words,
     dt: DocType,
@@ -932,8 +1117,11 @@ def _audit_events(
     kinds = {r.id: k for k, r in related}
     line_tables = {t for t, _ in dt.lines}
     events: list[_Event] = []
-    for group in _group(own + lines + attachments + [r for _, r in related]):
+    groups = _group(own + lines + attachments + [r for _, r in related])
+    line_said = _line_details(words, dt, doc_id, groups)
+    for gi, group in enumerate(groups):
         first = group[0]
+        lines_said = False
         when = _utc(first.timestamp)
         who = words.who(first.username, first.source)
         heads: list[tuple[str, str]] = []  # (kind, sentence)
@@ -941,7 +1129,6 @@ def _audit_events(
         # a void's reason, said after its sentence as typed (no vocabulary
         # swap in the person's own words)
         reasons: dict[int, str] = {}  # id() of the head tuple → reason
-        created = False
         # what an approve/convert/promote in this save wrote, on any of the
         # document's rows of it (the status and the stamps may flush apart)
         folded: set = set()
@@ -958,7 +1145,6 @@ def _audit_events(
         for r in group:
             if r.table_name == dt.table and r.record_id == doc_id:
                 if r.action == "INSERT":
-                    created = True
                     num = _number(dt, r.new_values or {})
                     heads.append(
                         (
@@ -1011,21 +1197,10 @@ def _audit_events(
                         if not c.startswith("Void ")
                     )
             elif r.table_name in line_tables:
-                if created and r.action == "INSERT":
-                    details.append(f"Line: {_line_words(words, r.new_values or {})}")
-                elif r.action == "INSERT":
-                    details.append(
-                        f"Line added: {_line_words(words, r.new_values or {})}"
-                    )
-                elif r.action == "DELETE":
-                    details.append(
-                        f"Line removed: {_line_words(words, r.old_values or {})}"
-                    )
-                else:
-                    moved = _changes(words, r)
-                    if moved:
-                        line = _edited_line_name(words, dt, r)
-                        details.append(f"Line {line}: " + "; ".join(moved))
+                # the save's lines, said once as one change of the set (W-215)
+                if not lines_said:
+                    details.extend(line_said.get(gi, []))
+                    lines_said = True
             elif r.table_name == "attachments":
                 vals = (r.new_values if r.action == "INSERT" else r.old_values) or {}
                 name = vals.get("filename") or "a file"
