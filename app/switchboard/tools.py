@@ -9,6 +9,7 @@
 import difflib
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 from app.switchboard.client import (
     ApiClient,
@@ -422,6 +423,19 @@ ASK_FIRST = {
             _LINE_FIELD,
         ),
     ),
+    # paid_from_account_id is required by the API, but its absence is not
+    # left to the API's 422: paid_from_hold names the account the app's
+    # form would start at, for the assistant to confirm.
+    "/api/expenses": AskFirst(
+        "an expense",
+        ("date",),
+        (
+            ("Payee or vendor", ("payee", "vendor_id")),
+            ("Paid from account", ("paid_from_account_id",)),
+            ("Memo", ("memo",)),
+            ("Reference (check number)", ("reference",)),
+        ),
+    ),
 }
 
 ASKED_USER = (
@@ -482,9 +496,10 @@ def body_fields(client: ApiClient, route: str):
     return set(props) if isinstance(props, dict) else None
 
 
-def ask_first(route: str, data, asked_user: bool, tool: str, known=None):
+def ask_first(route: str, data, asked_user: bool, tool: str, known=None, tax=None):
     """The ask-first answer for a bare create, or None to send it. known is
-    the set of fields the route takes, when the app's document says."""
+    the set of fields the route takes, when the app's document says; tax is
+    sales_tax's plan, whose ask adds the sales tax rate to the empty fields."""
     rule = ASK_FIRST.get(route)
     if rule is None or asked_user is True or not isinstance(data, dict):
         return None
@@ -495,16 +510,20 @@ def ask_first(route: str, data, asked_user: bool, tool: str, known=None):
     empty = left_blank(rule, data)
     if len(rule.fields) - len(empty) >= rule.need:
         return None
+    rows = [
+        {"label": label, "field": _field_names(keys)}
+        for label, keys in rule.fields
+        if label in empty
+    ]
+    if tax is not None and tax["ask"]:
+        empty.append(TAX_LABEL)
+        rows.append({"label": TAX_LABEL, "field": "tax_rate"})
     labels = ", ".join(empty)
     return {
         "created": False,
         "ask_first": True,
         "record": rule.record.split(" ", 1)[1],
-        "empty": [
-            {"label": label, "field": _field_names(keys)}
-            for label, keys in rule.fields
-            if label in empty
-        ],
+        "empty": rows,
         "next": (
             f"Nothing was created yet: {rule.record} with this little on it "
             f"may need checking first. Ask the user whether they have any of "
@@ -515,24 +534,402 @@ def ask_first(route: str, data, asked_user: bool, tool: str, known=None):
     }
 
 
-def with_left_blank(route: str, data, answer):
-    """A create's answer with left_blank: the rule's fields still empty."""
+# ---------------------------------------------------------------------------
+# Sales tax on a new sales document. The API takes a missing tax_rate as 0%,
+# while the app's own forms start a new invoice, estimate, sales receipt or
+# credit memo at the company's Default Tax Rate (Settings), and a credit memo
+# for an invoice at that invoice's rate. So when the assistant gives no
+# tax_rate, Switchboard does what the form does and says so in the answer
+# (tax_rate_source, tax_note); a tax_rate the assistant gives, 0 included, is
+# always sent as given. A non-taxable customer or a document marked
+# tax_exempt is charged no tax by the app whatever the rate (the form keeps
+# the default rate on it too). With no default rate (0%) and a taxable
+# customer, "Sales tax rate" is one of the fields to ask about. The API's
+# own default is not changed: that is for every API user to keep.
+# ---------------------------------------------------------------------------
+
+SALES_TAX_ROUTES = (
+    "/api/invoices",
+    "/api/estimates",
+    "/api/sales-receipts",
+    "/api/credit-memos",
+)
+TAX_LABEL = "Sales tax rate"
+_RATE_PLACES = Decimal("0.000001")  # the API keeps a rate to six places
+
+
+def _percent(value: Decimal) -> str:
+    text = format(value.normalize(), "f")
+    return (text.rstrip("0").rstrip(".") if "." in text else text) + "%"
+
+
+def _default_percent(client: ApiClient):
+    """The company's Default Tax Rate as a percent, or None unreadable."""
+    try:
+        settings = client.get("/api/settings")
+    except ApiError:
+        return None
+    raw = settings.get("default_tax_rate") if isinstance(settings, dict) else None
+    try:
+        pct = Decimal(str(raw if raw not in (None, "") else "0"))
+    except InvalidOperation:
+        return None
+    return pct if pct.is_finite() and 0 <= pct <= 100 else None
+
+
+def _exempt_reason(client: ApiClient, data: dict):
+    """Why the app charges this document no tax whatever its rate, or None."""
+    if data.get("tax_exempt") is True:
+        return "the document is marked tax exempt"
+    cid = data.get("customer_id")
+    if isinstance(cid, bool) or not isinstance(cid, (int, str)) or cid == "":
+        return None
+    try:
+        customer = client.get(f"/api/customers/{cid}")
+    except ApiError:
+        return None  # the API says what is wrong with the customer
+    if isinstance(customer, dict) and customer.get("is_taxable") is False:
+        name = customer.get("name") or "the customer"
+        return f"{name} is non-taxable (reseller or exempt)"
+    return None
+
+
+def sales_tax(client: ApiClient, route: str, data):
+    """The plan for tax_rate on a new sales document sent without one:
+    {"rate": the fraction to send or None (with "shown", the percent),
+    "source", "note", "ask"}; None
+    when there is nothing to do (another record, or a tax_rate given)."""
+    if route not in SALES_TAX_ROUTES or not isinstance(data, dict):
+        return None
+    if data.get("tax_rate") is not None:
+        return None  # the assistant's rate, 0 included, is sent as given
+    if route == "/api/credit-memos" and _has(data.get("original_invoice_id")):
+        return {
+            "rate": None,
+            "source": "the credited invoice's rate",
+            "note": (
+                "No tax_rate was given, so SlowBooks Pro used the rate of the "
+                "invoice being credited, as its own form does: the tax goes "
+                "back the way it was charged."
+            ),
+            "ask": False,
+        }
+    pct = _default_percent(client)
+    exempt = _exempt_reason(client, data)
+    if pct is None:
+        return {
+            "rate": None,
+            "source": "none: the company's default rate could not be read",
+            "note": (
+                "No tax_rate was given and the company's Default Tax Rate "
+                "could not be read, so the document has a 0% sales tax rate. "
+                "Ask the user what rate applies."
+            ),
+            "ask": exempt is None,
+        }
+    if pct > 0:
+        shown = _percent(pct)
+        if exempt:
+            note = (
+                f"No tax_rate was given, so the company's default rate, {shown}, "
+                f"was used, as SlowBooks Pro's form does; {exempt}, so no sales "
+                "tax is charged."
+            )
+        else:
+            note = (
+                f"No tax_rate was given, so SlowBooks Pro used the company's "
+                f"default sales tax rate, {shown}, as its own form does. Tell "
+                "the user; if this sale is taxed at another rate, change the "
+                "document's tax_rate (a fraction: 0.0159 is 1.59%)."
+            )
+        return {
+            "rate": (pct / 100).quantize(_RATE_PLACES),
+            "shown": shown,
+            "source": f"company default ({shown})",
+            "note": note,
+            "ask": False,
+        }
+    if exempt:
+        return {
+            "rate": None,
+            "source": "none: no sales tax applies",
+            "note": f"No tax_rate was given; {exempt}, so no sales tax is charged.",
+            "ask": False,
+        }
+    return {
+        "rate": None,
+        "source": "none: the company's default rate is 0%",
+        "note": (
+            "No tax_rate was given and the company's Default Tax Rate is 0%, "
+            "so no sales tax was charged. Ask the user whether this sale is "
+            "taxed, and at what rate."
+        ),
+        "ask": True,
+    }
+
+
+def with_tax_rate(data, tax):
+    """data with the plan's rate in it (a number, as the API's schema says)."""
+    if tax is None or tax["rate"] is None or not isinstance(data, dict):
+        return data
+    return {**data, "tax_rate": float(tax["rate"])}
+
+
+def _shown(label: str, value) -> str:
+    if isinstance(value, bool):
+        if label.startswith("Sales Tax"):
+            return "taxable" if value else "exempt"
+        return "yes" if value else "no"
+    return str(value)
+
+
+def _defaulted_value(label: str, keys: tuple, answer: dict):
+    """What the app filled in for a field the assistant did not give, from
+    the created record; None when it is still empty there."""
+    if keys == (_LINES,):
+        return None
+    present = [(k, answer.get(k)) for k in keys if _has(answer.get(k))]
+    if not present:
+        return None
+    # an id (payment_term_id) says nothing to a person beside the words
+    named = [(k, v) for k, v in present if not k.endswith("_id")]
+    present = named or present
+    if len(present) == 1:
+        return _shown(label, present[0][1])
+    return ", ".join(f"{k.replace('_', ' ')} {_shown(label, v)}" for k, v in present)
+
+
+def with_left_blank(route: str, data, answer, tax=None, fallbacks=None):
+    """A create's answer with left_blank (the rule's fields still empty on
+    the record) and defaulted (those the assistant did not give that
+    SlowBooks Pro filled with its default: [{label, value}]), and, for a
+    sales document sent without a tax_rate, tax_rate_source and tax_note."""
     rule = ASK_FIRST.get(route)
-    if rule is None or not isinstance(data, dict):
+    if (rule is None and tax is None) or not isinstance(data, dict):
         return answer
-    blank = left_blank(rule, data)
+    record = answer if isinstance(answer, dict) else {}
+    blank, defaulted = [], []
+    for label, keys in rule.fields if rule else ():
+        if _given(data, keys):
+            continue
+        value = _defaulted_value(label, keys, record)
+        if value is None and fallbacks:
+            value = fallbacks.get(label)
+        if value is None:
+            blank.append(label)
+        else:
+            defaulted.append({"label": label, "value": value})
+    extra: dict = {}
+    if tax is not None:
+        if tax["rate"] is not None:
+            defaulted.append(
+                {"label": TAX_LABEL, "value": f"{tax['shown']} (the company's default)"}
+            )
+        elif tax["ask"]:
+            blank.append(TAX_LABEL)
+        extra = {"tax_rate_source": tax["source"], "tax_note": tax["note"]}
+    out = {"left_blank": blank, "defaulted": defaulted, **extra}
     if isinstance(answer, dict):
-        return {**answer, "left_blank": blank}
-    return {"created": True, "answer": answer, "left_blank": blank}
+        return {**answer, **out}
+    return {"created": True, "answer": answer, **out}
+
+
+# ---------------------------------------------------------------------------
+# The accounts SlowBooks Pro uses when a record leaves one out. The app finds
+# these by their number in its own registry of control accounts: a control
+# account's number cannot be changed (the app refuses), so the number is the
+# app's own key; the name shown is read from the company's chart, never
+# assumed.
+# ---------------------------------------------------------------------------
+
+MONEY_ROUTES = ("/api/payments", "/api/bill-payments")
+UNDEPOSITED_FUNDS = "1200"  # a payment received with no deposit account
+CHECKING = "1000"  # a bill payment with no pay-from account
+DEFAULT_INCOME = "4000"  # a sales line whose item names no income account
+
+
+def _chart(client: ApiClient) -> list:
+    try:
+        rows = client.get("/api/accounts")
+    except ApiError:
+        return []
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def account_label(row) -> str:
+    """ "4000 - Service Income", or the name alone with no number."""
+    if not isinstance(row, dict):
+        return ""
+    number, name = row.get("account_number"), row.get("name") or ""
+    return f"{number} - {name}" if number else name
+
+
+def _by_id(chart: list, account_id):
+    return next((r for r in chart if r.get("id") == account_id), None)
+
+
+def _control(chart: list, number: str):
+    return next(
+        (
+            r
+            for r in chart
+            if r.get("account_number") == number and r.get("is_control") is not False
+        ),
+        None,
+    )
+
+
+def _first_cogs(chart: list):
+    cogs = [
+        r
+        for r in chart
+        if r.get("account_type") == "cogs" and r.get("is_active") is not False
+    ]
+    cogs.sort(key=lambda r: str(r.get("account_number") or ""))
+    return cogs[0] if cogs else None
+
+
+def default_paid_from(client: ApiClient):
+    """The account the app's Enter Expense form starts at: Settings' default
+    deposit account when it is an active bank account, else the first
+    active one named Checking, else the first bank account; None if none."""
+    chart = _chart(client)
+    banks = [r for r in chart if r.get("bank_kind") and r.get("is_active") is not False]
+    if not banks:  # an older app, or a chart without bank kinds
+        banks = [r for r in chart if r.get("account_number") == CHECKING]
+    try:
+        settings = client.get("/api/settings")
+    except ApiError:
+        settings = {}
+    chosen = ""
+    if isinstance(settings, dict):
+        chosen = str(settings.get("default_deposit_account_id") or "").strip()
+    return (
+        next((r for r in banks if str(r.get("id")) == chosen), None)
+        or next(
+            (r for r in banks if "checking" in str(r.get("name", "")).lower()), None
+        )
+        or (banks[0] if banks else None)
+    )
+
+
+def paid_from_hold(client: ApiClient, route: str, data, tool: str):
+    """An expense without paid_from_account_id is not sent: the answer names
+    the account the app's form would start at, for the assistant to confirm
+    with the user. Asked or not, the account is never guessed."""
+    if route != "/api/expenses" or not isinstance(data, dict):
+        return None
+    if _has(data.get("paid_from_account_id")):
+        return None
+    suggested = default_paid_from(client)
+    out = {
+        "created": False,
+        "ask_first": True,
+        "record": "expense",
+        "empty": [{"label": "Paid from account", "field": "paid_from_account_id"}],
+    }
+    if suggested is not None:
+        label = account_label(suggested)
+        out["suggested"] = {
+            "paid_from_account_id": suggested.get("id"),
+            "account": label,
+        }
+        out["next"] = (
+            "Nothing was created yet: an expense needs the account it was paid "
+            f"from. SlowBooks Pro's form would start at {label}. Ask the user "
+            "whether it was paid from that account or which one, then call "
+            f"{tool} again with paid_from_account_id."
+        )
+    else:
+        out["next"] = (
+            "Nothing was created yet: an expense needs the account it was paid "
+            "from, and the company has no bank account to suggest. Ask the "
+            f"user which account paid it, then call {tool} again with "
+            "paid_from_account_id."
+        )
+    return out
+
+
+def item_fallbacks(client: ApiClient, route: str, data) -> dict:
+    """For a new item that names no income or expense account: what the app
+    posts to instead, as {label: sentence}, read from the chart."""
+    if route != "/api/items" or not isinstance(data, dict):
+        return {}
+    if _has(data.get("income_account_id")) and _has(data.get("expense_account_id")):
+        return {}
+    chart = _chart(client)
+    out = {}
+    income = _control(chart, DEFAULT_INCOME)
+    if income is not None:
+        out["Income Account"] = (
+            f"sales of this item post to {account_label(income)} (SlowBooks "
+            "Pro's default income account) unless you set one"
+        )
+    buying = (
+        "a bill or expense line for it posts to the vendor's default expense "
+        "account; with none, SlowBooks Pro refuses the line until an account "
+        "is chosen"
+    )
+    cogs = _first_cogs(chart)
+    stocked = data.get("item_type") == "product" or data.get("track_inventory") is True
+    if stocked and cogs is not None:
+        buying = (
+            f"the cost of its sales posts to {account_label(cogs)} (the first "
+            f"cost-of-goods account); {buying}"
+        )
+    out["Expense or COGS Account"] = buying
+    return out
+
+
+def money_went(client: ApiClient, route: str, answer):
+    """A payment's answer with where the money went: money_to (the account)
+    and money_note (a sentence to pass on), from the payment and the chart."""
+    if not isinstance(answer, dict) or route not in MONEY_ROUTES:
+        return answer
+    chart = _chart(client)
+    if route == "/api/payments":
+        chosen = answer.get("deposit_to_account_id")
+        if chosen:
+            row = _by_id(chart, chosen)
+            label = account_label(row) or f"account {chosen}"
+            note = f"The payment went into {label}."
+        else:
+            row = _control(chart, UNDEPOSITED_FUNDS)
+            label = account_label(row) or "Undeposited Funds"
+            note = (
+                "No deposit account was given, so SlowBooks Pro holds the "
+                f"payment in {label}: it is not in a bank account yet. It goes "
+                "to the bank when it is put on a bank deposit (Make Deposits)."
+            )
+    else:
+        chosen = answer.get("pay_from_account_id")
+        if chosen:
+            row = _by_id(chart, chosen)
+            label = account_label(row) or f"account {chosen}"
+            note = f"The payment was paid from {label}."
+        else:
+            row = _control(chart, CHECKING)
+            label = account_label(row) or "Checking"
+            note = (
+                "No pay-from account was given, so SlowBooks Pro paid it from "
+                f"{label}, its default bank account."
+            )
+    money_to = {"account_id": row.get("id") if row else chosen, "account": label}
+    return {**answer, "money_to": money_to, "money_note": note}
 
 
 def _create(client: ApiClient, route: str, data, asked_user: bool, tool: str):
-    held = None
-    if not asked_user and route in ASK_FIRST:
-        held = ask_first(route, data, asked_user, tool, body_fields(client, route))
+    held = paid_from_hold(client, route, data, tool)
     if held is not None:
         return held
-    return with_left_blank(route, data, _write(client, route, data))
+    tax = sales_tax(client, route, data)
+    if not asked_user and route in ASK_FIRST:
+        held = ask_first(route, data, asked_user, tool, body_fields(client, route), tax)
+    if held is not None:
+        return held
+    fallbacks = item_fallbacks(client, route, data)
+    answer = _write(client, route, with_tax_rate(data, tax))
+    return with_left_blank(route, data, answer, tax, fallbacks)
 
 
 def create_customer(client: ApiClient, data: dict, asked_user: bool = False):
@@ -560,10 +957,10 @@ def create_bill(client: ApiClient, data: dict, asked_user: bool = False):
     return _create(client, "/api/bills", data, asked_user, "create_bill")
 
 
-def create_expense(client: ApiClient, data: dict):
+def create_expense(client: ApiClient, data: dict, asked_user: bool = False):
     """Record a paid expense. Required: date, paid_from_account_id, and either
     amount + expense_account_id or lines. api_schema("/api/expenses") has the rest."""
-    return _write(client, "/api/expenses", data)
+    return _create(client, "/api/expenses", data, asked_user, "create_expense")
 
 
 def create_journal_entry(client: ApiClient, data: dict):
@@ -577,7 +974,8 @@ def record_payment(client: ApiClient, data: dict, key: str):
     allocations apply it to invoices (api_schema("/api/payments") has the rest).
     key is required: 1 to 128 characters of A-Z a-z 0-9 _ . : -. The same key
     with the same data books once; the same key with other data is refused."""
-    return _keyed(client, "/api/payments", data, key)
+    answer = _keyed(client, "/api/payments", data, key)
+    return money_went(client, "/api/payments", answer)
 
 
 def record_bill_payment(client: ApiClient, data: dict, key: str):
@@ -585,7 +983,8 @@ def record_bill_payment(client: ApiClient, data: dict, key: str):
     it to bills (api_schema("/api/bill-payments") has the rest). key is
     required: 1 to 128 characters of A-Z a-z 0-9 _ . : -. The same key with the
     same data books once; the same key with other data is refused."""
-    return _keyed(client, "/api/bill-payments", data, key)
+    answer = _keyed(client, "/api/bill-payments", data, key)
+    return money_went(client, "/api/bill-payments", answer)
 
 
 _VOID_PATHS = {

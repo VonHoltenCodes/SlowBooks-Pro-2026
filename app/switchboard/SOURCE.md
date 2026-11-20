@@ -7,14 +7,21 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: f5da708e224cfc0882d79d8b1fca71c7257de5d7 (main, 2026-11-19,
-  "relay/forget": Disconnect has the relay delete its record of these
-  books, POST /v1/forget, with the relay name kept for the manual
-  fallback). It carries "sbplive/annotations" (every tool that writes the books marked destructive; a clear 5xx
-  sentence), "relay/steady-line" (a ping every 15 s, a silent line given up
-  after 35 s, and "replay") and "sbplive/ask-first" (a create with little on
-  it held back until the assistant asked; left_blank on every create).
-  Before it: c0ab2c3
+- Commit: 8bf0f93bb6e9734b8419a08b2fc7b1cfb0f1fb0c (main, 2026-11-19,
+  "sbplive/clearer-answers"): a DELETE's answer says "deactivated" or
+  "deleted" as the app answered; a payment's answer names the account the
+  money went to (Undeposited Funds when no deposit account was given); an
+  expense is asked about first and, without the account it was paid from,
+  is not sent and names the account the form would start at; a new item
+  without accounts lists what its sales and purchases post to. It carries
+  "sbplive/sales-tax-default" and "sbplive/defaulted-no-ids" (a sales
+  document sent without a tax rate takes the company's Default Tax Rate,
+  as the app's form does, and says so; every create lists `left_blank` and
+  `defaulted`) and "sbplive/connector-icon" (serverInfo reads title
+  "SlowBooks Pro", websiteUrl and icons; through the relay the icons are
+  the relay's own files, which the line points at). Before them: f5da708
+  ("relay/forget"), with "sbplive/annotations", "relay/steady-line" and
+  "sbplive/ask-first".
 - Standard library only; nothing is added to the requirements.
 
 ## The files
@@ -28,17 +35,17 @@ The modules `line.py` imports, directly or through `server.py` (and
 | `account.py` | 606 |
 | `client.py` | 223 |
 | `config.py` | 205 |
-| `line.py` | 1019 |
+| `line.py` | 1030 |
 | `logs.py` | 78 |
-| `operations.py` | 649 |
-| `protocol.py` | 389 |
+| `operations.py` | 684 |
+| `protocol.py` | 493 |
 | `registry.py` | 401 |
 | `remote.py` | 682 |
-| `server.py` | 581 |
+| `server.py` | 615 |
 | `store.py` | 170 |
-| `tools.py` | 612 |
+| `tools.py` | 1011 |
 | `ws.py` | 589 |
-| 14 files | 6220 |
+| 14 files | 6803 |
 
 Not copied: the self-hosted HTTP door's runner (`serve_http.py`, which
 shows its connector secret on first run), the OAuth door (`oauth*.py`,
