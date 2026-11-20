@@ -40,7 +40,7 @@ async function dialog({ construction, tax, retainage }) {
 }
 
 const note = (html, about) => {
-    const m = html.match(new RegExp(`<strong class="hint-pop-title">${about}</strong>(.*?)</span>`));
+    const m = html.match(new RegExp(`<strong class="hint-pop-title">${about}</strong> ?(.*?)</span>`));
     return m && m[1];
 };
 

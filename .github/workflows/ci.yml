@@ -324,7 +324,8 @@ jobs:
           # (test_browser_find.py, test_browser_find_webkit.py: one each without playwright).
           # 406 with round 22's documents (#1120 #1121 #1122): seven WeasyPrint cases
           # (test_pdf_last_page_w187_w188.py) and one Chromium module (test_print_last_sheet_w187_browser.py).
-          MAX_SKIPS: "406"
+          # 407 with round 22's tortoise notes (#1123 #1124): test_browser_hints_r22.py, one module without playwright.
+          MAX_SKIPS: "407"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

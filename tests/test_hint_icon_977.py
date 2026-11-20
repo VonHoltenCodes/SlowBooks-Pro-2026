@@ -57,3 +57,22 @@ def test_the_mark_is_the_whole_tortoise_on_a_clear_ground():
         assert alpha.getpixel((side // 2, side // 2)) == 255, name
     js = (ROOT / "app/static/js/hint.js").read_text(encoding="utf-8")
     assert 'tortoise-hint@2x.png 2x" width="22" height="22"' in js
+
+
+def test_the_i_on_the_shell_reads_at_the_buttons_size():
+    """NEW-264: at 22px the "i" was about 2 x 5 pixels, a dot on the shell.
+    The button's two sizes keep the same tortoise with a larger white disc
+    behind a darker "i" (main had 4 and 28 white pixels there)."""
+    from PIL import Image
+
+    for name, side, white_least, ink_least in (
+        ("tortoise-hint.png", 22, 14, 0),
+        ("tortoise-hint@2x.png", 44, 70, 30),
+    ):
+        mark = Image.open(ROOT / "app/static/img" / name).convert("RGBA")
+        px = mark.load()
+        spots = [(x, y) for x in range(side) for y in range(side) if px[x, y][3] > 200]
+        white = sum(1 for s in spots if min(px[s][:3]) > 235)
+        ink = sum(1 for s in spots if sum(px[s][:3]) / 3 < 90)
+        assert white >= white_least, (name, white)
+        assert ink >= ink_least, (name, ink)
