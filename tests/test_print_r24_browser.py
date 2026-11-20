@@ -51,7 +51,7 @@ def test_chromium_prints_the_line_breaks_and_the_cut(
                 page.set_content(html.replace("window.print()", "void 0"))
                 pdf = page.pdf(prefer_css_page_size=True)
                 said = f"{kind}, {n} lines, {length} characters (Chromium)"
-                found, cut = problems(said, n, length, html, pdf)
+                found, cut = problems(said, n, length, html, pdf, saved_pdf=False)
                 wrong += found
                 cuts.append(cut)
     finally:
