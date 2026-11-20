@@ -72,3 +72,19 @@ def test_the_release_notes_are_shown_once_per_version():
     assert "if (splash && acknowledged) {" in BOOT
     # the licence's own acknowledgement is untouched
     assert BOOT.count("localStorage.setItem(ACK_KEY, LICENSE_VERSION)") == 1
+
+
+def test_about_says_only_who_it_is_not_affiliated_with():
+    """The owner's wording for About: no origin story and no account of how
+    it was built, only the line saying whom the product is not tied to."""
+    legal = INDEX[INDEX.index('class="splash-legal"') :][:400]
+    assert "Not affiliated with, endorsed by or sponsored by Intuit Inc.," in legal
+    assert "Mercury Technologies, Inc., SimpleFIN, or any AI provider." in legal
+    for gone in (
+        "Born as",
+        "activation servers",
+        "reimplementation",
+        "QBFC",
+        "paying customer",
+    ):
+        assert gone not in INDEX, gone
