@@ -6,6 +6,10 @@ stays through the panel's refresh until Dismiss or the next press, with
 Connect offered again. NEW-269: a relay name a Disconnect could not delete
 comes from the server, so the panel shows it after a reload.
 
+Later: a refresh of the panel that changes nothing draws nothing, so the
+keyboard focus and a selection stay; no two of its buttons share a name;
+what the relay says is shown as text.
+
 W-209: text on a page selects (a cell's figure, a name, a sentence) while
 the chrome (the sidebar, buttons, column headings) does not, and a field's
 Ctrl/Cmd+A selects its own text.
@@ -155,6 +159,142 @@ def test_a_relay_name_left_by_a_disconnect_shows_after_a_reload(relay, client, e
             page.close()
     finally:
         link.stop_retry()
+
+
+# -- the panel's own rule: a refresh takes nothing from the person ------------------
+
+
+def _held(page):
+    return page.evaluate("""() => ({
+            focus: document.activeElement && document.activeElement.id,
+            selected: String(getSelection()),
+        })""")
+
+
+def test_a_timed_refresh_keeps_the_keyboard_focus_and_the_selection(
+    relay, client, engine
+):
+    """The notice for a relay name stays up for as long as the relay cannot
+    be reached, and the panel asks the server again every few seconds: the
+    Dismiss button keeps the keyboard and the relay name stays selected."""
+    _connected(relay, client)
+    record = json.loads(link.link_path().read_text())
+    link._save(dict(record, relay=f"http://127.0.0.1:{_free_port()}"))
+    assert client.post("/api/switchboard/disconnect").json()["unlinked"] is False
+    try:
+        page, errors = _page(client, engine)
+        try:
+            _connections(page)
+            page.wait_for_selector("#claude-relay-fallback")
+            page.focus("#claude-relay-fallback-dismiss")
+            page.evaluate("""() => {
+                const name = document.getElementById('claude-relay-fallback-name');
+                name._same = true;
+                getSelection().selectAllChildren(name);
+            }""")
+            before = _held(page)
+            assert before == {
+                "focus": "claude-relay-fallback-dismiss",
+                "selected": relay.slug,
+            }
+            for _ in range(3):  # what the timer does, three times over
+                page.evaluate("SettingsPage.loadSwitchboard()")
+                page.wait_for_timeout(150)
+            assert _held(page) == before
+            # nothing was drawn again: the very same nodes, so a screen
+            # reader is not told the alert a second time either
+            assert page.evaluate(
+                "document.getElementById('claude-relay-fallback-name')._same"
+            )
+            assert not errors, errors
+        finally:
+            page.close()
+    finally:
+        link.stop_retry()
+
+
+def test_a_redraw_that_changes_the_panel_gives_back_what_was_held(
+    relay, client, engine
+):
+    _connected(relay, client)
+    page, errors = _page(client, engine)
+    try:
+        _connections(page)
+        page.wait_for_selector("#claude-relay-name")
+        page.focus("#claude-code")
+        page.evaluate("""() => getSelection().selectAllChildren(
+                document.getElementById('claude-relay-name'))""")
+        # the panel changes under it: a sign-in code appears
+        page.evaluate("SettingsPage.claudeCode()")
+        page.wait_for_selector("#claude-relay-code")
+        assert _held(page) == {"focus": "claude-code", "selected": relay.slug}
+        assert not errors, errors
+    finally:
+        page.close()
+
+
+def test_no_two_buttons_of_the_panel_share_a_name(relay, client, engine):
+    """An old relay name still waiting to be removed, and a new connection:
+    the panel has two relay names with Copy, an error with Dismiss and the
+    notice with Dismiss, each button with a name of its own."""
+    _connected(relay, client)
+    record = json.loads(link.link_path().read_text())
+    link._save(dict(record, relay=f"http://127.0.0.1:{_free_port()}"))
+    assert client.post("/api/switchboard/disconnect").json()["unlinked"] is False
+    try:
+        _connected(relay, client)  # connected again while the old name waits
+        st = client.get("/api/switchboard/status").json()
+        assert st["linked"] is True and st["pending"]
+        page, errors = _page(client, engine)
+        try:
+            _connections(page)
+            page.wait_for_selector("#claude-relay-fallback")
+            page.wait_for_selector("#claude-relay-name")
+            # and a press that failed, so the relay message shows too
+            relay.fail["/v1/code"] = 503
+            page.click("#claude-code")
+            page.wait_for_selector("#claude-relay-error")
+            names = page.evaluate("""() => [...document.querySelectorAll(
+                    '#switchboard-relay button')].map(b =>
+                    b.getAttribute('aria-label') || b.textContent.trim())""")
+            assert len(names) == len(set(names)), names
+            assert set(names) == {
+                "Dismiss the relay message",
+                "Copy the relay name in the removal notice",
+                "Dismiss the removal notice",
+                "Copy the connector address",
+                "Copy the relay name",
+                "Show a sign-in code",
+                "Disconnect",
+            }
+            for name in names:
+                assert page.get_by_role("button", name=name, exact=True).count() == 1
+            assert not errors, errors
+        finally:
+            page.close()
+    finally:
+        link.stop_retry()
+
+
+def test_what_the_relay_says_is_shown_as_text_never_as_markup(relay, client, engine):
+    relay.link_status = 403
+    relay.link_error = '<img src=x onerror="window.relaySaid = 1"> <b>closed</b>'
+    page, errors = _page(client, engine)
+    try:
+        _connections(page)
+        page.click("#claude-connect")
+        page.wait_for_selector("#claude-relay-error")
+        said = page.inner_text("#claude-relay-error")
+        assert link.RELAY_REFUSED in said
+        assert "<img src=x" in said and "<b>closed</b>" in said
+        assert (
+            page.locator("#claude-relay-error img, #claude-relay-error b").count() == 0
+        )
+        assert page.evaluate("window.relaySaid") is None
+        assert "127.0.0.1" not in said and "403" not in said
+        assert not errors, errors
+    finally:
+        page.close()
 
 
 # -- W-209 -------------------------------------------------------------------------

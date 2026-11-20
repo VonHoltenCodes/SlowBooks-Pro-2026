@@ -2713,7 +2713,12 @@ const SettingsPage = {
             html += '<div id="claude-relay-fallback" role="alert" style="margin-top:8px;">'
                 + `<div>${escapeHtml(shown.sentence || '')}</div>`
                 + '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:6px;">'
-                + copyLineHtml('claude-relay-fallback-name', 'Relay name', shown.slug, 'SettingsPage.copyClaudeFallbackName()')
+                // the same line as copyLineHtml draws, its button named for the
+                // notice: while connected again the panel has a second Relay
+                // name line, and no two buttons share a name
+                + '<span style="font-size:12px; color:var(--text-muted);">Relay name</span>'
+                + `<code id="claude-relay-fallback-name" style="font-family:var(--font-mono); font-size:12px; user-select:all; overflow-wrap:anywhere;">${escapeHtml(shown.slug || '')}</code>`
+                + '<button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-copy" aria-label="Copy the relay name in the removal notice" onclick="SettingsPage.copyClaudeFallbackName()">Copy</button>'
                 + '</div>'
                 + (admin ? '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" aria-label="Dismiss the removal notice" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>' : '')
                 + '</div>';
@@ -2741,11 +2746,87 @@ const SettingsPage = {
         return html;
     },
 
+    // Where a selection's end is, as the steps down from the panel to its
+    // node, so it can be found again in a panel drawn anew.
+    _claudePath(el, node) {
+        const path = [];
+        while (node && node !== el) {
+            const parent = node.parentNode;
+            if (!parent) return null;
+            path.unshift(Array.prototype.indexOf.call(parent.childNodes, node));
+            node = parent;
+        }
+        return node === el ? path : null;
+    },
+
+    _claudeNode(el, path) {
+        let node = el;
+        for (const i of path) {
+            node = node && node.childNodes[i];
+        }
+        return node || null;
+    },
+
+    // What the person holds in the panel: the control with the keyboard and
+    // the text selected.
+    _claudeHeld(el) {
+        const held = { focus: null, range: null };
+        if (typeof el.contains !== 'function') return held;
+        const active = document.activeElement;
+        if (active && active !== el && el.contains(active) && active.id) held.focus = active.id;
+        const sel = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
+        if (sel && sel.rangeCount && !sel.isCollapsed
+            && el.contains(sel.anchorNode) && el.contains(sel.focusNode)) {
+            const r = sel.getRangeAt(0);
+            const from = SettingsPage._claudePath(el, r.startContainer);
+            const to = SettingsPage._claudePath(el, r.endContainer);
+            if (from && to) held.range = { from, to, start: r.startOffset, end: r.endOffset, text: String(sel) };
+        }
+        return held;
+    },
+
+    // Give it back after the panel was drawn anew: the control with the same
+    // id, and the same selection where the same words are still there.
+    _claudeGiveBack(el, held) {
+        if (held.focus) {
+            const again = document.getElementById(held.focus);
+            if (again && el.contains(again) && !again.disabled) {
+                try { again.focus({ preventScroll: true }); } catch (e) { again.focus(); }
+            }
+        }
+        if (held.range) {
+            try {
+                const from = SettingsPage._claudeNode(el, held.range.from);
+                const to = SettingsPage._claudeNode(el, held.range.to);
+                if (from && to) {
+                    const r = document.createRange();
+                    r.setStart(from, held.range.start);
+                    r.setEnd(to, held.range.end);
+                    if (String(r) === held.range.text) {
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(r);
+                    }
+                }
+            } catch (e) { /* the words are gone: nothing to select */ }
+        }
+    },
+
     _drawSwitchboard() {
         const el = $('#switchboard-relay');
         if (!el) return;
         const c = SettingsPage._claude;
-        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback);
+        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback);
+        // A refresh that changes nothing draws nothing: the keyboard focus, a
+        // selection (the relay name being copied) and the screen reader's
+        // place stay where they are, and an alert is not announced again.
+        // When something did change, what the person held is given back.
+        if (el._claudeDrawn !== html) {
+            const held = SettingsPage._claudeHeld(el);
+            el.innerHTML = html;
+            el._claudeDrawn = html;
+            SettingsPage._claudeGiveBack(el, held);
+        }
         // while the line is coming up or the relay is away, the words follow
         // it: asked again in a few seconds, while the panel is on the page
         const state = c.status && c.status.state;
@@ -2779,6 +2860,9 @@ const SettingsPage = {
         // the next press clears the last one's sentence
         SettingsPage._claude.error = '';
         $('#claude-relay-error')?.remove();
+        // the panel was changed by hand here: the next draw is a real one
+        const panel = $('#switchboard-relay');
+        if (panel) panel._claudeDrawn = null;
         try {
             SettingsPage._claude.status = await API.post('/switchboard/connect');
             SettingsPage._claude.code = null;
@@ -2847,13 +2931,23 @@ const SettingsPage = {
         SettingsPage._claude.error = '';
         try {
             const r = await API.post('/switchboard/disconnect');
-            if (r && r.unlinked === false && r.slug) {
-                // the relay was out of reach: keep its name on the panel
-                // the name now comes from the server's status (NEW-269)
-                SettingsPage._claude.fallback = null;
-                toast('The AI assistant is disconnected and the token revoked. The relay was out of reach: see the relay name below.');
+            SettingsPage._claude.fallback = null;
+            const done = 'The AI assistant is disconnected' + (r && r.revoked ? ' and the token revoked. ' : '. ');
+            if (r && r.say && r.sentence) {
+                // something the relay could not do, with no notice kept for
+                // it: the server's sentence stays on the panel until dismissed
+                SettingsPage._claude.error = r.sentence;
+                toast('The AI assistant is disconnected. See the message on the panel.');
+            } else if (r && r.unlinked === false && r.slug) {
+                // the relay still holds its record: the relay name is on the
+                // panel, from the server's status (NEW-269), and the toast
+                // says why, as the relay answered
+                toast(done + (r.why === 'refused'
+                    ? 'The relay did not accept the request to delete its record: see the relay name below.'
+                    : (r.why === 'unconfirmed'
+                        ? 'The relay did not confirm that it deleted its record: see the relay name below.'
+                        : 'The relay was out of reach: see the relay name below.')));
             } else {
-                SettingsPage._claude.fallback = null;
                 toast(r && r.deleted
                     ? 'The AI assistant is disconnected, and the relay deleted its record of these books.'
                     : 'The AI assistant is disconnected.');
