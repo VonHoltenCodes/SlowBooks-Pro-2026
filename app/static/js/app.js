@@ -1293,8 +1293,9 @@ const App = {
     },
 
     // Each artist by their credit line, the pieces and where each is used,
-    // the name linked when a link was given; an empty list shows the file's
-    // note and a link to the repo. Everything through escapeHtml: the file
+    // the name linked when a link was given; then the file's note, a request
+    // to donate, with the project's donation link (the Artists heading only
+    // when an artist is credited). Everything through escapeHtml: the file
     // ships with the app, but a credit is text, not markup.
     renderArtists(data) {
         const box = $('#splash-artists');
@@ -1315,16 +1316,19 @@ const App = {
                     .join(', ');
                 return `<li><strong>${name}</strong>${pieces ? `: ${pieces}` : ''}</li>`;
             }).join('');
-            note.innerHTML = '';
         } else {
             list.innerHTML = '';
-            const repo = String(data.repo || '');
-            note.innerHTML = escapeHtml(data.note || '')
-                + (repo ? ` ${linked(repo, repo.replace(/^https?:\/\//, ''))}` : '');
         }
+        // the request to donate, under the credits or on its own (NEW-268:
+        // it linked the art repository by its lower-case-b name)
+        const donate = String(data.donate || '');
+        note.innerHTML = escapeHtml(data.note || '')
+            + (/^https:\/\//.test(donate) ? ` ${linked(donate, data.donate_text || 'Donate')}` : '');
+        const title = box.querySelector('.splash-artists-title');
+        if (title) title.hidden = !artists.length;
         list.hidden = !artists.length;
-        note.hidden = !!artists.length;
-        box.hidden = false;
+        note.hidden = !note.innerHTML;
+        box.hidden = !artists.length && note.hidden;
     },
 
     // Theme toggle — Feature 12: Dark Mode
@@ -2807,6 +2811,27 @@ const App = {
         location.reload();
     },
 
+    // The desktop window's own title bar (W-206): WebView2 and macOS's
+    // WebKit never take document.title, so the launcher is handed the
+    // company's name (it builds "<company> — SlowBooks Pro 2026" the same
+    // way). In a browser there is no bridge, and the tab shows
+    // document.title already.
+    setWindowTitle(name) {
+        const send = () => {
+            const api = window.pywebview && window.pywebview.api;
+            if (api && typeof api.set_window_title === 'function') {
+                try { Promise.resolve(api.set_window_title(name)).catch(() => {}); } catch (e) { /* best effort */ }
+                return true;
+            }
+            return false;
+        };
+        try {
+            if (!send() && typeof window.addEventListener === 'function') {
+                window.addEventListener('pywebviewready', send, { once: true });
+            }
+        } catch (e) { /* the title is a convenience */ }
+    },
+
     showCompany(s) {
         App.settings = s || {};
         App.applyHiddenMenu(App.settings);
@@ -2816,6 +2841,7 @@ const App = {
         if (companyEl) companyEl.textContent = `Company: ${name}`;
         // the window / tab title and the topbar brand say whose books these are
         document.title = `${name} — SlowBooks Pro 2026`;
+        App.setWindowTitle(name);
         const brand = $('#topbar-company');
         if (brand) brand.textContent = name;
     },

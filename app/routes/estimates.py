@@ -870,6 +870,10 @@ def mark_estimate_lost(
     return _estimate_response(estimate)
 
 
+# The most a void reason holds (the column's size).
+VOID_REASON_MAX = 500
+
+
 @router.post("/{estimate_id}/void", response_model=EstimateResponse)
 def void_estimate(
     estimate_id: int,
@@ -885,6 +889,16 @@ def void_estimate(
     contract, schedule of values or budget its acceptance made. Voiding a
     void estimate again changes nothing. There is no un-void, as for every
     other document."""
+    reason = ((data.reason or "").strip() if data else "") or None
+    if reason and len(reason) > VOID_REASON_MAX:
+        # a sentence, not the validator's text (W-202, as W-191's memo)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"A void reason can be at most {VOID_REASON_MAX} characters; "
+                f"this one has {len(reason)}."
+            ),
+        )
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
@@ -899,7 +913,7 @@ def void_estimate(
         estimate.voided_at = datetime.now(timezone.utc)
         # the name the audit log gives this request (get_db stamps it)
         estimate.voided_by = db.info.get("acting_username") or "operator"
-        estimate.void_reason = ((data.reason or "").strip() if data else "") or None
+        estimate.void_reason = reason
         db.commit()
         db.refresh(estimate)
     return _estimate_response(estimate)

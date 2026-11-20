@@ -141,6 +141,7 @@ class FakeRelay:
         self.codes = []
         self.lines = queue.Queue()
         self.link_status = 201
+        self.fail = {}  # path -> a status to answer instead (a 5xx, say)
         relay = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -166,6 +167,10 @@ class FakeRelay:
                 raw = self.rfile.read(length) if length else b""
                 body = json.loads(raw) if raw else None
                 relay.calls.append(("POST", self.path, self._bearer(), body))
+                if self.path in relay.fail:
+                    return self._answer(
+                        relay.fail[self.path], {"error": "Internal error 7f3a."}
+                    )
                 if self.path == "/v1/link":
                     if relay.link_status != 201:
                         return self._answer(
@@ -286,6 +291,7 @@ def relay(monkeypatch, tmp_path):
         yield fake
     finally:
         link.stop()
+        link.stop_retry()
         fake.close()
 
 
@@ -536,11 +542,12 @@ def test_connect_with_the_relay_down_leaves_nothing(
 ):
     monkeypatch.setenv(link.RELAY_ENV, f"http://127.0.0.1:{_free_port()}")
     r = client.post("/api/switchboard/connect")
-    assert r.status_code == 502
-    assert "did not answer" in r.json()["detail"]
+    assert r.status_code == 503
+    assert r.json()["detail"] == link.RELAY_AWAY
     assert not link.link_path().exists()
     assert db_session.query(ApiToken).count() == 0
-    relay.link_status = 503
+    # a refusal the relay words itself is its own sentence
+    relay.link_status = 429
     monkeypatch.setenv(link.RELAY_ENV, relay.url)
     r = client.post("/api/switchboard/connect")
     assert r.status_code == 502

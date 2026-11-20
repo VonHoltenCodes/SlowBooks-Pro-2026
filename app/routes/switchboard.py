@@ -5,6 +5,9 @@
 #   POST /api/switchboard/connect     an administrator: link, token, line
 #   POST /api/switchboard/code        an administrator: a one-time sign-in code
 #   POST /api/switchboard/disconnect  an administrator: line, link and token gone
+#   POST /api/switchboard/dismiss     an administrator: hide a relay name the
+#                                     relay has not deleted yet (NEW-269; the
+#                                     quiet retry goes on)
 #
 # The gate (app.main) refuses every API token here, whatever its role: the
 # assistant that holds the connection's token must not mint itself codes or
@@ -14,10 +17,12 @@
 # ============================================================================
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.users import ROLE_ADMIN
+from app.schemas.common import StrictModel
 from app.services import switchboard_link as link
 
 router = APIRouter(prefix="/api/switchboard", tags=["switchboard"])
@@ -72,3 +77,13 @@ def switchboard_code(request: Request, response: Response):
 def switchboard_disconnect(request: Request, db: Session = Depends(get_db)):
     _require_admin(request)
     return _answer(link.disconnect, db)
+
+
+class DismissPending(StrictModel):
+    slug: str = Field(..., min_length=1, max_length=64)
+
+
+@router.post("/dismiss")
+def switchboard_dismiss(request: Request, data: DismissPending):
+    _require_admin(request)
+    return link.dismiss_pending(data.slug)

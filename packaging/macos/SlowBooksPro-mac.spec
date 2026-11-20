@@ -15,7 +15,7 @@
 import os
 import subprocess
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 
@@ -90,6 +90,12 @@ datas += _tree("migrations", "migrations")
 # See #144: the message has to point somewhere the reader can actually go.
 datas += [(os.path.join(ROOT, "scripts", "repair-schema.py"), "scripts")]
 datas += [(_BUILD_SHA_FILE, "app")]
+# certifi's cacert.pem: httpx loads it itself, and app/tls_trust.py points
+# OpenSSL's default at it, because the bundled libcrypto's compiled-in CA
+# folder is the build machine's (NEW-265). PyInstaller's certifi hook
+# collects it already whenever certifi is imported; named here so the
+# bundle cannot lose it.
+datas += collect_data_files("certifi")
 
 # PyInstaller's WeasyPrint hook uses ctypes.util.find_library(), which does
 # not find Homebrew libraries on Apple Silicon. Seed the six libraries that

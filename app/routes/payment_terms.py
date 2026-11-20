@@ -216,8 +216,8 @@ def _check_rule(v: dict) -> None:
     elif v["kind"] == END_OF_MONTH:
         if not 0 <= when <= v["net_days"]:
             _refuse(
-                "The discount must be taken within the days after the end of "
-                f"the month until it's due, 0 to {v['net_days']}."
+                "The discount must be taken by the due date: 0 to "
+                f"{v['net_days']} days after the end of the month."
             )
     elif not 1 <= when <= 31:
         _refuse("The day of the month for the discount must be 1 to 31.")

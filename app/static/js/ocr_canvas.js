@@ -389,6 +389,9 @@ const OcrCanvas = {
             return { x: (evt.clientX - r.left) * kx, y: (evt.clientY - r.top) * ky };
         };
         canvas.addEventListener('mousedown', evt => {
+            // a box drawn here is not a text selection across the page
+            // (the page's text selects since W-209)
+            evt.preventDefault();
             const p = pos(evt);
             this._drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
         });

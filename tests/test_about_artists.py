@@ -1,7 +1,9 @@
 """The About dialog credits the artists (#635).
 
-The community art repo (github.com/VonHoltenCodes/Slowbooks-Pro-Art) promises
-every contributing artist a credit in the app. The credits are data,
+The community art repo promises every contributing artist a credit in the
+app. Under the credits (or alone while there are none) the box asks for a
+donation, linking the project's Ko-fi page (NEW-268: it linked the art
+repository by its lower-case-b name). The credits are data,
 /static/artists.json, so a new artist is a line in that file and not a code
 change. These pin the file's shape, the wiring that reads and renders it
 (the list, and the note with the repo link while the list is empty), and
@@ -13,7 +15,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTISTS = ROOT / "app" / "static" / "artists.json"
-ART_REPO = "https://github.com/VonHoltenCodes/Slowbooks-Pro-Art"
+# the donation page the README and slowbookspro.com's Donate link use
+DONATE = "https://ko-fi.com/Y7G628VSJ3"
 
 
 def _credits():
@@ -23,9 +26,10 @@ def _credits():
 def test_the_credits_file_has_the_shape_the_dialog_reads():
     data = _credits()
     assert isinstance(data["artists"], list)
-    # while the list is empty the dialog shows this note and the repo
-    assert isinstance(data["note"], str) and data["note"].strip()
-    assert data["repo"] == ART_REPO
+    # the request to donate, and the project's donation page
+    assert isinstance(data["note"], str) and "donation" in data["note"]
+    assert data["donate"] == DONATE
+    assert "repo" not in data
     for artist in data["artists"]:
         assert isinstance(artist["name"], str) and artist["name"].strip()
         assert artist["pieces"], artist["name"]
@@ -59,7 +63,7 @@ def test_the_about_dialog_reads_and_renders_the_credits():
     assert "App.loadArtists()" in init
 
     render = js[js.index("renderArtists(data) {") :]
-    render = render[: render.index("box.hidden = false;")]
+    render = render[: render.index("box.hidden = !artists.length")]
     # each artist: the credit line, the pieces and where they are used, the
     # link when given, every one of them escaped
     for needle in ("a.name", "p.what", "p.where", "a.link", "escapeHtml("):
@@ -67,17 +71,18 @@ def test_the_about_dialog_reads_and_renders_the_credits():
     assert "innerHTML" in render and "textContent" not in render
     for raw in ("${a.name}", "${a.link}", "${p.what}", "${p.where}", "${data.note}"):
         assert raw not in render, f"{raw} reaches the page unescaped"
-    # an empty list: the note and the repo link
-    assert "data.note" in render and "data.repo" in render
+    # the note and the donation link, under the list or alone
+    assert "data.note" in render and "data.donate" in render
+    assert "data.repo" not in render
     assert "list.hidden = !artists.length" in render
-    assert "note.hidden = !!artists.length" in render
+    assert "title.hidden = !artists.length" in render
 
 
 def test_the_credits_are_served_without_a_sign_in(unauthed_client):
     r = unauthed_client.get("/static/artists.json")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/json")
-    assert r.json()["repo"] == ART_REPO
+    assert r.json()["donate"] == DONATE
     # as every response: revalidated, never served stale after an update
     assert r.headers.get("cache-control") == "no-cache"
 

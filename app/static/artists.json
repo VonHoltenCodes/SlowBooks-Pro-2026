@@ -1,6 +1,7 @@
 {
-  "note": "The turtle is waiting for its first artist. See the art repo.",
-  "repo": "https://github.com/VonHoltenCodes/Slowbooks-Pro-Art",
+  "note": "SlowBooks Pro is free, made by a few people in their spare time. If it saves you time, please help keep it going with a donation.",
+  "donate": "https://ko-fi.com/Y7G628VSJ3",
+  "donate_text": "Donate to SlowBooks Pro",
   "how": "One entry per artist, in the order they were credited: name is the credit line, pieces says what each piece is and where the app uses it, link is optional and must start with https://.",
   "artists": []
 }
