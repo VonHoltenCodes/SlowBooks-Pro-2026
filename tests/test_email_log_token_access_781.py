@@ -93,7 +93,12 @@ def test_an_administrator_sees_the_whole_row_with_the_raw_error(client, db_sessi
     _seed(db_session)
     body = client.get("/api/email-log").json()
     failed = next(r for r in body["rows"] if r["status"] == "failed")
-    assert failed["error_message"] == RAW_ERROR
+    # the server's reply, as plain words (NEW-275), from a row stored the
+    # old way
+    assert failed["error_message"] == (
+        "535 5.7.8 Authentication failed on relay7.mailhost-internal.example "
+        "ESMTP Postfix (Debian/GNU)"
+    )
     assert "username or password" in failed["failure"]
     assert set(failed) == {
         "id",

@@ -103,7 +103,7 @@
 
     <h2 class="sheet">Line detail</h2>
     {# the largest figure the line detail prints decides how much room each gets (W-226) #}
-    {% set widest = [totals.scheduled_total, totals.previous_total, totals.this_period_total, totals.stored_total, totals.completed_to_date, totals.balance_to_finish_total] | map('abs') | max %}
+    {% set widest = [totals.scheduled_total, totals.previous_total, totals.this_period_total, totals.stored_total, totals.completed_to_date, totals.balance_to_finish_total] | map('float') | map('abs') | max %}
     <table class="cont{% if widest >= 1000000 %} figures-7{% elif widest >= 10000 %} figures-6{% endif %}">
         <thead><tr>
             <th style="width:36px;">Item</th>
