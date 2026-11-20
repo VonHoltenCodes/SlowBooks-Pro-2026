@@ -30,6 +30,15 @@
     table.cont > tbody > tr > td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
     table.cont > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     table.cont > tbody > tr.totals > td { font-weight: 700; border-top: 2px solid #003366; }
+    /* Ten columns of six- and seven-figure amounts, which never wrap, ran
+       the line detail past the right margin (W-226: 3 pt at six figures,
+       45 pt at seven). Its figures take less room as they grow, so the
+       table, and its Totals row, end at the margin whatever the amounts. */
+    table.cont.figures-6 > thead > tr > th, table.cont.figures-6 > tbody > tr > td { padding-left: 4px; padding-right: 4px; }
+    table.cont.figures-6 > tbody > tr > td { font-size: 8pt; }
+    table.cont.figures-7 > thead > tr > th, table.cont.figures-7 > tbody > tr > td { padding-left: 3px; padding-right: 3px; }
+    table.cont.figures-7 > thead > tr > th { font-size: 6.5pt; }
+    table.cont.figures-7 > tbody > tr > td { font-size: 7pt; }
     table.cont > tbody > tr { page-break-inside: avoid; }
     /* The last line, the Totals row, the note and the footer are one
        unbreakable group of the line table (#1047, as #1039 for the invoice):
@@ -93,7 +102,9 @@
     </table></div>
 
     <h2 class="sheet">Line detail</h2>
-    <table class="cont">
+    {# the largest figure the line detail prints decides how much room each gets (W-226) #}
+    {% set widest = [totals.scheduled_total, totals.previous_total, totals.this_period_total, totals.stored_total, totals.completed_to_date, totals.balance_to_finish_total] | map('abs') | max %}
+    <table class="cont{% if widest >= 1000000 %} figures-7{% elif widest >= 10000 %} figures-6{% endif %}">
         <thead><tr>
             <th style="width:36px;">Item</th>
             <th>Description</th>
