@@ -26,23 +26,38 @@ def _clean_reason(error_text: str) -> str:
     """The SMTP error with Python's tuple/bytes wrapping stripped off.
 
     `str(SMTPAuthenticationError)` is "(535, b'5.7.8 ...')"; the bit a person
-    reads is "535 5.7.8 ...". Leave anything we don't recognise untouched."""
+    reads is "535 5.7.8 ...". A refused sender is "(530, b'...', 'from@x')"
+    and refused recipients a dict "{'to@x': (550, b'...')}"; each is read
+    back as a value (W-216), so no quote, comma or b'' of Python's is left
+    in the reply. Leave anything we don't recognise untouched."""
     text = (error_text or "").strip()
     if not text:
         return ""
-    if text.startswith("(") and text.endswith(")") and "," in text:
-        code, _, rest = text[1:-1].partition(",")
-        rest = rest.strip()
-        # b'...' or b"..." -> the inner text
-        if (rest.startswith("b'") and rest.endswith("'")) or (
-            rest.startswith('b"') and rest.endswith('"')
-        ):
-            rest = rest[2:-1]
-        rest = rest.replace("\\n", " ").replace("\\r", " ").strip()
-        code = code.strip()
-        if code.isdigit() and rest:
-            return f"{code} {rest}"
+    if text[0] in "({" and len(text) <= 5000:
+        try:
+            value = ast.literal_eval(text)
+        except (ValueError, SyntaxError, MemoryError, RecursionError):
+            value = None
+        if isinstance(value, dict) and value:
+            parts = [
+                f"{addr}: {_reply_words(reply)}".rstrip(": ")
+                for addr, reply in value.items()
+            ]
+            return "; ".join(parts)
+        if _code(value) is not None:
+            return _reply_words(value)
     return text
+
+
+def _reply_words(reply) -> str:
+    """ "550 5.1.1 ..." for a (code, message[, sender]) reply."""
+    if not (isinstance(reply, tuple) and reply):
+        return str(reply or "")
+    message = reply[1] if len(reply) > 1 else ""
+    if isinstance(message, bytes):
+        message = message.decode("utf-8", "replace")
+    message = " ".join(str(message).split())
+    return f"{reply[0]} {message}".strip()
 
 
 def explain_send_failure(error_text: str, host: str = "") -> tuple[str, str]:
@@ -106,6 +121,14 @@ _SIGN_IN_SENTENCE = (
 _STARTTLS_FIRST_SENTENCE = (
     "The mail server takes mail only over a secure connection. Turn on Use "
     "TLS under Settings → Email (SMTP)."
+)
+# Use TLS off, a username set, and a server that offers AUTH only after
+# STARTTLS (Gmail on 587): smtplib's "SMTP AUTH extension not supported by
+# server." in words (W-217)
+_SIGN_IN_NEEDS_TLS_SENTENCE = (
+    "The mail server offers sign-in only over a secure connection, so nothing "
+    "was sent and your password was not given to it. Turn on Use TLS under "
+    "Settings → Email (SMTP). ({host})"
 )
 _UNREACHABLE_SENTENCE = (
     "The server could not be reached — check the host, port, and the "
@@ -229,9 +252,11 @@ class MailTLSError(Exception):
 _CERT_TEXT = "Certificate not verified ({host}): {reason}"
 _TLS_TEXT = "Secure connection failed ({host})"
 _NO_STARTTLS_TEXT = "No secure connection offered ({host})"
+_SIGN_IN_NEEDS_TLS_TEXT = "Sign-in offered only over a secure connection ({host})"
 _TLS_STORED = re.compile(
     r"^(Certificate not verified|Secure connection failed|No secure connection "
-    r"offered) \((.*?)\)(?:: (.+))?$",
+    r"offered|Sign-in offered only over a secure connection) \((.*?)\)"
+    r"(?:: (.+))?$",
     re.S,
 )
 
@@ -300,6 +325,10 @@ def no_starttls_text(host: str) -> str:
     return _NO_STARTTLS_TEXT.format(host=host)
 
 
+def sign_in_needs_tls_text(host: str) -> str:
+    return _SIGN_IN_NEEDS_TLS_TEXT.format(host=host)
+
+
 def tls_sentence(text: str) -> str:
     """The sentence for a stored TLS failure, or "" when it is not one."""
     found = _TLS_STORED.match((text or "").strip())
@@ -310,6 +339,8 @@ def tls_sentence(text: str) -> str:
         return _CERT_SENTENCE.format(host=host, reason=reason or _CERT_UNVERIFIED)
     if kind == "No secure connection offered":
         return _NO_STARTTLS_SENTENCE.format(host=host)
+    if kind == "Sign-in offered only over a secure connection":
+        return _SIGN_IN_NEEDS_TLS_SENTENCE.format(host=host)
     return _TLS_SENTENCE.format(host=host)
 
 

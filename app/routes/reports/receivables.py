@@ -23,8 +23,7 @@ from app.services.pdf_service import (
 from app.services.settings_service import get_all_settings as get_settings
 from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
-from app.routes._roles import is_admin
-from app.services.email_errors import sentence_for_last_send, where_to_see_why
+from app.services.email_errors import sentence_for_last_send
 from app.routes._helpers import refuse_unknown_filters
 
 logger = logging.getLogger(__name__)
@@ -1165,10 +1164,12 @@ def collection_letters(
                     emailed += 1
                 else:
                     why = sentence_for_last_send(db, "collection", cid)
+                    # the same words as the other batch sends (W-218)
                     errors.append(
-                        f"{customer.name}: the letter could not be emailed. "
-                        + (why + " " if why else "")
-                        + where_to_see_why(is_admin(request))
+                        f"{customer.name}: the letter could not be sent. {why}"
+                        if why
+                        else f"{customer.name}: the letter could not be sent "
+                        "(the email log has the reason)"
                     )
         except Exception:
             logger.exception(
