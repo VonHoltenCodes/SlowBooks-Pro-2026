@@ -337,9 +337,7 @@ def _line_texts(box) -> list[str]:
     for line in box.descendants():
         if isinstance(line, wb.LineBox):
             out.append(
-                "".join(
-                    t.text for t in line.descendants() if isinstance(t, wb.TextBox)
-                )
+                "".join(t.text for t in line.descendants() if isinstance(t, wb.TextBox))
             )
     return out
 
@@ -392,6 +390,8 @@ def choose_last_line(html_whole: str):
     kept = [t for t in lines if t.strip()][-DOC_TAIL_LINES:]
     words = sum(len(t.split()) for t in kept)
     return words or None
+
+
 _jinja_env.filters["currency"] = _format_currency
 _jinja_env.filters["rate"] = _format_rate
 _jinja_env.filters["qty"] = _format_qty
