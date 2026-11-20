@@ -52,6 +52,7 @@ def _refuse_item_accounts(db: Session, fields: dict, item=None) -> None:
     item imported that way can still be edited."""
     from app.services.control_accounts import is_control
 
+    tied = None
     for field, what in _ACCOUNT_FIELDS.items():
         account_id = fields.get(field)
         if account_id is None or (
@@ -92,6 +93,31 @@ def _refuse_item_accounts(db: Session, fields: dict, item=None) -> None:
                 detail=f"{start}, an accounts payable account, which only bills "
                 "and bill payments post to; choose another account.",
             )
+        # Every other account a Books Check row ties to a sub-ledger (W-196):
+        # Sales Tax Payable, Accrued Job Costs, the payroll liabilities, the
+        # retainage accounts, an item's own inventory account. A line on one
+        # moves the account and not what it is tied to.
+        if tied is None:
+            tied = refused_item_accounts(db)
+        if account.id in tied:
+            label, keeper = tied[account.id]
+            raise HTTPException(
+                status_code=422,
+                detail=f"{start}: Books Check ties it to {keeper}, and a line "
+                f"on an item would put its {label} row out by the line. Choose "
+                "another account.",
+            )
+
+
+def refused_item_accounts(db: Session) -> dict[int, tuple[str, str]]:
+    """{account id: (Books Check label, what it is tied to)}: the accounts
+    an item may not newly post to beyond the ones refused by number, type or
+    detail above, read from Books Check itself (books_check.tied_accounts)
+    so the two cannot drift. GET /api/items/refused-accounts gives the form
+    the same list, so it never offers them."""
+    from app.services.books_check import tied_accounts
+
+    return tied_accounts(db)
 
 
 def item_name_key(name) -> str:
@@ -252,6 +278,18 @@ def low_stock_items(db: Session = Depends(get_db)):
         )
     out.sort(key=lambda r: r.shortage, reverse=True)
     return out
+
+
+@router.get("/refused-accounts")
+def refused_accounts(db: Session = Depends(get_db)):
+    """The accounts the item form does not offer for an item's income or
+    expense account beyond the bank, card, receivable, payable, Undeposited
+    Funds and Inventory accounts it already leaves out: each with the reason
+    the server gives when one is sent (W-196)."""
+    return [
+        {"account_id": aid, "books_check_row": label, "tied_to": keeper}
+        for aid, (label, keeper) in sorted(refused_item_accounts(db).items())
+    ]
 
 
 @router.get("/valuation")

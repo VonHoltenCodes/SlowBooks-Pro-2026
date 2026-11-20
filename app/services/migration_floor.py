@@ -38,10 +38,32 @@ BELOW_FLOOR_MESSAGE = (
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class BelowMigrationFloor(RuntimeError):
-    """A company file from before 2.29.0. ``str(exc)`` is the sentence."""
+# A file whose revision this build does not know was last opened by a newer
+# build (W-186): Alembic's own "Can't locate revision identified by …" was
+# all the picker said, and the Mac's start-up a generic error.
+NEWER_VERSION_MESSAGE = (
+    "This company file was last opened by a newer version of SlowBooks Pro, "
+    "and this version cannot open it. Update SlowBooks Pro to open it; the "
+    "file was left as it is."
+)
+
+
+class CompanyFileRefused(RuntimeError):
+    """A company file this build does not open. ``str(exc)`` is the
+    sentence; nothing has been written to the file."""
+
+
+class BelowMigrationFloor(CompanyFileRefused):
+    """A company file from before 2.29.0."""
 
     def __init__(self, message: str = BELOW_FLOOR_MESSAGE):
+        super().__init__(message)
+
+
+class FromNewerVersion(CompanyFileRefused):
+    """A company file last opened by a newer build (W-186)."""
+
+    def __init__(self, message: str = NEWER_VERSION_MESSAGE):
         super().__init__(message)
 
 
@@ -113,10 +135,39 @@ def revisions_of(connection) -> list[str]:
     ]
 
 
+def is_from_newer(revision) -> bool:
+    """True when a file at ``revision`` (one revision, or the rows of its
+    ``alembic_version``) holds one this build does not know: a newer
+    build's (W-186). No revision is a new database: False."""
+    revisions = [revision] if isinstance(revision, str) else list(revision or [])
+    known = _known()
+    return any(r and r not in known for r in revisions)
+
+
+def refusal(revisions) -> str | None:
+    """The sentence when this build does not open a file at ``revisions``:
+    one from a newer build, or from before 2.29.0. None when it opens."""
+    if is_from_newer(revisions):
+        return NEWER_VERSION_MESSAGE
+    if is_below_floor(revisions):
+        return BELOW_FLOOR_MESSAGE
+    return None
+
+
+def refuse(message: str) -> None:
+    """Raise the refusal that ``message`` (a refusal() sentence) is."""
+    if message == NEWER_VERSION_MESSAGE:
+        raise FromNewerVersion()
+    raise BelowMigrationFloor(message)
+
+
 def refuse_below_floor(connection) -> None:
-    """Raise BelowMigrationFloor when the database is from before 2.29.0."""
-    if is_below_floor(revisions_of(connection)):
-        raise BelowMigrationFloor()
+    """Raise FromNewerVersion when the database was last opened by a newer
+    build (before Alembic, which knows no such revision, says so in its own
+    words), and BelowMigrationFloor when it is from before 2.29.0."""
+    message = refusal(revisions_of(connection))
+    if message:
+        refuse(message)
 
 
 def file_revisions(
@@ -164,3 +215,15 @@ def file_problem(
     if revisions is None:
         return None
     return BELOW_FLOOR_MESSAGE if is_below_floor(revisions) else None
+
+
+def file_refusal(
+    path, key: bytes | None = None, *, resolve_key: bool = True
+) -> str | None:
+    """The sentence when this build does not open a SQLite company file: one
+    last opened by a newer build (W-186), or from before 2.29.0. None when
+    it opens (and when it cannot be read here). Read as the file lies."""
+    revisions = file_revisions(path, key, resolve_key=resolve_key)
+    if revisions is None:
+        return None
+    return refusal(revisions)

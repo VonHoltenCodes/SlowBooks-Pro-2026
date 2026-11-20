@@ -4158,3 +4158,10 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
 [data-find-hit="match"] { outline: 2px dashed var(--find-match-ring); outline-offset: 1px; }
 [data-find-hit="current"] { outline: 3px solid var(--find-current-ring); outline-offset: 1px; }
 @media print { .find-bar, .find-marks { display: none !important; } }
+
+/* how a bank rule's pattern with a star reads, in words (NEW-259): under
+   the pattern on the Bank Rules list and the rule form */
+.rule-pattern-reads { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+/* a To review memo's count near its limit (W-191); empty, it takes no room */
+.review-memo-count { font-size: 11px; color: var(--gray-500); }
+.review-memo-count:empty { display: none; }

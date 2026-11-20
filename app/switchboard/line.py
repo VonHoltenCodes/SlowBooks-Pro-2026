@@ -308,6 +308,14 @@ class _Request:
                 pass
 
 
+def relay_origin(line_url: str) -> str:
+    """The relay's web address from its line's: wss://relay.example/v1/line
+    is https://relay.example (ws:// is http://, a relay on this computer)."""
+    parts = urlsplit(line_url)
+    scheme = "http" if parts.scheme == "ws" else "https"
+    return f"{scheme}://{parts.netloc}"
+
+
 class Line:
     """The line client. run() keeps the line until stop(); everything else
     is safe from any thread."""
@@ -337,6 +345,9 @@ class Line:
         self.app_port = parts.port or (443 if parts.scheme == "https" else 80)
         self.app_netloc = parts.netloc
         self.mcp = mcp
+        if mcp is not None and hasattr(mcp, "use_origin"):
+            # serverInfo's icons are the relay's own files (relay/src/icons.py).
+            mcp.use_origin(relay_origin(url))
         self.mcp_problem = mcp_problem or (NO_TOKEN if mcp is None else None)
         self.app_version = app_version
         sw = switches or {}

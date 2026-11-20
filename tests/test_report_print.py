@@ -44,6 +44,7 @@ TITLES = {
     "/api/reports/pledges/print": "Pledge Report",
     "/api/reports/possible-duplicates/print": "Possible Duplicates",
     "/api/reports/sales-by-item/print": "Sales by Item",
+    "/api/reports/income-by-customer/print": "Income by Customer",
     "/api/reports/purchases-by-item/print": "Purchases by Item",
     "/api/reports/profit-loss-detail/print": "Profit &amp; Loss Detail",
     "/api/reports/wip-schedule/print": "WIP Schedule",

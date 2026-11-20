@@ -949,9 +949,11 @@ def _qty_text(value) -> str:
 
 def sales_by_item_csv(data: dict, company: str) -> str:
     """Item | Type | Quantity | Amount | Avg price | COGS | Gross margin |
-    Margin %, one row per item with a "No item" row last, then a TOTAL row
-    whose Amount ties to the P&L income for the same period (see the route
-    docstring). COGS, margin and margin % are blank for an untracked item."""
+    Margin %, one row per item with a "No item" row last, on the cash basis
+    a row for the payments received and not yet applied (W-194), then a
+    TOTAL row whose Amount ties to the P&L income for the same period (see
+    the route docstring). COGS, margin and margin % are blank for an
+    untracked item."""
     out = io.StringIO()
     w = _SafeWriter(out)
     _preamble(w, company, "Sales by Item", _range(data))
@@ -980,6 +982,20 @@ def sales_by_item_csv(data: dict, company: str) -> str:
                 _Percent(r["margin_pct"]) if r["margin_pct"] is not None else "",
             ]
         )
+    # cash basis: the money not yet applied, outside the items (W-194)
+    if data.get("unapplied_amount") is not None:
+        w.writerow(
+            [
+                data["unapplied_label"],
+                "",
+                "",
+                _money(data["unapplied_amount"]),
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
     w.writerow(
         [
             "TOTAL",
@@ -992,6 +1008,92 @@ def sales_by_item_csv(data: dict, company: str) -> str:
             "",
         ]
     )
+    return out.getvalue()
+
+
+def _income_by_customer_columns(data: dict, t) -> list[tuple[str, str]]:
+    """(heading, key) for Income by Customer, the screen's columns: Not
+    income only when the period has some (a security deposit's line)."""
+    cols = [
+        (t("Customer"), "customer_name"),
+        (t("Invoices"), "invoice_count"),
+        ("Sales", "total_sales"),
+    ]
+    if data.get("total_other") or any(
+        i.get("total_other") for i in data.get("items", [])
+    ):
+        cols.append(("Not income", "total_other"))
+    cols += [("Sales Tax", "total_tax"), ("Paid", "total_paid")]
+    cols.append(("Balance", "total_balance"))
+    return cols
+
+
+def income_by_customer_title(t=None) -> str:
+    t = t or (lambda words: words)
+    return t("Income by Customer")
+
+
+def income_by_customer_sections(data: dict, t=None) -> list[dict]:
+    """Income by Customer as a report PDF section (W-197): the columns and
+    figures the screen shows, a row per customer and the TOTAL row, the
+    period saying the basis."""
+    t = t or (lambda words: words)
+    cols = _income_by_customer_columns(data, t)
+    rows = []
+
+    def cells(r: dict, name: str, count) -> list:
+        out = []
+        for _head, key in cols:
+            if key == "customer_name":
+                out.append(name)
+            elif key == "invoice_count":
+                out.append(str(count))
+            else:
+                out.append(_pdf_money(r.get(key) or 0))
+        return out
+
+    for i in data.get("items", []):
+        rows.append(
+            {"cells": cells(i, i.get("customer_name") or "", i["invoice_count"])}
+        )
+    count = sum(i["invoice_count"] for i in data.get("items", []))
+    rows.append({"cells": cells(data, "TOTAL", count), "style": "grand-total"})
+    return [
+        {
+            "title": income_by_customer_title(t),
+            "period": f"{data['start_date']} — {data['end_date']}"
+            + (" (cash basis)" if data.get("basis") == "cash" else ""),
+            "columns": [head for head, _key in cols],
+            "rows": rows,
+        }
+    ]
+
+
+def income_by_customer_csv(data: dict, company: str, t=None) -> str:
+    """Income by Customer as the screen shows it (W-197): a row per customer,
+    then a TOTAL row; the period line says the basis."""
+    t = t or (lambda words: words)
+    cols = _income_by_customer_columns(data, t)
+    out = io.StringIO()
+    w = _SafeWriter(out)
+    _preamble(w, company, income_by_customer_title(t), _range(data))
+    w.writerow([head for head, _key in cols])
+
+    def cells(r: dict, name: str, count) -> list:
+        row = []
+        for _head, key in cols:
+            if key == "customer_name":
+                row.append(name)
+            elif key == "invoice_count":
+                row.append(count)
+            else:
+                row.append(_money(r.get(key) or 0))
+        return row
+
+    for i in data.get("items", []):
+        w.writerow(cells(i, i.get("customer_name") or "", i["invoice_count"]))
+    count = sum(i["invoice_count"] for i in data.get("items", []))
+    w.writerow(cells(data, "TOTAL", count))
     return out.getvalue()
 
 
@@ -1057,6 +1159,22 @@ def sales_by_item_sections(data: dict) -> list[dict]:
                         else ""
                     ),
                     f"{r['margin_pct']:.1f}%" if r["margin_pct"] is not None else "",
+                ]
+            }
+        )
+    # cash basis: the money not yet applied, outside the items (W-194)
+    if data.get("unapplied_amount") is not None:
+        rows.append(
+            {
+                "cells": [
+                    data["unapplied_label"],
+                    "",
+                    "",
+                    _pdf_money(data["unapplied_amount"]),
+                    "",
+                    "",
+                    "",
+                    "",
                 ]
             }
         )
