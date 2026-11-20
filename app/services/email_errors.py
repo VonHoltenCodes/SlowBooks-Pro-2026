@@ -94,6 +94,19 @@ _SENDER_REFUSED_SENTENCE = (
     "under Settings → Email (SMTP)."
 )
 _TRY_LATER_SENTENCE = "The mail server asked to try again later."
+# 530, authentication required: the server wants a sign-in before it takes
+# mail, and none was given (Gmail's "530 5.7.0 Authentication Required" to a
+# send with no username), not a refused sender
+_SIGN_IN_SENTENCE = (
+    "The mail server wants a sign-in, and none is set. Enter the username and "
+    "password under Settings → Email (SMTP)."
+)
+# 530 asking for STARTTLS first: the server takes mail only over a secure
+# connection
+_STARTTLS_FIRST_SENTENCE = (
+    "The mail server takes mail only over a secure connection. Turn on Use "
+    "TLS under Settings → Email (SMTP)."
+)
 _UNREACHABLE_SENTENCE = (
     "The server could not be reached — check the host, port, and the "
     "Use TLS setting."
@@ -132,12 +145,23 @@ def _refused(recipients: dict):
     return None, ""
 
 
-def _by_code(code: int):
-    if code in (530, 534, 535):
+def _by_code(code: int, message="") -> tuple:
+    if code == 530:
+        return _sign_in_kind(message)
+    if code in (534, 535):
         return "auth", ""
     if 400 <= code < 500:
         return "later", ""
     return "other", ""
+
+
+def _sign_in_kind(message) -> tuple:
+    """A 530: the server wants a sign-in, or STARTTLS first."""
+    if isinstance(message, bytes):
+        message = message.decode("utf-8", "replace")
+    if "starttls" in str(message or "").lower():
+        return "starttls", ""
+    return "sign-in", ""
 
 
 def _classify_exception(error: BaseException):
@@ -150,9 +174,11 @@ def _classify_exception(error: BaseException):
     if isinstance(error, smtplib.SMTPSenderRefused):
         if 400 <= error.smtp_code < 500:
             return "later", ""
+        if error.smtp_code == 530:
+            return _sign_in_kind(error.smtp_error)
         return "sender", str(error.sender)
     if isinstance(error, smtplib.SMTPResponseException):
-        return _by_code(error.smtp_code)
+        return _by_code(error.smtp_code, error.smtp_error)
     if isinstance(error, smtplib.SMTPServerDisconnected):
         return "unreachable", ""
     if isinstance(error, OSError) and not isinstance(error, smtplib.SMTPException):
@@ -178,9 +204,12 @@ def _classify_text(text: str):
     code = _code(value)
     if code is None:
         return None, ""
+    message = value[1] if len(value) > 1 else ""
+    if code == 530:
+        return _sign_in_kind(message)
     if len(value) == 3 and isinstance(value[2], str) and code >= 500:
         return "sender", value[2]
-    return _by_code(code)
+    return _by_code(code, message)
 
 
 # -- the secure connection to the mail server ---------------------------------
@@ -310,6 +339,10 @@ def failure_sentence(error, host: str = "") -> str:
         return _TRY_LATER_SENTENCE
     if kind == "auth":
         return _credentials_sentence(host, text)
+    if kind == "sign-in":
+        return _SIGN_IN_SENTENCE
+    if kind == "starttls":
+        return _STARTTLS_FIRST_SENTENCE
     if kind == "unreachable":
         return _UNREACHABLE_SENTENCE
     if kind == "other":
