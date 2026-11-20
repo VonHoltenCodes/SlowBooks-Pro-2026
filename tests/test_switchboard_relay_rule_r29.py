@@ -1024,3 +1024,326 @@ def test_no_relay_address_or_status_code_reaches_a_person(raw, client, caplog):
     r = client.post("/api/switchboard/connect")
     assert "403" not in r.text and "127.0.0.1" not in r.text
     assert "403" in caplog.text and "/v1/link" in caplog.text
+
+
+# -- the review of the rule: what got past it ----------------------------------------
+
+# JSON nested too deep to decode: json.loads raises RecursionError, which is
+# neither a ValueError nor an OSError
+DEEP = {"a list": b"[" * 30000, "an object": b'{"a":' * 30000}
+
+
+@pytest.mark.parametrize("how", sorted(DEEP))
+def test_an_answer_nested_too_deep_is_one_that_cannot_be_read(
+    raw, client, db_session, how
+):
+    raw.behave["/v1/link"] = http(200, DEEP[how])
+    r = _plain(client.post("/api/switchboard/connect"))
+    assert r.status_code == 502 and r.json()["detail"] == link.RELAY_ODD
+    assert _tokens(db_session) == [] and not link.link_path().exists()
+    del raw.behave["/v1/link"]
+    _connect(client)
+    raw.behave["/v1/code"] = http(200, DEEP[how])
+    r = _plain(client.post("/api/switchboard/code"))
+    assert r.status_code == 502 and r.json()["detail"] == link.RELAY_ODD
+
+
+@pytest.mark.parametrize("how", sorted(DEEP))
+def test_disconnect_finishes_when_the_answer_is_nested_too_deep(
+    raw, client, db_session, how
+):
+    record = _connect(client)
+    raw.behave["/v1/forget"] = http(200, DEEP[how])
+    r = _plain(client.post("/api/switchboard/disconnect"))
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert got["deleted"] is False and got["revoked"] is True
+    assert got["why"] == link.WHY_UNCONFIRMED and got["pending"] is True
+    assert _tokens(db_session) == [("AI assistant (relay)", False)]
+    assert not link.link_path().exists()
+    assert [p["slug"] for p in _pending()] == [record["slug"]]
+    # and the retry does not raise on it either
+    assert link.retry_pending_once() == 1
+    del raw.behave["/v1/forget"]
+    assert link.retry_pending_once() == 0 and _pending() == []
+
+
+def test_a_connect_undone_against_an_answer_nested_too_deep_keeps_the_note(
+    raw, client, db_session, monkeypatch
+):
+    monkeypatch.setattr(link, "_save_new", _cannot_save)
+    raw.behave["/v1/forget"] = http(200, DEEP["a list"])
+    r = _plain(client.post("/api/switchboard/connect"))
+    assert r.status_code == 503 and r.json()["detail"] == link.NOT_KEPT
+    assert _tokens(db_session) == [] and not link.link_path().exists()
+    assert [p["slug"] for p in _pending()] == [raw.slugs[0]]
+
+
+def test_nothing_gets_past_the_classifier(raw, monkeypatch):
+    """Whatever a call trips on, the answer is a class, never an exception."""
+    quoted = secrets.token_urlsafe(16)
+
+    def trips(*_a, **_k):
+        raise RuntimeError(f"something of our own {quoted}")
+
+    monkeypatch.setattr(link, "_relay_call", trips)
+    answer = link._relay_post(raw.url, "/v1/code", None, want=lambda data: True)
+    assert answer.kind == link.ODD
+    monkeypatch.undo()
+
+    def want_trips(data):
+        raise RecursionError(quoted)
+
+    answer = link._relay_post(raw.url, "/v1/code", None, want=want_trips)
+    assert answer.kind == link.ODD
+
+
+def test_a_kept_file_nested_too_deep_is_damaged_not_a_fault(raw, client, db_session):
+    _connect(client)
+    link.link_path().write_text("[" * 30000)
+    st = client.get("/api/switchboard/status")
+    assert st.status_code == 200 and st.json()["state"] == "damaged"
+    link.pending_path().write_text("[" * 30000)
+    assert client.get("/api/switchboard/status").json()["pending"] == []
+    link.pending_path().unlink()
+    r = _plain(client.post("/api/switchboard/disconnect"))
+    assert r.status_code == 200, r.text
+    assert _tokens(db_session) == [("AI assistant (relay)", False)]
+    assert not link.link_path().exists()
+
+
+def test_disconnect_revokes_the_token_whatever_it_was_renamed_to(
+    raw, client, db_session
+):
+    """The connection's token is the one whose secret the file holds: an
+    administrator renaming it in Settings, API Tokens does not hide it."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    record = _connect(client)
+    bot = TestClient(app)
+    bot.headers["Authorization"] = f"Bearer {record['token']}"
+    assert bot.get("/api/customers").status_code == 200
+    renamed = "Assistant on the office phone"
+    r = client.put(f"/api/tokens/{record['token_id']}", json={"label": renamed})
+    assert r.status_code == 200, r.text
+    got = client.post("/api/switchboard/disconnect").json()
+    assert got["revoked"] is True and got["deleted"] is True
+    db_session.expire_all()
+    row = db_session.query(ApiToken).filter(ApiToken.id == record["token_id"]).one()
+    assert (row.label, row.is_active) == (renamed, False)
+    assert bot.get("/api/customers").status_code == 401
+
+
+def test_disconnect_revokes_by_the_secret_not_by_a_number_someone_edited(
+    raw, client, db_session
+):
+    """The file's token id pointing at another token does not revoke that
+    one: the secret says which token is the connection's."""
+    made = client.post(
+        "/api/tokens", json={"label": "the receipt service", "role": "readonly"}
+    ).json()
+    record = _connect(client)
+    link._save(dict(record, token_id=made["id"], token_label="the receipt service"))
+    assert client.post("/api/switchboard/disconnect").json()["revoked"] is True
+    db_session.expire_all()
+    rows = {t.label: t.is_active for t in db_session.query(ApiToken).all()}
+    assert rows["the receipt service"] is True
+    assert rows["AI assistant (relay)"] is False
+
+
+_FOLDER_MODES = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="a folder's mode does not stop this user here",
+)
+
+
+@_FOLDER_MODES
+def test_disconnect_in_a_folder_that_cannot_be_written_still_disconnects(
+    raw, client, db_session, tmp_path
+):
+    """The file cannot be removed from a read-only folder, but it is this
+    user's own: it is written over as ended, so nothing of the connection
+    stays, and the answer says what the relay did."""
+    record = _connect(client)
+    os.chmod(tmp_path, 0o555)
+    try:
+        r = _plain(client.post("/api/switchboard/disconnect"))
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["deleted"] is True and got["revoked"] is True
+        assert "deleted its record" in got["sentence"]
+        assert "nothing was changed" not in r.text
+        assert _tokens(db_session) == [("AI assistant (relay)", False)]
+        left = link.link_path().read_text()
+        assert record["credential"] not in left and record["token"] not in left
+        assert os.stat(link.link_path()).st_mode & 0o777 == 0o600
+        # it is no connection any more: the panel, a code, a second press
+        st = client.get("/api/switchboard/status").json()
+        assert st["linked"] is False and st["state"] == "not_connected"
+        assert st["slug"] == "" and st["address"] == ""
+        r = client.post("/api/switchboard/code")
+        assert r.status_code == 409 and r.json()["detail"] == link.NOT_LINKED
+        r = client.post("/api/switchboard/disconnect")
+        assert r.status_code == 409 and r.json()["detail"] == link.NOT_LINKED
+        assert raw.paths() == ["/v1/link", "/v1/forget"]
+        # Connect while the folder still cannot be written: said before the
+        # relay is asked for anything
+        r = _plain(client.post("/api/switchboard/connect"))
+        assert r.status_code == 503 and r.json()["detail"] == link.NOT_KEPT
+        assert raw.paths() == ["/v1/link", "/v1/forget"]
+        assert _tokens(db_session) == [("AI assistant (relay)", False)]
+    finally:
+        os.chmod(tmp_path, 0o755)
+    # the folder can be written again: Connect takes the ended file away
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    assert json.loads(link.link_path().read_text())["slug"] == raw.slugs[1]
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".")] == []
+
+
+@_FOLDER_MODES
+def test_disconnect_in_a_folder_that_cannot_be_written_with_the_relay_away(
+    raw, client, db_session, tmp_path
+):
+    """Neither the file nor the note can be written and the relay is away:
+    the answer gives the relay name to send to support."""
+    record = _connect(client)
+    raw.behave["/v1/forget"] = lambda conn: conn.close()
+    os.chmod(tmp_path, 0o555)
+    try:
+        r = _plain(client.post("/api/switchboard/disconnect"))
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["deleted"] is False and got["unlinked"] is False
+        assert got["revoked"] is True and got["pending"] is False
+        assert got["say"] is True
+        assert f"relay name {record['slug']}" in got["sentence"]
+        assert "Send that name" in got["sentence"]
+        assert "nothing was changed" not in r.text
+        assert _tokens(db_session) == [("AI assistant (relay)", False)]
+        assert client.get("/api/switchboard/status").json()["linked"] is False
+        assert record["credential"] not in link.link_path().read_text()
+    finally:
+        os.chmod(tmp_path, 0o755)
+
+
+@pytest.mark.parametrize("relay_is", ["there", "away"])
+def test_a_file_that_can_be_neither_removed_nor_ended_is_said_as_it_is(
+    raw, client, db_session, monkeypatch, relay_is
+):
+    """What was done is said (the relay's record, the token), then what was
+    not: never that nothing was changed."""
+    record = _connect(client)
+    if relay_is == "away":
+        raw.behave["/v1/forget"] = lambda conn: conn.close()
+    monkeypatch.setattr(link, "_forget", _cannot_save)
+    monkeypatch.setattr(link, "_end_in_place", lambda: False)
+    r = _plain(client.post("/api/switchboard/disconnect"))
+    assert r.status_code == 503, r.text
+    detail = r.json()["detail"]
+    assert "nothing was changed" not in detail
+    assert detail.endswith(link.FILE_KEPT)
+    assert "Its token is revoked." in detail
+    assert f"relay name {record['slug']}" in detail
+    if relay_is == "there":
+        assert "the relay deleted its record of these books" in detail
+    else:
+        assert "could not be reached" in detail and "deleted" not in detail
+        assert [p["slug"] for p in _pending()] == [record["slug"]]
+    assert "/somewhere" not in detail and record["credential"] not in detail
+    assert _tokens(db_session) == [("AI assistant (relay)", False)]
+    # the line is not opened again on a revoked token (once, by Connect)
+    assert len(raw.started) == 1
+
+
+def test_a_token_that_cannot_be_revoked_is_said_and_the_rest_is_done(
+    raw, client, db_session, monkeypatch
+):
+    quoted = secrets.token_urlsafe(16)
+
+    def locked(*_a, **_k):
+        raise RuntimeError(f"database is locked {quoted}")
+
+    record = _connect(client)
+    monkeypatch.setattr(link, "_revoke", locked)
+    r = _plain(client.post("/api/switchboard/disconnect"), secrets_=(quoted,))
+    assert r.status_code == 503, r.text
+    detail = r.json()["detail"]
+    assert "the relay deleted its record of these books" in detail
+    assert link.TOKEN_KEPT.format(label=record["token_label"]) in detail
+    assert "locked" not in detail and "could not finish that" not in detail
+    assert not link.link_path().exists()
+    assert raw.paths() == ["/v1/link", "/v1/forget"]
+
+
+def test_an_ended_file_is_never_taken_for_another_processs_link(raw, client):
+    """Clearing an ended file moves it aside and looks at it there: a link
+    another server process kept in that moment is put back, not removed."""
+    record = _connect(client)
+    with pytest.raises(link._AlreadyKept):
+        link._clear_ended()
+    assert json.loads(link.link_path().read_text()) == record
+    assert [p.name for p in link.link_path().parent.iterdir()] == [link.LINK_FILE]
+
+
+def _part_link(**fields):
+    """A link answer that is not a whole link."""
+    return http(201, fields)
+
+
+def test_a_link_answer_with_a_credential_but_not_whole_is_undone_at_the_relay(
+    raw, client, db_session
+):
+    """The relay made a record and said what deleting it needs, but the
+    answer cannot be kept as a link: the record is deleted, not left."""
+    credential = "sbd_" + secrets.token_urlsafe(32)
+    slug = "s" + secrets.token_hex(4)
+    raw.behave["/v1/link"] = _part_link(
+        credential=credential, slug=slug, device="dev_" + secrets.token_hex(4)
+    )
+    r = _plain(client.post("/api/switchboard/connect"), secrets_=(credential,))
+    assert r.status_code == 502 and r.json()["detail"] == link.RELAY_ODD
+    assert raw.calls == [("/v1/link", None), ("/v1/forget", credential)]
+    assert _pending() == [] and _tokens(db_session) == []
+    assert not link.link_path().exists()
+
+
+def test_a_part_link_the_relay_cannot_be_told_to_delete_is_noted(
+    raw, client, db_session
+):
+    credential = "sbd_" + secrets.token_urlsafe(32)
+    slug = "s" + secrets.token_hex(4)
+    raw.behave["/v1/link"] = _part_link(credential=credential, slug=slug)
+    raw.behave["/v1/forget"] = lambda conn: conn.close()
+    r = _plain(client.post("/api/switchboard/connect"), secrets_=(credential,))
+    assert r.status_code == 502 and r.json()["detail"] == link.RELAY_ODD
+    kept = _pending()
+    assert [(p["slug"], p["credential"], p["connect"]) for p in kept] == [
+        (slug, credential, True)
+    ]
+    notice = client.get("/api/switchboard/status").json()["pending"][0]
+    assert slug in notice["sentence"] and "could not be finished" in notice["sentence"]
+    assert _tokens(db_session) == []
+    del raw.behave["/v1/forget"]
+    assert link.retry_pending_once() == 0 and _pending() == []
+
+
+def test_a_part_link_with_no_relay_name_says_what_to_tell_support(raw, client):
+    credential = "sbd_" + secrets.token_urlsafe(32)
+    raw.behave["/v1/link"] = _part_link(credential=credential, slug="<b>no</b>")
+    raw.behave["/v1/forget"] = lambda conn: conn.close()
+    r = _plain(client.post("/api/switchboard/connect"), secrets_=(credential,))
+    assert r.status_code == 502
+    detail = r.json()["detail"]
+    assert detail.startswith(link.RELAY_ODD)
+    assert "say when you pressed Connect" in detail and "<b>" not in detail
+    assert raw.calls[-1] == ("/v1/forget", credential) and _pending() == []
+
+
+def test_an_answer_with_no_credential_made_nothing_to_undo(raw, client):
+    raw.behave["/v1/link"] = _part_link(slug="s" + secrets.token_hex(4))
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 502 and r.json()["detail"] == link.RELAY_ODD
+    assert raw.paths() == ["/v1/link"] and _pending() == []

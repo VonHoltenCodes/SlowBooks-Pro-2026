@@ -233,6 +233,100 @@ def test_a_redraw_that_changes_the_panel_gives_back_what_was_held(
         page.close()
 
 
+_SELECT = """(id) => {
+    const node = document.getElementById(id);
+    node._same = true;
+    getSelection().selectAllChildren(node);
+}"""
+
+
+def test_a_notice_going_on_a_refresh_leaves_the_selection_below_it(
+    relay, client, engine
+):
+    """Connected again while an old relay name waits: the new relay name is
+    selected to copy it, and the old notice goes on a timed refresh (the
+    relay deleted the record, or it was dismissed elsewhere). The block that
+    went was above the selection; the selection and the keyboard stay."""
+    _connected(relay, client)
+    record = json.loads(link.link_path().read_text())
+    link._save(dict(record, relay=f"http://127.0.0.1:{_free_port()}"))
+    assert client.post("/api/switchboard/disconnect").json()["unlinked"] is False
+    try:
+        old = link.pending_notices()[0]["slug"]
+        _connected(relay, client)
+        page, errors = _page(client, engine)
+        try:
+            _connections(page)
+            page.wait_for_selector("#claude-relay-fallback")
+            page.focus("#claude-code")
+            page.evaluate(_SELECT, "claude-relay-name")
+            before = _held(page)
+            assert before["focus"] == "claude-code" and before["selected"]
+            r = client.post("/api/switchboard/dismiss", json={"slug": old})
+            assert r.status_code == 200, r.text
+            page.evaluate("SettingsPage.loadSwitchboard()")  # what the timer does
+            page.wait_for_function(
+                "() => !document.getElementById('claude-relay-fallback')"
+            )
+            assert _held(page) == before
+            # the line was not drawn again: the very node that was selected
+            assert page.evaluate("document.getElementById('claude-relay-name')._same")
+            assert not errors, errors
+        finally:
+            page.close()
+    finally:
+        link.stop_retry()
+
+
+def test_a_sentence_arriving_on_a_refresh_leaves_the_selection_below_it(
+    relay, client, engine
+):
+    """Just connected, the address selected to copy it; a timed refresh
+    turns "Connecting…" into "The relay cannot be reached" and adds its
+    sentence above the address. The selection and the keyboard stay."""
+    _connected(relay, client)
+    page, errors = _page(client, engine)
+    try:
+        _connections(page)
+        page.wait_for_selector("#claude-relay-address")
+        assert page.locator("#claude-relay-sentence").count() == 0
+        page.focus("#claude-code")
+        page.evaluate(_SELECT, "claude-relay-address")
+        before = _held(page)
+        assert before["focus"] == "claude-code"
+        assert before["selected"].endswith("/mcp")
+        was = page.inner_text("#claude-relay-state")
+        page.evaluate(
+            """(sentence) => {
+            const c = SettingsPage._claude;
+            c.status = { ...c.status, state: 'unreachable', sentence };
+            SettingsPage._drawSwitchboard();
+        }""",
+            link.UNREACHABLE,
+        )
+        assert page.inner_text("#claude-relay-state") != was
+        assert page.inner_text("#claude-relay-sentence") == link.UNREACHABLE
+        assert _held(page) == before
+        assert page.evaluate("document.getElementById('claude-relay-address')._same")
+        # words selected inside the block that did change are selected
+        # again in the block drawn in its place
+        page.evaluate("""() => getSelection().selectAllChildren(
+                document.querySelector('#claude-relay-status span:last-child'))""")
+        company = _held(page)["selected"]
+        assert "Company" in company
+        page.evaluate("""() => {
+            const c = SettingsPage._claude;
+            c.status = { ...c.status, state: 'connected', sentence: '' };
+            SettingsPage._drawSwitchboard();
+        }""")
+        assert page.inner_text("#claude-relay-state") == "Connected"
+        assert page.locator("#claude-relay-sentence").count() == 0
+        assert _held(page) == {"focus": "claude-code", "selected": company}
+        assert not errors, errors
+    finally:
+        page.close()
+
+
 def test_no_two_buttons_of_the_panel_share_a_name(relay, client, engine):
     """An old relay name still waiting to be removed, and a new connection:
     the panel has two relay names with Copy, an error with Dismiss and the

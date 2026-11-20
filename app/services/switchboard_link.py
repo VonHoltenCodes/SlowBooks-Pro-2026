@@ -36,7 +36,9 @@
 #     time, an answer with no end (its size is capped at MAX_ANSWER). A
 #     press that makes two calls shares the one deadline. The name lookup
 #     alone is outside it (the stated limit).
-#  2. Every relay answer is classified once, by _relay_post, into an Answer.
+#  2. Every relay answer is classified once, by _relay_post, into an Answer;
+#     _relay_post never raises, whatever came back (an answer nested too
+#     deep to decode, or anything else it trips on, is ODD).
 #     The expected 2xx carrying the expected JSON fields is OK. Everything
 #     else is one of four, each with one fixed sentence: AWAY (no answer at
 #     all), REFUSED (a 4xx: said so, and not asked again by itself), BUSY
@@ -53,11 +55,19 @@
 #  4. Local state is never half-made. A Connect that fails at any step
 #     (keeping the file included) leaves no token and no file here and, if
 #     the relay had linked, has the relay delete that record or keeps a
-#     pending-deletion note for its relay name. Disconnect always revokes
-#     the token and clears the file, a damaged or unreadable file included;
-#     when the relay name or the credential can no longer be read it says
-#     plainly that the relay's own record could not be removed and what to
-#     give support (never a secret).
+#     pending-deletion note for its relay name (a link answer that is not
+#     a whole one but carries a credential counts as linked). Disconnect
+#     always revokes the token and clears the file, a damaged or unreadable
+#     file included; the token is the one whose secret the file holds,
+#     whatever it has been renamed to. When the relay name or the credential
+#     can no longer be read it says plainly that the relay's own record
+#     could not be removed and what to give support (never a secret).
+#     Disconnect's steps each say what they did: when one cannot be done
+#     (the file cannot be removed, the token cannot be revoked) the answer
+#     says what was done and what was not, never "nothing was changed". A
+#     file that cannot be removed is written over where it lies with
+#     "ended": no credential and no token stay in it, it reads as no
+#     connection, and the next Connect takes it away.
 #  5. One Connect or Disconnect at a time: a second press while one is
 #     being worked on is refused in a sentence, and the connection file is
 #     only ever made new (never over another), so two presses, or two
@@ -156,6 +166,15 @@ NOT_KEPT = (
 NOT_WRITTEN = (
     "SlowBooks Pro could not write to its data folder, so nothing was changed. "
     "Check that the data folder can be written to, then try again."
+)
+# Disconnect did what it could and one step could not be done (rule 4): said
+# after what was done, never in place of it
+FILE_KEPT = (
+    " SlowBooks Pro could not remove the connection from its data folder. "
+    "Check that the data folder can be written to, then press Disconnect again."
+)
+TOKEN_KEPT = (
+    ' Its token could not be revoked: revoke "{label}" in Settings, API Tokens.'
 )
 # a fault of our own on one of these routes: a sentence, never an HTTP 500
 UNFINISHED = (
@@ -257,6 +276,17 @@ def _company_open(company_file: str) -> bool:
 
 
 # -- the file ---------------------------------------------------------------------
+
+
+def _from_json(text: str):
+    """json.loads whose every failure is a ValueError: text nested too deep
+    to decode raises RecursionError, which is not one, and must not get
+    past the places that read a file or an answer (rule 2)."""
+    try:
+        return json.loads(text)
+    except RecursionError:
+        raise ValueError("nested too deep") from None
+
 
 _FIELDS = (
     "relay",
@@ -406,9 +436,11 @@ def _load() -> dict | None:
             unreadable=True,
         )
     try:
-        record = json.loads(path.read_text(encoding="utf-8"))
+        record = _from_json(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         raise SwitchboardError(409, DAMAGED, unreadable=True) from None
+    if _ended(record):
+        return None  # what a Disconnect left when it could not remove the file
     if not _whole(record):
         raise SwitchboardError(409, DAMAGED, unreadable=True)
     return record
@@ -419,7 +451,7 @@ def _salvage() -> dict:
     Disconnect (rule 4): the file as it is, whatever its mode, or {} when
     it is not a JSON object. Each value is checked where it is used."""
     try:
-        record = json.loads(link_path().read_text(encoding="utf-8"))
+        record = _from_json(link_path().read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return {}
     return record if isinstance(record, dict) else {}
@@ -430,6 +462,72 @@ def _forget() -> None:
         link_path().unlink()
     except FileNotFoundError:
         pass
+
+
+# What is left in a connection file that Disconnect could not remove: no
+# link, no credential, no token. _load reads it as no connection, and the
+# next Connect takes it away.
+_ENDED_TEXT = '{"v": 1, "ended": true}\n'
+
+
+def _ended(record) -> bool:
+    return (
+        isinstance(record, dict)
+        and record.get("ended") is True
+        and "credential" not in record
+        and "token" not in record
+    )
+
+
+def _end_in_place() -> bool:
+    """Write "ended" over a connection file that cannot be removed (a data
+    folder that cannot be written to still lets this user's own file be
+    written): the credential and the token no longer lie in it, and it no
+    longer reads as a connection. Whether that was done."""
+    try:
+        fd = os.open(link_path(), os.O_WRONLY | os.O_TRUNC)
+    except OSError:
+        return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(_ENDED_TEXT)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError:
+        return False
+    return True
+
+
+def _clear_ended() -> None:
+    """Take away the "ended" file an earlier Disconnect left, before a new
+    link is kept: OSError when the folder still cannot be written to. Moved
+    aside first and looked at there, so a link another server process kept
+    in the same moment is never the file removed (rule 5): it is put back,
+    and _AlreadyKept says so."""
+    path = link_path()
+    if not path.is_file():
+        return
+    aside = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.ended")
+    try:
+        os.rename(path, aside)
+    except FileNotFoundError:
+        return
+    try:
+        record = _from_json(aside.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        record = None
+    if _ended(record):
+        _unlink_quietly(aside)
+        return
+    try:
+        os.link(aside, path)
+    except FileExistsError:
+        pass
+    except OSError:
+        os.rename(aside, path)
+        raise _AlreadyKept() from None
+    _unlink_quietly(aside)
+    raise _AlreadyKept()
 
 
 # -- a deletion the relay has not heard yet (NEW-269) --------------------------------
@@ -478,7 +576,7 @@ def pending_path() -> Path:
 def _load_pending() -> list:
     path = pending_path()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = _from_json(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return []
     except (OSError, UnicodeDecodeError, ValueError):
@@ -1137,7 +1235,7 @@ def _relay_call(relay: str, path: str, body, headers: dict, deadline=None):
         else:
             deadline.release()
     try:
-        decoded = json.loads(raw.decode("utf-8")) if raw else None
+        decoded = _from_json(raw.decode("utf-8")) if raw else None
     except (UnicodeDecodeError, ValueError):
         decoded = None
     return status, decoded, raw
@@ -1190,11 +1288,9 @@ def _classify(status: int, data, want) -> Answer:
     object carries what was asked for (``want``)."""
     obj = data if isinstance(data, dict) else None
     if 200 <= status < 300:
-        return (
-            Answer(OK, status, obj)
-            if obj is not None and want(obj)
-            else Answer(ODD, status)
-        )
+        # an answer that is not what was asked keeps what it did carry: a
+        # link answer with a credential is a record the relay made (rule 4)
+        return Answer(OK if obj is not None and want(obj) else ODD, status, obj)
     if status == 429 or status >= 500:
         return Answer(BUSY, status)
     if 400 <= status < 500:
@@ -1225,7 +1321,16 @@ def _relay_post(
         reason = getattr(exc, "reason", None) or exc
         logger.warning("the relay at %s did not answer %s: %s", relay, path, reason)
         return Answer(AWAY)
-    answer = _classify(status, data, want)
+    except Exception as exc:
+        # nothing gets past the classifier (rule 2): whatever tripped on
+        # this answer, it was not one that could be read
+        _log_fault(f"the relay's answer to {path} could not be worked on", exc)
+        return Answer(ODD)
+    try:
+        answer = _classify(status, data, want)
+    except Exception as exc:
+        _log_fault(f"the relay's answer to {path} could not be classified", exc)
+        return Answer(ODD)
     if answer.kind != OK:
         logger.warning(
             "the relay at %s answered %s to %s (%s)", relay, status, path, answer.kind
@@ -1401,9 +1506,21 @@ def _undo_link(relay: str, data: dict, deadline) -> str:
     if fate in _TOLD:
         return ""
     why = {AWAY: WHY_AWAY, REFUSED: WHY_REFUSED}.get(fate, WHY_UNCONFIRMED)
+    slug = data.get("slug")
+    if not (isinstance(slug, str) and account._SLUG.fullmatch(slug)):
+        # the relay gave a credential and no name a note could be kept
+        # under: there is nothing to give support but the time
+        logger.warning(
+            "the relay keeps a record of a link that was not kept here, and "
+            "gave no relay name for it"
+        )
+        return (
+            " The relay may still hold a record of this try; if you write to "
+            f"{account.SUPPORT} about it, say when you pressed Connect."
+        )
     try:
         _add_pending(
-            {"relay": relay, "slug": data["slug"], "credential": data["credential"]},
+            {"relay": relay, "slug": slug, "credential": data["credential"]},
             why,
             connect=True,
         )
@@ -1412,13 +1529,25 @@ def _undo_link(relay: str, data: dict, deadline) -> str:
         logger.warning(
             "the relay keeps a record of a link that was not kept here (relay "
             "name %s), and no note of it could be written: %s",
-            data["slug"],
+            slug,
             exc,
         )
         return (
-            f" The relay may still hold a record under relay name {data['slug']}; "
+            f" The relay may still hold a record under relay name {slug}; "
             f"send that name to {account.SUPPORT} to have it removed."
         )
+
+
+def _made_a_record(answer: Answer) -> bool:
+    """Whether a link answer that is not a whole link still shows the relay
+    made a record: a 2xx carrying a device credential (rule 4)."""
+    credential = (answer.data or {}).get("credential")
+    return (
+        answer.kind == ODD
+        and 200 <= answer.status < 300
+        and isinstance(credential, str)
+        and bool(account._CREDENTIAL.fullmatch(credential))
+    )
 
 
 @_one_press
@@ -1439,6 +1568,14 @@ def connect(db, username: str) -> dict:
             )
         raise SwitchboardError(409, ALREADY)
     try:
+        _clear_ended()
+    except _AlreadyKept:
+        raise SwitchboardError(409, ALREADY) from None
+    except OSError as exc:
+        # before the relay is asked for anything: nothing is made anywhere
+        logger.warning("the data folder cannot be written to: %s", exc)
+        raise SwitchboardError(503, NOT_KEPT) from None
+    try:
         relay = relay_url()
     except ConfigError as exc:
         raise SwitchboardError(502, str(exc)) from None
@@ -1451,7 +1588,13 @@ def connect(db, username: str) -> dict:
             deadline=deadline,
         )
         if answer.kind != OK:
-            raise answer.error()
+            failed = answer.error()
+            if _made_a_record(answer):
+                # not a link that can be kept, but the relay made a record
+                # and said what deleting it needs: it is deleted, or noted
+                more = _undo_link(relay, answer.data, deadline)
+                failed = SwitchboardError(failed.status, failed.sentence + more)
+            raise failed
         data = answer.data
         token_id = None
         try:
@@ -1546,13 +1689,24 @@ def _kept_for_disconnect() -> tuple:
 
 def _revoke(db, record: dict, whole: bool) -> tuple:
     """Revoke the connection's token: (whether one was, when the newest was
-    made). By its id when the file says which; with a file that cannot say,
-    every active token carrying the connection's own label."""
+    made). The token is the one whose secret the file holds, whatever an
+    administrator has renamed it to since (rule 4); where the secret can no
+    longer be read, the one with the id and the label the file says; and
+    with a file that cannot say, every active token carrying the
+    connection's own label."""
     from app.models.api_tokens import ApiToken
+    from app.services.api_token_service import hash_token
 
     rows = []
+    secret = record.get("token")
+    if isinstance(secret, str) and secret:
+        row = (
+            db.query(ApiToken).filter(ApiToken.token_hash == hash_token(secret)).first()
+        )
+        if row is not None:
+            rows.append(row)
     token_id, label = record.get("token_id"), record.get("token_label")
-    if isinstance(token_id, int) and not isinstance(token_id, bool):
+    if not rows and isinstance(token_id, int) and not isinstance(token_id, bool):
         row = db.query(ApiToken).filter(ApiToken.id == token_id).first()
         if row is not None and row.label == label:
             rows.append(row)
@@ -1565,9 +1719,10 @@ def _revoke(db, record: dict, whole: bool) -> tuple:
             if _OWN_LABEL.fullmatch(row.label) and row not in rows
         ]
     made = max((row.created_at for row in rows if row.created_at), default=None)
-    for row in rows:
+    live = [row for row in rows if row.is_active]
+    for row in live:
         row.is_active = False
-    if rows:
+    if live:
         db.commit()
     return bool(rows), made
 
@@ -1637,12 +1792,25 @@ def _disconnect(db, record: dict, whole: bool, undoing) -> dict:
                     exc,
                 )
     undoing.set()
-    revoked, made = _revoke(db, record, intact)
+    # each step says what it did; the answer is made of what was done
+    token_kept = False
+    try:
+        revoked, made = _revoke(db, record, intact)
+    except Exception as exc:
+        _log_fault("the connection's token could not be revoked", exc)
+        revoked, made, token_kept = False, None, True
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    file_kept = False
     try:
         _forget()
     except OSError as exc:
         logger.warning("the connection file could not be removed: %s", exc)
-        raise SwitchboardError(503, NOT_WRITTEN) from None
+        # emptied where it lies, it is no connection any more: Disconnect
+        # is done all the same
+        file_kept = not _end_in_place()
     if told:
         sentence = _told_sentence(fate, slug)
     elif fate is not None and slug:
@@ -1656,6 +1824,18 @@ def _disconnect(db, record: dict, whole: bool, undoing) -> dict:
             + (" and its token revoked. " if revoked else ". ")
             + sentence
         )
+    if file_kept or token_kept:
+        # not finished: what was done at the relay (the sentence so far) and
+        # to the token, then what was not, and what to do about it
+        if token_kept:
+            label = record.get("token_label")
+            label = label if isinstance(label, str) and label else TOKEN_LABEL
+            sentence += TOKEN_KEPT.format(label=" ".join(label.split())[:100])
+        elif revoked and intact:
+            sentence += " Its token is revoked."
+        if file_kept:
+            sentence += FILE_KEPT
+        raise SwitchboardError(503, sentence)
     return {
         "unlinked": told,
         "revoked": revoked,

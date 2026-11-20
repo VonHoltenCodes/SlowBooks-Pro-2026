@@ -2691,7 +2691,9 @@ const SettingsPage = {
         const words = SettingsPage.claudeStateWords(st);
         const colour = st.state === 'connected' ? 'var(--text-success)'
             : (st.state === 'unreachable' ? 'var(--text-warning)' : 'var(--text-muted)');
-        let html = `<div><span style="color:var(--text-muted);">Status:</span> <strong id="claude-relay-state" style="color:${colour};">${escapeHtml(words)}</strong>`
+        // every block of the panel carries an id: a refresh replaces only the
+        // blocks that changed (_claudeRedraw), found again by these
+        let html = `<div id="claude-relay-status"><span style="color:var(--text-muted);">Status:</span> <strong id="claude-relay-state" style="color:${colour};">${escapeHtml(words)}</strong>`
             + (st.linked && st.company && st.this_company ? ` <span style="color:var(--text-muted);">&middot; Company: ${escapeHtml(st.company)}</span>` : '')
             + '</div>';
         if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
@@ -2725,12 +2727,12 @@ const SettingsPage = {
         }
         if (!admin) return html;
         if (!st.linked) {
-            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin onclick="SettingsPage.connectClaude()">Connect to AI assistant</button></div>';
+            html += '<div id="claude-relay-connect-row" style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin onclick="SettingsPage.connectClaude()">Connect to AI assistant</button></div>';
             return html;
         }
         if (!st.this_company && st.state !== 'damaged') return html;
         if (st.address) {
-            html += '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
+            html += '<div id="claude-relay-lines" style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
                 + copyLineHtml('claude-relay-address', 'Connector address', st.address, 'SettingsPage.copyClaudeAddress()')
                 + (st.slug ? copyLineHtml('claude-relay-name', 'Relay name', st.slug, 'SettingsPage.copyClaudeRelayName()') : '')
                 + '</div>';
@@ -2740,28 +2742,31 @@ const SettingsPage = {
                 + `<div><span style="color:var(--text-muted);">Sign-in code:</span> <code id="claude-relay-code" style="font-family:var(--font-mono); font-size:14px; user-select:all;">${escapeHtml(code.code)}</code></div>`
                 + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div></div>`;
         }
-        html += '<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
+        html += '<div id="claude-relay-buttons" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
         if (st.this_company) html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin onclick="SettingsPage.claudeCode()">Show a sign-in code</button>';
         html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>';
         return html;
     },
 
-    // Where a selection's end is, as the steps down from the panel to its
-    // node, so it can be found again in a panel drawn anew.
+    // Where a selection's end is: the nearest element above it that has an
+    // id (every block of the panel has one), and the steps down from there
+    // to its node. Blocks coming and going around it do not move it.
     _claudePath(el, node) {
         const path = [];
-        while (node && node !== el) {
+        while (node && node !== el && !(node.nodeType === 1 && node.id)) {
             const parent = node.parentNode;
             if (!parent) return null;
             path.unshift(Array.prototype.indexOf.call(parent.childNodes, node));
             node = parent;
         }
-        return node === el ? path : null;
+        if (!node) return null;
+        return { id: node === el ? '' : node.id, path };
     },
 
-    _claudeNode(el, path) {
-        let node = el;
-        for (const i of path) {
+    _claudeNode(el, where) {
+        let node = where.id ? document.getElementById(where.id) : el;
+        if (node && node !== el && !el.contains(node)) return null;
+        for (const i of where.path) {
             node = node && node.childNodes[i];
         }
         return node || null;
@@ -2785,10 +2790,11 @@ const SettingsPage = {
         return held;
     },
 
-    // Give it back after the panel was drawn anew: the control with the same
-    // id, and the same selection where the same words are still there.
+    // Give back what a redraw took: the keyboard to the control with the
+    // same id, and the selection where the same words are still there.
+    // What the redraw left alone is left alone here too.
     _claudeGiveBack(el, held) {
-        if (held.focus) {
+        if (held.focus && !(document.activeElement && document.activeElement.id === held.focus)) {
             const again = document.getElementById(held.focus);
             if (again && el.contains(again) && !again.disabled) {
                 try { again.focus({ preventScroll: true }); } catch (e) { again.focus(); }
@@ -2796,6 +2802,9 @@ const SettingsPage = {
         }
         if (held.range) {
             try {
+                const sel = window.getSelection();
+                if (sel && String(sel) === held.range.text && !sel.isCollapsed
+                    && el.contains(sel.anchorNode) && el.contains(sel.focusNode)) return;
                 const from = SettingsPage._claudeNode(el, held.range.from);
                 const to = SettingsPage._claudeNode(el, held.range.to);
                 if (from && to) {
@@ -2803,13 +2812,38 @@ const SettingsPage = {
                     r.setStart(from, held.range.start);
                     r.setEnd(to, held.range.end);
                     if (String(r) === held.range.text) {
-                        const sel = window.getSelection();
                         sel.removeAllRanges();
                         sel.addRange(r);
                     }
                 }
             } catch (e) { /* the words are gone: nothing to select */ }
         }
+    },
+
+    // Draw the panel anew, replacing only the blocks that changed: a block
+    // that reads the same stays the very node it was, so a selection or the
+    // keyboard inside it is never touched, and its alert is not announced
+    // again. (The first draw, over "Checking…", is the whole panel.)
+    _claudeRedraw(el, html) {
+        const blocks = el.children ? Array.from(el.children) : null;
+        const whole = !blocks || !blocks.length || typeof document.createElement !== 'function'
+            || blocks.length !== el.childNodes.length || blocks.some(n => !n.id);
+        if (whole) { el.innerHTML = html; return; }
+        const next = document.createElement('div');
+        next.innerHTML = html;
+        const was = new Map(blocks.map(n => [n.id, n]));
+        let at = el.firstChild;
+        for (const block of Array.from(next.children)) {
+            const same = block.id ? was.get(block.id) : null;
+            if (same && same.parentNode === el && same.isEqualNode(block)) {
+                // what stood between here and it is gone from the panel
+                while (at && at !== same) { const gone = at; at = at.nextSibling; gone.remove(); }
+                at = same.nextSibling;
+            } else {
+                el.insertBefore(block, at);
+            }
+        }
+        while (at) { const gone = at; at = at.nextSibling; gone.remove(); }
     },
 
     _drawSwitchboard() {
@@ -2820,10 +2854,11 @@ const SettingsPage = {
         // A refresh that changes nothing draws nothing: the keyboard focus, a
         // selection (the relay name being copied) and the screen reader's
         // place stay where they are, and an alert is not announced again.
-        // When something did change, what the person held is given back.
+        // When something did change, only the blocks that changed are
+        // replaced, and what the person held in one of those is given back.
         if (el._claudeDrawn !== html) {
             const held = SettingsPage._claudeHeld(el);
-            el.innerHTML = html;
+            SettingsPage._claudeRedraw(el, html);
             el._claudeDrawn = html;
             SettingsPage._claudeGiveBack(el, held);
         }
