@@ -371,9 +371,18 @@ def render_acknowledgment(db, company: dict, customer, gift: dict) -> tuple[str,
 # ── year-end giving statement ────────────────────────────────────────────
 
 
+# Where a gift booked straight to the bank is (#606): a register or
+# bank-feed entry, Make Deposits' lines for money never invoiced (#792), a
+# card charge or an expense, the same entries Income by Customer counts as
+# the donor's money (NEW-272, NEW-274). Each is a gift only by the rule
+# below: an income credit that names the donor, more than zero, not void.
+GIFT_BANK_SOURCES = ("bank_entry", "deposit", "cc_charge", "expense")
+
+
 def gift_from_bank_line(db, line, txn=None) -> dict:
     """A gift booked on a deposit line (#606): an income credit on a
-    register or bank-feed entry that names the donor."""
+    register or bank-feed entry, or a Make Deposits line (NEW-274), that
+    names the donor."""
     from app.models.accounts import Account, AccountType
     from app.models.transactions import Transaction
     from app.services.entry_text import BANK_ENTRY_HEADER
@@ -381,7 +390,10 @@ def gift_from_bank_line(db, line, txn=None) -> dict:
 
     txn = txn or db.get(Transaction, line.transaction_id)
     account = db.get(Account, line.account_id)
-    if txn.source_type != "bank_entry" or account.account_type != AccountType.INCOME:
+    if (
+        txn.source_type not in GIFT_BANK_SOURCES
+        or account.account_type != AccountType.INCOME
+    ):
         raise NotAGift("This line is not a gift booked on a deposit")
     if not line.customer_id:
         raise NotAGift("This deposit line names no donor")
@@ -407,8 +419,9 @@ def gift_from_bank_line(db, line, txn=None) -> dict:
 
 def gifts_from_bank_entries(db, customer_id: int, start, end) -> list[dict]:
     """Gifts booked straight to the bank (#606): the income lines of a
-    register or bank-feed deposit that name this donor, so one deposit of
-    two gifts counts once for each. A void entry drops out."""
+    register or bank-feed deposit, or of Make Deposits (NEW-274), that name
+    this donor, so one deposit of two gifts counts once for each. A void
+    entry drops out."""
     from app.models.accounts import Account, AccountType
     from app.models.transactions import Transaction, TransactionLine
 
@@ -418,7 +431,7 @@ def gifts_from_bank_entries(db, customer_id: int, start, end) -> list[dict]:
         .join(Account, Account.id == TransactionLine.account_id)
         .filter(
             TransactionLine.customer_id == customer_id,
-            Transaction.source_type == "bank_entry",
+            Transaction.source_type.in_(GIFT_BANK_SOURCES),
             Transaction.date >= start,
             Transaction.date <= end,
             Account.account_type == AccountType.INCOME,
