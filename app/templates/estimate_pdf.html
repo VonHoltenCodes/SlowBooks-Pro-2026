@@ -39,7 +39,6 @@
     table.line-items > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
     table.line-items > tbody.doc-tail > tr:nth-child(even) { background: none; }
     table.line-items > tbody.doc-tail > tr.doc-end > td { padding: 16px 0 0; border-bottom: 0; }
-    table.line-items > tbody.doc-tail > tr.alt { background: #f7f9fb; }
     /* A long last line is cut in two (W-187): its last lines open the group,
        so the totals keep a row above them even when the rest of it ends a page. */
     table.line-items > tbody > tr.row-head > td { border-bottom: 0; padding-bottom: 0; }
@@ -48,6 +47,7 @@
     .doc-close { break-inside: avoid; page-break-inside: avoid; }
     .terms-block.terms-end { margin-top: 0; }
     .notes.notes-end { margin-top: 0; padding-top: 0; border-top: 0; break-before: auto; page-break-before: auto; }
+    table.line-items > tbody.doc-tail > tr.alt { background: #f7f9fb; }
     {%- if terms.is_construction and presentation_style(est, company.estimate_style) == 'line_markup' %}
     /* a markup-per-line row prints whole on one page, its description wrapping (#774) */
     table.line-items.priced-lines tr { break-inside: avoid; page-break-inside: avoid; }
