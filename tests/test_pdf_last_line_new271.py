@@ -146,3 +146,174 @@ def test_the_totals_page_carries_the_end_alone_and_two_lines_of_it(
                 wrong.append(f"{said}: a word missing, twice, cut or out of order")
     assert cuts + kept, f"{font}: every line printed whole with room"
     assert not wrong, "\n".join(wrong)
+
+
+# ---------------------------------------------------------------------------
+# Round 25 (W-220, W-221): the shapes the round's sweep found carrying more
+# than two lines, or cut at two lines.
+#
+# W-220: a last line written with line breaks is 34-51 lines of the layout
+# tall. On a bid, a bid with tables and a credit memo it starts 59-87 %
+# down a page and runs over the page break, 17-38 of its lines on the
+# totals' page. Kept whole with the totals it does not fit on one page (on
+# a bid, the room under the totals is 83-369 pt; the 22 lines the page
+# before holds of it need 370 pt). A cut may fall at any line of the layout,
+# inside a paragraph or at a break (_cut_words counts words, not breaks),
+# but the totals' group fits on that page under the k lines the break
+# leaves there, so a first part of all but two lines puts k - 2 of its own
+# lines on the totals' page: the first part ends at a page's foot only by
+# holding exactly the lines the break leaves above it. So the cut carries
+# the k lines and none of the first part is on the totals' page; two is
+# possible only by forcing the totals onto a page of their own after a
+# page holding k - 2 lines of the first part alone (and a page more).
+#
+# W-221: a 2-line bid with every line in a package, at 1,200 characters,
+# does not fit on one page: laid out whole, its totals' group falls to the
+# next page (with the line whole above them it overruns by a few points).
+# Kept whole with the totals would leave the first page under half full
+# (the line starts 29 % down it), so it is cut and two lines are carried.
+# Each shape below is checked against the uncut layout that decided it.
+# ---------------------------------------------------------------------------
+
+BREAK_PARTS = "\n".join(
+    " ".join(f"w{j:04d}" for j in range(i, i + 4)) for i in range(1, 2000, 4)
+)
+# the Mac's detail: bids and bids with tables as plain words and sentences
+SENTENCES = " ".join(
+    " ".join(f"w{j:04d}" for j in range(i, i + 8)) + "." for i in range(1, 2000, 8)
+)
+BREAK_KINDS = ["bid", "bid tables", "credit memo", "line_markup"]
+SHAPES = [(kind, BREAK_PARTS) for kind in BREAK_KINDS] + [
+    (kind, text) for kind in ("bid", "bid tables") for text in (WORDS, SENTENCES)
+]
+BREAK_CASES = ((47, 1200), (48, 900), (49, 1100), (50, 1000))
+
+
+def _shaped(client, accounts, customer, kind, n, length, text, packaged=False):
+    """A document of ``kind`` whose last line is ``text`` cut to ``length``."""
+    if kind in MAKERS:
+        import tests.test_pdf_last_page_w187_w188 as w187
+
+        saved = w187.WORDS
+        w187.WORDS = text
+        try:
+            return long_last_line(client, accounts, customer, kind, n, length)
+        finally:
+            w187.WORDS = saved
+    c1046._construction(client)
+    lines, _last = c1046.construction_lines(client, kind, n)
+    if packaged:
+        pkgs = [
+            c1046._package(client, "Concrete"),
+            c1046._package(client, "Electrical"),
+        ]
+        for i, line in enumerate(lines):
+            line["trade_package_id"] = pkgs[i % 2]
+    lines[-1]["description"] = (f"Item {n}\n" + text)[:length].rstrip()
+    r = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": customer.id,
+            "date": "2026-11-01",
+            "lines": lines,
+            "terms": "",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return f"/api/estimates/{r.json()['id']}"
+
+
+def _decided(monkeypatch):
+    """The uncut layout's facts each print decided on, newest last."""
+    real = pdf_service.choose_last_line
+    seen = []
+
+    def spy(html, keep=True):
+        document = pdf_service._layout(html)
+        found, start, tail, _pages = pdf_service._last_line_layout(document)
+        while found and not found[-1][1].strip():
+            found = found[:-1]
+        on_totals = sum(1 for p, _t in found if tail and p == tail[0])
+        seen.append({"start": start, "tail": tail, "on_totals": on_totals})
+        return real(html, keep)
+
+    monkeypatch.setattr(pdf_service, "choose_last_line", spy)
+    return seen
+
+
+def _sweep_one(client, url, seen, said):
+    """What is wrong with one printed document: the first part on the
+    totals' page, or more than two lines carried where two were possible."""
+    seen.clear()
+    html = client.get(f"{url}/print-preview").text
+    head, end, tail, stretched = _where(html)
+    if len(tail) != 1:
+        return [f"{said}: the totals' group is on pages {sorted(tail)}"], None
+    page = tail.pop()
+    wrong = [f"{said}: a line of the cut row is set full"] if stretched else []
+    if not end:
+        if set(head) - {page}:
+            wrong.append(f"{said}: uncut, and not on the totals' page")
+        return wrong, 0
+    if page in head:
+        wrong.append(
+            f"{said}: {head.count(page)} lines of the first part on the totals' page"
+        )
+    if set(end) != {page}:
+        wrong.append(f"{said}: the end is on pages {sorted(set(end))}")
+    if len(end) != 2:
+        # more than two only when the uncut line ran over the page break
+        # with that many of its lines on the totals' page, starting on the
+        # page before it
+        first = seen[0]
+        if not (
+            first["on_totals"] == len(end) and first["start"][0] == first["tail"][0] - 1
+        ):
+            wrong.append(f"{said}: {len(end)} lines carried; {first}")
+    return wrong, len(end)
+
+
+def test_a_last_line_with_line_breaks_carries_what_the_page_break_leaves(
+    client, seed_accounts, seed_customer, monkeypatch
+):
+    seen = _decided(monkeypatch)
+    wrong, counts = [], {}
+    for kind, text in SHAPES:
+        for n, length in BREAK_CASES:
+            url = _shaped(client, seed_accounts, seed_customer, kind, n, length, text)
+            found, carried = _sweep_one(
+                client, url, seen, f"{kind}, {n} lines, {length} characters"
+            )
+            wrong += found
+            counts[carried] = counts.get(carried, 0) + 1
+    assert any(c and c > 2 for c in counts), counts  # the shape W-220 found
+    assert not wrong, "\n".join(wrong)
+
+
+def test_a_two_line_packaged_bid_prints_whole_when_it_fits(
+    client, seed_accounts, seed_customer, monkeypatch
+):
+    seen = _decided(monkeypatch)
+    wrong, whole = [], 0
+    for length in (590, 700, 800, 900, 1000, 1100, 1200):
+        url = _shaped(
+            client, seed_accounts, seed_customer, "bid", 2, length, WORDS, True
+        )
+        said = f"2-line packaged bid, {length} characters"
+        found, carried = _sweep_one(client, url, seen, said)
+        wrong += found
+        if carried == 0:
+            whole += 1
+        elif seen:
+            first = seen[0]
+            # cut only when it does not fit: the totals' group fell to the
+            # page after the line, and keeping the line with them would have
+            # left the page before under half full
+            if not (
+                first["tail"][0] > first["start"][0]
+                and first["on_totals"] == 0
+                and first["start"][1] < 0.5
+            ):
+                wrong.append(f"{said}: cut though it fits; {first}")
+    assert whole >= 5, whole
+    assert not wrong, "\n".join(wrong)
