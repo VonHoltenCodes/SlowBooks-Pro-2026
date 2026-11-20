@@ -116,10 +116,29 @@ def _contexts():
 
 
 def test_every_outbound_https_helper_has_cas_and_verifies():
+    """Each verifies, and has authorities to verify with: loaded already
+    (a bundle file), or a folder of hashed certificates the default
+    context reads at the handshake (a Linux with no bundle file, where
+    nothing shows as loaded before a connection is made)."""
     for name, ctx in _contexts().items():
         assert ctx.verify_mode == ssl.CERT_REQUIRED, name
         assert ctx.check_hostname, name
-        assert ctx.get_ca_certs(), name
+        assert ctx.get_ca_certs() or tls_trust.default_context_has_cas(), name
+
+
+def test_a_folder_of_certificates_counts_before_any_is_loaded(monkeypatch, tmp_path):
+    """The Linux gate box: no bundle file, a populated hashed folder. A
+    default context shows nothing loaded, and it still has its authorities."""
+    folder = tmp_path / "certs"
+    folder.mkdir()
+    (folder / "0a1b2c3d.0").write_text("placeholder", encoding="utf-8")
+    monkeypatch.setenv("SSL_CERT_DIR", str(folder))
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "missing.pem"))
+    if ssl.create_default_context().get_ca_certs():
+        pytest.skip("this platform loads a system store whatever OpenSSL says")
+    assert tls_trust.default_context_has_cas()
+    (folder / "0a1b2c3d.0").unlink()
+    assert not tls_trust.default_context_has_cas()
 
 
 def test_with_the_mac_defaults_missing_the_helper_gives_each_one_its_cas(

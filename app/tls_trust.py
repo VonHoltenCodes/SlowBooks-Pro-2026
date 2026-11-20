@@ -78,6 +78,12 @@ def use_bundled_ca_if_needed(
 
 
 def default_context_has_cas() -> bool:
-    """Whether a default context loads any certificate authority (the
-    smoke test's check, and the tests')."""
-    return bool(ssl.create_default_context().get_ca_certs())
+    """Whether a default context has certificate authorities to verify
+    with (the smoke test's check, and the tests'). A bundle file is loaded
+    when the context is made; a folder of hashed certificates (a Linux
+    whose Python has no bundle file of its own) is read only as a
+    handshake asks for one, so nothing shows as loaded until then and the
+    folder itself is the evidence."""
+    if ssl.create_default_context().get_ca_certs():
+        return True
+    return _default_paths_exist(ssl.get_default_verify_paths())
