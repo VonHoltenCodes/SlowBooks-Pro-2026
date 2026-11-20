@@ -640,7 +640,9 @@ jobs:
           # 399 + 8 would be 407; the shards of the integrated tree measured 406
           # (CI 44659250827: 283 + 57 + 66), so one skip went away in the same batch.
           # 407 with round 22's tortoise notes (#1123 #1124): test_browser_hints_r22.py, one module without playwright.
-          MAX_SKIPS: "407"
+          # 408 with the estimate void's browser test (#1128,
+          # test_browser_estimate_void_1128.py: one module without playwright).
+          MAX_SKIPS: "408"
         run: |
           total=0
           for f in shards/*/skips.txt; do

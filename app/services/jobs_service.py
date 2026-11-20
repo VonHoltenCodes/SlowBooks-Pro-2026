@@ -289,7 +289,7 @@ def documents_carrying_job(db: Session, job_id: int, t: Terms) -> list[tuple[str
     from sqlalchemy import or_
 
     from app.models.credit_memos import CreditMemo, CreditMemoLine, CreditMemoStatus
-    from app.models.estimates import Estimate, EstimateLine
+    from app.models.estimates import Estimate, EstimateLine, EstimateStatus
     from app.models.in_kind import InKindGift, InKindGiftLine
     from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
     from app.models.recurring import RecurringInvoice
@@ -329,7 +329,10 @@ def documents_carrying_job(db: Session, job_id: int, t: Terms) -> list[tuple[str
     )
     counts["estimate"] = (
         db.query(Estimate)
-        .filter(or_(Estimate.job_id == job_id, Estimate.id.in_(on_estimate_line)))
+        .filter(
+            or_(Estimate.job_id == job_id, Estimate.id.in_(on_estimate_line)),
+            Estimate.status.is_distinct_from(EstimateStatus.VOID),
+        )
         .count()
     )
     counts["recurring " + t("invoice")] = (

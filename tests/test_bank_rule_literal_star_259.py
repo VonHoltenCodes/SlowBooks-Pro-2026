@@ -217,7 +217,7 @@ def test_rules_made_before_the_upgrade_file_exactly_what_they_filed(tmp_path):
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision(REVISION).down_revision == BELOW
-    assert script.get_heads() == [REVISION]
+    assert script.get_heads() == ["c1128e5a7d0f"]  # #1128 is the head above it
     command.upgrade(cfg, BELOW)  # the step below it
     with sqlite3.connect(db) as conn:
         for i, (rule_type, pattern) in enumerate(OLD_RULES, start=1):

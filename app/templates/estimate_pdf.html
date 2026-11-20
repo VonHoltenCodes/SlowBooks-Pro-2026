@@ -14,6 +14,7 @@
     .company-logo { display: block; max-height: 60px; max-width: 200px; margin-bottom: 6px; }
     .doc-title { text-align: right; }
     .doc-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
+    .doc-title .void { color: #b00020; }
     .doc-number { font-size: 12pt; color: #666; margin-top: 2px; }
     /* The dates and terms sit beside the title, label and value on a row
        each (#1041): a band of their own across the page pushed the line
@@ -90,7 +91,7 @@
             </div>
         </div>
         <div class="doc-title">
-            <h1>ESTIMATE</h1>
+            <h1>ESTIMATE{% if est.status and est.status.value == 'void' %} <span class="void">VOID</span>{% endif %}</h1>
             <div class="doc-number">#{{ est.estimate_number }}</div>
             <table class="meta-table">
                 <tr><th scope="row">Date:</th><td>{{ est.date | fdate }}</td></tr>
