@@ -54,11 +54,12 @@
     /* The end of long notes and the footer are one block (W-188). */
     .doc-close { break-inside: avoid; page-break-inside: avoid; }
     .notes.notes-end { margin-top: 0; padding-top: 0; border-top: 0; break-before: auto; page-break-before: auto; }
-    .totals { margin-left: auto; width: 240px; break-inside: avoid; page-break-inside: avoid; } /* a block, not a float, so the footer's break-before: avoid binds to it (#1032); never broken inside (#1033) */
-    .totals table { width: 100%; }
+    .totals { margin-left: auto; break-inside: avoid; page-break-inside: avoid; } /* a block, not a float, so the footer's break-before: avoid binds to it (#1032); never broken inside (#1033) */
+    /* the block's table is 240px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214) */
+    .totals table { width: 240px; margin-left: auto; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
-    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    .totals .label { font-weight: 700; color: #4a4a6a; }
+    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .totals .label { font-weight: 700; color: #4a4a6a; white-space: nowrap; }
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .notes { clear: both; break-before: avoid; page-break-before: avoid; margin-top: 16px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
     .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
