@@ -353,9 +353,7 @@ def test_income_by_customer_pdf_and_csv_follow_the_basis(client, books, monkeypa
         assert lines[-1].startswith("TOTAL,") and (
             f",{data['total_sales']:.2f}," in lines[-1]
         )
-        page = client.get(
-            f"/api/reports/income-by-customer/print?{OCT}&basis={basis}"
-        )
+        page = client.get(f"/api/reports/income-by-customer/print?{OCT}&basis={basis}")
         assert page.status_code == 200 and "window.print()" in page.text
     # with no deposit in the period there is no Not income column
     sep = _get(client, "income-by-customer", PERIODS["sep"], "accrual")
