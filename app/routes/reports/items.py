@@ -21,7 +21,10 @@ credit memo posts to bad debt, not income, and is left out too; so is a
 credit memo line of zero or less, which its journal skips. The account is
 the item's as it is now: an item re-pointed after a sale reads at its new
 account. Income the report cannot show (a journal entry to an income
-account, a deposit's income line) is the rest of the P&L's figure.
+account, a deposit's income line) is the rest of the P&L's figure. On the
+cash basis money received and not yet applied to an invoice is income on
+the P&L (Unapplied Cash Payment Income) that no item sold: it has a row of
+its own under the items, in the total (W-194).
 
 Amounts are in home currency, each line at its document's booked rate,
 rounded per line (contact_balances.home_amount), the conversion the
@@ -56,7 +59,6 @@ from app.models.credit_memos import CreditMemo, CreditMemoStatus
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.items import InventoryMovement, Item
 from app.models.jobs import Job
-from app.models.accounts import Account, AccountType
 from app.models.vendor_credits import (
     VendorCredit,
     VendorCreditStatus,
@@ -122,25 +124,11 @@ def _item_meta(db: Session) -> dict:
 
 
 def _posts_to_income(db: Session):
-    """A test of whether a sales line posts to an income account: the
-    item's income account, else the default income account (4000), the
-    account the invoice and credit memo journals credit. Looked up once."""
-    from app.services.accounting import get_default_income_account_id
-    from app.services.control_accounts import MissingControlAccount
+    """A test of whether a sales line posts to an income account
+    (sales_income.posts_to_income, the one rule every sales figure reads)."""
+    from app.services.sales_income import posts_to_income
 
-    income = {
-        a.id
-        for a in db.query(Account.id).filter(Account.account_type == AccountType.INCOME)
-    }
-    try:
-        default_ok = get_default_income_account_id(db) in income
-    except MissingControlAccount:
-        default_ok = False
-    item_ok = {
-        it.id: (it.income_account_id in income if it.income_account_id else default_ok)
-        for it in db.query(Item.id, Item.income_account_id)
-    }
-    return lambda item_id: item_ok.get(item_id, default_ok) if item_id else default_ok
+    return posts_to_income(db)
 
 
 # ── The cash basis (#1062) ────────────────────────────────────────────────
@@ -198,6 +186,56 @@ def _cash_sales(db: Session, start_date, end_date, customer_id, to_income):
         share = got / total
         for part in cash_basis.prorate(pool, got, total):
             out.append((inv, lines[part["at"]], part["amount"], share))
+    return out
+
+
+# The cash basis's row for money received and not yet applied to an
+# invoice (W-194): the cash Profit and Loss counts it as income
+# (Unapplied Cash Payment Income) on the payment's date, and no item sold
+# it, so it has a row of its own under the items, in the total, and the
+# total ties to the cash P&L's income from sales.
+UNAPPLIED_ROW = "Payments received, not yet applied"
+UNAPPLIED_KEY = "unapplied"
+
+
+def _unapplied_amount(db, start_date, end_date, customer_id, class_id, job_id):
+    """The unapplied row's amount on the cash basis, or None for no row:
+    none when nothing is unapplied, and none when the report is narrowed to
+    a class or a job, since money not applied to an invoice has neither."""
+    if class_id is not None or job_id is not None:
+        return None
+    from app.services import cash_basis
+
+    got = cash_basis.unapplied_cash_income(db, start_date, end_date)
+    if customer_id is not None:
+        got = {k: v for k, v in got.items() if k == customer_id}
+    total = sum(got.values(), Decimal("0"))
+    return total if total != 0 else None
+
+
+def _unapplied_lines(db, start_date, end_date, customer_id, class_id, job_id):
+    """The payments behind the unapplied row, one line each."""
+    if class_id is not None or job_id is not None:
+        return []
+    from app.services import cash_basis
+
+    out = []
+    for p, amount in cash_basis.unapplied_cash_payments(db, start_date, end_date):
+        if customer_id is not None and p.customer_id != customer_id:
+            continue
+        out.append(
+            {
+                "date": p.date.isoformat(),
+                "doc_type": "Payment",
+                "number": p.reference or p.check_number or "",
+                "party": p.customer.name if p.customer else None,
+                "description": "Not applied to an invoice yet",
+                "quantity": None,
+                "rate": None,
+                "amount": float(amount),
+                "link": {"type": "payment", "id": p.id},
+            }
+        )
     return out
 
 
@@ -354,6 +392,15 @@ def _sales_by_item(
         Decimal("0"),
     )
     total_amount = sum((Decimal(str(r["amount"])) for r in items), Decimal("0"))
+    # cash basis: money received and not applied to an invoice yet, on its
+    # own row outside the items, in the total (W-194)
+    unapplied = (
+        _unapplied_amount(db, start_date, end_date, customer_id, class_id, job_id)
+        if basis == "cash"
+        else None
+    )
+    if unapplied is not None:
+        total_amount += unapplied
     total_cogs = sum(
         (Decimal(str(r["cogs"])) for r in items if r["cogs"] is not None),
         Decimal("0"),
@@ -375,6 +422,8 @@ def _sales_by_item(
         "class_id": class_id,
         "job_id": job_id,
         "items": items,
+        "unapplied_label": UNAPPLIED_ROW if unapplied is not None else None,
+        "unapplied_amount": float(unapplied) if unapplied is not None else None,
         "total_quantity": float(total_quantity),
         "total_amount": float(total_amount),
         "total_cogs": float(total_cogs),
@@ -488,6 +537,20 @@ def _sales_lines(
     _require(db, Job, job_id, "job")
     basis = _basis(db, basis)
     to_income = _posts_to_income(db)
+    if item_key == UNAPPLIED_KEY:
+        return {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "basis": basis,
+            "item_id": UNAPPLIED_KEY,
+            "lines": (
+                _unapplied_lines(
+                    db, start_date, end_date, customer_id, class_id, job_id
+                )
+                if basis == "cash"
+                else []
+            ),
+        }
     if basis == "cash":
         return _cash_sales_lines(
             db, start_date, end_date, item_key, customer_id, class_id, job_id, to_income
@@ -825,11 +888,14 @@ def _item_key(item_id: Optional[str]):
     other value is the integer item id."""
     if item_id is None or str(item_id).lower() in ("", "none", "null"):
         return None
+    if str(item_id).lower() == UNAPPLIED_KEY:
+        return UNAPPLIED_KEY
     try:
         key = int(item_id)
     except ValueError:
         raise HTTPException(
-            status_code=400, detail="item_id must be an integer or none"
+            status_code=400,
+            detail="item_id must be an integer, none or unapplied",
         )
     # an id past a 64-bit integer cannot exist; refused rather than left to
     # overflow the database bind (#855)

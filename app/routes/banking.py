@@ -110,6 +110,23 @@ def _feeds_out(db: Session, rows: list) -> list[dict]:
     return [_feed_out(b, balances) for b in rows]
 
 
+# The most a To review memo holds (#1049): the memo of the entry it posts,
+# as a bank rule's memo (bank_rules.MEMO_MAX).
+MEMO_MAX = 500
+
+
+def _review_memo(memo: str | None) -> None:
+    """A memo typed on a To review line, or given with a payment from one,
+    is refused past MEMO_MAX in a sentence, the way a rule's memo is
+    (W-191: the validator's own text came back)."""
+    n = len((memo or "").strip())
+    if n > MEMO_MAX:
+        raise HTTPException(
+            status_code=422,
+            detail=f"A memo can be at most {MEMO_MAX} characters; this one has {n}.",
+        )
+
+
 @router.get("/overview")
 def banking_overview(db: Session = Depends(get_db)):
     """Every bank and card account with its ledger balance, its feed (if
@@ -463,6 +480,7 @@ def statement_add(
     from app.services import bank_matching as m
 
     data = data or StatementAdd()
+    _review_memo(data.memo)
     bt = _statement_line(db, txn_id)
     splits = None
     if data.splits:
@@ -598,6 +616,7 @@ def statement_receive_payment(
     register shows the payment once."""
     from app.services.bank_feed_payments import receive_payment
 
+    _review_memo(data.memo)
     bt = receive_payment(db, _statement_line(db, txn_id), data)
     db.commit()
     db.refresh(bt)
@@ -612,6 +631,7 @@ def statement_pay_bills(
     and matched to the line."""
     from app.services.bank_feed_payments import pay_bills
 
+    _review_memo(data.memo)
     bt = pay_bills(db, _statement_line(db, txn_id), data)
     db.commit()
     db.refresh(bt)
@@ -640,6 +660,7 @@ def statement_set_category(
 
     bt = _statement_line(db, txn_id)
     sent = data.model_fields_set
+    _review_memo(data.memo)
     if "category_account_id" in sent:
         bt = m.set_category(db, bt, data.category_account_id)
     picks = {k: getattr(data, k) for k in m.PICKS if k in sent}
@@ -686,6 +707,7 @@ def feed_add_all(
         # a class or job a row picked must exist and be live, as one Add
         # checks; refused before anything posts (2.31.4 gate, W-95)
         require_dimensions(db, p.class_id, p.job_id, p.customer_id)
+        _review_memo(p.memo)
         picks[p.id] = {
             "class_id": p.class_id,
             "job_id": p.job_id,

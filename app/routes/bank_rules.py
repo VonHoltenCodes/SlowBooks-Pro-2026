@@ -78,6 +78,14 @@ MEMO_MAX = 500
 def _check_refs(db: Session, fields: dict, rule: BankRule | None = None) -> None:
     """Each record a rule names exists. `rule` is the rule being edited, so
     a field the edit leaves out is checked as the rule has it."""
+    if "pattern" in fields:
+        # a pattern of only `*` or spaces matched nothing and was saved
+        # anyway (W-193)
+        from app.services.bank_rules_engine import pattern_problem
+
+        problem = pattern_problem(fields["pattern"])
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
     if fields.get("vendor_id") is not None and not db.get(Vendor, fields["vendor_id"]):
         raise HTTPException(status_code=404, detail="Vendor not found")
     if fields.get("account_id") is not None and not db.get(

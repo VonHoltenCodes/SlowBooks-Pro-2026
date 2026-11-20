@@ -30,7 +30,7 @@ const BankRulesPage = {
             for (const r of rules) {
                 html += `<tr>
                     <td><strong>${escapeHtml(r.name)}</strong></td>
-                    <td><code>${escapeHtml(r.pattern)}</code></td>
+                    <td><code>${escapeHtml(r.pattern)}</code>${BankRulesPage.patternReading(r.pattern)}</td>
                     <td>${escapeHtml(r.rule_type)}</td>
                     <td>${r.account_name ? escapeHtml(r.account_name) : '—'}</td>
                     <td>${r.vendor_name ? escapeHtml(r.vendor_name) : '—'}</td>
@@ -111,8 +111,9 @@ const BankRulesPage = {
                 <div class="form-grid">
                     <div class="form-group"><label>Rule Name *</label>
                         <input name="name" required value="${escapeHtml(rule.name)}"></div>
-                    <div class="form-group"><label>Payee Pattern *${prefill && prefill.from ? ` ${hint(`From ${escapeHtml(prefill.from)}: the pattern is its payee, matched by Contains in any case. A shorter pattern catches other spellings, and a very short one ("CO") catches too much.`, 'Payee Pattern')}` : ''}</label>
-                        <input name="pattern" required value="${escapeHtml(rule.pattern)}" placeholder="e.g. AMZN or Amazon"></div>
+                    <div class="form-group"><label for="bank-rule-pattern">Payee Pattern * ${hint(`${prefill && prefill.from ? `From ${escapeHtml(prefill.from)}: the pattern is its payee, matched by Contains in any case. A shorter pattern catches other spellings, and a very short one ("CO") catches too much. ` : ''}A <code>*</code> stands for anything: <code>T-MOBILE*</code> matches "T-MOBILE AUTOPAY". A star the bank prints is typed <code>\\*</code>: <code>SQ \\*</code> matches "SQ *JOES DELI" and not "MSQ LLC PARTS". A rule made before SlowBooks Pro 2.32.0 had its stars written that way, so it matches what it matched before.`, 'Payee Pattern', 'bank-rule-pattern-hint')}</label>
+                        <input id="bank-rule-pattern" name="pattern" required value="${escapeHtml(rule.pattern)}" placeholder="e.g. AMZN or Amazon" aria-describedby="bank-rule-pattern-hint bank-rule-pattern-reads" oninput="BankRulesPage.showReading(this)">
+                        <div id="bank-rule-pattern-reads" class="rule-pattern-reads" aria-live="polite">${BankRulesPage.readingText(rule.pattern)}</div></div>
                     <div class="form-group"><label>Match Type</label>
                         <select name="rule_type">
                             <option value="contains" ${rule.rule_type==='contains'?'selected':''}>Contains</option>
@@ -144,9 +145,84 @@ const BankRulesPage = {
             </form>`);
     },
 
+    // A rule's payee pattern (#1064, NEW-259), read as the server reads it
+    // (bank_rules_engine.pattern_parts): `*` is anything, `\*` a star
+    // itself, `\\` a backslash before a star; text runs and wildcards
+    // (null) in order.
+    patternParts(pattern) {
+        const chars = String(pattern || '').trim();
+        const parts = [];
+        let text = '';
+        for (let i = 0; i < chars.length; i++) {
+            const c = chars[i];
+            if (c === '\\' && i + 1 < chars.length && (chars[i + 1] === '*' || chars[i + 1] === '\\')) {
+                text += chars[i + 1];
+                i++;
+            } else if (c === '*') {
+                if (text) { parts.push(text); text = ''; }
+                if (!parts.length || parts[parts.length - 1] !== null) parts.push(null);
+            } else {
+                text += c;
+            }
+        }
+        if (text) parts.push(text);
+        return parts;
+    },
+
+    // A payee or a name as a pattern that matches it as written: each star
+    // in it is the bank's own (Rule… from a statement line).
+    escapePattern(text) {
+        const s = String(text || '');
+        let out = '';
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (c === '*') out += '\\*';
+            else if (c === '\\' && i + 1 < s.length && (s[i + 1] === '*' || s[i + 1] === '\\')) out += '\\\\';
+            else out += c;
+        }
+        return out;
+    },
+
+    // The server's sentence for a pattern with no text to match (W-193).
+    PATTERN_EMPTY: 'A payee pattern needs some of the text the bank prints; a pattern of only * or spaces would match nothing. To match a star the bank prints, type \\*.',
+
+    patternProblem(pattern) {
+        return BankRulesPage.patternParts(pattern).some(p => p !== null && p.trim()) ? null : BankRulesPage.PATTERN_EMPTY;
+    },
+
+    // How a pattern with a star or a backslash in it reads, in words: its
+    // text in quotes, a wildcard as "anything" ('' for plain text, which
+    // reads as itself).
+    readingText(pattern) {
+        const p = String(pattern || '');
+        if (!/[*\\]/.test(p) || BankRulesPage.patternProblem(p)) return '';
+        const words = BankRulesPage.patternParts(p).map(x => (x === null ? 'anything' : `“${escapeHtml(x)}”`));
+        return `Reads: ${words.join(', then ')}`;
+    },
+
+    patternReading(pattern) {
+        const text = BankRulesPage.readingText(pattern);
+        return text ? `<div class="rule-pattern-reads">${text}</div>` : '';
+    },
+
+    showReading(input) {
+        const out = document.getElementById('bank-rule-pattern-reads');
+        if (out) out.innerHTML = BankRulesPage.readingText(input.value);
+        input.setCustomValidity('');
+    },
+
     async save(e, id) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target).entries());
+        // a pattern of only `*` or spaces is refused here as the server
+        // refuses it, in its sentence (W-193)
+        const problem = BankRulesPage.patternProblem(data.pattern);
+        if (problem) {
+            const input = e.target.querySelector('[name="pattern"]');
+            if (input) { input.setCustomValidity(problem); input.reportValidity(); input.focus(); }
+            toast(problem, 'error');
+            return;
+        }
         data.account_id = data.account_id ? parseInt(data.account_id) : null;
         data.vendor_id = data.vendor_id ? parseInt(data.vendor_id) : null;
         data.customer_id = data.customer_id ? parseInt(data.customer_id) : null;

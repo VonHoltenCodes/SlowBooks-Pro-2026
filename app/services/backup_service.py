@@ -754,9 +754,10 @@ def bring_restored_books_up_to_date() -> dict:
         cfg.attributes["company_file_key"] = key
         command.upgrade(cfg, "head")
     except Exception as exc:
-        from app.services.migration_floor import BelowMigrationFloor
+        from app.services.migration_floor import CompanyFileRefused
 
-        if isinstance(exc, BelowMigrationFloor):  # from before 2.29.0 (#769)
+        # from before 2.29.0 (#769), or a newer build's (W-186)
+        if isinstance(exc, CompanyFileRefused):
             return {"success": False, "error": str(exc)}
         logger.exception("Could not upgrade the restored books")
         return {

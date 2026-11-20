@@ -223,10 +223,11 @@ def open_engine(filename: str):
     except RuntimeError as exc:
         engine.dispose()
         logger.error("not serving %s: %s", filename, exc)
-        from app.services.migration_floor import BelowMigrationFloor
+        from app.services.migration_floor import CompanyFileRefused
 
-        if isinstance(exc, BelowMigrationFloor):
-            raise CompanyUnavailable(str(exc)) from exc  # from before 2.29.0
+        # from before 2.29.0 (#769), or a newer build's (W-186)
+        if isinstance(exc, CompanyFileRefused):
+            raise CompanyUnavailable(str(exc)) from exc
         raise CompanyUnavailable(OTHER_VERSION) from exc
     return engine
 
