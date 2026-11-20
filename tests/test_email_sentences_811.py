@@ -102,7 +102,12 @@ def test_the_stored_text_of_each_exception_gives_the_same_sentence(
     # back from it, as from the plain words stored since
     from app.services.email_errors import stored_text
 
-    assert failure_sentence(str(error)) == sentence
+    # an old row's refusal names neither its stage nor its words (W-231,
+    # W-228); the plain words stored since keep both
+    old = sentence
+    if sentence.startswith("The mail server refused the message: "):
+        old = "The mail server refused the email."
+    assert failure_sentence(str(error)) == old
     assert failure_sentence(stored_text(error)) == sentence
 
 

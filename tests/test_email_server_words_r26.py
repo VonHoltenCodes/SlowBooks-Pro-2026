@@ -175,8 +175,8 @@ STAGES = {
     "timeout": (
         "The server could not be reached — check the host, port, and the Use "
         "TLS setting.",
-        # smtplib's words for a reply that never came
-        "Connection unexpectedly closed: timed out",
+        # a reply that never came: the plain cause, nothing closed (W-232)
+        "timed out",
     ),
 }
 
@@ -365,11 +365,13 @@ OLD_ROWS = [
     (
         "(554, b'5.7.1 Message rejected as spam')",
         "554 5.7.1 Message rejected as spam",
-        "The mail server refused the message: 554 5.7.1 Message rejected as spam.",
+        # the old tuple lost the stage, and its words are not said in the
+        # sentence (W-228, W-231); the administrator's line keeps them
+        "The mail server refused the email.",
     ),
     (
         "[Errno 111] Connection refused",
-        "[Errno 111] Connection refused",
+        "Connection refused",
         "The server could not be reached",
     ),
     # never run: a stored text that is not a literal stays as it was
