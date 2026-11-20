@@ -354,7 +354,9 @@ class EstimateVoid(StrictModel):
     """Void an estimate made in error (#1128); the reason is optional and is
     kept on the estimate."""
 
-    reason: Optional[str] = Field(default=None, max_length=500)
+    # its length is checked in words by the route (W-202), as a To review
+    # memo's is (W-191)
+    reason: Optional[str] = None
 
 
 def totals_from_dict(data: dict) -> EstimateTotals:

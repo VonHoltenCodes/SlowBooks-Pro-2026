@@ -2401,6 +2401,7 @@ tr.clickable { cursor: pointer; }
 .splash-artists ul { margin: 0; padding-left: 16px; }
 .splash-artists li { margin: 2px 0; }
 .splash-artists p { margin: 0; }
+.splash-artists ul + p { margin-top: 6px; }
 .splash-artists a { color: #002244; font-weight: 600; }
 
 .splash-terms {
@@ -4167,3 +4168,33 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
 /* a To review memo's count near its limit (W-191); empty, it takes no room */
 .review-memo-count { font-size: 11px; color: var(--gray-500); }
 .review-memo-count:empty { display: none; }
+
+/* What can be selected (W-209). The desktop window once inherited
+   pywebview's body { user-select: none }, so nothing on a page could be
+   selected or copied. Text a person copies (figures, names, document
+   numbers, report cells, notes, sentences, the sign-in code, the relay
+   address) selects as in any page; the chrome a click or a drag works
+   (the sidebar, the top bar, the status line, buttons, tabs and the
+   column headings) does not, so a quick double-click there never
+   highlights words. */
+#sidebar,
+#topbar,
+#statusbar,
+button,
+.btn,
+[role="button"],
+[role="tab"],
+thead th,
+canvas {
+    -webkit-user-select: none;
+    user-select: none;
+}
+/* a field's text always selects, wherever the field sits */
+#sidebar input,
+#topbar input,
+textarea,
+input,
+select {
+    -webkit-user-select: text;
+    user-select: text;
+}

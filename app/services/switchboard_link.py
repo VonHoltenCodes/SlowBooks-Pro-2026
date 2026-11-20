@@ -39,6 +39,8 @@ import json
 import logging
 import os
 import threading
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,6 +76,24 @@ OTHER_COMPANY = (
 )
 ALREADY = "An AI assistant is already connected to this company."
 UNREACHABLE = "SlowBooks Pro keeps trying on its own; the books work as before."
+# The relay out of reach, or answering a server error, on a press of
+# Connect, Show a sign-in code or Disconnect (W-208): said in a sentence that
+# stays on the panel, never the OS's error text or an address; the detail
+# goes to the log (no credential, token or code is in it).
+RELAY_AWAY = (
+    "The relay could not be reached. SlowBooks Pro is working normally; try "
+    "again in a few minutes."
+)
+# a 5xx: the relay was just updated (it restarts for a moment) or is busy
+RELAY_BUSY = "The relay was just updated or is busy. Try again in a couple of minutes."
+# How long a press waits on the relay, per step (connecting, then each read).
+# The relay answers these small requests in well under a second; ten
+# seconds still allows a slow or busy connection, where the vendored
+# client's 30 seconds, or Windows' own ~21-second connect timeout when a
+# firewall drops the packets, left "Connecting…" up for half a minute. The
+# background line is not on this path: it keeps its own backoff (1 s
+# doubling to 60 s).
+PRESS_TIMEOUT = 10.0
 DAMAGED = (
     "The AI assistant connection kept in the data folder cannot be read. "
     "Disconnect, then connect again."
@@ -87,12 +107,24 @@ logging.getLogger(sb_logs.LOGGER).addFilter(sb_logs._MaskSecrets())
 class SwitchboardError(Exception):
     """A refusal or failure; .sentence is for the person, .status for HTTP."""
 
-    def __init__(self, status: int, sentence: str, *, unreadable: bool = False):
+    def __init__(
+        self,
+        status: int,
+        sentence: str,
+        *,
+        unreadable: bool = False,
+        unreachable: bool = False,
+        busy: bool = False,
+    ):
         super().__init__(sentence)
         self.status = status
         self.sentence = sentence
         # the kept file itself cannot be used (Disconnect forgets it)
         self.unreadable = unreadable
+        # the relay did not answer at all (Disconnect's fallback)
+        self.unreachable = unreachable
+        # the relay answered a server error (just updated, or busy)
+        self.busy = busy
 
 
 # -- where things are -------------------------------------------------------------
@@ -224,6 +256,190 @@ def _forget() -> None:
         pass
 
 
+# -- a deletion the relay has not heard yet (NEW-269) --------------------------------
+#
+# Disconnect with the relay out of reach undoes everything here, but the
+# relay still holds its record. What deleting it needs is kept in a small
+# file of its own, user-only like the link file: the relay, the relay name
+# (for the panel's sentence and for support) and the device credential (the
+# forget call's bearer; it can do nothing else once the token is revoked and
+# the link file is gone). A quiet retry with a bounded backoff, off the
+# books' path, tells the relay when it is back, then deletes the entry. The
+# panel says the name until then (Dismiss hides it; the retry goes on). A
+# new Connect is not held up by it.
+
+PENDING_FILE = "claude-relay-pending.json"
+# The retry's backoff: first try after RETRY_FIRST seconds, doubling to
+# RETRY_MAX; the tests shorten both.
+RETRY_FIRST = 30.0
+RETRY_MAX = 30 * 60.0
+_PENDING_FIELDS = ("relay", "slug", "credential")
+
+_pending_lock = threading.Lock()
+_retry_thread = None
+_retry_wake = threading.Event()
+_retry_stop = threading.Event()
+
+
+def pending_path() -> Path:
+    return link_path().with_name(PENDING_FILE)
+
+
+def _load_pending() -> list:
+    path = pending_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeDecodeError, ValueError):
+        logger.warning("the pending relay deletions file cannot be read")
+        return []
+    items = data.get("pending") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [
+        item
+        for item in items
+        if isinstance(item, dict)
+        and all(isinstance(item.get(f), str) and item[f] for f in _PENDING_FIELDS)
+    ]
+
+
+def _save_pending(items: list) -> None:
+    if not items:
+        try:
+            pending_path().unlink()
+        except FileNotFoundError:
+            pass
+        return
+    _write_private(
+        pending_path(), json.dumps({"v": 1, "pending": items}, indent=2) + "\n"
+    )
+
+
+def _add_pending(record: dict) -> None:
+    with _pending_lock:
+        items = [i for i in _load_pending() if i["slug"] != record["slug"]]
+        items.append(
+            {
+                "relay": record["relay"],
+                "slug": record["slug"],
+                "credential": record["credential"],
+                "since": datetime.now(timezone.utc).isoformat(),
+                "dismissed": False,
+            }
+        )
+        _save_pending(items)
+    _start_retry()
+
+
+def pending_notices() -> list:
+    """The relay names still held on the relay, for the panel (never the
+    credential)."""
+    with _pending_lock:
+        items = _load_pending()
+    return [
+        {
+            "slug": i["slug"],
+            "sentence": account.unreachable_sentence(i["slug"]),
+            "dismissed": bool(i.get("dismissed")),
+        }
+        for i in items
+    ]
+
+
+def dismiss_pending(slug: str) -> dict:
+    """Hide the panel's notice for this relay name; the retry goes on."""
+    with _pending_lock:
+        items = _load_pending()
+        for i in items:
+            if i["slug"] == slug:
+                i["dismissed"] = True
+        _save_pending(items)
+    return {"pending": pending_notices()}
+
+
+def _tell_relay_forget(item: dict) -> bool:
+    """One try at the deletion: True when the relay has it (or no longer
+    knows the computer), False when it should be tried again."""
+    bearer = item["credential"]
+    try:
+        code, _, _ = _relay_post(
+            item["relay"], account.FORGET_PATH, None, bearer=bearer
+        )
+        if code == 404:  # a relay from before /v1/forget
+            code, _, _ = _relay_post(
+                item["relay"], account.UNLINK_PATH, None, bearer=bearer
+            )
+    except SwitchboardError:
+        return False
+    if 200 <= code < 300 or code == 401:
+        return True
+    logger.info("the relay answered %s to a pending deletion; tried again later", code)
+    return False
+
+
+def retry_pending_once() -> int:
+    """Try every pending deletion once; returns how many are left."""
+    with _pending_lock:
+        items = _load_pending()
+    done = {i["slug"] for i in items if _tell_relay_forget(i)}
+    with _pending_lock:
+        left = [i for i in _load_pending() if i["slug"] not in done]
+        _save_pending(left)
+    if done:
+        logger.info("the relay deleted %d record(s) left by a disconnect", len(done))
+    return len(left)
+
+
+def _retry_loop() -> None:
+    global _retry_thread
+    delay = RETRY_FIRST
+    try:
+        while True:
+            _retry_wake.wait(delay)
+            _retry_wake.clear()
+            if _retry_stop.is_set():
+                return
+            try:
+                left = retry_pending_once()
+            except Exception:
+                logger.exception("a pending relay deletion could not be tried")
+                left = 1
+            if not left:
+                return
+            delay = min(delay * 2, RETRY_MAX)
+    finally:
+        with _pending_lock:
+            _retry_thread = None
+        # an entry added while this one was ending gets its own loop
+        if not _retry_stop.is_set() and _load_pending():
+            _start_retry()
+
+
+def stop_retry(timeout: float = 5.0) -> None:
+    """End the quiet retry (the app's shutdown, the tests); the entries stay
+    kept for the next start."""
+    _retry_stop.set()
+    _retry_wake.set()
+    with _pending_lock:
+        made = _retry_thread
+    if made is not None:
+        made.join(timeout)
+    _retry_stop.clear()
+
+
+def _start_retry() -> None:
+    global _retry_thread
+    with _pending_lock:
+        if _retry_thread is not None:
+            return
+        _retry_thread = threading.Thread(
+            target=_retry_loop, name="claude-relay-forget", daemon=True
+        )
+        _retry_thread.start()
+
+
 # -- the line -----------------------------------------------------------------------
 
 _lock = threading.Lock()
@@ -310,6 +526,11 @@ def start_in_background() -> None:
 
     def begin():
         try:
+            if _load_pending():
+                _start_retry()
+        except Exception:
+            logger.exception("pending relay deletions not retried")
+        try:
             record = _load()
             if record is None or record.get("on") is False:
                 return
@@ -368,6 +589,8 @@ def status() -> dict:
         "token_label": "",
         "terms": TERMS_URL,
         "privacy": PRIVACY_URL,
+        # relay names a Disconnect could not delete yet (NEW-269)
+        "pending": pending_notices(),
     }
     try:
         record = _load()
@@ -399,15 +622,54 @@ def status() -> dict:
 # -- the administrator's three buttons ----------------------------------------------
 
 
+def _relay_call(relay: str, path: str, body, headers: dict):
+    """account._post's request with PRESS_TIMEOUT in place of the vendored
+    client's 30 seconds (app/switchboard is vendored and kept as shipped):
+    (status, decoded JSON or None, raw body). A relay that does not answer
+    raises OSError (urllib's URLError is one)."""
+    data = json.dumps(body).encode("utf-8") if body is not None else b""
+    hdrs = {
+        "Accept": "application/json",
+        "User-Agent": f"sbplive/{SWITCHBOARD_VERSION}",
+    }
+    if body is not None:
+        hdrs["Content-Type"] = "application/json"
+    hdrs.update(headers)
+    req = urllib.request.Request(relay + path, data=data, headers=hdrs, method="POST")
+    try:
+        with account._opener(None).open(req, timeout=PRESS_TIMEOUT) as resp:
+            status, raw = resp.status, resp.read(1 << 20)
+    except urllib.error.HTTPError as exc:
+        status, raw = exc.code, exc.read(1 << 20)
+    try:
+        decoded = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeDecodeError, ValueError):
+        decoded = None
+    return status, decoded, raw
+
+
 def _relay_post(record_or_relay, path: str, body, *, bearer: str | None = None):
     relay = record_or_relay
     headers = {"Authorization": f"Bearer {bearer}"} if bearer else {}
     try:
-        return account._post(relay, path, body, headers)
-    except account.LinkError as exc:
-        raise SwitchboardError(502, str(exc)) from None
+        return _relay_call(relay, path, body, headers)
+    except (urllib.error.URLError, OSError) as exc:
+        # what the OS said goes to the log, not to the person (W-208)
+        reason = getattr(exc, "reason", None) or exc
+        logger.warning("the relay at %s did not answer %s: %s", relay, path, reason)
+        raise SwitchboardError(503, RELAY_AWAY, unreachable=True) from None
     except ConfigError as exc:
         raise SwitchboardError(502, str(exc)) from None
+
+
+def _refused(raw: bytes, status_code: int, relay: str, path: str) -> SwitchboardError:
+    """The relay answered, but not with what was asked: a server error is
+    the relay being updated or busy (W-208's note), said so; anything else
+    is the relay's own sentence."""
+    if status_code >= 500:
+        logger.warning("the relay at %s answered %s to %s", relay, status_code, path)
+        return SwitchboardError(503, RELAY_BUSY, busy=True)
+    return SwitchboardError(502, account._sentence(raw, status_code, relay))
 
 
 def _free_label(db) -> str:
@@ -448,7 +710,7 @@ def connect(db, username: str) -> dict:
         {"device_name": DEVICE_NAME, "switchboard": SWITCHBOARD_VERSION},
     )
     if status_code not in (200, 201):
-        raise SwitchboardError(502, account._sentence(raw, status_code, relay))
+        raise _refused(raw, status_code, relay, account.LINK_PATH)
     if not (
         isinstance(data, dict)
         and isinstance(data.get("credential"), str)
@@ -486,7 +748,10 @@ def connect(db, username: str) -> dict:
         _save(record)
     except Exception:
         # nothing half-made stays: the relay forgets the device
-        _relay_post(relay, account.UNLINK_PATH, None, bearer=data["credential"])
+        try:
+            _relay_post(relay, account.UNLINK_PATH, None, bearer=data["credential"])
+        except SwitchboardError:
+            logger.warning("the relay was not told to forget a half-made link")
         raise
     _start(record)
     return status()
@@ -511,9 +776,7 @@ def new_code() -> dict:
         bearer=record["credential"],
     )
     if status_code != 201:
-        raise SwitchboardError(
-            502, account._sentence(raw, status_code, record["relay"])
-        )
+        raise _refused(raw, status_code, record["relay"], account.CODE_PATH)
     code = data.get("code") if isinstance(data, dict) else None
     expires = data.get("expires") if isinstance(data, dict) else None
     if not (isinstance(code, str) and account._CODE.fullmatch(code)):
@@ -553,13 +816,21 @@ def disconnect(db) -> dict:
     told, deleted, left = False, False, 0
     bearer = record["credential"]
     try:
-        status_code, data, _ = _relay_post(
-            record["relay"], account.FORGET_PATH, None, bearer=bearer
-        )
-        if status_code == 404:  # a relay from before /v1/forget
-            status_code, data, _ = _relay_post(
-                record["relay"], account.UNLINK_PATH, None, bearer=bearer
+        path = account.FORGET_PATH
+        status_code, data, raw = _relay_post(record["relay"], path, None, bearer=bearer)
+        old_relay = status_code == 404  # a relay from before /v1/forget
+        if old_relay:
+            path = account.UNLINK_PATH
+            status_code, data, raw = _relay_post(
+                record["relay"], path, None, bearer=bearer
             )
+        if status_code >= 500:
+            # the relay is there but was just updated or is busy: nothing
+            # is undone here, so Disconnect can simply be pressed again
+            # (W-208's note); the line opens again meanwhile
+            _start(record)
+            raise _refused(raw, status_code, record["relay"], path)
+        if old_relay:
             told = 200 <= status_code < 300 or status_code == 401
         elif 200 <= status_code < 300:
             told = True
@@ -569,7 +840,14 @@ def disconnect(db) -> dict:
         elif status_code == 401:
             told = deleted = True  # the relay no longer knows this computer
     except SwitchboardError as exc:
+        if exc.busy:
+            raise
+        # out of reach: undone here all the same, with the relay name to
+        # send to support (the fallback sentence)
         logger.warning("the relay was not told of the disconnect: %s", exc.sentence)
+    if not told:
+        # kept until the relay hears it, and retried quietly (NEW-269)
+        _add_pending(record)
     revoked = False
     row = db.query(ApiToken).filter(ApiToken.id == record["token_id"]).first()
     if row is not None and row.label == record["token_label"]:

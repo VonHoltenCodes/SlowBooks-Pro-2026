@@ -21,7 +21,6 @@ ALLOWED = {
     "SlowbooksDesktop",  # (desktop_shim.js)
     "SlowbooksTextSize",  # (text_size.js)
     "SlowbooksTopbar",  # (topbar_fit.js)
-    "Slowbooks-Pro-Art",  # the art repository's name on GitHub (a URL)
 }
 
 SURFACES = [

@@ -329,8 +329,8 @@ def test_an_end_of_month_discount_on_the_dates_route(client):
                 "discount_percent": "2",
                 "discount_days": 31,
             },
-            "The discount must be taken within the days after the end of the "
-            "month until it's due, 0 to 30.",
+            "The discount must be taken by the due date: 0 to 30 days after the "
+            "end of the month.",
         ),
         (
             {

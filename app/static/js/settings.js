@@ -2655,9 +2655,12 @@ const SettingsPage = {
     },
 
     // ---- Connect to AI assistant (#1087) --------------------------------
-    // fallback: { slug, sentence } after a Disconnect that could not reach
-    // the relay, kept here (the link file is gone) until it is dismissed
-    _claude: { status: null, code: null, error: '', timer: null, fallback: null },
+    // fallback: unused since NEW-269 (the relay name a Disconnect could not
+    // delete comes from the server's status, st.pending)
+    // error: a press's failure in the server's sentence, kept on the panel
+    // until Dismiss or the next press (W-208: the 3-second refresh dropped
+    // it); readError: the panel's own read failing, which a refresh clears
+    _claude: { status: null, code: null, error: '', readError: '', timer: null, fallback: null },
 
     // The state in words: what the panel says, for any role.
     claudeStateWords(st) {
@@ -2690,15 +2693,26 @@ const SettingsPage = {
             + (st.linked && st.company && st.this_company ? ` <span style="color:var(--text-muted);">&middot; Company: ${escapeHtml(st.company)}</span>` : '')
             + '</div>';
         if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
-        if (error) html += `<div id="claude-relay-error" role="alert" style="margin-top:4px; color:var(--text-danger);">${escapeHtml(error)}</div>`;
-        if (fallback && fallback.slug) {
-            // Disconnect could not reach the relay: the name to send to support
+        if (error) {
+            html += '<div id="claude-relay-error" role="alert" style="margin-top:4px;">'
+                + `<div style="color:var(--text-danger);">${escapeHtml(error)}</div>`
+                + '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-error-dismiss" onclick="SettingsPage.dismissClaudeError()">Dismiss</button></div>'
+                + '</div>';
+        }
+        // Disconnect could not reach the relay: the name to send to support,
+        // kept by the server until the relay deletes the record (NEW-269:
+        // it lived only in the page, lost on a restart); Dismiss hides it
+        // while the quiet retry goes on
+        const pending = (st.pending || []).filter(p => p && p.slug && !p.dismissed);
+        if (!pending.length && fallback && fallback.slug) pending.push(fallback);
+        const shown = pending[pending.length - 1];
+        if (shown) {
             html += '<div id="claude-relay-fallback" role="alert" style="margin-top:8px;">'
-                + `<div>${escapeHtml(fallback.sentence || '')}</div>`
+                + `<div>${escapeHtml(shown.sentence || '')}</div>`
                 + '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:6px;">'
-                + copyLineHtml('claude-relay-fallback-name', 'Relay name', fallback.slug, 'SettingsPage.copyClaudeFallbackName()')
+                + copyLineHtml('claude-relay-fallback-name', 'Relay name', shown.slug, 'SettingsPage.copyClaudeFallbackName()')
                 + '</div>'
-                + '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>'
+                + (admin ? '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>' : '')
                 + '</div>';
         }
         if (!admin) return html;
@@ -2728,15 +2742,18 @@ const SettingsPage = {
         const el = $('#switchboard-relay');
         if (!el) return;
         const c = SettingsPage._claude;
-        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error, c.fallback);
+        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback);
         // while the line is coming up or the relay is away, the words follow
         // it: asked again in a few seconds, while the panel is on the page
         const state = c.status && c.status.state;
-        if ((state === 'connecting' || state === 'unreachable') && !c.timer) {
+        // and while a relay name waits on the quiet retry, now and then, so
+        // the notice goes when the relay has deleted the record (NEW-269)
+        const waiting = ((c.status && c.status.pending) || []).some(p => p && !p.dismissed);
+        if ((state === 'connecting' || state === 'unreachable' || waiting) && !c.timer) {
             c.timer = setTimeout(() => {
                 c.timer = null;
                 if (document.getElementById('switchboard-relay')) SettingsPage.loadSwitchboard();
-            }, 3000);
+            }, waiting && state !== 'connecting' && state !== 'unreachable' ? 15000 : 3000);
         }
     },
 
@@ -2745,10 +2762,10 @@ const SettingsPage = {
         if (!el) return;
         try {
             SettingsPage._claude.status = await API.get('/switchboard/status');
-            SettingsPage._claude.error = '';
+            SettingsPage._claude.readError = '';
         } catch (e) {
             SettingsPage._claude.status = null;
-            SettingsPage._claude.error = 'Could not read the AI assistant connection.';
+            SettingsPage._claude.readError = 'Could not read the AI assistant connection.';
         }
         SettingsPage._drawSwitchboard();
     },
@@ -2756,21 +2773,24 @@ const SettingsPage = {
     async connectClaude() {
         const button = $('#claude-connect');
         if (button) { button.disabled = true; button.textContent = 'Connecting…'; }
+        // the next press clears the last one's sentence
+        SettingsPage._claude.error = '';
+        $('#claude-relay-error')?.remove();
         try {
             SettingsPage._claude.status = await API.post('/switchboard/connect');
             SettingsPage._claude.code = null;
-            SettingsPage._claude.error = '';
             toast('The AI assistant is connected. Add the address in Claude or Grok, then show a sign-in code.');
+            SettingsPage._drawSwitchboard();
         } catch (err) {
-            // a relay that cannot be reached says so where the button was
-            SettingsPage._claude.status = Object.assign({}, SettingsPage._claude.status || {},
-                err.status === 502 ? { state: 'unreachable' } : {});
+            // nothing was made: the sentence stays, with Connect offered
+            // again (the panel read again, so it says what is really there)
             SettingsPage._claude.error = err.message;
+            await SettingsPage.loadSwitchboard();
         }
-        SettingsPage._drawSwitchboard();
     },
 
     async claudeCode() {
+        SettingsPage._claude.error = '';
         try {
             SettingsPage._claude.code = await API.post('/switchboard/code');
             SettingsPage._claude.error = '';
@@ -2791,24 +2811,43 @@ const SettingsPage = {
         await copyToClipboard(st.slug || '', 'Relay name', $('#claude-relay-name'));
     },
 
+    _claudeShownPending() {
+        const c = SettingsPage._claude;
+        const pending = ((c.status && c.status.pending) || []).filter(p => p && p.slug && !p.dismissed);
+        return pending[pending.length - 1] || c.fallback || {};
+    },
+
     async copyClaudeFallbackName() {
-        const f = SettingsPage._claude.fallback || {};
+        const f = SettingsPage._claudeShownPending();
         await copyToClipboard(f.slug || '', 'Relay name', $('#claude-relay-fallback-name'));
     },
 
-    dismissClaudeFallback() {
-        SettingsPage._claude.fallback = null;
+    dismissClaudeError() {
+        SettingsPage._claude.error = '';
         SettingsPage._drawSwitchboard();
+        $('#claude-connect, #claude-code, #claude-disconnect')?.focus();
+    },
+
+    async dismissClaudeFallback() {
+        const f = SettingsPage._claudeShownPending();
+        SettingsPage._claude.fallback = null;
+        if (f.slug) {
+            try { await API.post('/switchboard/dismiss', { slug: f.slug }); }
+            catch (err) { SettingsPage._claude.error = err.message; }
+        }
+        await SettingsPage.loadSwitchboard();
     },
 
     async disconnectClaude() {
         if (!confirm('Disconnect the AI assistant? The connection ends, the relay deletes its record of these books, and the token "'
             + ((SettingsPage._claude.status || {}).token_label || 'AI assistant (relay)') + '" is revoked.')) return;
+        SettingsPage._claude.error = '';
         try {
             const r = await API.post('/switchboard/disconnect');
             if (r && r.unlinked === false && r.slug) {
                 // the relay was out of reach: keep its name on the panel
-                SettingsPage._claude.fallback = { slug: r.slug, sentence: r.sentence || '' };
+                // the name now comes from the server's status (NEW-269)
+                SettingsPage._claude.fallback = null;
                 toast('The AI assistant is disconnected and the token revoked. The relay was out of reach: see the relay name below.');
             } else {
                 SettingsPage._claude.fallback = null;
@@ -2817,7 +2856,6 @@ const SettingsPage = {
                     : 'The AI assistant is disconnected.');
             }
             SettingsPage._claude.code = null;
-            SettingsPage._claude.error = '';
         } catch (err) {
             SettingsPage._claude.error = err.message;
         }
