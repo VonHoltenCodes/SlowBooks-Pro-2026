@@ -958,10 +958,11 @@ const SettingsPage = {
                      line to the SlowBooks relay is held by SlowBooks Pro itself
                      (app/services/switchboard_link.py); loadSwitchboard draws its
                      state and an administrator's buttons into #switchboard-relay.
-                     The local program's download and guide stay for Claude
-                     Desktop and Claude Code. -->
+                     The local program (SlowBooks Switchboard, for Claude Desktop and
+                     Claude Code with no relay) is behind the section's note, with
+                     its download and guide: the section is about one button. -->
                 <div class="settings-section" data-group="connections" id="settings-switchboard" role="group" aria-labelledby="settings-h-claude-agents">
-                    <div class="settings-h-row"><h3 id="settings-h-claude-agents">AI assistants: SlowBooks Switchboard (sbplive)</h3>${hintList('AI assistants', [
+                    <div class="settings-h-row"><h3 id="settings-h-claude-agents">AI assistants</h3>${hintList('AI assistants', [
                         { id: 'settings-claude-relay-help', text: `Connect to AI assistant lets an AI assistant, such as Claude on the web, the desktop or a phone, or Grok,
                         work this company's books through the SlowBooks relay, with nothing else to install. SlowBooks Pro
                         makes a <strong>bookkeeper API token</strong> for the connection and dials out to the relay itself:
@@ -975,18 +976,22 @@ const SettingsPage = {
                         relay delete its record of these books. The <strong>relay name</strong> shown while connected is how
                         that record is known: if Disconnect cannot reach the relay, send the name to
                         support@slowbookspro.com and the record is removed by hand.` },
-                        { id: 'settings-switchboard-help', text: `SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
+                        { id: 'settings-switchboard-help', text: `<strong>Without the relay: SlowBooks Switchboard.</strong> SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
                         with a <strong>bookkeeper API token</strong> you make under Users and security, API Tokens
                         (read-only for an agent that only reports). It does only what that token's role allows,
                         and every change it makes is in the audit log as <code>token:&lt;label&gt;</code>.
-                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.` },
+                        Run <code>sbplive setup</code>: it asks for the token and connects Claude Desktop and Claude Code.
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
+                        &middot;
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md" target="_blank" rel="noopener">The guide</a>` },
                         { id: 'settings-switchboard-privacy', text: `The token stays on this computer, and Switchboard sends nothing anywhere but this
                         SlowBooks Pro. For Claude on the web it has a self-hosted door, <code>sbplive serve-http</code>,
                         behind your own Cloudflare Tunnel; nothing of the books can be reached from outside this
                         computer unless you set that door up. What Claude reads from the books goes to Claude,
-                        as with any agent.` },
+                        as with any agent.
+                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md" target="_blank" rel="noopener">Claude on the web: the self-hosted door</a>` },
                     ])}</div>
                     <div id="switchboard-relay" aria-live="polite" style="font-size:12px;">Checking…</div>
                     <p id="switchboard-relay-caution" style="font-size:11px; margin:8px 0;">The relay is free and comes with no guarantee: it may be slow, change, or stop, and it may not stay free without donations. Use it at your own risk.
@@ -994,13 +999,6 @@ const SettingsPage = {
                         &middot;
                         <a href="https://www.slowbookspro.com/privacy/" target="_blank" rel="noopener">Privacy</a></p>
                     <p id="switchboard-relay-ask" style="font-size:11px; margin:8px 0;">An assistant asks before it creates a record with little on it, and says what it left blank.</p>
-                    <div style="font-size:11px;">
-                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/releases" target="_blank" rel="noopener">Download SlowBooks Switchboard</a>
-                        &middot;
-                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/GUIDE.md" target="_blank" rel="noopener">The guide</a>
-                        &middot;
-                        <a href="https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md" target="_blank" rel="noopener">Claude on the web: the self-hosted door</a>
-                    </div>
                 </div>
 
                 <div class="settings-section" data-group="connections" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
