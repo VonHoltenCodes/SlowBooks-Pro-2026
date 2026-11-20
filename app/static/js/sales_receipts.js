@@ -63,7 +63,7 @@ const SalesReceiptsPage = {
                 <div class="total-row"><span class="label">Tax</span><span class="value">${money(sr.tax_amount)}</span></div>
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(sr.total)}</span></div>
                 ${sr.fair_value_amount ? `<div class="total-row"><span class="label">Fair value of goods/services${sr.fair_value_description ? ` (${escapeHtml(sr.fair_value_description)})` : ''}</span><span class="value">${money(sr.fair_value_amount)}</span></div>
-                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${money(sr.total - sr.fair_value_amount)}</span></div>` : ''}
+                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${money(Math.max(Number(sr.amount_paid || 0) - Number(sr.fair_value_amount), 0))}</span></div>` : ''}
             </div>
             ${sr.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(sr.notes)}</p>` : ''}
             ${InvoicesPage.attachmentsPanelHtml('invoice', sr.id)}
@@ -71,7 +71,7 @@ const SalesReceiptsPage = {
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/print-preview','_blank')">Print</button>
-                ${Terms.isNonprofit() && sr.status !== 'void' ? `<button class="btn btn-secondary" onclick="window.open('/api/donors/gifts/invoice/${sr.id}/acknowledgment/pdf','_blank')">Acknowledgment (PDF)</button>
+                ${Terms.isNonprofit() && sr.status !== 'void' && Number(sr.amount_paid || 0) > 0 ? `<button class="btn btn-secondary" onclick="window.open('/api/donors/gifts/invoice/${sr.id}/acknowledgment/pdf','_blank')">Acknowledgment (PDF)</button>
                 <button class="btn btn-secondary" onclick="Donors.emailAcknowledgment('invoice', ${sr.id})">Email Acknowledgment</button>` : ''}
                 ${sr.status !== 'void' ? `<button data-destructive class="btn btn-danger" onclick="SalesReceiptsPage.void(${sr.id})">Void Receipt</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>

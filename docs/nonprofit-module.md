@@ -184,6 +184,10 @@ receipt is what gets acknowledged.
   A gift is money that came in: a donation receipt counts at what has been
   paid on it (nothing, once its payment is voided), in the year it was
   paid, and a foreign-currency gift is stated in dollars at its own rate.
+  The fair value of what the donor received back comes off the money in
+  the order it was paid: a receipt paid across two years has it deducted
+  once, in full, between the two statements. The receipt's window offers
+  the acknowledgment only once something has been received on it.
 - **The ministry's own words** — Settings → Sales documents → Giving Statement (nonprofit mode)
   keeps the ministry's own message and footer on the statement. The **Opening
   messages** are saved the same way as Invoice Messages (a short list, one the

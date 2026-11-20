@@ -198,12 +198,18 @@ def receipt_money(inv, start=None, end=None) -> dict:
     typed in.
 
     With `start`/`end` only the payments dated in those dates count (a
-    giving statement's year), and the fair value belongs to the dates the
-    receipt's first payment falls in, so it is never deducted twice.
+    giving statement's year). The fair value is taken off the money in the
+    order it came in: each payment that is not void covers what is left of
+    it, up to its own amount, and the dates get the part their payments
+    covered. So a receipt paid across two years has its fair value deducted
+    once, in full, between the two statements: never twice, never more in a
+    year than came in that year, and none of it dropped because the first
+    year's money was less than the dinner was worth. With no dates it is
+    the whole fair value, the figure the letter and the receipt state.
 
     {paid: document currency, amount: home currency, fair_value: home
-    currency (0 when it belongs to other dates), date: the receipt's date
-    when it is in the dates, else the first payment's in them}
+    currency (the part that belongs to the dates), date: the receipt's
+    date when it is in the dates, else the first payment's in them}
 
     A receipt with no payment record at all (written by an import that
     keeps none) counts at its own amount paid, on its own date."""
@@ -244,14 +250,22 @@ def receipt_money(inv, start=None, end=None) -> dict:
     amount = sum(
         (home_amount(amt, p.exchange_rate) for amt, p in counted), Decimal("0")
     )
-    first_here = bool(counted) and counted[0][1].id == live[0][1].id
+    if start is None and end is None:
+        fv_here = fair_value if counted else Decimal("0")
+    else:
+        fv_here, left = Decimal("0"), fair_value
+        for amt, p in live:
+            covered = min(left, home_amount(amt, p.exchange_rate))
+            left -= covered
+            if in_dates(p.date):
+                fv_here += covered
     when = inv.date
     if counted and not in_dates(inv.date):
         when = counted[0][1].date
     return {
         "paid": _q(paid),
         "amount": _q(amount),
-        "fair_value": fair_value if first_here else Decimal("0"),
+        "fair_value": _q(fv_here),
         "date": when,
     }
 
@@ -631,9 +645,9 @@ def collect_gifts(db, customer_id: int, year: int) -> dict:
     cash.extend(gifts_from_bank_entries(db, customer_id, start, end))
     cash.sort(key=lambda g: (g["date"], g["kind"], g["id"]))
     for g in cash:
-        # no more is deducted than was given: a receipt paid in part for
-        # less than the dinner was worth is deductible at nothing, and the
-        # three totals still add up
+        # no more is deducted than was given (receipt_money already
+        # shares a receipt's fair value out by the money that came in; this
+        # holds the row rule for every kind of gift): the totals add up
         fv = min(_q(Decimal(str(g["fair_value_amount"] or 0))), g["amount"])
         g["fair_value_amount"] = fv or None
         g["deductible"] = _q(g["amount"] - fv)

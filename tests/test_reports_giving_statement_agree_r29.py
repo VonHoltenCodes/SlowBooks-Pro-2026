@@ -210,14 +210,132 @@ def test_a_receipt_paid_across_two_years_is_split_between_them(
     }
     assert first["cash"][0]["date"] == date(2026, 12, 20)
     assert _income_row(client, name, 2026)["total_sales"] == 30.00
-    # the fair value is not deducted a second time
+    # the rest of the dinner comes off the next year's money: between the
+    # two statements the fair value is deducted once, in full, and the
+    # donor's deductible total is the receipt less the dinner
     second = _statement(db_session, donor, 2027)
     assert second["totals"] == {
         "amount": D("120.00"),
-        "fair_value": D("0.00"),
-        "deductible": D("120.00"),
+        "fair_value": D("15.00"),
+        "deductible": D("105.00"),
     }
     assert _income_row(client, name, 2027)["total_sales"] == 120.00
+    assert first["totals"]["deductible"] + second["totals"]["deductible"] == D(
+        "150.00"
+    ) - D("45.00")
+
+
+def test_a_dinner_worth_more_than_the_first_years_money_is_deducted_in_full(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Receipt 150.00 with a 100.00 dinner, a cent paid on the last day of
+    one year and the rest on the first of the next. The two statements
+    together read 149.99 deductible, and the second said no goods or
+    services were provided; the figure is 50.00, the one the letter
+    prints."""
+    from app.services.donor_documents import (
+        NO_GOODS,
+        gift_irs,
+        giving_statement_irs_text,
+        load_gift,
+    )
+
+    _nonprofit(client)
+    donor = seed_customer.id
+    made = _receipt(
+        client,
+        donor,
+        date="2025-12-20",
+        fair_value_amount="100.00",
+        fair_value_description="Dinner",
+    ).json()
+    receipt = made["invoice"]["id"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    _pay(client, donor, "2025-12-31", "0.01", receipt)
+    _pay(client, donor, "2026-01-01", "149.99", receipt)
+
+    first = _statement(db_session, donor, 2025)
+    assert first["totals"] == {
+        "amount": D("0.01"),
+        "fair_value": D("0.01"),
+        "deductible": D("0.00"),
+    }
+    second = _statement(db_session, donor, 2026)
+    assert second["totals"] == {
+        "amount": D("149.99"),
+        "fair_value": D("99.99"),
+        "deductible": D("50.00"),
+    }
+    row = second["cash"][0]
+    assert (row["fair_value_amount"], row["deductible"]) == (D("99.99"), D("50.00"))
+    assert row["fair_value_description"] == "Dinner"
+    # the statement no longer says nothing was given back
+    company = {"company_name": "Riverbend Community Arts"}
+    said = giving_statement_irs_text(company, second["totals"])
+    assert NO_GOODS not in said
+    assert "Deductible column" in said
+    # the two years together are what the letter for the receipt prints
+    db_session.expire_all()
+    letter = gift_irs(company, load_gift(db_session, "invoice", receipt))
+    assert letter["deductible_amount"] == 50.0
+    assert "fair market value of $100.00 (Dinner)" in letter["text"]
+    assert first["totals"]["deductible"] + second["totals"]["deductible"] == D("50.00")
+    assert first["totals"]["fair_value"] + second["totals"]["fair_value"] == D("100.00")
+
+
+def test_a_dinner_is_shared_out_by_the_money_each_year_brought(
+    client, db_session, seed_accounts, seed_customer
+):
+    """60.00 one year and 90.00 the next on a 150.00 receipt with a 100.00
+    dinner: 0.00 and 50.00 deductible, not 0.00 and 90.00. A voided payment
+    covers none of it."""
+    _nonprofit(client)
+    donor = seed_customer.id
+    made = _receipt(client, donor, date="2025-12-20", fair_value_amount="100.00").json()
+    receipt = made["invoice"]["id"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    bounced = _pay(client, donor, "2025-12-22", "150.00", receipt)
+    assert client.post(f"/api/payments/{bounced['id']}/void").status_code == 200
+    _pay(client, donor, "2025-12-28", "60.00", receipt)
+    _pay(client, donor, "2026-01-08", "90.00", receipt)
+
+    assert _statement(db_session, donor, 2025)["totals"] == {
+        "amount": D("60.00"),
+        "fair_value": D("60.00"),
+        "deductible": D("0.00"),
+    }
+    assert _statement(db_session, donor, 2026)["totals"] == {
+        "amount": D("90.00"),
+        "fair_value": D("40.00"),
+        "deductible": D("50.00"),
+    }
+
+
+def test_an_unpaid_receipt_offers_no_acknowledgment_buttons(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The receipt's window offered Acknowledgment (PDF) on a receipt whose
+    payment was voided; the route refuses it, so the button opened a tab of
+    raw JSON. The buttons show only when something has been received, and
+    the window's deductible portion is worked from what was received, as
+    the letter and the statement work it."""
+    _nonprofit(client)
+    made = _receipt(client, seed_customer.id, fair_value_amount="40.00").json()
+    receipt = made["invoice"]["id"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    # what the window reads, and what the button would open
+    shown = client.get(f"/api/invoices/{receipt}").json()
+    assert D(str(shown["amount_paid"])) == D("0.00")
+    pdf = client.get(f"/api/donors/gifts/invoice/{receipt}/acknowledgment/pdf")
+    assert pdf.status_code == 400
+
+    view = (JS / "sales_receipts.js").read_text(encoding="utf-8")
+    buttons = next(ln for ln in view.splitlines() if "Acknowledgment (PDF)" in ln)
+    assert "Number(sr.amount_paid || 0) > 0" in buttons
+    assert "sr.status !== 'void'" in buttons
+    deductible = next(ln for ln in view.splitlines() if "Deductible portion" in ln)
+    assert "sr.total - sr.fair_value_amount" not in deductible
+    assert "sr.amount_paid" in deductible
 
 
 def test_a_receipt_an_import_wrote_with_no_payment_record_still_counts(
