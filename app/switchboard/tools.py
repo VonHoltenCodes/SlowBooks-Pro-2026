@@ -423,6 +423,19 @@ ASK_FIRST = {
             _LINE_FIELD,
         ),
     ),
+    # paid_from_account_id is required by the API, but its absence is not
+    # left to the API's 422: paid_from_hold names the account the app's
+    # form would start at, for the assistant to confirm.
+    "/api/expenses": AskFirst(
+        "an expense",
+        ("date",),
+        (
+            ("Payee or vendor", ("payee", "vendor_id")),
+            ("Paid from account", ("paid_from_account_id",)),
+            ("Memo", ("memo",)),
+            ("Reference (check number)", ("reference",)),
+        ),
+    ),
 }
 
 ASKED_USER = (
@@ -686,7 +699,7 @@ def _defaulted_value(label: str, keys: tuple, answer: dict):
     return ", ".join(f"{k.replace('_', ' ')} {_shown(label, v)}" for k, v in present)
 
 
-def with_left_blank(route: str, data, answer, tax=None):
+def with_left_blank(route: str, data, answer, tax=None, fallbacks=None):
     """A create's answer with left_blank (the rule's fields still empty on
     the record) and defaulted (those the assistant did not give that
     SlowBooks Pro filled with its default: [{label, value}]), and, for a
@@ -700,6 +713,8 @@ def with_left_blank(route: str, data, answer, tax=None):
         if _given(data, keys):
             continue
         value = _defaulted_value(label, keys, record)
+        if value is None and fallbacks:
+            value = fallbacks.get(label)
         if value is None:
             blank.append(label)
         else:
@@ -719,15 +734,202 @@ def with_left_blank(route: str, data, answer, tax=None):
     return {"created": True, "answer": answer, **out}
 
 
+# ---------------------------------------------------------------------------
+# The accounts SlowBooks Pro uses when a record leaves one out. The app finds
+# these by their number in its own registry of control accounts: a control
+# account's number cannot be changed (the app refuses), so the number is the
+# app's own key; the name shown is read from the company's chart, never
+# assumed.
+# ---------------------------------------------------------------------------
+
+MONEY_ROUTES = ("/api/payments", "/api/bill-payments")
+UNDEPOSITED_FUNDS = "1200"  # a payment received with no deposit account
+CHECKING = "1000"  # a bill payment with no pay-from account
+DEFAULT_INCOME = "4000"  # a sales line whose item names no income account
+
+
+def _chart(client: ApiClient) -> list:
+    try:
+        rows = client.get("/api/accounts")
+    except ApiError:
+        return []
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def account_label(row) -> str:
+    """ "4000 - Service Income", or the name alone with no number."""
+    if not isinstance(row, dict):
+        return ""
+    number, name = row.get("account_number"), row.get("name") or ""
+    return f"{number} - {name}" if number else name
+
+
+def _by_id(chart: list, account_id):
+    return next((r for r in chart if r.get("id") == account_id), None)
+
+
+def _control(chart: list, number: str):
+    return next(
+        (
+            r
+            for r in chart
+            if r.get("account_number") == number and r.get("is_control") is not False
+        ),
+        None,
+    )
+
+
+def _first_cogs(chart: list):
+    cogs = [
+        r
+        for r in chart
+        if r.get("account_type") == "cogs" and r.get("is_active") is not False
+    ]
+    cogs.sort(key=lambda r: str(r.get("account_number") or ""))
+    return cogs[0] if cogs else None
+
+
+def default_paid_from(client: ApiClient):
+    """The account the app's Enter Expense form starts at: Settings' default
+    deposit account when it is an active bank account, else the first
+    active one named Checking, else the first bank account; None if none."""
+    chart = _chart(client)
+    banks = [r for r in chart if r.get("bank_kind") and r.get("is_active") is not False]
+    if not banks:  # an older app, or a chart without bank kinds
+        banks = [r for r in chart if r.get("account_number") == CHECKING]
+    try:
+        settings = client.get("/api/settings")
+    except ApiError:
+        settings = {}
+    chosen = ""
+    if isinstance(settings, dict):
+        chosen = str(settings.get("default_deposit_account_id") or "").strip()
+    return (
+        next((r for r in banks if str(r.get("id")) == chosen), None)
+        or next(
+            (r for r in banks if "checking" in str(r.get("name", "")).lower()), None
+        )
+        or (banks[0] if banks else None)
+    )
+
+
+def paid_from_hold(client: ApiClient, route: str, data, tool: str):
+    """An expense without paid_from_account_id is not sent: the answer names
+    the account the app's form would start at, for the assistant to confirm
+    with the user. Asked or not, the account is never guessed."""
+    if route != "/api/expenses" or not isinstance(data, dict):
+        return None
+    if _has(data.get("paid_from_account_id")):
+        return None
+    suggested = default_paid_from(client)
+    out = {
+        "created": False,
+        "ask_first": True,
+        "record": "expense",
+        "empty": [{"label": "Paid from account", "field": "paid_from_account_id"}],
+    }
+    if suggested is not None:
+        label = account_label(suggested)
+        out["suggested"] = {
+            "paid_from_account_id": suggested.get("id"),
+            "account": label,
+        }
+        out["next"] = (
+            "Nothing was created yet: an expense needs the account it was paid "
+            f"from. SlowBooks Pro's form would start at {label}. Ask the user "
+            "whether it was paid from that account or which one, then call "
+            f"{tool} again with paid_from_account_id."
+        )
+    else:
+        out["next"] = (
+            "Nothing was created yet: an expense needs the account it was paid "
+            "from, and the company has no bank account to suggest. Ask the "
+            f"user which account paid it, then call {tool} again with "
+            "paid_from_account_id."
+        )
+    return out
+
+
+def item_fallbacks(client: ApiClient, route: str, data) -> dict:
+    """For a new item that names no income or expense account: what the app
+    posts to instead, as {label: sentence}, read from the chart."""
+    if route != "/api/items" or not isinstance(data, dict):
+        return {}
+    if _has(data.get("income_account_id")) and _has(data.get("expense_account_id")):
+        return {}
+    chart = _chart(client)
+    out = {}
+    income = _control(chart, DEFAULT_INCOME)
+    if income is not None:
+        out["Income Account"] = (
+            f"sales of this item post to {account_label(income)} (SlowBooks "
+            "Pro's default income account) unless you set one"
+        )
+    buying = (
+        "a bill or expense line for it posts to the vendor's default expense "
+        "account; with none, SlowBooks Pro refuses the line until an account "
+        "is chosen"
+    )
+    cogs = _first_cogs(chart)
+    stocked = data.get("item_type") == "product" or data.get("track_inventory") is True
+    if stocked and cogs is not None:
+        buying = (
+            f"the cost of its sales posts to {account_label(cogs)} (the first "
+            f"cost-of-goods account); {buying}"
+        )
+    out["Expense or COGS Account"] = buying
+    return out
+
+
+def money_went(client: ApiClient, route: str, answer):
+    """A payment's answer with where the money went: money_to (the account)
+    and money_note (a sentence to pass on), from the payment and the chart."""
+    if not isinstance(answer, dict) or route not in MONEY_ROUTES:
+        return answer
+    chart = _chart(client)
+    if route == "/api/payments":
+        chosen = answer.get("deposit_to_account_id")
+        if chosen:
+            row = _by_id(chart, chosen)
+            label = account_label(row) or f"account {chosen}"
+            note = f"The payment went into {label}."
+        else:
+            row = _control(chart, UNDEPOSITED_FUNDS)
+            label = account_label(row) or "Undeposited Funds"
+            note = (
+                "No deposit account was given, so SlowBooks Pro holds the "
+                f"payment in {label}: it is not in a bank account yet. It goes "
+                "to the bank when it is put on a bank deposit (Make Deposits)."
+            )
+    else:
+        chosen = answer.get("pay_from_account_id")
+        if chosen:
+            row = _by_id(chart, chosen)
+            label = account_label(row) or f"account {chosen}"
+            note = f"The payment was paid from {label}."
+        else:
+            row = _control(chart, CHECKING)
+            label = account_label(row) or "Checking"
+            note = (
+                "No pay-from account was given, so SlowBooks Pro paid it from "
+                f"{label}, its default bank account."
+            )
+    money_to = {"account_id": row.get("id") if row else chosen, "account": label}
+    return {**answer, "money_to": money_to, "money_note": note}
+
+
 def _create(client: ApiClient, route: str, data, asked_user: bool, tool: str):
+    held = paid_from_hold(client, route, data, tool)
+    if held is not None:
+        return held
     tax = sales_tax(client, route, data)
-    held = None
     if not asked_user and route in ASK_FIRST:
         held = ask_first(route, data, asked_user, tool, body_fields(client, route), tax)
     if held is not None:
         return held
+    fallbacks = item_fallbacks(client, route, data)
     answer = _write(client, route, with_tax_rate(data, tax))
-    return with_left_blank(route, data, answer, tax)
+    return with_left_blank(route, data, answer, tax, fallbacks)
 
 
 def create_customer(client: ApiClient, data: dict, asked_user: bool = False):
@@ -755,10 +957,10 @@ def create_bill(client: ApiClient, data: dict, asked_user: bool = False):
     return _create(client, "/api/bills", data, asked_user, "create_bill")
 
 
-def create_expense(client: ApiClient, data: dict):
+def create_expense(client: ApiClient, data: dict, asked_user: bool = False):
     """Record a paid expense. Required: date, paid_from_account_id, and either
     amount + expense_account_id or lines. api_schema("/api/expenses") has the rest."""
-    return _write(client, "/api/expenses", data)
+    return _create(client, "/api/expenses", data, asked_user, "create_expense")
 
 
 def create_journal_entry(client: ApiClient, data: dict):
@@ -772,7 +974,8 @@ def record_payment(client: ApiClient, data: dict, key: str):
     allocations apply it to invoices (api_schema("/api/payments") has the rest).
     key is required: 1 to 128 characters of A-Z a-z 0-9 _ . : -. The same key
     with the same data books once; the same key with other data is refused."""
-    return _keyed(client, "/api/payments", data, key)
+    answer = _keyed(client, "/api/payments", data, key)
+    return money_went(client, "/api/payments", answer)
 
 
 def record_bill_payment(client: ApiClient, data: dict, key: str):
@@ -780,7 +983,8 @@ def record_bill_payment(client: ApiClient, data: dict, key: str):
     it to bills (api_schema("/api/bill-payments") has the rest). key is
     required: 1 to 128 characters of A-Z a-z 0-9 _ . : -. The same key with the
     same data books once; the same key with other data is refused."""
-    return _keyed(client, "/api/bill-payments", data, key)
+    answer = _keyed(client, "/api/bill-payments", data, key)
+    return money_went(client, "/api/bill-payments", answer)
 
 
 _VOID_PATHS = {

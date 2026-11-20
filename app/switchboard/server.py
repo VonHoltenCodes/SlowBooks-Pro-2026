@@ -255,7 +255,7 @@ def build_registry(client: ApiClient) -> Registry:
             + _REFUSED
             + _ASKS.format(
                 what="A new customer, vendor, item, employee, account, invoice, "
-                "bill, estimate or purchase order"
+                "bill, expense, estimate or purchase order"
             )
             + _TAX.format(what="A new invoice, estimate, sales receipt or credit memo"),
             path=_WRITE_PATH,
@@ -289,9 +289,11 @@ def build_registry(client: ApiClient) -> Registry:
             operations.delete_operation,
             ONCE_WRITE,
             "DELETE through one operation of " + _API + ", as the token, and "
-            "return the API's answer: remove a record such as a customer, an "
-            "item or a rule. Posted documents are voided with post_operation "
-            "instead; the API answers a DELETE on one with the void route." + _REFUSED,
+            "return the API's answer: remove a record, or, where SlowBooks Pro "
+            "keeps its history (a customer, vendor or item), make it inactive; "
+            "the answer's result says which (deleted or deactivated). Posted "
+            "documents are voided with post_operation instead; the API answers "
+            "a DELETE on one with the void route." + _REFUSED,
             path=_WRITE_PATH,
             params=_PARAMS,
         )
@@ -313,7 +315,10 @@ def build_registry(client: ApiClient) -> Registry:
          "A bill"),
         ("create_expense", "Record an expense", tools.create_expense,
          ("Record a paid expense. Required: date, paid_from_account_id, and "
-          "either amount with expense_account_id or lines."), None),
+          "either amount with expense_account_id or lines. Without "
+          "paid_from_account_id nothing is sent: the answer suggests the "
+          "account the app's form starts at, to confirm with the user."),
+         "An expense"),
         ("create_journal_entry", "Post a journal entry",
          tools.create_journal_entry,
          ("Post a manual journal entry. Required: date, description and "
@@ -342,8 +347,10 @@ def build_registry(client: ApiClient) -> Registry:
             tools.record_payment,
             KEYED_WRITE,
             "Record a customer's payment. Required data: customer_id, date and "
-            "amount; allocations apply it to invoices. A retry with the same "
-            "key and data books it once.",
+            "amount; allocations apply it to invoices. Without "
+            "deposit_to_account_id it waits in Undeposited Funds until a bank "
+            "deposit; the answer's money_note says where the money went: pass "
+            "it on. A retry with the same key and data books it once.",
             data=_DATA,
             key=_KEY,
         )
@@ -355,8 +362,9 @@ def build_registry(client: ApiClient) -> Registry:
             tools.record_bill_payment,
             KEYED_WRITE,
             "Pay a vendor. Required data: vendor_id, date and amount; "
-            "allocations apply it to bills. A retry with the same key and data "
-            "books it once.",
+            "allocations apply it to bills. Without pay_from_account_id it is "
+            "paid from the default bank account; the answer's money_note says "
+            "which. A retry with the same key and data books it once.",
             data=_DATA,
             key=_KEY,
         )

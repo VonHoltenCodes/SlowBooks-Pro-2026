@@ -602,9 +602,15 @@ def post_operation(
             template = lookup(client, "post", path)[1]
         except ValueError:
             template = None  # _send says what is wrong
+    if template in tools.MONEY_ROUTES:
+        answer = _send(client, "post", path, params, body, idempotency_key)
+        return tools.money_went(client, template, answer)
     if template in tools.ASK_FIRST or template in tools.SALES_TAX_ROUTES:
+        held = tools.paid_from_hold(client, template, body, "post_operation")
+        if held is not None:
+            build_request(client, "post", path, params, body, idempotency_key)
+            return held
         tax = tools.sales_tax(client, template, body)
-        held = None
         if template in tools.ASK_FIRST:
             held = tools.ask_first(
                 template,
@@ -617,9 +623,10 @@ def post_operation(
         if held is not None:
             build_request(client, "post", path, params, body, idempotency_key)
             return held
+        fallbacks = tools.item_fallbacks(client, template, body)
         sent = tools.with_tax_rate(body, tax)
         answer = _send(client, "post", path, params, sent, idempotency_key)
-        return tools.with_left_blank(template, body, answer, tax)
+        return tools.with_left_blank(template, body, answer, tax, fallbacks)
     return _send(client, "post", path, params, body, idempotency_key)
 
 
@@ -650,5 +657,28 @@ def update_operation(
 
 
 def delete_operation(client: ApiClient, path: str, params: dict | None = None):
-    """DELETE through one API operation: remove a record."""
-    return _send(client, "delete", path, params, None, None)
+    """DELETE through one API operation: remove a record, or, where
+    SlowBooks Pro keeps history (customers, vendors, items), make it
+    inactive. The answer's result says which, from the app's own answer."""
+    answer = _send(client, "delete", path, params, None, None)
+    outcome = delete_outcome(answer)
+    if outcome is None:
+        return answer
+    return {**answer, "result": outcome}
+
+
+def delete_outcome(answer):
+    """ "deactivated" or "deleted" as the app's answer says it, else None
+    (the answer is passed on as it is)."""
+    if not isinstance(answer, dict):
+        return None
+    if answer.get("deleted") is True:
+        return "deleted"
+    words = " ".join(
+        str(answer.get(k)) for k in ("message", "status") if answer.get(k)
+    ).lower()
+    if "deactivat" in words or "inactive" in words:
+        return "deactivated"
+    if "delete" in words or "removed" in words:
+        return "deleted"
+    return None
