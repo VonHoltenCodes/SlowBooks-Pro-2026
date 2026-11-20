@@ -83,7 +83,7 @@ def test_on_this_machine_unfrozen_it_does_nothing(monkeypatch):
 
 def _contexts():
     """The TLS context of each outbound HTTPS caller, built as it builds it."""
-    from app.services import ai_service
+    from app.services import ai_service, email_service
     from app.services.payments import _http
     from app.switchboard import account, client, ws
 
@@ -97,6 +97,8 @@ def _contexts():
         "switchboard line (ws)": ws._verified(None),
         # fx_service's urlopen with no context: urllib's default
         "currency rate (urlopen)": ssl._create_default_https_context(),
+        # STARTTLS to the mail server (send_email, the test email)
+        "outgoing mail (SMTP)": email_service.smtp_tls_context(),
     }
     for name, made in (
         ("AI Insights", ai_service._hardened_client(5)),

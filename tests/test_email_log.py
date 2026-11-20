@@ -5,6 +5,7 @@ a log with no UI."""
 from datetime import datetime, timedelta
 
 import smtplib
+import ssl
 
 import pytest
 
@@ -157,7 +158,16 @@ class _FakeSMTP:
     def __init__(self, *a, **k):
         pass
 
-    def starttls(self):
+    def ehlo_or_helo_if_needed(self):
+        pass
+
+    def has_extn(self, name):
+        return name == "starttls"
+
+    def starttls(self, context=None):
+        assert context.verify_mode == ssl.CERT_REQUIRED
+
+    def ehlo(self):
         pass
 
     def login(self, user, password):

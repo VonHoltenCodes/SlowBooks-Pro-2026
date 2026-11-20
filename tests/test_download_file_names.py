@@ -14,6 +14,7 @@ the exact name and ``filename="…"`` an ASCII stand-in.
 import email
 import re
 import smtplib
+import ssl
 from urllib.parse import unquote
 
 import pytest
@@ -211,7 +212,16 @@ def test_an_emailed_statement_keeps_the_customers_name(
         def __init__(self, *a, **k):
             pass
 
-        def starttls(self):
+        def ehlo_or_helo_if_needed(self):
+            pass
+
+        def has_extn(self, name):
+            return name == "starttls"
+
+        def starttls(self, context=None):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+
+        def ehlo(self):
             pass
 
         def login(self, *a):
