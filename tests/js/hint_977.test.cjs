@@ -18,6 +18,7 @@ function load() {
             getElementById: (id) => nodes[id] || null,
         },
         escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
+        setTimeout,
     };
     vm.createContext(context);
     const js = fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8');
@@ -53,10 +54,14 @@ test('the button names its field, and its text is in the page though hidden', ()
     const { context } = load();
     const html = context.hint('Optional. Separate addresses with commas.', 'CC');
     assert.match(html, /<button type="button" class="hint-icon" data-hint aria-label="About CC" aria-expanded="false"/);
-    const id = /aria-controls="(hint-\d+)"/.exec(html)[1];
-    assert.ok(html.includes(`aria-describedby="${id}"`));
-    assert.ok(html.includes(`<span class="hint-pop" id="${id}" role="note" hidden>`));
-    assert.ok(html.includes('<strong class="hint-pop-title">CC</strong>Optional. Separate addresses with commas.'));
+    const id = /aria-describedby="(hint-\d+)"/.exec(html)[1];
+    // the note opens from aria-controls; its text (no role, so WebKit
+    // describes from it, NEW-263) describes the button, and names the note
+    // while it is open
+    assert.ok(html.includes(`aria-controls="${id}-note" aria-describedby="${id}"`));
+    assert.ok(html.includes(`<span class="hint-pop" id="${id}-note" role="note" tabindex="-1" hidden>`));
+    assert.ok(html.includes(`<span class="hint-pop-body" id="${id}">`));
+    assert.ok(html.includes('<strong class="hint-pop-title">CC</strong> Optional. Separate addresses with commas.'));
     // the whole tortoise on the button and, larger, heading the note
     assert.ok(html.includes('src="/static/img/tortoise-hint.png"') && html.includes('src="/static/img/tortoise-info.png"'));
     assert.equal((html.match(/alt="" aria-hidden="true"/g) || []).length, 2);
@@ -128,6 +133,52 @@ test('Tab out closes it; focus moving within it does not', () => {
     assert.equal(one.note.hidden, true);
 });
 
+// W-189: Tab from the page's last control leaves the page (or wraps to its
+// top) and focusout carries no relatedTarget; where focus went is looked at
+// once the move is over
+test('focus leaving with no relatedTarget closes it once focus is outside', async () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    env.context.document.activeElement = { tagName: 'A', id: 'skip-link' };
+    env.listeners.focusout[0]({ relatedTarget: null });
+    assert.equal(one.note.hidden, false, 'not before the move is over');
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(one.note.hidden, true);
+});
+
+test('no relatedTarget but focus still in the note (the window lost focus): it stays open', async () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    env.context.document.activeElement = one.note;
+    env.listeners.focusout[0]({ relatedTarget: null });
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(one.note.hidden, false);
+});
+
+// NEW-263: a field's note takes focus as it opens, so VoiceOver reads it;
+// closing it from inside puts focus back on its button
+test("a field's note takes focus as it opens and gives it back as it closes", () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    let focused = 0;
+    const noteAttrs = { tabindex: '-1' };
+    one.note.getAttribute = (k) => noteAttrs[k] ?? null;
+    one.note.setAttribute = (k, v) => { noteAttrs[k] = v; };
+    one.note.removeAttribute = (k) => { delete noteAttrs[k]; };
+    one.attrs['aria-describedby'] = 'hint-a-text';
+    one.note.focus = () => { focused += 1; env.context.document.activeElement = one.note; };
+    one.note.contains = (el) => el === one.note;
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    assert.equal(focused, 1);
+    assert.equal(noteAttrs['aria-labelledby'], 'hint-a-text', 'named by its text while open');
+    env.listeners.click[0]({ target: { closest: () => null } });
+    assert.equal(one.note.hidden, true);
+    assert.equal(noteAttrs['aria-labelledby'], undefined);
+    assert.equal(one.button.focused, true);
+});
+
 test('a note near the right edge is moved in to stay inside the window', () => {
     // the placement itself is tested in hint_placement_977.test.cjs
     const env = load();
@@ -150,8 +201,9 @@ test('nothing opens on hover: only click, keydown and focusout are listened for'
 test('a hint can carry the id a field already names with aria-describedby', () => {
     const { context } = load();
     const html = context.hint('A line this rule matches is added for this vendor.', 'Vendor', 'bank-rule-vendor-hint');
-    assert.ok(html.includes('<span class="hint-pop" id="bank-rule-vendor-hint" role="note" hidden>'));
-    assert.ok(html.includes('aria-controls="bank-rule-vendor-hint" aria-describedby="bank-rule-vendor-hint"'));
+    assert.ok(html.includes('<span class="hint-pop" id="bank-rule-vendor-hint-note" role="note" tabindex="-1" hidden>'));
+    assert.ok(html.includes('<span class="hint-pop-body" id="bank-rule-vendor-hint">'));
+    assert.ok(html.includes('aria-controls="bank-rule-vendor-hint-note" aria-describedby="bank-rule-vendor-hint"'));
     // without one the ids still count on, and never repeat a named one
     const a = context.hint('One.');
     const b = context.hint('Two.', '', '');
@@ -171,7 +223,7 @@ test('setText swaps a note body and keeps the field name at its head', () => {
     };
     env.nodes['vendor-bank-rule-hint'] = { querySelector: (sel) => (sel === '.hint-pop-body' ? body : null) };
     env.context.Hints.setText('vendor-bank-rule-hint', 'Choose the default account first.');
-    assert.deepEqual(body.children, [head, 'Choose the default account first.']);
+    assert.deepEqual(body.children, [head, ' Choose the default account first.']);
     // an id not on the page is no error
     env.context.Hints.setText('nowhere', 'x');
 });

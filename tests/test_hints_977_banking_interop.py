@@ -306,7 +306,7 @@ def test_the_csv_page_sections_and_migrate_data():
 def test_the_import_columns_follow_the_entity_type_inside_its_note():
     src = _src("app.js")
     help_ = _method(src, "    csvImportHelp(entity) {")
-    assert "$('#csv-import-help .hint-pop-body')" in help_
+    assert "$('#csv-import-help')" in help_  # the note's text carries hint()'s id
     assert "body.innerHTML = App._csvImportHelpHtml(entity);" in help_
     assert "body.insertBefore(head, body.firstChild)" in help_
     assert (

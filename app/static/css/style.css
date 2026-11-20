@@ -2827,6 +2827,8 @@ tr.clickable { cursor: pointer; }
     text-shadow: none; cursor: auto;
 }
 .hint-pop[hidden] { display: none; }
+/* a field's note takes focus as it opens (NEW-263): the ring shows it from the keyboard */
+.hint-pop:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .hint-pop-mark { flex: 0 0 auto; }
 .hint-pop-title { display: block; margin-bottom: 2px; }
 
