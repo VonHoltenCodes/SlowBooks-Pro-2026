@@ -2329,15 +2329,22 @@ const ReportsPage = {
         // counts when it is paid, in the proportion paid
         const basisOpts = ReportsPage._basisOpts(prefill);
         await ReportsPage.openPeriodModal(T("Income by Customer"), ReportsPage.defaultPeriod(), async (_period, range, p) => {
-            const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}${ReportsPage._basisQs(p)}`);
-            // Sales before tax, the tax beside it; Paid includes money not
-            // yet applied to an invoice, and Balance is net of it.
-            // A customer's name opens the customer's page (R9)
+            // the basis rides on the PDF and the CSV too (W-197)
+            const qs = `start_date=${range.start}&end_date=${range.end}${ReportsPage._basisQs(p)}`;
+            const data = await API.get(`/reports/income-by-customer?${qs}`);
+            // Sales is income only, before tax; a line on an item that posts
+            // to a balance-sheet account (a security deposit) is Not income,
+            // a column shown only when the period has one (W-195). Paid
+            // includes money not yet applied to an invoice, and Balance is
+            // net of it. A customer's name opens the customer's page (R9)
+            const other = !!data.total_other || data.items.some(i => i.total_other);
+            const otherCell = (v) => other ? `<td class="amount">${formatCurrency(v || 0)}</td>` : '';
             let rows = data.items.map(i =>
                 `<tr>
                     <td>${i.customer_id ? ReportsPage._rowLink(`ReportsPage.openCustomer(${i.customer_id}, this)`, i.customer_name, `customer:${i.customer_id}`) : escapeHtml(i.customer_name)}</td>
                     <td class="amount">${i.invoice_count}</td>
                     <td class="amount">${formatCurrency(i.total_sales)}</td>
+                    ${otherCell(i.total_other)}
                     <td class="amount">${formatCurrency(i.total_tax || 0)}</td>
                     <td class="amount">${formatCurrency(i.total_paid)}</td>
                     <td class="amount">${formatCurrency(i.total_balance)}</td>
@@ -2347,15 +2354,20 @@ const ReportsPage = {
                 <td>TOTAL</td>
                 <td class="amount">${data.items.reduce((sum, item) => sum + item.invoice_count, 0)}</td>
                 <td class="amount">${formatCurrency(data.total_sales)}</td>
+                ${otherCell(data.total_other)}
                 <td class="amount">${formatCurrency(data.total_tax || 0)}</td>
                 <td class="amount">${formatCurrency(data.total_paid)}</td>
                 <td class="amount">${formatCurrency(data.total_balance)}</td>
             </tr>`;
-            return `
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}</p>
+            const otherHead = other
+                ? `<th scope="col" class="amount">Not income ${hint(escapeHtml(Terms.text('What was billed on an item that posts to a balance-sheet account, such as a security deposit. It is owed, but it is not a sale, so it is not in Sales or on the Profit & Loss.')), 'Not income')}</th>`
+                : '';
+            const cols = other ? 7 : 6;
+            return `${ReportsPage._exportButtons('income-by-customer', qs)}
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. ${hint(escapeHtml(Terms.text('Sales is what was sold, before tax, and ties to the income on the Profit & Loss for the same dates. On the accrual basis a credit memo takes its credit off Sales on its date.')), T('Income by Customer'))}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th>${otherHead}<th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
+                    <tbody>${rows || `<tr><td colspan="${cols}" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>`}</tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null, ...basisOpts.params }, prefill, toolbar: basisOpts.toolbar });
     },
@@ -2475,7 +2487,7 @@ const ReportsPage = {
     // existing openers (bank_register._LINKS): an invoice at #/invoices/<id>,
     // a credit memo at #/credit-memos/<id>, a bill at #/bills/<id>, a vendor
     // credit at #/vendor-credits/<id>.
-    _ITEM_DOC: { invoice: '#/invoices/', credit_memo: '#/credit-memos/', bill: '#/bills/', vendor_credit: '#/vendor-credits/' },
+    _ITEM_DOC: { invoice: '#/invoices/', credit_memo: '#/credit-memos/', bill: '#/bills/', vendor_credit: '#/vendor-credits/', payment: '#/payments/' },
 
     // start/end plus whichever narrowing params the report carries.
     _itemQs(range, p, idKey) {
@@ -2510,8 +2522,8 @@ const ReportsPage = {
                 <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(l.doc_type)} ${escapeHtml(l.number || '')}</a></td>
                 <td>${escapeHtml(l.party || '')}</td>
                 <td>${escapeHtml(l.description || '')}</td>
-                <td class="amount">${l.quantity}</td>
-                <td class="amount">${formatCurrency(l.rate)}</td>
+                <td class="amount">${l.quantity === null || l.quantity === undefined ? '' : l.quantity}</td>
+                <td class="amount">${l.rate === null || l.rate === undefined ? '' : formatCurrency(l.rate)}</td>
                 <td class="amount">${formatCurrency(l.amount)}</td>
             </tr>`;
         }).join('');
@@ -2558,6 +2570,19 @@ const ReportsPage = {
                     <td class="amount">${pct(i.margin_pct)}</td>
                 </tr>`;
             }).join('');
+            // cash basis: money received and not applied to an invoice yet,
+            // income on the cash P&L that no item sold, on its own row in
+            // the total (W-194)
+            if (data.unapplied_amount !== null && data.unapplied_amount !== undefined) {
+                const open = escapeHtml(`ReportsPage.openItemLines('sales', 'unapplied', ${JSON.stringify(data.unapplied_label)}, ${JSON.stringify(qs)})`);
+                rows += `<tr class="sbi-unapplied">
+                    <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(data.unapplied_label)}</a>
+                        ${hint(escapeHtml(Terms.text('Money a customer paid that is not applied to an invoice yet. The cash Profit & Loss counts it as income on the day it came in, and no item sold it, so it has a row of its own.')), data.unapplied_label)}</td>
+                    <td></td><td class="amount"></td>
+                    <td class="amount">${formatCurrency(data.unapplied_amount)}</td>
+                    <td class="amount"></td><td class="amount"></td><td class="amount"></td><td class="amount"></td>
+                </tr>`;
+            }
             rows += `<tr style="font-weight:700; background:var(--gray-50);">
                 <td>TOTAL</td><td></td>
                 <td class="amount">${data.total_quantity}</td>

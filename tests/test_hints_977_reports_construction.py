@@ -337,7 +337,9 @@ FACTS = [
 ]
 
 # tortoises each file ends up with, all from the lines above
-TORTOISES = {"reports.js": 22, "jobs.js": 8, "job_costs.js": 3}
+# reports.js 25 since round 22 (W-194, W-195, W-198): Sales by Item's
+# unapplied row, Income by Customer's header line and its Not income column
+TORTOISES = {"reports.js": 25, "jobs.js": 8, "job_costs.js": 3}
 
 
 def _src(name):
