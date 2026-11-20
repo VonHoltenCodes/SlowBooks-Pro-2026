@@ -639,7 +639,8 @@ jobs:
           # (test_pdf_last_page_w187_w188.py) and one Chromium module (test_print_last_sheet_w187_browser.py).
           # 399 + 8 would be 407; the shards of the integrated tree measured 406
           # (CI 44659250827: 283 + 57 + 66), so one skip went away in the same batch.
-          MAX_SKIPS: "406"
+          # 407 with round 22's tortoise notes (#1123 #1124): test_browser_hints_r22.py, one module without playwright.
+          MAX_SKIPS: "407"
         run: |
           total=0
           for f in shards/*/skips.txt; do

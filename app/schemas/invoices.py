@@ -14,6 +14,7 @@ from pydantic import (
 from app.models.invoices import InvoiceStatus
 from app.schemas.common import (
     StrictModel,
+    NewTaxRate,
     TaxRate,
     TaxRateOut,
     check_line_fits,
@@ -128,7 +129,7 @@ class InvoiceCreate(StrictModel):
     # The Ship To's country; left out, the customer's ship country, as a
     # ship street left out is the customer's (2.31.1 gate, round 3).
     ship_to_country: Optional[str] = Field(None, max_length=100)
-    tax_rate: TaxRate = Decimal("0")
+    tax_rate: NewTaxRate = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None

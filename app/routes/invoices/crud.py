@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
+from app.services.settings_service import default_sales_tax_rate
 from app.database import get_db
 from app.routes._helpers import clamp_pagination, reject_null_updates
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
@@ -194,6 +195,10 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     # (#864); on, no line is taxed
     exempt = settle_tax_exempt(db, data.tax_exempt, customer, data.job_id)
     resolve_line_taxable(db, data.lines, customer, exempt)
+    # No rate sent: the company's Default Tax Rate, as the form starts one
+    # (#1129); a rate sent, 0 included, is kept.
+    if data.tax_rate is None:
+        data.tax_rate = default_sales_tax_rate(db)
     subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
     confirm_zero_total(total, data.allow_zero_total, noun)
     _check_fair_value(data.fair_value_amount, total)

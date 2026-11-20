@@ -191,6 +191,9 @@ class ComboBox {
             const v = sel.getAttribute(a);
             if (v) box.setAttribute(a, v);
         }
+        // the label's own words, set apart from its tortoise (Hints.nameFields,
+        // NEW-263), name the box alone: the select is out of sight
+        if (/^hint-name-/.test(sel.getAttribute('aria-labelledby') || '')) sel.removeAttribute('aria-labelledby');
         // and its marks: a sign-in that can't write (or isn't the
         // administrator) gets the box locked, as it got the select
         for (const a of ['data-write', 'data-admin', 'data-readonly-ok']) {

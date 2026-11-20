@@ -2098,12 +2098,10 @@ const SettingsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    // A field's hint (#977) whose note keeps the id the field (and the
-    // tests) already point at: hint() makes its own id, swapped here.
+    // A field's hint (#977) whose text keeps the id the field (and the
+    // tests) already point at with aria-describedby.
     _hintWithId(text, about, id) {
-        const html = hint(text, about);
-        const made = /aria-controls="([^"]+)"/.exec(html);
-        return made ? html.split('"' + made[1] + '"').join('"' + id + '"') : html;
+        return hint(text, about, id);
     },
 
     // Invite your accountant (#345): a sign-in with a one-time password
