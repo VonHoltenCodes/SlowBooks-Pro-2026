@@ -124,3 +124,70 @@ def test_the_rule_form_shows_and_sends_the_vendor(browser):
         assert "NT Suites" in page.locator("td").all_inner_texts()
     finally:
         page.close()
+
+
+def test_the_rule_form_refuses_a_pattern_of_stars_and_says_a_star_in_words(browser):
+    """W-193 and NEW-259 in the window: a pattern of only `*` is refused in
+    the server's sentence before anything is sent; typed, a pattern with a
+    star says how it reads, and the list says it under the pattern."""
+    sent = []
+    square = {
+        "id": 4,
+        "name": "Square",
+        "pattern": "SQ \\*",
+        "account_id": 2,
+        "vendor_id": None,
+        "class_id": None,
+        "job_id": None,
+        "customer_id": None,
+        "memo": None,
+        "rule_type": "contains",
+        "priority": 0,
+        "is_active": True,
+        "created_at": "2026-11-01T00:00:00",
+        "account_name": "6200 - Rent",
+    }
+
+    def _rules(route):
+        if route.request.method == "POST":
+            sent.append(route.request.post_data_json)
+            return route.fulfill(status=201, json=square)
+        return route.fulfill(json=[square])
+
+    page = _open(browser, 1280, 800, "#/")
+    try:
+        page.route("**/api/accounts*", lambda r: r.fulfill(json=ACCOUNTS))
+        page.route("**/api/vendors*", lambda r: r.fulfill(json=[VENDOR]))
+        page.route("**/api/bank-rules", _rules)
+        page.evaluate("() => BankRulesPage.showForm()")
+        page.wait_for_selector("#bank-rule-pattern")
+        page.fill("#modal-body input[name=name]", "Star")
+        page.fill("#bank-rule-pattern", " * ")
+        page.click("#modal-body button[type=submit]")
+        page.wait_for_selector(".toast-error")
+        sentence = page.evaluate("() => BankRulesPage.PATTERN_EMPTY")
+        assert page.inner_text(".toast-error") == sentence
+        assert (
+            page.evaluate(
+                "() => document.getElementById('bank-rule-pattern').validationMessage"
+            )
+            == sentence
+        )
+        assert sent == []
+        # the tortoise holds the teaching; the reading is in the open
+        assert (
+            page.locator("#bank-rule-pattern-hint")
+            .text_content()
+            .count("stands for anything")
+            == 1
+        )
+        page.fill("#bank-rule-pattern", "SQ \\*")
+        assert page.inner_text("#bank-rule-pattern-reads") == "Reads: “SQ *”"
+        page.click("#modal-body button[type=submit]")
+        page.wait_for_function("() => document.querySelector('.toast-success')")
+        assert sent[-1]["pattern"] == "SQ \\*"
+        page.goto(page.url.split("#")[0] + "#/bank-rules")
+        page.wait_for_selector(".rule-pattern-reads")
+        assert page.inner_text(".rule-pattern-reads") == "Reads: “SQ *”"
+    finally:
+        page.close()

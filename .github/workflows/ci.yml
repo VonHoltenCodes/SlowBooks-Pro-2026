@@ -635,7 +635,10 @@ jobs:
           # 398 with the shards (#1095), unchanged: the sum of the shards' counts.
           # 399 with the sidebar fold's browser test (#978, test_sidebar_fold_browser.py:
           # one module without playwright), which landed on main without its line here.
-          MAX_SKIPS: "399"
+          # 407 with round 22's documents (#1120 #1121 #1122): seven WeasyPrint cases
+          # (test_pdf_last_page_w187_w188.py) and one Chromium module (test_print_last_sheet_w187_browser.py);
+          # main counted them from 398 as 406, without #978's module.
+          MAX_SKIPS: "407"
         run: |
           total=0
           for f in shards/*/skips.txt; do

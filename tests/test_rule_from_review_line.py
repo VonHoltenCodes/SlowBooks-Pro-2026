@@ -80,7 +80,9 @@ def test_the_review_row_hands_the_payee_and_category_to_the_rule_form():
     fn = banking[banking.index("async ruleFromLine(lineId, accountId) {") :]
     fn = fn[: fn.index("\n    },")]
     assert "BankRulesPage.showForm(null, {" in fn
-    assert "pattern: payee," in fn and "account_id: accountChosen" in fn
+    # the payee as written: a star the bank prints is a star (NEW-259)
+    assert "pattern: BankRulesPage.escapePattern(payee)," in fn
+    assert "account_id: accountChosen" in fn
     assert "API.post('/bank-rules/apply')" in fn and "App.refresh();" in fn
     rules = open("app/static/js/bank_rules.js", encoding="utf-8").read()
     assert "async showForm(id = null, prefill = null)" in rules

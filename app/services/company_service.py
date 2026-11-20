@@ -254,10 +254,11 @@ def _below_floor_note(filename: str) -> str | None:
     if path is None or not path.exists():
         return None
     try:
-        from app.services.migration_floor import file_problem
+        from app.services.migration_floor import file_refusal
 
-        # a plain file only: an encrypted one says so when it is opened
-        return file_problem(path, resolve_key=False)
+        # a plain file only: an encrypted one says so when it is opened; a
+        # file a newer SlowBooks Pro last opened is said the same way (W-186)
+        return file_refusal(path, resolve_key=False)
     except Exception:
         logger.exception("Could not read the migration state of %s", filename)
         return None
