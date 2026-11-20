@@ -618,16 +618,17 @@ def launch_company(
         except company_file.CompanyFileLocked as exc:
             raise RuntimeError(str(exc)) from exc
 
-    # A file from before 2.29.0 is not migrated by this build (#769): read
-    # as it lies, refused with one sentence before anything opens it
-    # writable or remembers it as the last company, and recorded where the
-    # wait for the server reads its reasons.
+    # A file from before 2.29.0 (#769), or one last opened by a newer
+    # SlowBooks Pro (W-186), is not migrated by this build: read as it
+    # lies, refused with one sentence before anything opens it writable or
+    # remembers it as the last company, and recorded where the wait for the
+    # server reads its reasons.
     from app.services import migration_floor, startup_progress
 
-    too_old = migration_floor.file_problem(db_path, key)
-    if too_old:
-        startup_progress.refuse(too_old, startup_progress_path())
-        raise migration_floor.BelowMigrationFloor(too_old)
+    refused = migration_floor.file_refusal(db_path, key)
+    if refused:
+        startup_progress.refuse(refused, startup_progress_path())
+        migration_floor.refuse(refused)
 
     # A second launch while the app is already open would lose the fight
     # for the port and fail confusingly -- say what's actually wrong.
@@ -3016,9 +3017,9 @@ def _migrate_other_companies(started: str, output=None) -> list[str]:
                 continue
         from app.services import migration_floor
 
-        too_old = migration_floor.file_problem(db_path, key)
-        if too_old:  # #769: from before 2.29.0, left as it is
-            print(f"WARNING: {filename} is not served. {too_old}")
+        refused = migration_floor.file_refusal(db_path, key)
+        if refused:  # from before 2.29.0 (#769) or a newer build's (W-186)
+            print(f"WARNING: {filename} is not served. {refused}")
             skipped.append(filename)
             continue
         try:

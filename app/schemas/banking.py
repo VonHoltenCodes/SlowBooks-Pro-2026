@@ -264,8 +264,9 @@ class FeedLinePicks(StrictModel):
     customer_id: Optional[int] = None
     # a name typed that is no vendor's: the entry's payee, as text
     payee: Optional[str] = None
-    # the memo typed on the row (#1049)
-    memo: Optional[str] = Field(default=None, max_length=500)
+    # the memo typed on the row (#1049); its length is checked in words by
+    # the route (W-191)
+    memo: Optional[str] = None
 
 
 class FeedAddAll(StrictModel):
@@ -304,7 +305,8 @@ class StatementReceivePayment(StrictModel):
     customer_id: int
     allocations: list[FeedInvoiceApplied] = Field(default_factory=list, max_length=500)
     class_id: Optional[int] = None
-    memo: Optional[str] = Field(default=None, max_length=500)
+    # checked in words by the route (W-191)
+    memo: Optional[str] = None
 
 
 class StatementPayBills(StrictModel):
@@ -315,7 +317,8 @@ class StatementPayBills(StrictModel):
     vendor_id: int
     allocations: list[FeedBillApplied] = Field(default_factory=list, max_length=500)
     class_id: Optional[int] = None
-    memo: Optional[str] = Field(default=None, max_length=500)
+    # checked in words by the route (W-191)
+    memo: Optional[str] = None
 
 
 class StatementPayout(StrictModel):
@@ -351,8 +354,9 @@ class StatementCategory(StrictModel):
     customer_id: Optional[int] = None
     # a name typed that is no vendor's: the entry's payee, as text
     payee: Optional[str] = Field(default=None, max_length=200)
-    # the memo typed on the row (#1049): the entry's memo
-    memo: Optional[str] = Field(default=None, max_length=500)
+    # the memo typed on the row (#1049): the entry's memo; its length is
+    # checked in words by the route (W-191)
+    memo: Optional[str] = None
 
 
 class ReconciliationCreate(StrictModel):

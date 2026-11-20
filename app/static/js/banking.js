@@ -1855,8 +1855,26 @@ const BankingPage = {
         }
         // the entry's memo (#1049), kept on the line like the rest; where
         // none was typed, the memo the line's bank rule gives it (#1075)
-        html += `<input type="text" id="rv-memo-${t.id}" class="review-memo" data-write maxlength="500" autocomplete="off" aria-label="Memo, line ${t.id}" placeholder="Memo" value="${escapeHtml(t.pick_memo || t.rule_memo || '')}" style="${small}" ${save}>`;
+        // At most MEMO_MAX characters, as the server keeps (W-191); near
+        // the limit the count shows under it.
+        const memo = t.pick_memo || t.rule_memo || '';
+        html += `<input type="text" id="rv-memo-${t.id}" class="review-memo" data-write maxlength="${BankingPage.MEMO_MAX}" autocomplete="off" aria-label="Memo, line ${t.id}" aria-describedby="rv-memo-count-${t.id}" placeholder="Memo" value="${escapeHtml(memo)}" style="${small}" ${save} oninput="BankingPage.memoCount(this, ${t.id})">`;
+        html += `<span id="rv-memo-count-${t.id}" class="review-memo-count" aria-live="polite">${BankingPage.memoCountText(memo.length)}</span>`;
         return `<td><div style="display:grid; gap:2px;">${html}</div></td>`;
+    },
+
+    // The most a To review memo holds: the server's MEMO_MAX (W-191).
+    MEMO_MAX: 500,
+
+    // "487 of 500 characters" once a memo is within 50 of the limit, else
+    // nothing.
+    memoCountText(n) {
+        return n >= BankingPage.MEMO_MAX - 50 ? `${n} of ${BankingPage.MEMO_MAX} characters` : '';
+    },
+
+    memoCount(input, lineId) {
+        const out = document.getElementById(`rv-memo-count-${lineId}`);
+        if (out) out.textContent = BankingPage.memoCountText(input.value.length);
     },
 
     // The bar above the To review list (#1053): what it holds is set on
@@ -1962,8 +1980,9 @@ const BankingPage = {
     },
 
     // Add selected (#1053): the ticked lines, after the bar's choices are
-    // set on them, each with its own row's picks; a line that cannot post
-    // (no category yet) is named in the toast, not passed over.
+    // set on them, each with its own row's picks; each line that cannot
+    // post (no category yet) is named in the toast with its reason, as a
+    // warning, and stays ticked (W-190).
     async addSelected(feedId, accountId) {
         const ids = BankingPage._tickedIds();
         if (!ids.length) { toast('Tick the lines to add first: the box at the start of each row.', 'error'); return; }
@@ -1976,13 +1995,45 @@ const BankingPage = {
             const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`, { line_ids: ids, lines: picked });
             const skipped = new Set(r.skipped.map(x => x.id));
             const outside = BankingPage._outsideFilterAll(ids.filter(id => !skipped.has(id) && lines[id]).map(id => String(lines[id].date || '')));
-            const said = `Added ${r.added} of ${ids.length} ticked${r.skipped.length ? `; not added ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`;
-            toast(outside ? `${said}. ${outside}` : said, r.added ? undefined : 'error');
-            BankingPage._backToRegister(accountId);
+            const notAdded = BankingPage._notAddedText(r.skipped, lines);
+            const said = `Added ${r.added} of ${ids.length} ticked.${notAdded ? ` ${notAdded}` : ''}`;
+            // a line left out is a warning, not a success (W-190)
+            toast(outside ? `${said} ${outside}` : said, !r.added ? 'error' : (r.skipped.length ? 'warning' : undefined));
+            await BankingPage._backToRegister(accountId);
+            // the lines not added stay ticked, to be fixed and added again
+            BankingPage._tickAgain(r.skipped.map(x => x.id));
             const typed = Object.fromEntries(picked.filter(p => p.payee).map(p => [p.id, p.payee]));
             BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id])
                 .filter(Boolean).map(t => (typed[t.id] ? { ...t, payee: typed[t.id] } : t)));
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Each line Add selected or Add all did not add, named by its date,
+    // the bank's text and its amount, with its own reason (W-190): "Not
+    // added: Oct 3, 2026, BETA HOMES CHECK, $120.00: Pick a category …".
+    // '' when every line was added.
+    _notAddedText(skipped, lines = {}) {
+        if (!skipped || !skipped.length) return '';
+        const named = skipped.map(x => {
+            const t = lines[x.id] || {};
+            const day = x.date || t.date;
+            const payee = x.payee || t.payee || t.description;
+            const amount = x.amount != null ? x.amount : t.amount;
+            const what = [day ? formatDate(day) : '', payee || '', amount != null && amount !== '' ? formatCurrency(amount) : '']
+                .filter(Boolean).join(', ') || `line ${x.id}`;
+            return `${what}: ${String(x.reason || '').replace(/\.$/, '')}`;
+        });
+        return `Not added (${skipped.length}): ${named.join('; ')}.`;
+    },
+
+    // Tick these review lines again after the list is drawn anew.
+    _tickAgain(ids) {
+        let any = false;
+        for (const id of ids || []) {
+            const box = document.querySelector(`input.review-tick[data-review-tick="${Number(id)}"]`);
+            if (box) { box.checked = true; any = true; }
+        }
+        if (any) BankingPage.tickChanged();
     },
 
     // What a review row chose besides its category, as the add call takes it.
@@ -2239,7 +2290,9 @@ const BankingPage = {
         const picks = BankingPage._reviewPicks(lineId);
         BankRulesPage.showForm(null, {
             name: payee,
-            pattern: payee,
+            // the bank's text as it is written: a star it prints is a star
+            // (NEW-259), not "anything"
+            pattern: BankRulesPage.escapePattern(payee),
             account_id: accountChosen ? parseInt(accountChosen, 10) : '',
             vendor_id: picks.vendor_id || '',
             class_id: picks.class_id || '',
@@ -2281,8 +2334,9 @@ const BankingPage = {
             const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`, picked.length ? { lines: picked } : undefined);
             const skipped = new Set(r.skipped.map(x => x.id));
             const outside = BankingPage._outsideFilterAll(categorised.filter(t => !skipped.has(t.id)).map(t => String(t.date || '')));
-            const said = `Added ${r.added}${r.skipped.length ? `, skipped ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`;
-            toast(outside ? `${said}. ${outside}` : said);
+            const notAdded = BankingPage._notAddedText(r.skipped, lines);
+            const said = `Added ${r.added}.${notAdded ? ` ${notAdded}` : ''}`;
+            toast(outside ? `${said} ${outside}` : said, r.skipped.length ? 'warning' : undefined);
             BankingPage._backToRegister(accountId);
             const typed = Object.fromEntries(picked.filter(p => p.payee).map(p => [p.id, p.payee]));
             BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id])
