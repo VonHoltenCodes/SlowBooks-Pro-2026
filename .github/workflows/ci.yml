@@ -656,7 +656,10 @@ jobs:
           # 430 with round 24's Mac fixes: two WeasyPrint cases of the long last line
           # with other fonts (test_pdf_last_line_new271.py, the fonts as shipped and a
           # wider family).
-          MAX_SKIPS: "430"
+          # 433 with round 25: three WeasyPrint cases, the long last line's shapes
+          # (test_pdf_last_line_new271.py: line breaks, and the 2-line packaged bid)
+          # and the other totals blocks (test_pdf_totals_labels_w214.py).
+          MAX_SKIPS: "433"
         run: |
           total=0
           for f in shards/*/skips.txt; do
