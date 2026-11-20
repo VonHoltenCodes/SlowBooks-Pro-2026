@@ -102,7 +102,7 @@ MOVED = [
     (248, "banking.js", "Move money between bank and card accounts."),
     (249, "banking.js", "Enter the ending date and balance from your statement."),
     (252, "banking.js", "Correct the ending date or balance from your statement."),
-    (364, "iif.js", "Download Slowbooks data as .iif files"),
+    (364, "iif.js", "Download SlowBooks data as .iif files"),
     (365, "iif.js", "Upload .iif files exported from QuickBooks Desktop"),
     (367, "iif.js", "QuickBooks Desktop can't export transactions to IIF"),
     (
@@ -431,7 +431,7 @@ def test_the_drawn_pages_hold_the_words_in_their_notes():
         assert words in on.note_text and words not in on.open_text, words
     assert "Connected. Choose which SlowBooks bank account" in on.open_text
     for words in (
-        "Download Slowbooks data as .iif files",
+        "Download SlowBooks data as .iif files",
         "Upload .iif files exported",
         "can't export transactions to IIF",
         "is not imported here",

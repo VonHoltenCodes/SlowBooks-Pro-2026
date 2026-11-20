@@ -107,7 +107,7 @@ def issue_token(
     allow_imports: bool = False,
 ) -> tuple:
     """Make and keep one token: (the row, the secret). The one way a token
-    is made, for Settings, API Tokens and for Connect Claude (#1087); the
+    is made, for Settings, API Tokens and for Connect to AI assistant (#1087); the
     caller has checked the label is free and the role is not admin."""
     secret = generate_token()
     row = ApiToken(

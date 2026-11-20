@@ -23,7 +23,7 @@ const IIFPage = {
             <div class="iif-sections">
                 <!-- Export Section -->
                 <div class="iif-section">
-                    <div class="iif-h-row"><h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9660; Export to IIF</h3>${hint(`Download Slowbooks data as .iif files for import into QuickBooks Desktop
+                    <div class="iif-h-row"><h3><img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">&#9660; Export to IIF</h3>${hint(`Download SlowBooks data as .iif files for import into QuickBooks Desktop
                         via File &gt; Utilities &gt; Import &gt; IIF Files.`, 'Export to IIF')}</div>
 
                     <div style="margin-bottom:10px;">

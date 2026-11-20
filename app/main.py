@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — "It's like QuickBooks, but we own the source code"
+# SlowBooks Pro 2026 — "It's like QuickBooks, but we own the source code"
 # An independent, from-scratch replacement for Intuit QuickBooks Pro 2003.
 # No Intuit source code or binaries were decompiled, disassembled, or used.
 # Everything derives from published SDK documentation (QBFC 5.0, qbXML 4.0),
@@ -737,7 +737,7 @@ async def lifespan(app: FastAPI):
     from app.services import scheduler as _scheduler
 
     _auto_enter = _scheduler.start()
-    # Connect Claude (#1087): a kept link opens its line in a thread of its
+    # Connect to AI assistant (#1087): a kept link opens its line in a thread of its
     # own once the app is up; the relay being down never holds the start.
     from app.services import switchboard_link as _claude_line
 
@@ -753,7 +753,7 @@ async def lifespan(app: FastAPI):
 # (fast, and the reason ORJSONResponse was deprecated in 0.136). We let it use
 # its default response class rather than pinning the now-deprecated ORJSON one.
 app = FastAPI(
-    title="Slowbooks Pro 2026",
+    title="SlowBooks Pro 2026",
     version=__version__,
     lifespan=lifespan,
     description=(
@@ -1212,7 +1212,7 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/invoice-messages",
     # The terms list is company setup too (#664): kept under Settings.
     "/api/payment-terms",
-    # Connect Claude (#1087): linking to the relay makes a token, so it is
+    # Connect to AI assistant (#1087): linking to the relay makes a token, so it is
     # an administrator's like the tokens themselves; the status is a read.
     "/api/switchboard",
 )
@@ -1497,13 +1497,15 @@ async def _require_session(request: Request, call_next):
                 status_code=403,
                 content={"detail": "API tokens cannot manage users or tokens"},
             )
-        # The Claude connection (#1087) is a signed-in person's: the
+        # The AI assistant connection (#1087) is a signed-in person's: the
         # assistant holding its token must not mint itself sign-in codes
         # or end its own connection, nor read its state.
         if path.startswith("/api/switchboard"):
             return JSONResponse(
                 status_code=403,
-                content={"detail": "An API token cannot reach the Claude connection."},
+                content={
+                    "detail": "An API token cannot reach the AI assistant connection."
+                },
             )
         # Restoring a backup replaces the whole company: a signed-in
         # administrator's, never a token's, whatever its role (#434).

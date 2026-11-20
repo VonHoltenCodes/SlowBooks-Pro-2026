@@ -1,5 +1,5 @@
 /**
- * Slowbooks Pro 2026 — Auth overlay (Phase 9.7)
+ * SlowBooks Pro 2026 — Auth overlay (Phase 9.7)
  *
  * Injects a full-screen login/setup overlay when the API returns 401, or
  * when /api/auth/status reports first-time setup is needed.
@@ -314,7 +314,7 @@
 
     function loginViewHTML() {
         // Name the books: with several companies on one machine, "Unlock
-        // Slowbooks" did not say whose password it wanted (explore 2.17.3,
+        // SlowBooks" did not say whose password it wanted (explore 2.17.3,
         // macbase1 F2).
         const name = existingCompany.name;
         return (
@@ -323,7 +323,7 @@
             'min-width:340px;max-width:400px;width:100%;' +
             'box-shadow:0 20px 60px rgba(0,0,0,0.4);">' +
             '<h2 id="auth-title" style="margin:0 0 6px;font-size:20px;">' +
-            (name ? "Unlock " + escapeText(name) : "Unlock Slowbooks") +
+            (name ? "Unlock " + escapeText(name) : "Unlock SlowBooks") +
             "</h2>" +
             '<p style="margin:0 0 20px;color:#555;font-size:13px;line-height:1.5;">' +
             (multiUser
@@ -730,8 +730,8 @@
             // The setup's teaching lines sit behind one tortoise beside its
             // heading (#977): the lead, the Settings line and Legal entity.
             '<div style="display:flex;align-items:center;gap:4px;margin:0 0 8px;">' +
-            '<h2 style="margin:0;font-size:22px;">Set up Slowbooks Pro 2026</h2>' +
-            hintList("Set up Slowbooks Pro 2026", [
+            '<h2 style="margin:0;font-size:22px;">Set up SlowBooks Pro 2026</h2>' +
+            hintList("Set up SlowBooks Pro 2026", [
                 { text: "Just enough to get you in. You can configure everything else later." },
                 {
                     text:
@@ -1031,7 +1031,7 @@
     // Single entry point used by api.js (on 401) and the DOMContentLoaded
     // handler. The view follows /api/auth/status: a company nobody has set
     // up yet opens on first-run setup, every other one on sign-in. (It used
-    // to open on "Unlock Slowbooks — enter your password" for a company that
+    // to open on "Unlock SlowBooks — enter your password" for a company that
     // had no password; the way on was a small link, or a wrong password —
     // explore 2.17.3, skytech M18 / macbase1 F1.) The cross-links still flip
     // between the two.

@@ -215,14 +215,14 @@ setup this server's address, `https://` from the internet, or a plain
 token's role allows and sends nothing anywhere but this server; for Claude on
 the web, `sbplive serve-http` is a self-hosted door behind your own
 Cloudflare Tunnel ([the self-hosted door](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md)), and nothing is reachable
-from outside unless you set it up. Settings → Connections → Claude and agents
+from outside unless you set it up. Settings → Connections → AI assistants
 has the same links.
 
-**Connect Claude** (v2.32.0, #1087) does it with no second program: an
-administrator presses **Connect Claude** under Settings → Connections →
-Claude and agents, and this server links itself to the SlowBooks relay at
+**Connect to AI assistant** (v2.32.0, #1087) does it with no second program:
+an administrator presses **Connect to AI assistant** under Settings →
+Connections → AI assistants, and this server links itself to the SlowBooks relay at
 `https://relay.sbplive.com`, makes a bookkeeper API token labelled
-`Claude (relay)` and holds the connection open itself. It dials out; no
+`AI assistant (relay)` and holds the connection open itself. It dials out; no
 port is opened, and there is no account, email or password: linking keeps a
 random credential, with the token, in one file in the data folder readable
 by the server's user only. The panel shows the address to add as a

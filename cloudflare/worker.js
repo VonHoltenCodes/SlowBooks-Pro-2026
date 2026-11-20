@@ -1,8 +1,8 @@
 // ============================================================================
-// Slowbooks Pro 2026 — Cloudflare Worker AI Gateway (Hardened)
+// SlowBooks Pro 2026 — Cloudflare Worker AI Gateway (Hardened)
 // ============================================================================
 //
-// Runs inside each LAN owner's own Cloudflare account. Slowbooks points at
+// Runs inside each LAN owner's own Cloudflare account. SlowBooks points at
 // this Worker instead of talking to an AI provider directly, so the real
 // credentials never leave Cloudflare. Every installation gets its own
 // Worker, its own shared secret, and its own usage quota.
@@ -22,7 +22,7 @@
 //   - Correct usage tracking
 //
 // Architecture:
-//   Slowbooks (your LAN)                  Cloudflare (worldwide edge)
+//   SlowBooks (your LAN)                  Cloudflare (worldwide edge)
 //   ────────────────────                  ───────────────────────────
 //   POST /v1/chat/completions   ───────►  Worker (this file)
 //   Authorization: Bearer <T>                │

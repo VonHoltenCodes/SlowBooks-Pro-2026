@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Docker Image
+# SlowBooks Pro 2026 — Docker Image
 # Runs on Linux, macOS, and Windows via Docker Desktop
 # ============================================================================
 
