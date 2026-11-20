@@ -8,6 +8,7 @@
  *   LineOrder.attach('#inv-lines', {
  *       add: () => InvoicesPage.addLine(),   // appends one blank row
  *       changed: () => InvoicesPage.recalc(), // totals after a move/insert
+ *       remove: true,  // a grid with no Remove line button of its own
  *   });
  *
  * The saved order is the order of the rows when the form is collected (each
@@ -43,7 +44,7 @@ const LineOrder = {
         const rows = Array.from(tbody.children).filter(r => r.tagName === 'TR');
         rows.forEach((row, i) => {
             if (!row.querySelector('.line-order-cell')) {
-                row.insertAdjacentHTML('beforeend', LineOrder.cellHtml());
+                row.insertAdjacentHTML('beforeend', LineOrder.cellHtml((LineOrder._opts.get(tbody) || {}).remove));
             }
             const up = row.querySelector('[data-line-order="up"]');
             const down = row.querySelector('[data-line-order="down"]');
@@ -52,12 +53,13 @@ const LineOrder = {
         });
     },
 
-    cellHtml() {
+    cellHtml(remove = false) {
         return `<td class="line-order-cell"><span class="line-order-controls">
             <span class="line-order-handle" draggable="true" data-line-order="drag" title="Drag to move this line" aria-hidden="true"></span>
             <button type="button" class="btn btn-sm btn-secondary" data-line-order="up" aria-label="Move line up" title="Move line up">&#9650;</button>
             <button type="button" class="btn btn-sm btn-secondary" data-line-order="down" aria-label="Move line down" title="Move line down">&#9660;</button>
-            <button type="button" class="btn btn-sm btn-secondary" data-line-order="insert" aria-label="Insert line below" title="Insert line below">+</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-line-order="insert" aria-label="Insert line below" title="Insert line below">+</button>${remove ? `
+            <button type="button" class="btn btn-sm btn-danger" data-line-order="remove" aria-label="Remove line" title="Remove line">X</button>` : ''}
         </span></td>`;
     },
 
@@ -74,6 +76,14 @@ const LineOrder = {
             parent.insertBefore(next, row);
         }
         return true;
+    },
+
+    // Take a row out (NEW-278: the purchase order's form had no way to);
+    // the row that takes the keyboard next: the one below, else above.
+    removeRow(row) {
+        const next = row.nextElementSibling || row.previousElementSibling;
+        row.parentNode.removeChild(row);
+        return next;
     },
 
     // Put a row before or after another (the drop).
@@ -121,6 +131,11 @@ const LineOrder = {
             const fresh = LineOrder.insertBelow(tbody, row);
             LineOrder._changed(tbody);
             LineOrder.focusFirst(fresh);
+        } else if (what === 'remove') {
+            const next = LineOrder.removeRow(row);
+            LineOrder._changed(tbody);
+            const focus = next && next.querySelector('[data-line-order="remove"]');
+            if (focus) focus.focus();
         } else if (what === 'up' || what === 'down') {
             if (!LineOrder.moveRow(row, what === 'up' ? -1 : 1)) return;
             LineOrder._changed(tbody);

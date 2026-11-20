@@ -327,3 +327,45 @@ def test_a_server_that_never_greets_reads_timed_out():
 def test_a_tls_failure_reads_as_its_plain_cause():
     stored = tls_failure_text(ssl.SSLError("handshake failure"), "mail.example.test")
     assert server_words(stored) == "Secure connection failed (mail.example.test)"
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_the_macs_old_row_shows_no_form_of_the_password(
+    client, seed_accounts, db_session, changed
+):
+    """The row as the old build stored it (the Python repr) for a reply
+    "554 5.7.1 Rejected: AUTH PLAIN <what the client sent> (password <it>)",
+    with the AUTH LOGIN steps echoed too."""
+    user = "qa-" + secrets.token_hex(4) + "@example.test"
+    password = secrets.token_urlsafe(12)
+    plain_arg = _b64(f"\0{user}\0{password}")
+    words = (
+        f"5.7.1 Rejected: AUTH PLAIN {plain_arg} (password {password}) "
+        f"AUTH LOGIN {_b64(user)} 334 {_b64(password)}"
+    )
+    set_setting(db_session, "smtp_user", user)
+    set_setting(
+        db_session, "smtp_password", secrets.token_urlsafe(12) if changed else password
+    )
+    db_session.commit()
+    cust = _customer(client)
+    inv = _invoice(client, cust["id"])
+    _old_row(db_session, words, entity_id=inv["id"])
+    stored = db_session.query(EmailLog).one().error_message
+    assert stored.startswith("(554, b'5.7.1 Rejected: AUTH PLAIN ")  # the old form
+
+    forms = [password, plain_arg, _b64(user), _b64(password)]
+    bk_client = _bookkeeper(db_session)
+    bk = bk_client.get("/api/email-log?status=failed").json()["rows"][0]
+    admin = client.get("/api/email-log?status=failed").json()["rows"][0]
+    seen = _activity(bk_client, "invoice", inv["id"])["events"]
+    emailed = next(e for e in seen if e["kind"] == "emailed")
+    # a non-administrator, and Activity, see no server words at all
+    for text in (bk["error_message"], bk["failure"], *emailed["details"]):
+        assert text == "The mail server refused the email.", text
+    # an administrator sees the words, every form of the password masked
+    line = admin["error_message"]
+    assert line.startswith("554 5.7.1 Rejected: AUTH PLAIN ••••"), line
+    for form in forms:
+        assert form not in line
+        assert form not in admin["failure"]

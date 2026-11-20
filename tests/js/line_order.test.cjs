@@ -18,6 +18,7 @@ function body(names) {
     const tbody = {
         children: [],
         get lastElementChild() { return this.children[this.children.length - 1] || null; },
+        removeChild(node) { this.children = this.children.filter(c => c !== node); },
         insertBefore(node, ref) {
             this.children = this.children.filter(c => c !== node);
             const at = ref ? this.children.indexOf(ref) : this.children.length;
@@ -79,4 +80,16 @@ test('insert: the focus lands on the new row\'s first control after the picker p
     await new Promise(r => setTimeout(r, 5));
     assert.equal(focused, box);
     LineOrder.focusFirst(null);  // nothing to focus is fine
+});
+
+test('a grid with no Remove line of its own gets one, and a removed line hands the keyboard on (NEW-278)', () => {
+    const LineOrder = module_();
+    assert.match(LineOrder.cellHtml(true), /data-line-order="remove" aria-label="Remove line" title="Remove line"/);
+    assert.doesNotMatch(LineOrder.cellHtml(), /data-line-order="remove"/);
+    const t = body(['a', 'b', 'c']);
+    assert.equal(LineOrder.removeRow(t.children[1]).name, 'c');
+    assert.deepEqual(names(t), ['a', 'c']);
+    // the last row hands it to the one above
+    assert.equal(LineOrder.removeRow(t.children[1]).name, 'a');
+    assert.deepEqual(names(t), ['a']);
 });

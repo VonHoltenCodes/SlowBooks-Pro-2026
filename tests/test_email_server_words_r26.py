@@ -189,18 +189,30 @@ def _plain(text):
         assert piece not in text, (piece, text)
 
 
+# How long the client waits for a reply. Only the stage that never answers
+# needs it short; every other stage answers, and a reply that is slow on a
+# loaded machine (a long run on a small box, a garbage-collection pause)
+# must not read as a timeout: a one-second wait for every reply failed the
+# body stage once in a full Linux lap (it passed alone and on the next lap).
+_ANSWERS_WITHIN = 20
+_SILENT_WAIT = 1
+
+
 @pytest.fixture
 def quick_timeout(monkeypatch):
-    """send_email() waits 30 s for a silent server; a second is enough here."""
+    """send_email() waits 30 s for a silent server; the "timeout" stage
+    needs only a second, and a stage that answers keeps a long wait."""
     import app.services.email_service as email_service
 
     real = smtplib.SMTP
+    wait = {"seconds": _ANSWERS_WITHIN}
 
     class Quick(real):
         def __init__(self, host="", port=0, local_hostname=None, timeout=None, **k):
-            super().__init__(host, port, local_hostname, timeout=1, **k)
+            super().__init__(host, port, local_hostname, timeout=wait["seconds"], **k)
 
     monkeypatch.setattr(email_service.smtplib, "SMTP", Quick)
+    return wait
 
 
 def _configure(db, port):
@@ -218,6 +230,8 @@ def _configure(db, port):
 
 @pytest.fixture(params=sorted(STAGES))
 def stage(request, db_session, quick_timeout):
+    if request.param == "timeout":
+        quick_timeout["seconds"] = _SILENT_WAIT
     server = StageStub(request.param)
     _configure(db_session, server.port)
     yield request.param

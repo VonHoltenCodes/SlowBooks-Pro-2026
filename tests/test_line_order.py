@@ -249,3 +249,30 @@ def test_the_module_moves_drags_and_inserts():
     index = (JS.parents[2] / "index.html").read_text(encoding="utf-8")
     at = index.index('<script src="/static/js/line_order.js"></script>')
     assert at < index.index('<script src="/static/js/invoices.js"></script>')
+
+
+# NEW-278: the purchase order's form could move and insert a line but not
+# remove one. Each grid but the bill's removes a line: with its own button,
+# or with the shared module's (remove: true), never both.
+OWN_REMOVE = {"invoices.js", "estimates.js", "sales_receipts.js", "credit_memos.js"}
+OWN_REMOVE |= {"recurring.js"}
+
+
+# the bill's grid is not yet (its columns are set to fit the agents'
+# window with no room for a fifth control); left open on the issue
+CAN_REMOVE = {p: g for p, g in GRIDS.items() if p != "bills.js"}
+
+
+@pytest.mark.parametrize("page,grid", CAN_REMOVE.items())
+def test_each_line_grid_can_remove_a_line(page, grid):
+    src = (JS / page).read_text(encoding="utf-8")
+    shared = re.search(rf"LineOrder\.attach\('{grid}', \{{[^}}]*remove: true", src)
+    own = 'aria-label="Remove line"' in src
+    assert own != bool(shared), page
+    assert own == (page in OWN_REMOVE), page
+
+
+def test_the_module_removes_a_line():
+    src = (JS / "line_order.js").read_text(encoding="utf-8")
+    assert 'data-line-order="remove" aria-label="Remove line"' in src
+    assert "removeRow(" in src

@@ -162,6 +162,31 @@ def _credential_forms(password: str, user: str = "") -> list[str]:
     return [f for f in forms if len(f) >= 3]
 
 
+def _echoed_sign_ins(text: str) -> list[str]:
+    """What the tokens after AUTH PLAIN / AUTH LOGIN / 334 in `text` decode
+    to: the password of an AUTH PLAIN argument, or an AUTH LOGIN step's
+    value, so the same password echoed as typed beside it is masked too,
+    even when it is no longer the one in Settings (W-228). A server's own
+    prompt ("Username:") is not one."""
+    import base64
+    import binascii
+
+    found = []
+    for m in _AUTH_TOKEN.finditer(text or ""):
+        token = m.group(0)[len(m.group(1)) + len(m.group(2)) :]
+        try:
+            raw = base64.b64decode(token + "=" * (-len(token) % 4), validate=True)
+            value = raw.decode("utf-8")
+        except (binascii.Error, ValueError):
+            continue
+        parts = [p for p in value.split("\0") if p]
+        if "\0" in value and parts:
+            found.append(parts[-1])
+        elif value and not value.endswith(":") and value.isprintable():
+            found.append(value)
+    return found
+
+
 def scrub_secrets(text: str, hidden=(), user: str = "") -> str:
     """`text` with every echo of a credential masked (W-228): each password
     in `hidden` and its sign-in forms with `user` (_credential_forms), and
@@ -171,7 +196,7 @@ def scrub_secrets(text: str, hidden=(), user: str = "") -> str:
     if not text:
         return text
     forms = set()
-    for secret in hidden or ():
+    for secret in [*(hidden or ()), *_echoed_sign_ins(text)]:
         forms.update(_credential_forms(secret or "", user))
     if user and not forms:
         forms.update(_credential_forms("", user))
