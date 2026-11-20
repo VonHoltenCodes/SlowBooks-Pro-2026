@@ -194,14 +194,9 @@ def _taxable(raw: str | None) -> tuple[bool | None, bool]:
 def _default_tax_rate(db: Session) -> Decimal:
     """The company's default tax rate as a fraction, as the New Invoice
     form starts with it (a percent in Settings: 8.25 is 8.25%)."""
-    from app.services.settings_service import get_all_settings
+    from app.services.settings_service import default_sales_tax_rate
 
-    pct = get_all_settings(db).get("default_tax_rate") or "0"
-    try:
-        rate = Decimal(str(pct).strip() or "0") / Decimal("100")
-    except ArithmeticError:
-        return Decimal("0")
-    return rate if 0 <= rate < 1 else Decimal("0")
+    return default_sales_tax_rate(db)
 
 
 def _default_terms(db: Session) -> str:

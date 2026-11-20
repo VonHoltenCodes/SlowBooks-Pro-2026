@@ -343,6 +343,31 @@ _TAX_RATE_DOC = dict(
 TaxRate = Annotated[Decimal, AfterValidator(_check_tax_rate), Field(**_TAX_RATE_DOC)]
 TaxRateFloat = Annotated[float, AfterValidator(_check_tax_rate), Field(**_TAX_RATE_DOC)]
 
+# The unit sentence every tax_rate field's description starts with.
+TAX_RATE_DESCRIPTION = _TAX_RATE_DOC["description"]
+
+# A NEW sales document's rate (#1129): left out, or null, it is the company's
+# Default Tax Rate (Settings), as the app's form starts the document; 0 is
+# no tax and is kept. A tax-exempt customer or document keeps the rate and
+# is charged no tax on any line, as on the form. The routes fill it in with
+# app.services.settings_service.default_sales_tax_rate.
+_NEW_TAX_RATE_DOC = dict(
+    _TAX_RATE_DOC,
+    description=(
+        TAX_RATE_DESCRIPTION
+        + " Left out (or null) on a new document: the company's Default Tax "
+        "Rate from Settings, as the app's form starts one; send 0 for no tax. "
+        "A non-taxable customer or a tax_exempt document keeps that rate and "
+        "is charged no tax."
+    ),
+)
+NewTaxRate = Annotated[
+    Optional[Decimal], AfterValidator(_check_tax_rate), Field(**_NEW_TAX_RATE_DOC)
+]
+NewTaxRateFloat = Annotated[
+    Optional[float], AfterValidator(_check_tax_rate), Field(**_NEW_TAX_RATE_DOC)
+]
+
 
 def _tax_rate_json(value) -> str:
     """A document's tax rate as the API writes it: four places as before
