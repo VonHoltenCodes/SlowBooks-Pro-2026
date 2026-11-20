@@ -46,6 +46,11 @@
        so the totals keep a row above them even when the rest of it ends a page. */
     table.line-items > tbody > tr.row-head > td { border-bottom: 0; padding-bottom: 0; }
     table.line-items > tbody > tr.row-end > td { padding-top: 0; }
+    /* W-201: a row's figures sit on its first line, so a cut row's are where
+       any row's are; a cut is at a line boundary of the layout, and the first
+       part's last line is set full so the join does not show. */
+    table.line-items > tbody > tr > td { vertical-align: top; }
+    table.line-items > tbody > tr.row-head.joined > td:first-child { text-align-last: justify; }
     /* The end of long notes and the footer are one block (W-188). */
     .doc-close { break-inside: avoid; page-break-inside: avoid; }
     .notes.notes-end { margin-top: 0; padding-top: 0; border-top: 0; break-before: auto; page-break-before: auto; }
@@ -121,8 +126,8 @@
             {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {#- a long last line: its end opens the group (W-187) #}
             {%- set cut = loop.last and long_last %}
-            {%- set d_head, d_end = tail_split(line.description or (line.item.name if line.item else '')) if cut else (line.description or (line.item.name if line.item else ''), '') %}
-            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut] | select | join(' ') }}"{% endif %}>
+            {%- set d_head, d_end = line_cut(line.description or (line.item.name if line.item else '')) if cut else (line.description or (line.item.name if line.item else ''), '') %}
+            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
                 <td>{{ d_head }}</td>
                 <td class="r">{{ line.quantity | qty }}</td>
                 <td class="r">{{ line.rate | currency }}</td>

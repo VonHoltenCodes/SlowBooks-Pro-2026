@@ -103,6 +103,7 @@ def uncut(monkeypatch):
     """#1045's markup: nothing of a long block kept with what follows it."""
     from app.services import pdf_service
 
+    monkeypatch.setattr(pdf_service, "choose_last_line", lambda html: "whole")
     monkeypatch.setitem(
         pdf_service._jinja_env.globals,
         "tail_split",
@@ -156,7 +157,12 @@ def test_w187_a_long_last_line_keeps_its_end_with_the_totals(
     assert not wrong, "\n".join(wrong)
 
 
-def test_w187_the_cut_markup(client, seed_accounts, seed_customer):
+def test_w187_the_cut_markup(client, seed_accounts, seed_customer, monkeypatch):
+    # the layout's choice forced: a cut carrying the line's last 30 words
+    # (W-200: pdf_service.choose_last_line picks whole or the last lines)
+    from app.services import pdf_service
+
+    monkeypatch.setattr(pdf_service, "choose_last_line", lambda html: 30)
     url = long_last_line(client, seed_accounts, seed_customer, "invoice", 3, 900)
     body = client.get(f"{url}/print-preview").text.split("<body")[1]
     tail = body.split('<tbody class="doc-tail">')[1].split("</tbody>")[0]
@@ -167,6 +173,8 @@ def test_w187_the_cut_markup(client, seed_accounts, seed_customer):
     assert tail.index('class="row-end"') < tail.index('class="totals')
     before = body.split('<tbody class="doc-tail">')[0]
     assert "row-head" in before and "Line 3 w0001" in before
+    end = re.findall(r"\bw\d{4}\b", tail.split("</td>")[0])
+    assert len(end) == 30
     # every word once, in order
     words = re.findall(r"\bw\d{4}\b", re.sub(r"<[^>]+>", " ", body))
     assert words == sorted(words) and len(words) == len(set(words))

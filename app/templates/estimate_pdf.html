@@ -44,6 +44,11 @@
        so the totals keep a row above them even when the rest of it ends a page. */
     table.line-items > tbody > tr.row-head > td { border-bottom: 0; padding-bottom: 0; }
     table.line-items > tbody > tr.row-end > td { padding-top: 0; }
+    /* W-201: a row's figures sit on its first line, so a cut row's are where
+       any row's are; a cut is at a line boundary of the layout, and the first
+       part's last line is set full so the join does not show. */
+    table.line-items > tbody > tr > td { vertical-align: top; }
+    table.line-items > tbody > tr.row-head.joined > td:first-child { text-align-last: justify; }
     /* The end of long notes and the footer are one block (W-188). */
     .doc-close { break-inside: avoid; page-break-inside: avoid; }
     .terms-block.terms-end { margin-top: 0; }
@@ -249,8 +254,8 @@
             {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {#- a long last line: its end opens the group (W-187) #}
             {%- set cut = loop.last and long_last %}
-            {%- set d_head, d_end = tail_split(line.description) if cut else (line.description or '', '') %}
-            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut] | select | join(' ') }}"{% endif %}>
+            {%- set d_head, d_end = line_cut(line.description) if cut else (line.description or '', '') %}
+            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
                 <td>{{ d_head }}</td>
                 <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
                 <td class="r">{{ line.amount | currency }}</td>
@@ -285,15 +290,15 @@
             {% if tail_here and loop.last and (bare or pkg_lines | length > 1) %}</tbody><tbody class="doc-tail">{% endif %}
             {#- a long last line: its end opens the group (W-187) #}
             {%- set cut = last_table == 'pkg' and long_last and loop.last and outer_last %}
-            {%- set d_head, d_end = tail_split(line.description) if cut else (line.description or '', '') %}
+            {%- set d_head, d_end = line_cut(line.description) if cut else (line.description or '', '') %}
             {%- set alt_tag %}{% if (line.line_kind or 'base') == 'alternate' %}<span class="alt-tag">{{ 'Deduct' if line.amount < 0 else 'Add' }} alternate, accepted</span>{% endif %}{% endset %}
-            <tr{% if cut %} class="row-head"{% endif %}>
-                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ d_head }}{% if not cut %}{{ alt_tag }}{% endif %}</td>
+            <tr{% if cut %} class="row-head{{ ' joined' if d_end }}" data-last-line{% endif %}>
+                <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ d_head }}{% if not d_end %}{{ alt_tag }}{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
                 {% if not spread %}<td class="r">{{ line.rate | rate }}</td>{% endif %}
                 <td class="r">{% if not spread %}{{ line.amount | currency }}{% elif bare and pkg_lines | length == 1 %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td>
             </tr>
-            {% if cut %}</tbody><tbody class="doc-tail"><tr class="row-end"><td>{{ d_end }}{{ alt_tag }}</td><td colspan="{{ 2 if spread else 3 }}"></td></tr>{% endif %}
+            {% if cut %}</tbody><tbody class="doc-tail"><tr class="row-end"><td>{{ d_end }}{% if d_end %}{{ alt_tag }}{% endif %}</td><td colspan="{{ 2 if spread else 3 }}"></td></tr>{% endif %}
             {% endfor %}
             {% if bare and spread and pkg_lines | length > 1 %}
             <tr><td colspan="2"></td><td class="r" style="font-weight:700;">{{ prices.packages[pkg.package_id] | currency }}</td></tr>
@@ -313,8 +318,8 @@
         {% for line in allowances %}
             {% if last_table == 'allow' and loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {%- set cut = last_table == 'allow' and loop.last and long_last %}
-            {%- set d_head, d_end = tail_split(line.description) if cut else (line.description or '', '') %}
-            <tr{% if cut %} class="row-head"{% endif %}><td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ d_head }}</td><td class="r">{{ (prices.allowances[line.id] if spread else line.amount) | currency }}</td></tr>
+            {%- set d_head, d_end = line_cut(line.description) if cut else (line.description or '', '') %}
+            <tr{% if cut %} class="row-head{{ ' joined' if d_end }}" data-last-line{% endif %}><td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ d_head }}</td><td class="r">{{ (prices.allowances[line.id] if spread else line.amount) | currency }}</td></tr>
             {% if cut %}</tbody><tbody class="doc-tail"><tr class="row-end"><td>{{ d_end }}</td><td></td></tr>{% endif %}
         {% endfor %}
         {% if last_table == 'allow' %}
@@ -331,8 +336,8 @@
         {% for alt in pending_alts %}
             {% if last_table == 'alt' and loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {%- set cut = last_table == 'alt' and loop.last and long_last %}
-            {%- set d_head, d_end = tail_split(alt.description) if cut else (alt.description or '', '') %}
-            <tr{% if cut %} class="row-head"{% endif %}><td>{{ d_head }}</td><td class="r">{{ alt.amount | currency }}</td></tr>
+            {%- set d_head, d_end = line_cut(alt.description) if cut else (alt.description or '', '') %}
+            <tr{% if cut %} class="row-head{{ ' joined' if d_end }}" data-last-line{% endif %}><td>{{ d_head }}</td><td class="r">{{ alt.amount | currency }}</td></tr>
             {% if cut %}</tbody><tbody class="doc-tail"><tr class="row-end"><td>{{ d_end }}</td><td></td></tr>{% endif %}
         {% endfor %}
         {% if last_table == 'alt' %}
@@ -349,8 +354,8 @@
         {% for up in totals.unit_prices %}
             {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {%- set cut = loop.last and long_last %}
-            {%- set d_head, d_end = tail_split(up.description) if cut else (up.description or '', '') %}
-            <tr{% if cut %} class="row-head"{% endif %}><td>{{ d_head }}</td><td class="r">{{ up.unit or '' }}</td><td class="r">{{ up.rate | rate }}</td></tr>
+            {%- set d_head, d_end = line_cut(up.description) if cut else (up.description or '', '') %}
+            <tr{% if cut %} class="row-head{{ ' joined' if d_end }}" data-last-line{% endif %}><td>{{ d_head }}</td><td class="r">{{ up.unit or '' }}</td><td class="r">{{ up.rate | rate }}</td></tr>
             {% if cut %}</tbody><tbody class="doc-tail"><tr class="row-end"><td>{{ d_end }}</td><td colspan="2"></td></tr>{% endif %}
         {% endfor %}
         <tr class="doc-end"><td colspan="3">{{ tail }}</td></tr>
@@ -395,15 +400,15 @@
             {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {#- a long last line: its end opens the group (W-187) #}
             {%- set cut = loop.last and long_last %}
-            {%- set d_head, d_end = tail_split(line.description) if cut else (line.description or '', '') %}
+            {%- set d_head, d_end = line_cut(line.description) if cut else (line.description or '', '') %}
             {%- set untaxed %}{% if est.tax_amount and not line.is_taxable %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}{% endset %}
-            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut] | select | join(' ') }}"{% endif %}>
-                <td>{{ d_head }}{% if not cut %}{{ untaxed }}{% endif %}</td>
+            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
+                <td>{{ d_head }}{% if not d_end %}{{ untaxed }}{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}</td>
                 <td class="r">{{ line.rate | rate }}</td>
                 <td class="r">{{ line.amount | currency }}</td>
             </tr>
-            {% if cut %}</tbody><tbody class="doc-tail"><tr class="{% if loop.index is even %}alt {% endif %}row-end"><td>{{ d_end }}{{ untaxed }}</td><td colspan="3"></td></tr>{% endif %}
+            {% if cut %}</tbody><tbody class="doc-tail"><tr class="{% if loop.index is even %}alt {% endif %}row-end"><td>{{ d_end }}{% if d_end %}{{ untaxed }}{% endif %}</td><td colspan="3"></td></tr>{% endif %}
         {% endfor %}
         {% if not est.lines %}</tbody><tbody class="doc-tail">{% endif %}
         <tr class="doc-end"><td colspan="4">
