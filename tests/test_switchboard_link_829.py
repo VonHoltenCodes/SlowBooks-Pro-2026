@@ -43,10 +43,7 @@ def test_the_connections_block_is_in_the_connections_group_with_its_heading():
     block = _block()
     assert 'data-group="connections"' in block[: block.index(">")]
     assert 'aria-labelledby="settings-h-claude-agents"' in block
-    assert (
-        '<h3 id="settings-h-claude-agents">'
-        "AI assistants: SlowBooks Switchboard (sbplive)</h3>"
-    ) in block
+    assert ('<h3 id="settings-h-claude-agents">' "AI assistants</h3>") in block
     # between AI Insights and Receipt Scanning
     assert (
         JS.index('id="settings-ai"')
@@ -91,14 +88,20 @@ def test_the_block_says_what_it_does_and_what_stays_on_this_computer():
 def test_the_block_links_the_download_the_guide_and_the_door_outside_the_app():
     block = _block()
     links = re.findall(r'<a href="([^"]+)"([^>]*)>([^<]+)</a>', block)
+    # the local program's links sit in the section's note, not in the open:
+    # the section is about one button (the owner's call)
     assert [(h, t) for h, _, t in links] == [
-        # the relay's caution (#1087)
-        ("https://www.slowbookspro.com/terms/", "Terms"),
-        ("https://www.slowbookspro.com/privacy/", "Privacy"),
         (RELEASES, "Download SlowBooks Switchboard"),
         (GUIDE, "The guide"),
         (REMOTE, "Claude on the web: the self-hosted door"),
+        # the relay's caution (#1087), in the open
+        ("https://www.slowbookspro.com/terms/", "Terms"),
+        ("https://www.slowbookspro.com/privacy/", "Privacy"),
     ]
+    note = block[block.index("hintList(") : block.index("])}</div>")]
+    for href in (RELEASES, GUIDE, REMOTE):
+        assert href in note and href not in block[block.index("])}</div>") :]
+    assert "<strong>Without the relay: SlowBooks Switchboard.</strong>" in note
     # external: opened in the system browser, like the sidebar's links
     assert all('target="_blank" rel="noopener"' in attrs for _, attrs, _ in links)
 
@@ -149,7 +152,7 @@ def test_the_api_tokens_paragraph_says_a_bookkeeper_token_is_what_setup_asks_for
 
 def test_features_md_names_switchboard_as_the_way_an_agent_works_the_books():
     doc = _flat((ROOT / "docs/features.md").read_text(encoding="utf-8"))
-    assert "### AI assistants: SlowBooks Switchboard (sbplive)" in doc
+    assert "### AI assistants" in doc
     assert "is the way Claude Desktop, Claude Code and any other agent" in doc
     assert "a **bookkeeper token** is what `sbplive setup` asks for" in doc
     assert "An AI agent works the books through **SlowBooks Switchboard**" in doc
