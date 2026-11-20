@@ -690,7 +690,9 @@ const EstimatesPage = {
     // A void estimate's who, when and why, in the open: it is the estimate's state.
     voidedNoteHtml(est) {
         if (est.status !== 'void') return '';
-        const when = est.voided_at ? formatDate(String(est.voided_at)) : '';
+        // stored in UTC; a stamp read back without its zone is UTC too
+        const at = est.voided_at ? String(est.voided_at) : '';
+        const when = at ? formatDate(/(Z|[+-]\d\d:?\d\d)$/i.test(at) ? at : at + 'Z') : '';
         const by = est.voided_by ? ` by ${escapeHtml(est.voided_by)}` : '';
         const why = est.void_reason ? `: ${escapeHtml(est.void_reason)}` : '';
         return `<div class="estimate-voided" role="status" style="margin-top:6px;color:var(--danger, #991b1b);">Voided${when ? ' ' + when : ''}${by}${why}. It is kept with its number and left out of the closing rate.</div>`;

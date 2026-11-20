@@ -322,7 +322,9 @@ jobs:
           # the credential file's POSIX mode (test_switchboard_connect_1087.py).
           # 398 with Find on this screen (#1092): its Chromium and WebKit modules
           # (test_browser_find.py, test_browser_find_webkit.py: one each without playwright).
-          MAX_SKIPS: "398"
+          # 399 with the estimate void's browser test (#1128,
+          # test_browser_estimate_void_1128.py: one module without playwright).
+          MAX_SKIPS: "399"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
