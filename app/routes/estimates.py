@@ -58,6 +58,7 @@ from app.schemas.estimates import (
     EstimateResponse,
     EstimateAccept,
     EstimateLost,
+    EstimateVoid,
     totals_from_dict,
     without_cost_side,
 )
@@ -86,6 +87,62 @@ _ADDRESS_PARTS = ("address1", "address2", "city", "state", "zip")
 # The one message a settled (accepted/converted) estimate gives when an edit
 # tries to re-price or re-scope it — its numbers are the locked budget (#551).
 _SETTLED_MSG = "A settled estimate can't be repriced or re-scoped; make a new one or a change order."
+
+
+def _refuse_void(estimate: Estimate, doing: str) -> None:
+    """A void estimate is kept as it was (#1128): nothing changes it again."""
+    if estimate.status == EstimateStatus.VOID:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "estimate_void",
+                "message": (
+                    f"Estimate {estimate.estimate_number} is void; a void "
+                    f"estimate can't be {doing}."
+                ),
+            },
+        )
+
+
+def _void_blocker(db: Session, estimate: Estimate) -> Optional[str]:
+    """Why this estimate can't be voided, or None: something else is built
+    on it (#1128). A converted estimate is an invoice now; an accepted one
+    may be a job's contract, its schedule of values or its locked budget,
+    which change orders and pay applications build on."""
+    number = estimate.estimate_number
+    t = terms_from_db(db)
+    if (
+        estimate.status == EstimateStatus.CONVERTED
+        or estimate.converted_invoice_id is not None
+    ):
+        inv = estimate.converted_invoice
+        became = f"{t('Invoice')} {inv.invoice_number}" if inv else f"an {t('invoice')}"
+        return (
+            f"Estimate {number} became {became}, so it can't be voided; void "
+            f"the {t('invoice')} if the sale was made in error."
+        )
+    job = db.query(Job).filter(Job.contract_estimate_id == estimate.id).first()
+    if job is None:
+        sov = (
+            db.query(SovLine).filter(SovLine.source_estimate_id == estimate.id).first()
+        )
+        job = db.get(Job, sov.job_id) if sov is not None else None
+    if job is not None:
+        return (
+            f"Estimate {number} is the contract of {job.name}, and its schedule "
+            "of values and pay applications are built on it, so it can't be "
+            "voided."
+        )
+    budget = db.query(JobBudget).filter(JobBudget.estimate_id == estimate.id).first()
+    if budget is not None:
+        job = db.get(Job, budget.job_id)
+        name = job.name if job is not None else "its job"
+        return (
+            f"Estimate {number} is the budget of {name}: accepting it set the "
+            "budget that change orders build on, so it can't be voided."
+        )
+    return None
+
 
 # Fields frozen once an estimate is settled (notes/expiration stay editable).
 _FROZEN_ON_SETTLE = {
@@ -297,6 +354,7 @@ def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     POST /accept endpoint and a PUT that sets status=accepted, so there is one
     code path. The budget is seeded (manual rows win) and the estimate's own
     rows are marked locked; from then on only a change order moves them."""
+    _refuse_void(estimate, "accepted")
     if estimate.status == EstimateStatus.CONVERTED:
         raise HTTPException(status_code=409, detail="Estimate already converted")
     if estimate.status == EstimateStatus.ACCEPTED:
@@ -374,7 +432,7 @@ def list_estimates(
         if word not in [s.value for s in EstimateStatus]:
             raise HTTPException(
                 status_code=422,
-                detail="status must be one of pending, accepted, lost, converted.",
+                detail="status must be one of pending, accepted, lost, converted, void.",
             )
         q = q.filter(Estimate.status == word)
     if customer_id:
@@ -560,6 +618,18 @@ def update_estimate(
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
+    _refuse_void(estimate, "edited")
+    if data.status == EstimateStatus.VOID:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "void_by_void",
+                "message": (
+                    "Void an estimate with Void (POST /api/estimates/{id}/void), "
+                    "which keeps who voided it and why."
+                ),
+            },
+        )
 
     priced_warnings: list[str] = []
     changes = reject_null_updates(
@@ -774,6 +844,7 @@ def mark_estimate_lost(
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
+    _refuse_void(estimate, "marked lost")
     if estimate.status in (EstimateStatus.ACCEPTED, EstimateStatus.CONVERTED):
         raise HTTPException(
             status_code=409,
@@ -788,6 +859,41 @@ def mark_estimate_lost(
         estimate.notes = f"{estimate.notes}\n{line}" if estimate.notes else line
     db.commit()
     db.refresh(estimate)
+    return _estimate_response(estimate)
+
+
+@router.post("/{estimate_id}/void", response_model=EstimateResponse)
+def void_estimate(
+    estimate_id: int,
+    data: Optional[EstimateVoid] = None,
+    db: Session = Depends(get_db),
+):
+    """Void an estimate made in error (#1128): a duplicate, the wrong
+    customer, a test. The estimate and its number stay, marked void with who
+    voided it, when and the reason given; it leaves the Estimate Closing Rate
+    and every count, and can't be edited, accepted, marked lost, converted
+    or emailed. An estimate posts nothing, so nothing is reversed. Refused
+    (409) when something is built on it: the invoice it became, or the job
+    contract, schedule of values or budget its acceptance made. Voiding a
+    void estimate again changes nothing. There is no un-void, as for every
+    other document."""
+    estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
+    if not estimate:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    if estimate.status != EstimateStatus.VOID:
+        blocker = _void_blocker(db, estimate)
+        if blocker:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "estimate_in_use", "message": blocker},
+            )
+        estimate.status = EstimateStatus.VOID
+        estimate.voided_at = datetime.now(timezone.utc)
+        # the name the audit log gives this request (get_db stamps it)
+        estimate.voided_by = db.info.get("acting_username") or "operator"
+        estimate.void_reason = ((data.reason or "").strip() if data else "") or None
+        db.commit()
+        db.refresh(estimate)
     return _estimate_response(estimate)
 
 
@@ -860,6 +966,7 @@ def email_estimate(
     est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
+    _refuse_void(est, "emailed")
     recipient = (data.recipient or "").strip() or (
         (est.customer.email or "").strip() if est.customer else ""
     )
@@ -921,6 +1028,7 @@ def convert_to_invoice(
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
+    _refuse_void(estimate, "converted")
     if estimate.status == EstimateStatus.CONVERTED:
         raise HTTPException(status_code=400, detail="Estimate already converted")
     # A contract job bills by pay application, with retainage; the whole bid

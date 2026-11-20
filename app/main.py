@@ -762,7 +762,7 @@ app = FastAPI(
         "silently dropped.\n"
         "- **Posted documents are voided, not deleted**: `POST /api/<resource>/"
         "{id}/void` (invoices, bills, payments, bill payments, credit memos, "
-        "expenses, journal entries, in-kind gifts, job costs). `DELETE` on one "
+        "expenses, journal entries, in-kind gifts, job costs, estimates). `DELETE` on one "
         "answers 405 and names the void route. A pledge that will not be paid "
         "is written off (`POST /api/invoices/{id}/write-off`), not voided.\n"
         "- **`tax_rate` on a document is a fraction** (0.089 = 8.9%), kept "

@@ -32,6 +32,9 @@ class EstimateStatus(str, enum.Enum):
     ACCEPTED = "accepted"  # 0x01
     REJECTED = "rejected"  # 0x02
     CONVERTED = "converted"  # 0x04 — sets ConvertedTxnRef in ESTIMATE.DAT
+    # An estimate made in error (#1128): kept with its number, left out of
+    # every count and report, never edited, converted or sent again.
+    VOID = "void"
 
 
 class Estimate(Base):
@@ -81,6 +84,11 @@ class Estimate(Base):
     # When the bid was decided, won or lost (#795): set by the status change
     # itself (see _stamp_decision), read by the Estimate Closing Rate report.
     decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Who voided it, when and why (#1128); NULL on a live estimate.
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by = Column(String(100), nullable=True)
+    void_reason = Column(String(500), nullable=True)
 
     notes = Column(Text, nullable=True)
     converted_invoice_id = Column(

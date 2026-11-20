@@ -558,7 +558,7 @@ def test_the_email_log_sender_migration(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("c894a1e7d2b3").down_revision == "b8640c3e4a5b"
-    assert script.get_heads() == ["a1075c4d8e2f"]  # #1075 is the head above it
+    assert script.get_heads() == ["c1128e5a7d0f"]  # #1128 is the head above it
     command.upgrade(cfg, "b8640c3e4a5b")  # the step below it
     with sqlite3.connect(db) as conn:
         conn.execute(

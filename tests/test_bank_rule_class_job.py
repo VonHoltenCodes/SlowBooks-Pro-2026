@@ -257,8 +257,8 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == [
-        "a1075c4d8e2f"
-    ]  # the bank rule's customer and memo (#1075) is the head above it
+        "c1128e5a7d0f"
+    ]  # the estimate void (#1128) is the head above it
     assert script.get_revision(REVISION).down_revision == "4810bd59e481"
     command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")

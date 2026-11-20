@@ -349,6 +349,13 @@ class EstimateLost(StrictModel):
     reason: Optional[str] = Field(default=None, max_length=500)
 
 
+class EstimateVoid(StrictModel):
+    """Void an estimate made in error (#1128); the reason is optional and is
+    kept on the estimate."""
+
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
 def totals_from_dict(data: dict) -> EstimateTotals:
     """Build the totals model from estimate_totals()'s dict, so the response
     carries a real EstimateTotals (not a raw dict Pydantic would re-serialize
@@ -376,6 +383,10 @@ class EstimateResponse(BaseModel):
     terms: Optional[str] = None
     accepted_at: Optional[datetime] = None
     decided_at: Optional[datetime] = None
+    # who voided it, when and why (#1128); none on a live estimate
+    voided_at: Optional[datetime] = None
+    voided_by: Optional[str] = None
+    void_reason: Optional[str] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None

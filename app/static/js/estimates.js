@@ -15,7 +15,7 @@ const EstimatesPage = {
             filter: con ? {
                 id: 'est-status-filter',
                 rowSelector: '.est-row',
-                options: [['pending', 'Pending'], ['accepted', 'Accepted'], ['rejected', 'Lost'], ['converted', 'Converted']],
+                options: [['pending', 'Pending'], ['accepted', 'Accepted'], ['rejected', 'Lost'], ['converted', 'Converted'], ['void', 'Void']],
             } : null,
             headerHtml: `<button class="btn btn-primary" onclick="EstimatesPage.showForm()">+ New Estimate</button>` + capNote,
             empty: `<p>No estimates yet.</p>
@@ -32,8 +32,8 @@ const EstimatesPage = {
                     <td class="amount">${formatCurrency(est.total)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.view(${est.id})">View</button>
-                        <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>
-                        ${con ? EstimatesPage.constructionActionsHtml(est) : (est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : '')}
+                        ${est.status === 'void' ? '' : `<button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>`}
+                        ${est.status === 'void' ? '' : con ? EstimatesPage.constructionActionsHtml(est) : (est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : '')}
                     </td>
                 </tr>`,
         });
@@ -86,6 +86,7 @@ const EstimatesPage = {
                 <strong>Date:</strong> ${formatDate(est.date)}<br>
                 ${est.expiration_date ? `<strong>Expires:</strong> ${formatDate(est.expiration_date)}<br>` : ''}
                 <strong>Status:</strong> ${statusBadge(est.status)}
+                ${EstimatesPage.voidedNoteHtml(est)}
             </div>
             ${bodyHtml}
             ${construction && est.terms ? `<p style="margin-top:12px;white-space:pre-wrap;"><strong>Terms, inclusions and exclusions</strong>\n${escapeHtml(est.terms)}</p>` : ''}
@@ -95,10 +96,11 @@ const EstimatesPage = {
             <div class="form-actions">
                 ${EstimatesPage.acceptButtonHtml(est)}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Save PDF</button>
-                <button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>
+                ${est.status === 'void' ? '' : `<button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>`}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/print-preview','_blank')">Print</button>
                 ${construction && est.status === 'pending' ? `<button class="btn btn-secondary" onclick="EstimatesPage.markLost(${est.id})">Mark lost</button>` : ''}
-                ${est.status !== 'converted' && !(construction && (est.bills_by_pay_app || est.status === 'rejected')) ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
+                ${est.status !== 'converted' && est.status !== 'void' && !(construction && (est.bills_by_pay_app || est.status === 'rejected')) ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
+                ${EstimatesPage.canVoid(est) ? `<button data-destructive class="btn btn-danger" onclick="EstimatesPage.void(${est.id})">Void Estimate</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
         InvoicesPage.loadAttachments('estimate', est.id);
@@ -674,6 +676,53 @@ const EstimatesPage = {
         try {
             await API.post(`/estimates/${id}/accept`, {});
             toast('Estimate accepted; job budget locked');
+            closeModal();
+            App.refresh();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Void is offered on an estimate that is not void and did not become an
+    // invoice (#1128); the server refuses one a job is built on, in a sentence.
+    canVoid(est) {
+        return est.status !== 'void' && est.status !== 'converted' && !est.converted_invoice_id;
+    },
+
+    // A void estimate's who, when and why, in the open: it is the estimate's state.
+    voidedNoteHtml(est) {
+        if (est.status !== 'void') return '';
+        const when = est.voided_at ? formatDate(String(est.voided_at)) : '';
+        const by = est.voided_by ? ` by ${escapeHtml(est.voided_by)}` : '';
+        const why = est.void_reason ? `: ${escapeHtml(est.void_reason)}` : '';
+        return `<div class="estimate-voided" role="status" style="margin-top:6px;color:var(--danger, #991b1b);">Voided${when ? ' ' + when : ''}${by}${why}. It is kept with its number and left out of the closing rate.</div>`;
+    },
+
+    // Void asks first, in a dialog of its own: what voiding does, an optional
+    // reason, and Cancel before Void. The dialog opens on the reason, never
+    // on Void (NEW-32).
+    async void(id) {
+        let est;
+        try { est = await API.get(`/estimates/${id}`); }
+        catch (err) { toast(err.message, 'error'); return; }
+        openModal(`Void Estimate #${est.estimate_number}`, `
+            <form id="estimate-void-form" onsubmit="EstimatesPage.confirmVoid(event, ${est.id})">
+                <p style="margin-top:0;">Void estimate #${escapeHtml(est.estimate_number)} for ${escapeHtml(est.customer_name || '')} (${formatCurrency(est.total)})? It stays in the list with its number, marked void, and is left out of the Estimate Closing Rate. It can't be edited, converted or emailed afterwards, and a void can't be undone.</p>
+                <div class="form-group">
+                    <label for="estimate-void-reason">Reason (optional)</label>
+                    <input id="estimate-void-reason" name="reason" maxlength="500" autocomplete="off">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="EstimatesPage.view(${est.id})">Cancel</button>
+                    <button type="submit" data-destructive class="btn btn-danger">Void Estimate</button>
+                </div>
+            </form>`);
+    },
+
+    async confirmVoid(e, id) {
+        e.preventDefault();
+        const reason = (e.target.reason.value || '').trim();
+        try {
+            await API.post(`/estimates/${id}/void`, { reason: reason || null });
+            toast('Estimate voided');
             closeModal();
             App.refresh();
         } catch (err) { toast(err.message, 'error'); }

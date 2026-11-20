@@ -1127,7 +1127,7 @@ const App = {
         'InvoicesPage.void', 'InvoicesPage.markSent', 'InvoicesPage.duplicate', 'InvoicesPage.uploadAttachment',
         'InvoicesPage.deleteAttachment', 'InvoicesPage.showApplyCredit', 'InvoicesPage.showWriteOff',
         'InvoicesPage.emailInvoice', 'InvoicesPage.copyPaymentLink', 'InvoicesPage.checkPaymentStatus',
-        'EstimatesPage.convert', 'EstimatesPage.accept', 'EstimatesPage.markLost', 'EstimatesPage.emailEstimate',
+        'EstimatesPage.convert', 'EstimatesPage.accept', 'EstimatesPage.markLost', 'EstimatesPage.void', 'EstimatesPage.confirmVoid', 'EstimatesPage.emailEstimate',
         'FieldTickets.del', 'FieldTickets.voidTicket', 'FieldTickets.deleteAttachment', 'FieldTickets.upload',
         'SalesReceiptsPage.void', 'CreditMemosPage.void', 'CreditMemosPage.showApply',
         'CreditMemosPage.doApply', 'PaymentsPage.void', 'PaymentsPage.doVoid', 'PaymentsPage.showApplyCredit', 'DepositsPage.voidDeposit',
