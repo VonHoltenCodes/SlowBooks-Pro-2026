@@ -649,7 +649,11 @@ jobs:
           # (test_pdf_last_line_w200_w201.py, one per document kind).
           # 416 with the certificate folder test (test_tls_trust_new265.py), which skips
           # where Windows loads its own store into every default context.
-          MAX_SKIPS: "416"
+          # 428 with round 24 (#1157 #1158): five WeasyPrint cases of the line-break sweep
+          # (test_pdf_line_breaks_w213.py), six of the totals labels
+          # (test_pdf_totals_labels_w214.py), and test_print_r24_browser.py, one module
+          # without playwright.
+          MAX_SKIPS: "428"
         run: |
           total=0
           for f in shards/*/skips.txt; do
