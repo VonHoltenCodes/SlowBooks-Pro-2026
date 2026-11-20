@@ -71,6 +71,11 @@ CASES = (
     (50, 1000),
     (50, 1100),
     (50, 3000),
+    # a line running over a page by more than two lines prints whole with
+    # the totals when it fits on their page (NEW-271): these still cut
+    # inside a paragraph
+    (20, 1700),
+    (40, 1500),
 )
 
 
@@ -112,7 +117,15 @@ def problems(said, n, length, html, pdf):
     blank = cell.count("&nbsp;<br>")
     stub = re.search(r"\n\s*w\d{0,3}$", source.rstrip()) is not None
     carried = len(tail) + blank + stub
-    if carried != 2:
+    head = {where[w] for w in where if w not in end}
+    pages = {p for p, _y in tail}
+    if pages and any(p == max(pages) for p, _y in head):
+        wrong.append(f"{said}: the first part runs onto the totals' page")
+    # two lines, or more only where the line ran over onto the totals' page
+    # by itself, the first part ending on the page before (NEW-271)
+    if carried != 2 and (
+        not head or not pages or max(p for p, _y in head) != max(pages) - 1
+    ):
         wrong.append(f"{said}: the end carried is {carried} lines")
     first = min(end)
     head_last = max(w for w in where if w < first)

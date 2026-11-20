@@ -273,13 +273,24 @@ def _tail_split(text, keep=DOC_TAIL_KEEP, most=DOC_TAIL_MOST):
 _jinja_env.globals["tail_split"] = _tail_split
 
 
-# A long last line (W-200, W-201, NEW-266, 2.32.0 round 23). The document is
-# first laid out with the line whole: when the whole line and the totals land on
-# one page (with room to spare, so a browser's print, whose pages run a
-# little differently, keeps them together too) it prints whole, with no
-# cut at all. Otherwise it is cut at a line boundary of that layout, so the
-# end carried with the totals is exactly its last DOC_TAIL_LINES lines and
-# the first part's last line is a full one: the two parts read as one row.
+# A long last line (W-200, W-201, NEW-266, 2.32.0 round 23; NEW-271, round
+# 24). The document is first laid out with the line whole, and that layout,
+# the one the PDF prints (same fonts, width and CSS), decides:
+# - the whole line and the totals on one page, with room to spare (so a
+#   browser's print, whose pages run a little differently, keeps them
+#   together too): it prints whole, with no cut at all;
+# - the line on the totals' page but with little room, or running over a
+#   page break with more than DOC_TAIL_LINES of its lines on the totals'
+#   page: it is "kept", printed whole inside the unbreakable group with the
+#   totals, when that group fits on a page (checked by laying it out) and
+#   moving the line leaves the page before it at least half full;
+# - otherwise it is cut at a line boundary of that layout, so what reaches
+#   the totals' page is the end alone, never part of the first part: its
+#   last DOC_TAIL_LINES lines, or, when the line itself runs over onto the
+#   totals' page with more than that, the lines the page break leaves there.
+# Cutting off the last two lines of a line that already ran over a page left
+# the rest of its first part on the totals' page too (NEW-271: 3 to 11 lines
+# there, the first part's last line set full in mid-page over a seam).
 # Qty, Rate and Amount sit at the top of every row (vertical-align: top),
 # so a cut row's figures are where any row's are: on its first line.
 DOC_TAIL_LINES = 2
@@ -322,36 +333,21 @@ def _desc(value):
 _jinja_env.filters["desc"] = _desc
 
 
-def _joined_head(head: str, last_is_full: bool = True, blanks: int = 0):
-    """The first part of a cut line. The row's cell is set full on its last
-    line (text-align-last: justify), and text-align-last also justifies each
-    line before a forced break, so what comes before the description's last
-    line break is a block of its own set as usual (``.lead``); when the cut
-    itself falls at a line break, the whole first part is."""
+def _joined_head(head: str, blanks: int = 0):
+    """The first part of a cut line, set as the layout set it (no line of it
+    stretched, NEW-271); a blank line the description has where the cut falls
+    stays at its foot (a no-break space holds the line open in both
+    engines)."""
     from markupsafe import Markup
 
-    if last_is_full:
-        if "\n" not in head:
-            return head
-        before, _, last = head.rpartition("\n")
-    else:
-        before, last = head, ""
-    # a blank line the description has where the cut falls stays at the
-    # first part's foot (a no-break space holds the line open in both engines)
-    gap = Markup("<br>&nbsp;") * blanks
-    return (
-        Markup('<div class="lead">')
-        + _desc(before)
-        + gap
-        + Markup("</div>")
-        + _desc(last)
-    )
+    return _desc(head) + Markup("<br>&nbsp;") * blanks
 
 
 @pass_context
 def _line_cut(ctx, text):
     """``(head, end)`` of a long last line, as the layout chose
-    (``last_line_cut`` in the template's context): "whole" leaves it uncut,
+    (``last_line_cut`` in the template's context): "whole" (and "kept", which
+    the templates print in the group with the totals) leaves it uncut,
     an int carries that many of its last words (its last lines) with the
     totals, and nothing chosen falls back on the character count.
 
@@ -361,7 +357,7 @@ def _line_cut(ctx, text):
     the end, so none is lost (W-213)."""
     text = _plain_lines(text).rstrip()
     how = ctx.get("last_line_cut")
-    if how == "whole":
+    if how in ("whole", "kept"):
         return text, ""
     # an int: the words carried; (words, 1): and the blank line above them,
     # which the layout counted as one of the two lines carried
@@ -379,7 +375,7 @@ def _line_cut(ctx, text):
         if breaks:
             end_blanks = min(end_blanks, breaks - 1)
             return (
-                _joined_head(head, False, breaks - 1 - end_blanks),
+                _joined_head(head, breaks - 1 - end_blanks),
                 Markup("&nbsp;<br>") * end_blanks + _desc(end),
             )
         return _joined_head(head), end
@@ -409,60 +405,113 @@ def _line_texts(box) -> list[str]:
     return out
 
 
-def choose_last_line(html_whole: str):
-    """How a document's long last line prints (see DOC_TAIL_LINES): "whole",
-    or the number of its last words to carry with the totals, read from a
-    layout of ``html_whole`` (the line uncut). None when it cannot be laid
-    out, and the character count decides."""
+def _layout(html: str):
+    """WeasyPrint's layout of ``html``, as the PDF prints it; None when it
+    cannot be laid out."""
     try:
         HTML, _ = _weasyprint()
-        from weasyprint.formatting_structure import boxes as wb
-
-        document = HTML(string=html_whole, url_fetcher=_get_fetcher()).render()
+        return HTML(string=html, url_fetcher=_get_fetcher()).render()
     except Exception:  # pragma: no cover - no WeasyPrint: the fallback cut
         return None
-    head_pages, lines, tail = set(), [], None
+
+
+def _last_line_layout(document):
+    """What a layout says of the long last line: its lines by page
+    ``[(page, text)]``, where its first part starts (page, the fraction of
+    the page's height above it, whether a row of the table is above it on
+    that page), and the totals' group's page, the room under it and the
+    pages it spans."""
+    from weasyprint.formatting_structure import boxes as wb
+
+    lines, start, tail, tail_pages = [], None, None, set()
     for number, page in enumerate(document.pages):
         page_box = page._page_box
+        top, height = page_box.content_box_y(), page_box.height
+        rows_above = False
         for box in page_box.descendants():
             classes, element = _box_classes(box)
             if element is None:
                 continue
-            if (
-                isinstance(box, wb.TableRowBox)
-                and element.get("data-last-line") is not None
-            ):
-                cells = [c for c in box.children if isinstance(c, wb.TableCellBox)]
-                if cells:
-                    texts = _line_texts(cells[0])
-                    if any(t.strip() for t in texts):
-                        head_pages.add(number)
-                    lines.extend(texts)
-            elif (
-                tail is None
-                and isinstance(box, wb.TableRowGroupBox)
-                and "doc-tail" in classes
-            ):
-                foot = page_box.content_box_y() + page_box.height
-                bottom = box.position_y + box.margin_height()
-                tail = (number, foot - bottom)
-    if tail is None or not lines:
-        return None
-    page, room = tail
-    # whole: the line on one page, the totals' page, with room to spare; a
-    # line running over a page is cut, so what reaches the totals' page is
-    # its last two lines and not however many the break left
-    if head_pages == {page} and room >= DOC_TAIL_SLACK:
-        return "whole"
-    # the last two lines of the layout, a blank one (two line breaks in the
-    # description) counted as a line (W-213)
-    while lines and not lines[-1].strip():
-        lines.pop()
-    kept = lines[-DOC_TAIL_LINES:]
+            if isinstance(box, wb.TableRowGroupBox):
+                if "doc-tail" in classes:
+                    tail_pages.add(number)
+                    if tail is None:
+                        bottom = box.position_y + box.margin_height()
+                        tail = (number, top + height - bottom)
+                continue
+            if not isinstance(box, wb.TableRowBox):
+                continue
+            if element.get("data-last-line") is None:
+                rows_above = True
+                continue
+            cells = [c for c in box.children if isinstance(c, wb.TableCellBox)]
+            if not cells:
+                continue
+            if start is None:
+                start = (number, (box.position_y - top) / height, rows_above)
+            lines.extend((number, t) for t in _line_texts(cells[0]))
+    return lines, start, tail, tail_pages
+
+
+def _carry(lines, count):
+    """The words of the last ``count`` lines; with the blank line flag when
+    the first of them is a blank line (two line breaks in the description,
+    counted as a line, W-213)."""
+    kept = lines[-count:]
     words = sum(len(t.split()) for t in kept)
     if words and not kept[0].strip():
         return (words, 1)
     return words or None
+
+
+def choose_last_line(html_whole: str, keep: bool = True):
+    """How a document's long last line prints (see DOC_TAIL_LINES): "whole",
+    "kept" (whole, in the group with the totals), or the number of its last
+    words to carry with the totals, read from a layout of ``html_whole``
+    (the line uncut). With ``keep`` False, "kept" is not answered (its
+    layout did not hold). None when it cannot be laid out, and the
+    character count decides."""
+    document = _layout(html_whole)
+    if document is None:
+        return None
+    found, start, tail, _pages = _last_line_layout(document)
+    if tail is None or start is None or not found:
+        return None
+    page, room = tail
+    head_pages = {p for p, t in found if t.strip()}
+    if head_pages == {page} and room >= DOC_TAIL_SLACK:
+        return "whole"
+    # trailing empty line boxes are no lines of the description
+    while found and not found[-1][1].strip():
+        found.pop()
+    lines = [t for _p, t in found]
+    on_totals_page = sum(1 for p, _t in found if p == page)
+    first_page, above, rows_above = start
+    if (
+        keep
+        and on_totals_page
+        and (
+            # on the totals' page, with too little room under it
+            (head_pages == {page} and rows_above)
+            # or run over onto it from the page before, past its middle
+            or (
+                on_totals_page > DOC_TAIL_LINES
+                and first_page == page - 1
+                and above >= 0.5
+            )
+        )
+    ):
+        return "kept"
+    return _carry(lines, max(DOC_TAIL_LINES, on_totals_page))
+
+
+def kept_holds(html_kept: str) -> bool:
+    """The kept line and the totals' group on one page, as laid out."""
+    document = _layout(html_kept)
+    if document is None:
+        return False
+    _l, _s, tail, pages = _last_line_layout(document)
+    return tail is not None and len(pages) == 1
 
 
 _jinja_env.filters["currency"] = _format_currency
@@ -578,6 +627,13 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
     how = choose_last_line(whole)
     if how == "whole":
         return whole
+    if how == "kept":
+        kept = template.render(
+            company=company_settings, terms=terms, last_line_cut="kept", **context
+        )
+        if kept_holds(kept):
+            return kept
+        how = choose_last_line(whole, keep=False)
     return template.render(
         company=company_settings, terms=terms, last_line_cut=how, **context
     )

@@ -47,12 +47,10 @@
     table.line-items > tbody > tr.row-head > td { border-bottom: 0; padding-bottom: 0; }
     table.line-items > tbody > tr.row-end > td { padding-top: 0; }
     /* W-201: a row's figures sit on its first line, so a cut row's are where
-       any row's are; a cut is at a line boundary of the layout, and the first
-       part's last line is set full so the join does not show. */
+       any row's are. A cut is at a line boundary of the layout, so the first
+       part's last line is the layout's own, set as usual: never stretched to
+       the column's width (NEW-271). */
     table.line-items > tbody > tr > td { vertical-align: top; }
-    table.line-items > tbody > tr.row-head.joined > td:first-child { text-align-last: justify; }
-    /* what comes before the description's last line break, or before a cut at one, is set as usual (W-213) */
-    table.line-items > tbody > tr.row-head.joined > td:first-child > .lead { text-align-last: auto; }
     /* The end of long notes and the footer are one block (W-188). */
     .doc-close { break-inside: avoid; page-break-inside: avoid; }
     .notes.notes-end { margin-top: 0; padding-top: 0; border-top: 0; break-before: auto; page-break-before: auto; }
@@ -123,7 +121,7 @@
            description is not bound to the totals, and long notes follow the
            table as a block of their own, free to break, with no column
            headings over them. #}
-        {%- set long_last = bill.lines and ((bill.lines|last).description or '')|length > 600 %}
+        {%- set long_last = bill.lines and ((bill.lines|last).description or '')|length > 600 and last_line_cut != 'kept' %}
         {%- set long_notes = (bill.notes or '')|length > 1000 %}
         {% for line in bill.lines %}
             {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}

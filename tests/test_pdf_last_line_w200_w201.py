@@ -47,6 +47,28 @@ def _words(pdf):
     return found
 
 
+def carried_problems(tail, every):
+    """What is wrong with the end a cut carries (NEW-271), as sentences:
+    ``tail`` is the (page, y) of the end's lines, ``every`` of all the
+    line's lines. The page with the end holds no line of the first part,
+    and the end is two lines, or more only where the line ran over onto
+    that page by itself: the cut is then at the page break, the first
+    part ending on the page before."""
+    if not tail:
+        return ["no end carried"]
+    pages = {p for p, _y in tail}
+    head = every - tail
+    said = []
+    if len(pages) != 1:
+        said.append(f"the end is on pages {sorted(pages)}")
+    page = max(pages)
+    if any(p == page for p, _y in head):
+        said.append("the first part runs onto the totals' page")
+    if len(tail) != 2 and (not head or max(p for p, _y in head) != page - 1):
+        said.append(f"the end carried is {len(tail)} lines")
+    return said
+
+
 def _end_words(html):
     m = re.search(r'class="[^"]*row-end[^"]*"><td>(.*?)</td>', html, re.S)
     return re.findall(r"\bw\d{4}\b", re.sub(r"<[^>]+>", " ", m[1])) if m else []
@@ -89,8 +111,10 @@ def test_a_long_last_line_is_whole_when_it_fits_and_else_ends_on_two_lines(
             continue
         cut_seen += 1
         tail = {(p, y) for p, y, _a, _b, w in words if w in end}
-        if len(tail) != 2:
-            wrong.append(f"{said}: the end carried is {len(tail)} lines")
+        wrong += [
+            f"{said}: {p}"
+            for p in carried_problems(tail, {(p, y) for p, y, *_x, w in words})
+        ]
         head = {}
         left = min(a for _p, _y, a, _b, _w in words)
         for p, y, _a, b, w in words:
