@@ -2,6 +2,7 @@
 # PDF generation — WeasyPrint + Jinja2 templates.
 # ============================================================================
 
+import re
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -237,6 +238,39 @@ def _format_date(value):
     return str(value)
 
 
+# The end of a long last line or of long notes, kept with what follows it
+# (W-187, W-188): a block that may break across pages (#1045) is cut in two,
+# and its last few lines go into the unbreakable group with the totals or
+# the footer, so that group never starts a page on its own. Chromium does
+# not honour break-after: avoid on a row, nor reliably break-before: avoid
+# after a long block; an unbreakable group is what both engines keep.
+DOC_TAIL_KEEP = 240  # characters, about two to three lines of a line's description
+DOC_TAIL_MOST = (
+    600  # a sentence's end within this many characters of the end is the cut
+)
+
+
+def _tail_split(text, keep=DOC_TAIL_KEEP, most=DOC_TAIL_MOST):
+    """``(head, end)``: ``text`` cut so ``end`` is its last ``keep`` characters
+    or a little more. The cut is at a sentence's or a line's end when one
+    falls in the last ``most`` characters, else at a space; text this short
+    is all ``end``."""
+    text = (text or "").rstrip()
+    if len(text) <= keep:
+        return "", text
+    hi = len(text) - keep  # the cut is at or before this
+    lo = max(1, len(text) - most)
+    cut = -1
+    for m in re.finditer(r"[.!?;:](?=\s)|\n", text[lo:hi]):
+        cut = lo + m.end()
+    if cut <= 0:
+        cut = text.rfind(" ", 1, hi)
+    if cut <= 0:
+        cut = hi
+    return text[:cut].rstrip(), text[cut:].lstrip()
+
+
+_jinja_env.globals["tail_split"] = _tail_split
 _jinja_env.filters["currency"] = _format_currency
 _jinja_env.filters["rate"] = _format_rate
 _jinja_env.filters["qty"] = _format_qty
