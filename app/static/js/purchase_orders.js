@@ -378,6 +378,7 @@ const PurchaseOrdersPage = {
             data.scope_notes = form.scope_notes ? (form.scope_notes.value || null) : null;
             if (id && form.status) data.status = form.status.value;
         }
+        if (!ZeroTotal.ask('Purchase Order', lines.reduce((sum, l) => sum + l.quantity * l.rate, 0))) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         try {
             if (id) { await API.put(`/purchase-orders/${id}`, data); toast('PO updated'); }

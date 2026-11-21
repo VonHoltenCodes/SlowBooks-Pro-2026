@@ -195,8 +195,8 @@ const CreditMemosPage = {
 
     removeLine(idx) {
         const row = $(`[data-cmline="${idx}"]`);
-        if (row) row.remove();
-        CreditMemosPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => CreditMemosPage.recalc())) CreditMemosPage.recalc();
     },
 
     itemSelected(idx) {
@@ -314,12 +314,16 @@ const CreditMemosPage = {
             class_id: classIdFromForm(form),
             lines,
         };
+        // no lines, or lines that add up to $0.00: asked first (ZeroTotal)
+        const zero = ZeroTotal.ask('Credit Memo', CreditMemosPage.recalc().total);
+        if (!zero) return;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form, { rows: '#cm-lines tr', cls: 'line-class' }))) return;
         try {
-            // $0.00 asks "Save it anyway?" first (SalesLines.sendAllowingZero)
+            // the server's own $0.00 question, should it still ask, is put
+            // the same way (SalesLines.sendAllowingZero)
             const saved = await SalesLines.sendAllowingZero(flags =>
-                API.post('/credit-memos' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), { ...data, ...flags }));
+                API.post('/credit-memos' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), { ...data, ...flags }), zero);
             if (!saved) return;
             if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Credit memo voided and replaced by credit memo ${saved.memo_number || `#${saved.id}`}`);
             else toastPosted('Credit memo created');

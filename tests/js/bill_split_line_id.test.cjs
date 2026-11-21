@@ -15,6 +15,16 @@ function loadBillsPage() {
         window: {},
         document: { addEventListener() {} },
         Nonprofit: { label: (fn) => fn },
+        // the shared line code, stood in for: a share is a copy of the row,
+        // and the shares take the row's place
+        LineOrder: {
+            cloneRow: (row) => row.cloneNode(true),
+            replaceRow(row, fresh, changed) {
+                fresh.forEach((r) => row.insertAdjacentElement('afterend', r));
+                row.remove();
+                if (changed) changed();
+            },
+        },
         escapeHtml: (s) => String(s ?? ''),
     };
     vm.createContext(context);

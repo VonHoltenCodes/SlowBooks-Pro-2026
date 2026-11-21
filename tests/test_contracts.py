@@ -11,9 +11,6 @@ contract (change orders, #554) and bill it (progress billing, #555); this one
 sets it and builds the schedule.
 """
 
-import os
-import subprocess
-import sys
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -822,19 +819,9 @@ def test_job_profitability_rows_gain_contract_type_and_period_fee(
     assert row["fee_period"] == 4000.0  # fee on the period's cost
 
 
-def test_migration_upgrades_and_downgrades(tmp_path):
+def test_migration_upgrades_and_downgrades(tmp_path, alembic_cli):
     db = tmp_path / "mig.db"
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}"}
-
-    def run(*args):
-        return subprocess.run(
-            [sys.executable, "-m", "alembic", *args],
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
+    run = alembic_cli(db)  # one time budget for the walks (tests/conftest.py)
 
     up = run("upgrade", "head")
     assert up.returncode == 0, up.stderr

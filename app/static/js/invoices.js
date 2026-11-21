@@ -710,14 +710,16 @@ const InvoicesPage = {
         e.preventDefault();
         const form = e.target;
         try {
-            await API.post(`/invoices/${id}/email`, {
+            const res = await API.post(`/invoices/${id}/email`, {
                 recipient: form.recipient.value,
                 cc: form.cc.value.trim() || null,
                 bcc: form.bcc.value.trim() || null,
                 subject: form.subject.value,
                 message: form.message.value,
             });
-            toast(`${T('Invoice')} emailed`);
+            // a copy the mail server refused is said with it
+            toast(res && res.note ? `${T('Invoice')} emailed. ${res.note}` : `${T('Invoice')} emailed`,
+                res && res.note ? 'warning' : 'success');
             closeModal();
         } catch (err) {
             // An administrator is offered the Recent sends section, where the
@@ -998,8 +1000,8 @@ const InvoicesPage = {
 
     removeLine(idx) {
         const row = $(`[data-line="${idx}"]`);
-        if (row) row.remove();
-        InvoicesPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => InvoicesPage.recalc())) InvoicesPage.recalc();
     },
 
     itemSelected(idx) {
@@ -1100,6 +1102,9 @@ const InvoicesPage = {
             lines,
         };
 
+        // no lines, or lines that add up to $0.00: asked first (ZeroTotal)
+        const zero = ZeroTotal.ask(T('Invoice'), InvoicesPage.recalc().total);
+        if (!zero) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         if (!(await ClassWarn.ok(form, { rows: '#inv-lines tr', cls: 'line-class' }))) return;
         // Past the customer's credit limit? Say so, and let the user decide.
@@ -1117,7 +1122,7 @@ const InvoicesPage = {
                 // a new invoice carries the files attached before its first save (#881)
                 if (!id) body.pending_attachments = PendingFiles.ids();
                 return id ? API.put(`/invoices/${id}`, body) : API.post('/invoices', body);
-            }, InvoicesPage._overLimitOk ? { allow_over_credit_limit: true } : {});
+            }, { ...zero, ...(InvoicesPage._overLimitOk ? { allow_over_credit_limit: true } : {}) });
             if (!saved) return; // $0.00 and the user said no: the form stays open
             if (!id) PendingFiles.saved();
             toastPosted(Terms.text(id ? 'Invoice updated' : 'Invoice created'));

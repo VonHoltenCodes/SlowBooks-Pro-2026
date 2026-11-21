@@ -4,6 +4,7 @@ a log with no UI."""
 
 from datetime import datetime, timedelta
 
+import secrets
 import smtplib
 import ssl
 
@@ -189,7 +190,7 @@ def test_test_email_failure_states_reason_and_hint(client, monkeypatch):
             "smtp_host": "smtp.gmail.com",
             "smtp_port": "587",
             "smtp_user": "me@gmail.com",
-            "smtp_password": "not-an-app-password",
+            "smtp_password": secrets.token_urlsafe(12),
             "smtp_from_email": "me@gmail.com",
             "smtp_use_tls": "true",
         },
@@ -198,11 +199,16 @@ def test_test_email_failure_states_reason_and_hint(client, monkeypatch):
     r = client.post("/api/settings/test-email")
     assert r.status_code == 502
     detail = r.json()["detail"]
-    # the sentence stands alone (W-216): no raw reply in front of it
-    assert detail.startswith("Test email failed to send. Google will not accept")
-    assert "535" not in detail
-    assert "app password" in detail.lower()
-    assert "Recent sends" in detail
+    # the sentence first (W-216: no raw reply in front of it), then the
+    # mail server's reply as it was received: Test Email is an
+    # administrator's, and the one answer to a send that carries the reply
+    assert detail == (
+        "Test email failed to send. Google will not accept a normal password "
+        "here. Turn on 2-Step Verification on the account and use a "
+        "16-character app password as the SMTP password. The mail server's "
+        "reply: 535 5.7.8 Username and Password not accepted. The full list "
+        "is under Settings → Email (SMTP) → Recent sends."
+    )
     # and the failure is in the list the message points at
     rows = client.get("/api/email-log?status=failed").json()["rows"]
     assert rows and rows[0]["entity_type"] == "settings_test"

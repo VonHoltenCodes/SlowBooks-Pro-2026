@@ -1202,7 +1202,7 @@ const JobsPage = {
             <td><input class="co-l-markup" data-write type="number" step="0.0001" min="-99.9999" max="999.9999" value="${line.markup_pct ?? ''}" style="width:64px;text-align:right" placeholder="dflt" oninput="JobsPage.coRecalc()"></td>
             <td class="amount co-l-amt">0.00</td>
             <td class="amount co-l-sell">0.00</td>
-            <td><button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coRemoveLine(this)">✕</button></td>
+            <td><button type="button" class="btn btn-sm btn-secondary" data-write aria-label="Remove line" title="Remove line" onclick="JobsPage.coRemoveLine(this)">✕</button></td>
         </tr>`;
     },
 
@@ -1235,7 +1235,8 @@ const JobsPage = {
         body.insertAdjacentHTML('beforeend', JobsPage.coLineRowHtml({}, body.children.length));
         JobsPage.coRecalc();
     },
-    coRemoveLine(btn) { const tr = btn.closest('tr'); if (tr) tr.remove(); JobsPage.coRecalc(); },
+    // The shared Remove line: names follow, and the keyboard stays on the form.
+    coRemoveLine(btn) { if (!LineOrder.removeLine(btn, () => JobsPage.coRecalc())) JobsPage.coRecalc(); },
 
     coRecalc() {
         const funding = $('#co-funding') ? $('#co-funding').value : 'contract';
@@ -1299,6 +1300,7 @@ const JobsPage = {
     async coSave(e, id) {
         if (e) e.preventDefault();
         const data = JobsPage.coReadForm();
+        if (!ZeroTotal.ask('Change Order', data.lines.reduce((sum, l) => sum + l.quantity * l.unit_cost, 0))) return;
         try {
             if (id) { const { kind, job_id, ...body } = data; await API.put(`/change-orders/${id}`, body); }
             else { await API.post('/change-orders', data); }
@@ -1647,7 +1649,7 @@ const JobsPage = {
                 <th scope="col" class="amount">Completed</th><th scope="col" class="amount">%</th>
                 <th scope="col" class="amount">Balance</th><th scope="col" class="amount">Retainage</th>
             </tr></thead>
-            <tbody id="pa-body">${rows}</tbody>
+            <tbody id="pa-body" data-line-names>${rows}</tbody>
         </table></div>
         <div id="pa-totals" style="display:flex;gap:16px;flex-wrap:wrap;margin:10px 0">
             ${JobsPage.paTotalsHtml(totals)}

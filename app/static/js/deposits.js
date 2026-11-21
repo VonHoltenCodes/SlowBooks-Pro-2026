@@ -228,9 +228,9 @@ const DepositsPage = {
     },
 
     removeOtherLine(btn) {
-        const row = btn && btn.closest('tr');
-        if (row) row.remove();
-        DepositsPage.recalcAll();
+        // the shared Remove line: the lines left are named by their place
+        // again, and the keyboard stays on the form
+        if (!LineOrder.removeLine(btn, () => DepositsPage.recalcAll())) DepositsPage.recalcAll();
     },
 
     // what the rows of one grid hold, as buildOtherLines reads them
@@ -493,6 +493,7 @@ const DepositsPage = {
         cents += built.lines.reduce((sum, ln) => sum + Math.round(parseFloat(ln.amount) * 100), 0);
         const total = cents / 100;
 
+        if (!ZeroTotal.ask('Deposit', total)) return;
         if (lineIds.length === 0 && built.lines.length === 0) { toast('Tick the payments to deposit, or add a line for money that was never invoiced.', 'error'); return; }
 
         const bankAcctId = $('#deposit-bank-acct')?.value;

@@ -416,6 +416,11 @@ class EstimateResponse(BaseModel):
     # says how many), and the sentences Accept answers with.
     uncoded_lines: int = 0
     warnings: list[str] = []
+    # On the answer to a create or an update only: a tax-exempt customer's
+    # exemption certificate is missing, or expired as of the document's date
+    # (services/tax_exemption.certificate_warning). The sale is exempt all
+    # the same; this is for the person to be told. Null otherwise.
+    tax_note: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

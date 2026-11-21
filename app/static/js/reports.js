@@ -2339,7 +2339,10 @@ const ReportsPage = {
             // net of it. The server's row_rule says which sum a row holds
             // on its basis (W-204: on cash, Sales + Not income + Sales Tax =
             // Paid, and the Balance owed now stands apart). A customer's
-            // name opens the customer's page (R9)
+            // name opens the customer's page (R9). The count column counts
+            // invoices and sales receipts alike (a nonprofit's pledges,
+            // invoices and donations), and its heading names them all:
+            // "Invoices" ("Pledges") was true of only some of them
             const other = !!data.total_other || data.items.some(i => i.total_other);
             const otherCell = (v) => other ? `<td class="amount">${formatCurrency(v || 0)}</td>` : '';
             let rows = data.items.map(i =>
@@ -2369,7 +2372,7 @@ const ReportsPage = {
             return `${ReportsPage._exportButtons('income-by-customer', qs)}
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. ${hint(escapeHtml(Terms.text('Sales is what was sold, before tax, and ties to the income on the Profit & Loss for the same dates. On the accrual basis a credit memo takes its credit off Sales on its date.')), T('Income by Customer'))}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th>${otherHead}<th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">${escapeHtml(data.balance_heading || 'Balance')}</th></tr></thead>
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${escapeHtml(T('Invoices & Receipts'))}</th><th scope="col" class="amount">Sales</th>${otherHead}<th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">${escapeHtml(data.balance_heading || 'Balance')}</th></tr></thead>
                     <tbody>${rows || `<tr><td colspan="${cols}" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>`}</tbody>
                 </table></div>
                 ${data.row_rule ? `<p class="report-note" style="margin-top:8px; color:var(--gray-500);">${escapeHtml(Terms.text(data.row_rule))}</p>` : ''}`;
@@ -3264,12 +3267,14 @@ const ReportsPage = {
             // Only what actually went out is "sent"; a customer who didn't
             // get one is named, with the reason (explore 2.17.3, W-H7).
             ReportsPage._sendResult('Statements',
-                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || []);
+                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || [], result.notes || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    _sendResult(title, headline, errors) {
-        if (!errors.length) { toast(headline); return; }
+    // `notes`: sends that went out though the mail server refused a copy
+    // (each "Name: The mail server refused a copy to: …")
+    _sendResult(title, headline, errors, notes = []) {
+        if (!errors.length && !notes.length) { toast(headline); return; }
         // Each failed send is in the email_log; the Recent sends section under
         // Settings → Email (SMTP) shows the reason (#447). It is an
         // administrator's section, so only an administrator gets the link;
@@ -3278,8 +3283,10 @@ const ReportsPage = {
             ? `<a href="#/settings" class="btn btn-secondary" onclick="closeModal(); try { sessionStorage.setItem('settings_focus', 'settings-h-email-recent-sends'); } catch (e) {}">Recent sends</a>`
             : '';
         openModal(title, `
-            <p>${escapeHtml(headline)} ${errors.length} could not be sent:</p>
-            <ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+            <p>${escapeHtml(headline)}${errors.length ? ` ${errors.length} could not be sent:` : ''}</p>
+            ${errors.length ? `<ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : ''}
+            ${notes.length ? `<p>Sent, with a copy the mail server refused:</p>
+            <ul style="margin:8px 0 12px 20px;">${notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : ''}
             <div class="form-actions">
                 ${recentSends}
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
@@ -3294,7 +3301,7 @@ const ReportsPage = {
                 send_email: true,
             });
             ReportsPage._sendResult('Collection Letters',
-                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || []);
+                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || [], result.notes || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 };
@@ -4516,7 +4523,8 @@ ReportsPage.emailGivingStatements = async function () {
     box.textContent = 'Sending…';
     try {
         const r = await API.post('/donors/giving-statements/batch-email', { year });
-        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? `<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '');
+        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? `<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '') +
+            ((r.notes || []).length ? `<ul>${r.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '');
     } catch (err) { box.textContent = err.message; }
 };
 

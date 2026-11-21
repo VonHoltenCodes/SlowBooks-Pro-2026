@@ -42,6 +42,9 @@ NONPROFIT: dict[str, str] = {
     "Recent Invoices": "Recent Pledges & Invoices",
     "The last five invoices": "The last five pledges and invoices",
     "Total Invoiced": "Total Pledged",
+    # Income by Customer's count column: every sales document in the row,
+    # so a nonprofit's names all three kinds it counts
+    "Invoices & Receipts": "Pledges, Invoices & Donations",
     "Sales Receipt": "Donation",
     "Sales Receipts": "Donations",
     "Enter Sales Receipts": "Enter Donations",
@@ -194,6 +197,19 @@ class Terms:
     def compact(self, key: str) -> str:
         """CamelCase form for document filenames: ``SalesReceipt`` / ``Donation``."""
         return re.sub(r"\W", "", self(key))
+
+
+class AsWritten(str):
+    """Text that is shown exactly as it is written: the vocabulary swap
+    every HTTP error body passes through (app/main.py) leaves it alone.
+
+    For a sentence that holds data and not only prose of ours: an email
+    address, a mail server's reply, a document's own printed face, a
+    person's name. Swapping whole words inside those turns
+    invoices@customer.example into an address nobody was sent to. Whoever
+    builds such a sentence words its prose itself."""
+
+    __slots__ = ()
 
 
 def document_reference(face: str, number, name: str | None = None) -> str:

@@ -1813,6 +1813,32 @@ const TxnWarn = {
     },
 };
 
+// One question for every line form before it saves a document with no lines,
+// or whose lines add up to $0.00: the invoice's own ("This invoice adds up to
+// $0.00. Save it anyway?"), with the kind's name in the company's words. Yes
+// goes on to the save, and what the server will not take that way it refuses
+// in a sentence the form shows; No leaves the form as it stands. A locked
+// form never gets here: its submit is answered by App.lockForms.
+const ZeroTotal = {
+    // the kind as the company says it: a nonprofit's invoice is its
+    // 'pledge' and its sales receipt its 'donation', the words its form's
+    // title and its "updated" message already use
+    noun(kind) {
+        return String(typeof T === 'function' ? T(kind) : kind).toLowerCase();
+    },
+    question(kind) { return `This ${ZeroTotal.noun(kind)} adds up to $0.00. Save it anyway?`; },
+    isZero(total) { return Math.round((Number(total) || 0) * 100) === 0; },
+    // Before a save: null for No, else the flags to send with it: {} when
+    // there is something to save, {allow_zero_total: true} when the person
+    // said yes, which the invoice's and credit memo's server check takes as
+    // its answer, so it is asked once.
+    ask(kind, total) {
+        if (!ZeroTotal.isZero(total)) return {};
+        return confirm(ZeroTotal.question(kind)) ? { allow_zero_total: true } : null;
+    },
+};
+window.ZeroTotal = ZeroTotal;
+
 // A question with two answers named for what they do, over whatever is
 // open: resolves true for `yes`, false for `no` (and for Escape). Focus
 // starts on `no`, the safe answer, and Tab stays between the two.
@@ -1941,6 +1967,7 @@ const TaxExempt = {
             }
         }
         const exempt = custExempt || (!!sw && sw.checked);
+        TaxExempt.certificate(form || (tbody && tbody.closest ? tbody.closest('form') : null), custExempt ? c : null);
         if (!tbody) return exempt;
         tbody.querySelectorAll('.line-taxable').forEach(box => {
             if (exempt) {
@@ -1960,6 +1987,56 @@ const TaxExempt = {
     },
 
     SWITCH_TITLE: 'No sales tax on any line; the PDF says the sale is exempt',
+
+    // A tax-exempt customer whose exemption certificate is missing, or
+    // expired as of the document's date, is still not charged: the form says
+    // so in the open, under the customer, and nothing is blocked. The
+    // sentence is the server's (one function decides it, the same one the
+    // API's tax_note and the customer's page read). `customer` is the
+    // form's customer when marked tax exempt, else null. The note is a
+    // polite live region, there before it is filled, and it follows the
+    // customer, the date and the job; a look that fails says nothing.
+    certificate(form, customer) {
+        if (!form || !form.querySelector || typeof API === 'undefined') return;
+        const picker = form.querySelector('[name="customer_id"]');
+        if (!picker) return;
+        let note = form.querySelector('.tax-exempt-warning');
+        if (!note) {
+            if (!customer) return;
+            const group = picker.closest('.form-group') || picker.parentNode;
+            group.insertAdjacentHTML('beforeend',
+                '<div class="tax-exempt-warning" role="status" style="color:var(--text-warning); font-size:11px; font-weight:600; margin-top:4px;"></div>');
+            note = group.querySelector('.tax-exempt-warning');
+            // the date and the job change what is true; the customer and
+            // the lines already come through each form's recalc
+            const again = () => TaxExempt.certificate(form, note._customer || null);
+            for (const name of ['date', 'start_date', 'job_id']) {
+                const box = form.querySelector(`[name="${name}"]`);
+                if (box) box.addEventListener('change', again);
+            }
+        }
+        note._customer = customer;
+        const day = form.querySelector('[name="date"]') || form.querySelector('[name="start_date"]');
+        const job = form.querySelector('select[name="job_id"]');
+        // a saved recurring invoice is judged as the API judges it: as of
+        // its next invoice's date, not the day it started, and by the job
+        // it carries (its form shows neither as a box to read)
+        const asOf = form.dataset.exemptAsOf || (day && day.value) || '';
+        const jobId = (job ? job.value : form.dataset.exemptJob) || '';
+        const key = customer ? [customer.id, asOf, jobId].join('|') : '';
+        if (note.dataset.key === key) return;
+        note.dataset.key = key;
+        // another customer's sentence never stands under this one's name
+        if (!customer || note.dataset.customer !== String(customer.id)) note.textContent = '';
+        note.dataset.customer = customer ? String(customer.id) : '';
+        if (!customer) return;
+        const query = [];
+        if (asOf) query.push(`as_of=${encodeURIComponent(asOf)}`);
+        if (jobId) query.push(`job_id=${encodeURIComponent(jobId)}`);
+        API.get(`/customers/${customer.id}/exemption-warning${query.length ? '?' + query.join('&') : ''}`)
+            .then(answer => { if (note.dataset.key === key) note.textContent = (answer && answer.warning) || ''; })
+            .catch(() => { if (note.dataset.key === key) note.textContent = ''; });
+    },
 
     // The header switch, named tax_exempt; `onchange` is the form's recalc.
     switchHtml(on, onchange) {
@@ -2083,16 +2160,30 @@ const Nonprofit = {
 
     // Split: an inline chooser under the row; on Apply the page's
     // splitApply(row, lines) clones the row into one line per share.
+    // The chooser's row is not a line: it is marked as belonging to the
+    // line above (data-line-part), so the lines under it keep their
+    // numbers, it travels with its line and goes when the line is removed;
+    // its picker is named for that line (data-line-name: nameFields keeps
+    // the number right).
     splitRow(btn) {
         const row = btn.closest('tr');
         const next = row.nextElementSibling;
-        if (next && next.classList.contains('np-split-row')) { next.remove(); return; }
+        if (next && next.classList.contains('np-split-row')) { next.remove(); btn.focus(); return; }
         const rules = (Nonprofit._rules || []).map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
-        row.insertAdjacentHTML('afterend', `<tr class="np-split-row"><td colspan="12" style="background:var(--gray-50);font-size:11px;">
-            Split this line by <select class="np-split-rule">${rules}</select>
+        const place = typeof LineOrder === 'undefined' ? 1 : LineOrder.rows(row.parentNode).indexOf(row) + 1;
+        row.insertAdjacentHTML('afterend', `<tr class="np-split-row" data-line-part><td colspan="12" style="background:var(--gray-50);font-size:11px;">
+            Split this line by <select class="np-split-rule" data-line-name aria-label="Allocation rule, line ${place}">${rules}</select>
             <button type="button" class="btn btn-sm btn-primary" onclick="Nonprofit.splitApply(this)">Apply</button>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="this.closest('tr').remove()">Cancel</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="Nonprofit.splitCancel(this)">Cancel</button>
             <span class="np-split-msg" style="margin-left:8px;color:var(--gray-500)"></span></td></tr>`);
+    },
+    // Cancel closes the chooser and hands the keyboard back to the line's
+    // Split button, where it came from.
+    splitCancel(btn) {
+        const chooser = btn.closest('tr');
+        const split = chooser.previousElementSibling && chooser.previousElementSibling.querySelector('.np-split');
+        chooser.remove();
+        if (split) split.focus();
     },
     async splitApply(btn) {
         const chooser = btn.closest('tr');
@@ -2340,8 +2431,8 @@ const SalesCost = {
     },
     cellHtml(line) {
         if (!SalesCost.on()) return '';
-        return `<td class="sales-cost-col"><select class="line-cost-code" aria-label="Line cost code">${CostCodes.optionsHtml(line.cost_code_id == null ? null : Number(line.cost_code_id))}</select></td>`
-            + `<td class="sales-cost-col"><select class="line-cost-type" aria-label="Line cost type">${CostTypes.optionsHtml(line.cost_type || null)}</select></td>`;
+        return `<td class="sales-cost-col"><select class="line-cost-code">${CostCodes.optionsHtml(line.cost_code_id == null ? null : Number(line.cost_code_id))}</select></td>`
+            + `<td class="sales-cost-col"><select class="line-cost-type">${CostTypes.optionsHtml(line.cost_type || null)}</select></td>`;
     },
     // the row's data attributes: what the line carries where no cell is drawn
     dataAttrs(line) {
@@ -2569,7 +2660,10 @@ async function copyToClipboard(text, label = 'Text', el = null) {
 //   - a label written just before its field is tied to it;
 //   - a field in a table is named from its column heading and its row.
 // A field that already has a name (its own label, aria-label or
-// aria-labelledby) is left as it is.
+// aria-labelledby) is left as it is, with one exception: a field named
+// "…, line N" here is marked (data-line-name) and named again from the row
+// it is in now on every pass, so after a line is inserted, removed or moved
+// no two lines read the same and none reads another's number.
 // ---------------------------------------------------------------------------
 const _FIELD_SEL = 'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]), select, textarea';
 let _fieldSeq = 0;
@@ -2616,11 +2710,12 @@ function _tieLabel(label, field) {
     _requiredStar(label, field);
 }
 
-function _gridName(field) {
+// A table field's name, and whether it is by place ("line N").
+function _gridName(field, places) {
     const cell = field.closest('td');
     const row = cell && cell.parentElement;
     const table = row && row.closest('table');
-    if (!table) return '';
+    if (!table) return { name: '', byLine: false };
     // the column heading over this cell, colspans counted
     let col = 0;
     for (const c of row.cells) { if (c === cell) break; col += c.colSpan || 1; }
@@ -2635,17 +2730,59 @@ function _gridName(field) {
     }
     // the row: the words of its first cell before this one that has any (an
     // amount isn't a row's name), or "line N" where they're all fields
+    // (a grid of lines that says so, data-line-names, is named by place
+    // whatever its cells hold: two lines can hold the same words)
+    const body = row.parentElement && row.parentElement.tagName === 'TBODY' ? row.parentElement : null;
     let rowName = '';
-    for (const c of row.cells) {
+    for (const c of body && body.hasAttribute('data-line-names') ? [] : row.cells) {
         if (c === cell) break;
         if (c.matches('.amount, .col-amount')) continue;
         rowName = _cellText(c);
         if (rowName) break;
     }
-    if (!rowName && row.parentElement && row.parentElement.tagName === 'TBODY') {
-        rowName = `line ${row.sectionRowIndex + 1}`;
+    let byLine = false;
+    if (!rowName && body) {
+        rowName = `line ${_linePlaces(body, places).get(row)}`;
+        byLine = true;
     }
-    return [heading, rowName].filter(Boolean).join(', ');
+    return { name: [heading, rowName].filter(Boolean).join(', '), byLine };
+}
+
+// Where each row of a table body is among its lines, counted once a pass.
+// A row that belongs to the line above it (data-line-part: the nonprofit
+// Split chooser) is not a line: it has that line's number, and the lines
+// under it keep theirs.
+function _linePlaces(body, places) {
+    let rows = places.get(body);
+    if (!rows) {
+        rows = new Map();
+        let n = 0;
+        for (const r of body.rows) {
+            if (!r.hasAttribute('data-line-part') || !n) n += 1;
+            rows.set(r, n);
+        }
+        places.set(body, rows);
+    }
+    return rows;
+}
+
+// A field named by its line takes the number of the line it is on now (a
+// field once named by its line stays named by its line, whatever its row's
+// cells say later); a type-ahead picker's box carries its select's name, so
+// it follows. `places` is the pass's own count of each table body's rows:
+// a row's index is looked up, not counted again for every field, so a
+// table of thousands of lines is one walk a pass.
+function _nameByPlace(field, places) {
+    const cell = field.closest('td');
+    const row = cell && cell.parentElement;
+    const body = row && row.parentElement;
+    if (!body || body.tagName !== 'TBODY') return;
+    const rows = _linePlaces(body, places);
+    const was = field.getAttribute('aria-label') || '';
+    const name = was.replace(/\bline \d+$/, `line ${rows.get(row)}`);
+    if (name !== was) field.setAttribute('aria-label', name);
+    const box = field._cbx && field._cbx.box;
+    if (box && box.getAttribute('aria-label') !== name) box.setAttribute('aria-label', name);
 }
 
 // A placeholder or title: a name, if nothing better is found.
@@ -2665,9 +2802,11 @@ function _nameFromHint(field) {
 }
 
 function nameFields(root = document) {
+    const places = new Map();
     for (const field of root.querySelectorAll(_FIELD_SEL)) {
         // out of the accessibility tree (a type-ahead picker's select,
         // whose box carries the name): nothing to name
+        if (field.hasAttribute('data-line-name')) { _nameByPlace(field, places); continue; }
         if (_ownName(field) || field.closest('[aria-hidden="true"]')) continue;
         const group = field.closest('.form-group');
         const label = group && [...group.querySelectorAll('label')].find(l => !l.querySelector(_FIELD_SEL));
@@ -2684,9 +2823,10 @@ function nameFields(root = document) {
             _tieLabel(before, field);
             continue;
         } else if (field.closest('td')) {
-            const name = _gridName(field);
+            const { name, byLine } = _gridName(field, places);
             if (name) {
                 field.setAttribute('aria-label', name);
+                if (byLine) field.setAttribute('data-line-name', '');
                 continue;
             }
         }

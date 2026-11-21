@@ -44,7 +44,7 @@ def test_a_change_orders_lines_say_only_what_changed(client, seed_customer, db_s
     url = f"/api/change-orders/{co['id']}"
     created = _newest(client, "change_order", co["id"])
     # the lines as made, with their real amounts, once
-    assert created["details"] == ["Line: Deck, $100.00", "Line: $200.00"]
+    assert created["details"] == ["Line: Deck, $100.00", "Line 2 ($200.00)"]
 
     # the form's save: every line sent again with no ids, only the title new
     _age(db_session)
@@ -75,8 +75,11 @@ def test_a_change_orders_lines_say_only_what_changed(client, seed_customer, db_s
     _age(db_session)
     assert client.put(url, json={"lines": [lines[0], extra]}).status_code == 200
     said = _line_details(_newest(client, "change_order", co["id"]))
-    # Deck and Rail are found unchanged; the $600.00 line is the one gone
-    assert said == ["Line removed: $600.00"], said
+    # Deck and Rail are found unchanged; the $600.00 line is the one gone.
+    # It has no description, item or account, so it is named by the place
+    # it had, as an edited line with no name is (the one naming rule of
+    # round 28; it read "Line removed: $600.00")
+    assert said == ["Line removed: Line 2 ($600.00)"], said
 
 
 def _same_then_quantity(client, db_session, kind, url, doc, lines, header):

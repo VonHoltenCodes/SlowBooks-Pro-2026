@@ -57,6 +57,7 @@ function page({ jobs = JOBS, entries = [], entry = null, accountant = false, row
         classIdFromForm: () => null,
         jobIdFromForm: () => null,
         TxnWarn: { ok: async () => true },
+        ZeroTotal: { ask: () => ({}) },
         ClassWarn: { ok: async () => true },
         toast: (...args) => calls.toast.push(args),
         toastPosted: () => {},

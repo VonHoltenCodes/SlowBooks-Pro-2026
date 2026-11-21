@@ -45,7 +45,11 @@ from app.services.estimating import (
 )
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
-from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
+from app.services.tax_exemption import (
+    certificate_warning,
+    refresh_certificate_copy,
+    settle_tax_exempt,
+)
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
@@ -616,6 +620,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
+    resp.tax_note = certificate_warning(
+        db, estimate.customer, estimate.date, estimate.job_id
+    )
     return resp
 
 
@@ -817,6 +824,9 @@ def update_estimate(
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
+    resp.tax_note = certificate_warning(
+        db, estimate.customer, estimate.date, estimate.job_id
+    )
     return resp
 
 
@@ -975,8 +985,8 @@ def email_estimate(
     """Email the estimate PDF as an attachment, by the path an invoice uses:
     the same address checks, the same send_email (EmailLog row, always-copy
     settings) and the same 502 when SMTP is not set up."""
-    from app.routes._roles import is_admin
-    from app.services.email_errors import send_failed_detail
+    from app.routes._roles import reads_mail_server_words
+    from app.services.email_errors import send_failed_detail, sent_answer
     from app.services.email_service import (
         _get_smtp_settings,
         bad_addresses,
@@ -1033,9 +1043,12 @@ def email_estimate(
     if not sent:
         raise HTTPException(
             status_code=502,
-            detail=send_failed_detail(db, "estimate", est.id, is_admin(request)),
+            detail=send_failed_detail(
+                db, "estimate", est.id, reads_mail_server_words(request)
+            ),
         )
-    return {"status": "sent"}
+    # with a note when the server refused a copy
+    return sent_answer(db, "estimate", est.id)
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)

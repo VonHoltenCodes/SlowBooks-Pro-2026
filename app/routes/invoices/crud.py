@@ -12,7 +12,11 @@ from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.items import Item
 from app.models.contacts import Customer
 from app.services.sub_customers import INVOICE_ADDRESS_FIELDS, invoice_addresses
-from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
+from app.services.tax_exemption import (
+    certificate_warning,
+    refresh_certificate_copy,
+    settle_tax_exempt,
+)
 from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.accounting import (
     _q,
@@ -344,6 +348,7 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     DocumentTerms(db, "invoice").fill(resp, invoice)
     resp.customer_name = cust_name
     resp.warnings = stock_warnings
+    resp.tax_note = certificate_warning(db, customer, invoice.date, invoice.job_id)
     return resp
 
 
@@ -809,5 +814,8 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
     resp.warnings = stock_warnings
+    resp.tax_note = certificate_warning(
+        db, invoice.customer, invoice.date, invoice.job_id
+    )
     fill_last_emailed(db, [resp])
     return resp

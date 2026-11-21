@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.collections import InvoiceReminder, InvoiceReminderRule
 from app.routes._helpers import get_or_404
-from app.routes._roles import require_admin
+from app.routes._roles import reads_mail_server_words, require_admin
 from app.schemas.collections import (
     RuleCreate,
     RuleResponse,
@@ -131,10 +131,16 @@ def reminders_due(db: Session = Depends(get_db)):
 
 
 @router.post("/reminders/run")
-def reminders_run(data: Optional[RunRequest] = None, db: Session = Depends(get_db)):
+def reminders_run(
+    request: Request,
+    data: Optional[RunRequest] = None,
+    db: Session = Depends(get_db),
+):
     data = data or RunRequest()
     try:
-        return svc.run_reminders(db, "run", data.invoice_ids)
+        return svc.run_reminders(
+            db, "run", data.invoice_ids, admin=reads_mail_server_words(request)
+        )
     except svc.EmailNotSetUp as e:
         raise _bad_request(e)
 
@@ -145,9 +151,11 @@ def reminders_run_if_due(db: Session = Depends(get_db)):
 
 
 @router.post("/invoices/{invoice_id}/remind")
-def remind_invoice(invoice_id: int, db: Session = Depends(get_db)):
+def remind_invoice(invoice_id: int, request: Request, db: Session = Depends(get_db)):
     try:
-        return svc.remind_invoice(db, invoice_id)
+        return svc.remind_invoice(
+            db, invoice_id, admin=reads_mail_server_words(request)
+        )
     except LookupError:
         raise HTTPException(404, "Invoice not found")
     except (svc.RemindError, svc.EmailNotSetUp) as e:
@@ -164,10 +172,14 @@ def statements_due(db: Session = Depends(get_db)):
 
 @router.post("/statements/run")
 def statements_run(
-    data: Optional[StatementRunRequest] = None, db: Session = Depends(get_db)
+    request: Request,
+    data: Optional[StatementRunRequest] = None,
+    db: Session = Depends(get_db),
 ):
     data = data or StatementRunRequest()
     try:
-        return svc.run_statements(db, data.force)
+        return svc.run_statements(
+            db, data.force, admin=reads_mail_server_words(request)
+        )
     except svc.EmailNotSetUp as e:
         raise _bad_request(e)

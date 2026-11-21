@@ -9,9 +9,6 @@ the contract: those rows lock, and only a change order (a later issue) moves
 them.
 """
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 from app.models.invoices import InvoiceLine
@@ -886,19 +883,9 @@ def test_convert_puts_the_markup_lines_on_the_job_and_foots_with_tax(
 # ── Migration up/down ───────────────────────────────────────────────────────
 
 
-def test_migration_upgrades_and_downgrades(tmp_path):
+def test_migration_upgrades_and_downgrades(tmp_path, alembic_cli):
     db = tmp_path / "mig.db"
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}"}
-
-    def run(*args):
-        return subprocess.run(
-            [sys.executable, "-m", "alembic", *args],
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
+    run = alembic_cli(db)  # one time budget for the walks (tests/conftest.py)
 
     up = run("upgrade", "head")
     assert up.returncode == 0, up.stderr

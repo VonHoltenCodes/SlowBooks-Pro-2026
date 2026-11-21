@@ -408,7 +408,8 @@ const Donors = {
         if (to === null) return;
         try {
             const r = await API.post(`/donors/gifts/${kind}/${id}/acknowledgment/email`, { recipient: to.trim() || null });
-            toast(`Acknowledgment sent to ${r.recipient}`);
+            toast(r.note ? `Acknowledgment sent to ${r.recipient}. ${r.note}` : `Acknowledgment sent to ${r.recipient}`,
+                r.note ? 'warning' : 'success');
         } catch (err) { toast(err.message, 'error'); }
     },
 };

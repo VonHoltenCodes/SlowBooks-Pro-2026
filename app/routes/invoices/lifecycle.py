@@ -78,8 +78,10 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
         raise HTTPException(
             status_code=400,
             detail=(
-                "Cannot void an invoice with payments applied. Void the "
-                "payment(s) first, then void the invoice."
+                # no article before the noun: a company that calls it a
+                # pledge read "an pledge"
+                "This invoice has payments applied and cannot be voided. "
+                "Void the payment(s) first, then void the invoice."
             ),
         )
     check_closing_date(
