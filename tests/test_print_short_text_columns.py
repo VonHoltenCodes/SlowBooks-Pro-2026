@@ -609,3 +609,270 @@ def test_thai_in_a_narrow_column_prints_no_mark_apart_from_its_letter(tmp_path):
         ]
         assert "".join(starts) == word + "$12.34"
         assert not [s[:3] for s in starts if _joins_back(s[0])]
+
+
+# --- a long number in a report -------------------------------------------------
+
+
+def leaves_its_cell(html):
+    """The text of a table that is printed outside its own cell, over the
+    cell beside it: ``(page, text, where it ends, where its cell ends)``."""
+    from weasyprint import HTML
+    from weasyprint.formatting_structure import boxes as wb
+
+    from app.services.pdf_service import _get_fetcher
+
+    out = []
+    document = HTML(string=html, url_fetcher=_get_fetcher()).render()
+    for number, page in enumerate(document.pages, 1):
+        for cell in page._page_box.descendants():
+            if not isinstance(cell, wb.TableCellBox):
+                continue
+            lo = cell.position_x
+            hi = lo + cell.border_width()
+            for t in cell.descendants():
+                if not isinstance(t, wb.TextBox) or not t.text.strip():
+                    continue
+                if t.style["visibility"] != "visible":
+                    continue
+                end = t.position_x + t.width
+                if end > hi + 1 or t.position_x < lo - 1:
+                    out.append((number, t.text[:40], round(end, 1), round(hi, 1)))
+    return out
+
+
+TRACE = "9120260211004471883305526671102938475611"
+
+
+def test_a_long_number_in_a_report_stays_in_its_cell(client, seed_accounts, pages):
+    """A payment's reference that is one long number (a wire's trace number)
+    was set on one line, as a figure is, in a column that counted for less
+    than its width: it printed over the description beside it."""
+    pytest.importorskip("weasyprint")
+    wrong = []
+    for paper in ("letter", "a4"):
+        ok(client.put("/api/settings", json={"pdf_paper_size": paper}))
+        for reference in (
+            TRACE[:16],
+            TRACE[:22],
+            TRACE[:26],
+            TRACE[:30],
+            TRACE,
+            "0000-1111-2222-3333-4444-5555-6666-7777",
+            "2026 " + TRACE[:30],
+        ):
+            _payment(
+                client,
+                "Whitfield & Sons Roofing Company of Ohio",
+                reference,
+                "34567890.12",
+            )
+            html = page_of(pages, client, GL)
+            said = f"{paper}, after {reference!r}"
+            wrong += [f"{said}: {o} is outside its cell" for o in leaves_its_cell(html)]
+            wrong += [f"{said}: {p}" for p in past_the_margin(html)]
+            for row in rows(html, "report"):
+                for _x, _w, lines in row:
+                    if any(text.MONEY.match(ln) for ln in lines) and len(lines) != 1:
+                        wrong.append(f"{said}: a figure prints as {lines}")
+    assert not wrong, "\n".join(wrong[:20])
+
+
+def test_a_report_figure_is_on_one_line_while_it_is_no_wider_than_a_column():
+    """A figure keeps its width and its line; a run of digits wider than a
+    column of words may be wraps there as words do. By its width as digits
+    are set, at the narrowest and the widest a column of words counts for."""
+    from app.services.pdf_service import (
+        _CAP_LEAST_EM,
+        _CAP_MOST_EM,
+        _capped,
+        _one_line,
+    )
+
+    for cap in (_CAP_LEAST_EM, _CAP_MOST_EM):
+        for figure in (
+            "",
+            "—",
+            "$12.34",
+            "-$34,567,890.12",
+            "($34,567,890.12)",
+            "USD -34,567,890.12",
+            "12.5%",
+            "2026-02-02",
+            "September 30, 2026",
+            "1042",
+            "4111111111111",
+            1234.5,
+            None,
+        ):
+            assert _one_line(figure, cap), (figure, cap)
+            # and it is never set in an element narrower than itself
+            assert "<span" not in str(_capped(figure, cap)), (figure, cap)
+        for words in (
+            TRACE[:26],
+            TRACE,
+            "0000-1111-2222-3333-4444-5555-6666-7777",
+            "2026 " + TRACE[:30],
+            "Wire",
+            "INV-1042",
+        ):
+            assert not _one_line(words, cap), (words, cap)
+    assert 'class="w"' in str(_capped(TRACE[:26], _CAP_MOST_EM))
+
+
+# --- the running head ---------------------------------------------------------
+
+
+def test_a_running_head_keeps_to_the_paper(client, seed_accounts, pages):
+    """The head of a document's second page names its number: a bill number
+    of 100 wide letters ran off both edges of the sheet."""
+    pytest.importorskip("weasyprint")
+    from weasyprint import HTML
+    from weasyprint.formatting_structure import boxes as wb
+
+    from app.services.pdf_service import _get_fetcher
+
+    v = ok(client.post("/api/vendors?force=true", json={"name": "Acme Supply"}))
+    heads = {}
+    for number in (W * 100, "B-1042"):
+        lines = [
+            {
+                "account_id": seed_accounts["6000"].id,
+                "description": f"Line {i}",
+                "quantity": 1,
+                "rate": "10.00",
+                "amount": "10.00",
+            }
+            for i in range(60)
+        ]
+        b = ok(
+            client.post(
+                "/api/bills",
+                json={
+                    "vendor_id": v["id"],
+                    "bill_number": number,
+                    "date": "2026-01-01",
+                    "lines": lines,
+                },
+            )
+        )
+        html = page_of(pages, client, f"/api/bills/{b['id']}/pdf")
+        assert not past_the_margin(html), number[:12]
+        document = HTML(string=html, url_fetcher=_get_fetcher()).render()
+        assert len(document.pages) > 1
+        page = document.pages[1]._page_box
+        said = [
+            t
+            for box in page.children
+            if isinstance(box, wb.MarginBox) and box.at_keyword == "@top-center"
+            for t in box.descendants()
+            if isinstance(t, wb.TextBox) and t.text.strip()
+        ]
+        # all of it is printed, inside the top margin
+        printed = "".join(t.text for t in said).replace(" ", "")
+        assert printed == f"Bill{number}·Page2of{len(document.pages)}", printed[:60]
+        assert all(0 <= t.position_y for t in said)
+        assert max(t.position_y + t.height for t in said) <= page.margin_top
+        heads[number] = [(round(t.position_x, 1), round(t.position_y, 1)) for t in said]
+    # an ordinary number's head is one line
+    assert len(heads["B-1042"]) == 1, heads["B-1042"]
+    # every document with a running head has the rule
+    for name in sorted(p.name for p in text.TEMPLATES.glob("*.html")):
+        source = (text.TEMPLATES / name).read_text(encoding="utf-8")
+        for line in source.splitlines():
+            if "@top-center" in line and "counter(page)" in line:
+                assert "overflow-wrap: anywhere" in line, name
+
+
+# --- the deposit's heading ----------------------------------------------------
+
+ARABIC = "ت" * 60
+
+
+def _slip(client, acc, reference):
+    doc = ok(
+        client.post(
+            "/api/deposits",
+            json={
+                "deposit_to_account_id": acc["1000"].id,
+                "date": "2026-06-12",
+                "reference": reference,
+                "line_ids": [],
+                "total": "5",
+                "other_lines": [
+                    {
+                        "received_from": "Dana Whitfield",
+                        "account_id": acc["4000"].id,
+                        "check_number": "1042",
+                        "method": "Check",
+                        "amount": "5",
+                        "memo": "Rent",
+                    }
+                ],
+            },
+        )
+    )
+    return f"/api/deposits/{doc['transaction_id']}/pdf"
+
+
+def _heading(html):
+    """Where each label and value of a deposit's heading block is set."""
+    from weasyprint import HTML
+    from weasyprint.formatting_structure import boxes as wb
+
+    from app.services.pdf_service import _get_fetcher
+
+    page = HTML(string=html, url_fetcher=_get_fetcher()).render().pages[0]
+    out = []
+    for block in page._page_box.descendants():
+        element = getattr(block, "element", None)
+        if element is None or not isinstance(block, wb.BlockBox):
+            continue
+        if (element.get("class") or "").split()[:1] not in (["label"], ["value"]):
+            continue
+        said = [t for t in block.descendants() if isinstance(t, wb.TextBox) and t.text]
+        if said and said[0].text.strip() != "Total deposit":
+            out.append(
+                (
+                    said[0].text.strip()[:12],
+                    round(min(t.position_x for t in said), 1),
+                    round(max(t.position_x + t.width for t in said), 1),
+                )
+            )
+    return out
+
+
+def test_a_deposit_heading_ends_at_the_margin_whatever_its_slip_number(
+    client, seed_accounts, pages
+):
+    """A slip number of Latin text, a long unbroken Arabic run and another
+    Arabic word was set on one line: Items printed past the margin, outside
+    its box. The heading with an ordinary number is where it was."""
+    pytest.importorskip("weasyprint")
+    wrong = []
+    for paper in ("letter", "a4"):
+        ok(client.put("/api/settings", json={"pdf_paper_size": paper}))
+        for reference in (
+            "slipno " + ARABIC + " فاتورة",
+            "slipno " + ARABIC,
+            ARABIC + " فاتورة",
+            W * 100,
+            "DEP-1042 " + W * 19 + " " + W * 19 + " " + W * 19 + " " + W * 19,
+        ):
+            html = page_of(pages, client, _slip(client, seed_accounts, reference))
+            said = f"{paper}, {reference[:16]!r}"
+            wrong += [f"{said}: {p}" for p in past_the_margin(html)]
+            heading = _heading(html)
+            if [h[0] for h in heading][-2:] != ["ITEMS", "1"]:
+                wrong.append(f"{said}: the heading is {heading}")
+    assert not wrong, "\n".join(wrong)
+    # an ordinary heading: each part beside the one before it, 24px apart
+    ok(client.put("/api/settings", json={"pdf_paper_size": "letter"}))
+    html = page_of(pages, client, _slip(client, seed_accounts, "DEP-1042"))
+    heading = _heading(html)
+    labels = [h for h in heading if h[0] in ("DEPOSITED TO", "DATE", "SLIP #", "ITEMS")]
+    assert len(labels) == 4, heading
+    values = {h[0]: h for h in heading}
+    assert labels[1][1] - labels[0][2] == pytest.approx(24, abs=0.5), heading
+    assert labels[2][1] - values["Jun 12, 2026"][2] == pytest.approx(24, abs=0.5)
+    assert labels[3][1] - values["DEP-1042"][2] == pytest.approx(24, abs=0.5), heading

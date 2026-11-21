@@ -51,8 +51,10 @@
        Description). A cell of words wraps in its column as words do: it is
        on one line while the sheet has the room, and no longer holds the
        columns of figures past the margin when it has not. Which a cell is
-       is read from what is in it (pdf_service._is_figure), never from how
-       long it is. #}
+       is read from what is in it (pdf_service._one_line): a figure no
+       wider than a column of words may be is on one line, and a run of
+       digits wider than that (a wire's trace number) is words, since on
+       one line it left its cell and printed over the column beside it. #}
     table.report td.amount.words { white-space: normal; }
     {# A word that may be wider than its column's share of the sheet (.w,
        pdf_service._capped) counts for no more than that share when

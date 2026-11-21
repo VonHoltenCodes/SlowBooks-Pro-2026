@@ -6,7 +6,7 @@
 {% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     /* every page after the first names its document and page, in the top margin (#1035) */
-    @page { @top-center { content: {{ ('Estimate ' ~ (est.estimate_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; } }
+    @page { @top-center { content: {{ ('Estimate ' ~ (est.estimate_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; overflow-wrap: anywhere; } }
     @page :first { @top-center { content: none; } }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 14px; }

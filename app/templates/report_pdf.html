@@ -43,7 +43,7 @@
                 <tr class="{{ row.style or '' }}">
                     {% for cell in row.cells %}
                     {# row.indent: the account's level under its heading (#390, #416) #}
-                    <td {% if loop.index0 >= (section.text_columns or 1) %}class="amount{{ '' if cell is figure else ' words' }}"{% elif loop.first and row.indent %}style="padding-left: {{ 6 + 14 * row.indent }}px"{% endif %}>{{ cell | capped(cap) }}</td>
+                    <td {% if loop.index0 >= (section.text_columns or 1) %}class="amount{{ '' if cell is one_line(cap) else ' words' }}"{% elif loop.first and row.indent %}style="padding-left: {{ 6 + 14 * row.indent }}px"{% endif %}>{{ cell | capped(cap) }}</td>
                     {% endfor %}
                 </tr>
                 {% endfor %}

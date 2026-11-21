@@ -597,6 +597,36 @@ def _is_figure(value) -> bool:
 
 _jinja_env.tests["figure"] = _is_figure
 
+# A figure is on one line, and its column is as wide as that line: so a
+# figure is one only while it is no wider than a column of words may be. A
+# run of digits wider than that (a wire's trace number of 26 digits typed
+# as a payment's reference) is set as words are: it wraps in its column and
+# breaks inside, where on one line it left its cell and printed over the
+# column beside it. Its width is judged from what it is made of, as a
+# sans-serif face sets digits and their punctuation.
+_FIGURE_EM = {",": 0.32, ".": 0.32, " ": 0.32, "-": 0.37, "(": 0.39, ")": 0.39}
+
+
+def _figure_em(token: str) -> float:
+    return sum(
+        _FIGURE_EM.get(c, 0.6 if c.isdigit() or c == "$" else 0.8) for c in token
+    )
+
+
+def _one_line(value, cap: float = 0.0) -> bool:
+    """Whether a report's cell is a figure that is set on one line: a
+    figure (``_is_figure``) with nothing in it wider than ``cap`` ems, the
+    most a word of its section's columns counts for (``_word_cap``)."""
+    if not _is_figure(value):
+        return False
+    if value is None or isinstance(value, (int, float)):
+        return True
+    cap = cap or _CAP_MOST_EM
+    return all(_figure_em(token) <= cap for token in str(value).split())
+
+
+_jinja_env.tests["one_line"] = _one_line
+
 # A report's columns share the sheet by what is in them, and each is at
 # least as wide as its longest word: six columns of words with a wide word
 # in each were wider than the sheet. A word that may be wider than its
@@ -626,13 +656,14 @@ _REPORT_SHEET_PX = {
 def _word_cap(section: dict, paper_size: str = "letter", landscape=False) -> float:
     """The most a word of one of a report section's columns counts for, in
     ems: the sheet's width, less what its columns of figures take, shared
-    by its columns of words."""
+    by its columns of words. A column with a figure in it that may be too
+    wide for one line (``_one_line``) is a column of words."""
     columns = len(section.get("columns") or []) or 1
     rows = section.get("rows") or []
     words = set()
     for row in rows:
         for at, cell in enumerate(row.get("cells") or []):
-            if at not in words and not _is_figure(cell):
+            if at not in words and not _one_line(cell, _CAP_LEAST_EM):
                 words.add(at)
     words.add(0)
     figures = max(0, columns - len(words))
@@ -669,11 +700,14 @@ def _em_width(word: str) -> float:
 
 def _capped(value, cap: float = _CAP_MOST_EM):
     """A report's cell with each word that may be wider than ``cap`` ems in
-    a .w element (see ``_word_cap``)."""
+    a .w element (see ``_word_cap``). A figure on one line is never in one:
+    it keeps its width, and its column has it."""
     from markupsafe import Markup, escape
 
     text = "" if value is None else str(value)
     if hasattr(value, "__html__") or len(text) * 1.3 <= cap:
+        return value
+    if _one_line(value, cap):
         return value
     parts = re.split(r"(\s+)", text)
     if not any(_em_width(part) > cap for part in parts):

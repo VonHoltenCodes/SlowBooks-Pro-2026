@@ -15,7 +15,15 @@
     .doc-title .void { color: #b00020; }
     .as-of { font-size: 10pt; color: #666; margin-top: 4px; }
     .deposit-block { margin-bottom: 20px; padding: 12px; background: #f7f9fb; border: 1px solid #e0e0e0; }
-    .deposit-block .row { display: flex; gap: 24px; font-size: 10pt; }
+    /* The row is a table as wide as its text and no wider than the block:
+       the account and the slip number wrap in what the date and the count
+       leave them, whatever is typed in them, and Items is never set past
+       the margin (in a flex row it was, by a slip number of mixed Arabic
+       and Latin text, which WeasyPrint measured as needing more than the
+       row had). */
+    .deposit-block .row { display: table; font-size: 10pt; }
+    .deposit-block .row > div { display: table-cell; vertical-align: top; padding-right: 24px; }
+    .deposit-block .row > div:last-child { padding-right: 0; }
     .deposit-block .label { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
     .deposit-block .value.nw { white-space: nowrap; }
     .deposit-block .value { font-weight: 700; color: #003366; }
