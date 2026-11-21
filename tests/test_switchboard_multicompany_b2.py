@@ -48,7 +48,6 @@ from tests.test_switchboard_connect_1087 import (
 
 ROOT = Path(__file__).resolve().parents[1]
 HANDLE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}~[a-z2-7]{6}")
-POSIX = pytest.mark.skipif(os.name == "nt", reason="the POSIX lock is tested here")
 
 COMPANIES = (
     ("harbor.db", "Harbor Books"),
@@ -503,10 +502,20 @@ with link._record_lock(wait=30):
     link._save(link._format2(record, link._entries(record) + [entry]))
 """
 
+# Another process holding one of the connection's locks, taken the way that
+# platform's kernel takes it (flock on POSIX, a byte-range lock on Windows),
+# not through the app's own helper, so the app's lock is checked against the
+# operating system's.
 _HOLD = r"""
-import fcntl, os, sys, time
+import os, sys, time
 fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)
-fcntl.flock(fd, fcntl.LOCK_EX)
+if os.name == "nt":
+    import msvcrt
+    os.lseek(fd, 0, os.SEEK_SET)
+    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+else:
+    import fcntl
+    fcntl.flock(fd, fcntl.LOCK_EX)
 print("held", flush=True)
 time.sleep(120)
 """
@@ -552,7 +561,6 @@ def _hand_made_record(*entries):
     return link._format2(base, list(entries))
 
 
-@POSIX
 def test_two_processes_add_at_once_and_both_persist(tmp_path, monkeypatch):
     monkeypatch.setattr(link, "link_path", lambda: tmp_path / link.LINK_FILE)
     link._save(_hand_made_record(_entry("harbor.db", "Harbor Books")))
@@ -571,7 +579,6 @@ def test_two_processes_add_at_once_and_both_persist(tmp_path, monkeypatch):
     assert record["rev"] == 3
 
 
-@POSIX
 def test_a_killed_lock_holder_lets_the_lock_go(tmp_path, monkeypatch):
     monkeypatch.setattr(link, "link_path", lambda: tmp_path / link.LINK_FILE)
     holder = _child(_HOLD, tmp_path / link.LOCK_FILE)
@@ -595,7 +602,6 @@ def test_a_killed_lock_holder_lets_the_lock_go(tmp_path, monkeypatch):
         pass  # the operating system let it go when the holder died
 
 
-@POSIX
 def test_a_second_process_waits_for_the_line_and_takes_it_after(
     relay, client, monkeypatch
 ):
@@ -717,7 +723,6 @@ def test_the_desktop_never_opens_a_company_that_is_not_open(client):
     assert set(db_module._company_engines) == before
 
 
-@POSIX
 def test_the_desktop_says_which_window_has_the_books(relay, client, monkeypatch):
     # a desktop started for a company file (the suite's own database is not one)
     monkeypatch.setattr(db_module, "started_company_file", lambda: "harbor.db")
