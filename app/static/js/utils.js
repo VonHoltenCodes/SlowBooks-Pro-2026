@@ -2158,10 +2158,14 @@ const Nonprofit = {
             .replace('<option value="">Same as header</option>', '<option value="">No class</option>');
     },
     headHtml() { return Nonprofit.classHeadHtml() + (Nonprofit.enabled() ? `<th scope="col">Function</th>` : ''); },
+    // The Function picker and Split share the cell side by side, the picker
+    // taking what room Split leaves: a picker as wide as the cell (the line
+    // tables' rule for a field) pushed Split out over the next column's
+    // control, where the mouse could not reach it.
     cellHtml(cls, selected, fundSelected) {
-        const split = Nonprofit.enabled() && (Nonprofit._rules || []).length ? ` <button type="button" class="btn btn-sm btn-secondary np-split" title="Split this line by an allocation rule" onclick="Nonprofit.splitRow(this)">Split</button>` : '';
+        const split = Nonprofit.enabled() && (Nonprofit._rules || []).length ? `<button type="button" class="btn btn-sm btn-secondary np-split" style="flex:none;" title="Split this line by an allocation rule" onclick="Nonprofit.splitRow(this)">Split</button>` : '';
         return Nonprofit.classCellHtml(cls, fundSelected) + (Nonprofit.enabled()
-            ? `<td style="white-space:nowrap"><select class="${cls}">${Nonprofit.optionsHtml(selected, '—')}</select>${split}</td>`
+            ? `<td><span class="np-function" style="display:flex;align-items:center;gap:4px;"><select class="${cls}" style="flex:1 1 5em;min-width:5em;">${Nonprofit.optionsHtml(selected, '—')}</select>${split}</span></td>`
             : '');
     },
     fromRow(row, cls) { return row.querySelector(`.${cls}`)?.value || null; },
