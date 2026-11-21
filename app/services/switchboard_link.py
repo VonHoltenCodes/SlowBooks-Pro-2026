@@ -880,6 +880,8 @@ def _record_lock(wait: float | None = None):
             _record_held["fd"] = fd
         _record_held["depth"] += 1
         try:
+            if _record_held["depth"] == 1:
+                _pay_owed_drops()
             yield
         finally:
             _record_held["depth"] -= 1
@@ -1663,7 +1665,7 @@ class LinkBooks:
             "why": "",
             "file": entry["file"],
         }
-        if entry["off"] or not entry["token"]:
+        if entry["off"] or not entry["token"] or _drop_owed(entry["books"]):
             raise Refused(403, BOOKS_LOST.format(name=name))
         if not _company_open(entry["file"]):
             if _server_edition():
@@ -1699,33 +1701,89 @@ class LinkBooks:
         return BOOKS_LOST.format(name=entry.get("name") or entry.get("file") or "")
 
 
+# Books whose refused token's secret could not be deleted at once because
+# the record lock stayed busy past the press deadline: the next holder of
+# the record lock in this process deletes it as it takes the lock, and
+# until then those books answer as lost.
+_owed_drops: set = set()
+_owed_lock = threading.Lock()
+
+
+def _drop_owed(books: str) -> bool:
+    with _owed_lock:
+        return books in _owed_drops
+
+
+def _drop_held(books: str) -> bool:
+    """Under _record_lock: delete the secret of the books' token and mark
+    the company refused. False when there is no record, or no token of
+    those books with a secret left."""
+    record = _load()
+    if record is None:
+        return False
+    entries = _entries(record)
+    for entry in entries:
+        if entry["books"] == books and entry["token"]:
+            entry["token"] = ""
+            entry["off"] = OFF_REFUSED
+            break
+    else:
+        return False
+    _save(_format2(record, _with_adders(entries)))
+    logger.warning(
+        "an AI assistant connection token was refused by its company; its "
+        "secret is deleted from this computer"
+    )
+    return True
+
+
+def _pay_owed_drops() -> None:
+    """Under _record_lock, as its first holder takes it: the drops owed.
+    One that still cannot be made stays owed; nothing here fails the
+    holder's own change."""
+    with _owed_lock:
+        owed = sorted(_owed_drops)
+    for books in owed:
+        try:
+            _drop_held(books)
+        except Exception as exc:
+            logger.warning(
+                "a refused AI assistant connection token's secret is still "
+                "not deleted: %s",
+                exc,
+            )
+            continue
+        with _owed_lock:
+            _owed_drops.discard(books)
+
+
 def drop_secret(books: str | None) -> bool:
     """A company's token answered 401: its secret is deleted from the record
     and the company is marked refused (its hash and id stay, so a restore
     that revives the token row cannot revive access through this computer).
-    Never waits for the lock: when it is busy, the next 401 tries again."""
+    Another change, the start's sweep or another window may hold the record
+    lock for a moment, so this waits for it up to the press deadline. When
+    it is still busy the drop is owed: the books answer as lost from now on
+    and the next change to the connection in this window deletes the secret
+    first (the next 401 tries again too). Returns whether it is deleted now."""
     if not books:
         return False
+    with _owed_lock:
+        _owed_drops.discard(books)
     try:
-        with _record_lock(wait=0):
-            record = _load()
-            if record is None:
-                return False
-            entries = _entries(record)
-            for entry in entries:
-                if entry["books"] == books and entry["token"]:
-                    entry["token"] = ""
-                    entry["off"] = OFF_REFUSED
-                    break
-            else:
-                return False
-            _save(_format2(record, _with_adders(entries)))
-            logger.warning(
-                "an AI assistant connection token was refused by its company; its "
-                "secret is deleted from this computer"
-            )
-            return True
-    except (SwitchboardError, OSError):
+        with _record_lock():
+            return _drop_held(books)
+    except SwitchboardError as exc:
+        if exc.sentence != EDIT_BUSY:
+            return False
+        with _owed_lock:
+            _owed_drops.add(books)
+        logger.warning(
+            "a refused AI assistant connection token's secret is not deleted "
+            "yet: the connection is busy; it is deleted at its next change"
+        )
+        return False
+    except OSError:
         return False
 
 

@@ -37,6 +37,7 @@ from app.services import auth as auth_service
 from app.services import served_companies
 from app.services import switchboard_link as link
 from app.switchboard import line as line_client
+from app.switchboard.client import Refused
 from app.switchboard.server import build_registry
 from tests.test_served_companies import _make_company
 from tests.test_switchboard_connect_1087 import (
@@ -828,6 +829,74 @@ def test_a_connection_made_before_this_change_keeps_working(relay, client):
     assert record["format"] == 2
     assert record["companies"][0]["books"] == first[0]["books"]
     assert link._whole2(record)
+
+
+def _hold_the_record_lock(let_go: threading.Event):
+    """Another holder of the record lock (the start's sweep, a change, or
+    another window) in a thread; returns it once it holds the lock."""
+    held = threading.Event()
+
+    def hold():
+        with link._record_lock():
+            held.set()
+            let_go.wait(30)
+
+    holder = threading.Thread(target=hold, daemon=True)
+    holder.start()
+    assert held.wait(10)
+    return holder
+
+
+def test_a_refused_tokens_secret_is_dropped_while_the_record_is_held_a_moment(
+    relay, client, monkeypatch
+):
+    """The line's start sweeps the leftovers under the record lock just after
+    the line opens: a 401 heard then still deletes the token's secret."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    threading.Timer(0.5, let_go.set).start()
+    assert link.drop_secret(books) is True
+    holder.join(10)
+    entry = _record()["companies"][0]
+    assert entry["books"] == books and entry["token"] == ""
+    assert entry["off"] == link.OFF_REFUSED
+    assert not link._owed_drops
+
+
+def test_a_drop_the_lock_is_not_free_for_in_time_is_made_by_its_next_holder(
+    relay, client, monkeypatch
+):
+    """Held past the press deadline: the books answer as lost at once and
+    the next change to the connection in this window deletes the secret."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.2)
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    try:
+        assert link.drop_secret(books) is False
+        assert _record()["companies"][0]["token"] != ""
+        with pytest.raises(Refused) as refused:
+            link.LinkBooks().pick(books, "context")
+        assert refused.value.status == 403
+        assert "no longer accepts this connection" in refused.value.detail
+    finally:
+        let_go.set()
+        holder.join(10)
+    with link._record_lock():
+        pass
+    entry = _record()["companies"][0]
+    assert entry["books"] == books and entry["token"] == ""
+    assert entry["off"] == link.OFF_REFUSED
+    assert not link._owed_drops
 
 
 def test_a_record_of_several_companies_still_reads_as_one_to_beta1(three, relay):
