@@ -73,6 +73,16 @@ SUBMIT = """(sel) => {
     form.requestSubmit();
 }"""
 QUESTION = "This {noun} adds up to $0.00. Save it anyway?"
+FIELD_TICKET_YES = "Field ticket saved"
+
+
+PICK_NEW_CUSTOMER = """() => {
+    const pick = document.querySelector('#qe-form [name="customer_id"]');
+    pick.value = '__new__';
+    pick.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('#qe-new-cust-name').value = 'Zero Street Diner';
+    document.querySelector('#qe-lines .line-desc').value = 'Site visit, no charge';
+}"""
 
 
 def _first(client, path):
@@ -106,6 +116,7 @@ class _Form:
         self.ready = more.get("ready", MODAL_SHOWN)
         self.still = more.get("still", self.ready)  # the form is still open
         self.before = more.get("before")  # set up just before it opens
+        self.keep = more.get("keep", False)  # its one line stays, at $0.00
 
 
 def _forms(client):
@@ -156,6 +167,10 @@ def _forms(client):
             f"/api/jobs/{job['id']}/contract",
             json={"contract_type": "lump_sum", "contract_amount": 36000},
         )
+        assert r.status_code == 200, r.text
+
+    def nonprofit():
+        r = client.put("/api/settings", json={"company_type": "nonprofit"})
         assert r.status_code == 200, r.text
 
     modal = "#modal-body form"
@@ -317,6 +332,53 @@ def _forms(client):
             still="() => !!document.querySelector('#co-form')",
             before=construction,
         ),
+        # the forms that are never saved for nothing ask first all the
+        # same, then say what they need
+        _Form(
+            "job cost entry",
+            "#/job-costs",
+            "JobCostsPage.showForm()",
+            modal,
+            "#jc-lines",
+            modal + " [name=memo]",
+            "Add at least one line with a quantity and rate",
+        ),
+        _Form(
+            "bill",
+            "#/bill-entry",
+            "null",
+            "#bqe-form",
+            "#bqe-lines",
+            "#bqe-number",
+            "Enter what the vendor charged: an amount on at least one line.",
+            ready="() => !!document.querySelector('#bqe-lines tr')",
+        ),
+        _Form(
+            "field ticket",
+            f"#/jobs/{job['id']}",
+            "(async () => { await JobsPage.setTab('fieldtickets');"
+            " FieldTickets.newTicket('tm'); FieldTickets.addLine(); })()",
+            "#ft-form",
+            "#ft-line-body",
+            "#ft-by",
+            FIELD_TICKET_YES,
+            saved=True,
+            ready="() => !!document.querySelector('#ft-line-body tr')",
+            still="() => !!document.querySelector('#ft-form')",
+        ),
+        # a nonprofit's in-kind gift: one described line with no fair value
+        _Form(
+            "in-kind gift",
+            "#/in-kind-gifts",
+            "InKindPage.showForm()",
+            modal,
+            "#ik-lines",
+            modal + " [name=memo]",
+            re.compile(r"IK-\d+ posted"),
+            saved=True,
+            keep=True,
+            before=nonprofit,
+        ),
     ]
 
 
@@ -357,7 +419,9 @@ def test_every_line_form_asks_before_saving_nothing(browser, company):
             )
             # the last line comes off like any other
             assert page.evaluate(ROWS, f.lines) >= 1, f.noun
-            if page.evaluate(HAS_REMOVE, f.lines):
+            if f.keep:
+                assert page.evaluate(ROWS, f.lines) == 1, f.noun
+            elif page.evaluate(HAS_REMOVE, f.lines):
                 for _ in range(12):
                     if not page.evaluate(REMOVE_ONE, f.lines):
                         break
@@ -401,6 +465,43 @@ def test_every_line_form_asks_before_saving_nothing(browser, company):
             assert errors == [], f.noun
         finally:
             page.close()
+
+    # Quick Entry with "+ New Customer" open and a name typed: the question
+    # comes before anything is sent, so No adds no customer either.
+    r = company.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+    page, handled = _open_at(browser, company, "#/quick-entry")
+    asked, writes = [], []
+    page.on("dialog", lambda d: (asked.append(d.message), d.dismiss()))
+    page.on(
+        "request",
+        lambda r: (
+            writes.append(f"{r.method} {r.url.split('/api/')[-1]}")
+            if r.method != "GET" and "/api/" in r.url
+            else None
+        ),
+    )
+    try:
+        page.wait_for_function("() => !!document.querySelector('#qe-lines tr')")
+        settle(page, handled)
+        page.evaluate(PICK_NEW_CUSTOMER)
+        settle(page, handled)
+        writes.clear()
+        page.evaluate(SUBMIT, "#qe-form")
+        settle(page, handled)
+        page.wait_for_timeout(300)
+        assert asked == [QUESTION.format(noun="invoice")]
+        assert writes == []
+        assert page.evaluate(TOASTS) == []
+        assert page.evaluate(
+            "() => [document.querySelector('#qe-new-cust-name').value,"
+            " document.querySelector('#qe-lines .line-desc').value]"
+        ) == ["Zero Street Diner", "Site visit, no charge"]
+    finally:
+        page.close()
+    found = company.get("/api/customers", params={"search": "Zero Street"}).json()
+    found = found.get("items") if isinstance(found, dict) else found
+    assert not [c for c in found if c["name"] == "Zero Street Diner"]
 
     # A nonprofit's invoice form is titled, and answers, as a pledge whether
     # or not the box that prints PLEDGE is ticked: it asks about a pledge too.

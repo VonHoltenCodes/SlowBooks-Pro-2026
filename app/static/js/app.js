@@ -2610,6 +2610,11 @@ const App = {
         if (!App.qeInvoiceData(form)) { toast('Add at least one line item', 'error'); return; }
         // "+ New Customer" still open with a name typed: Save & Next adds the
         // customer first, then the invoice
+        // lines that add up to $0.00: asked first, as the invoice form asks
+        // (ZeroTotal), and before anything is sent, a new customer included;
+        // Yes saves it, No leaves the entry as typed and adds nothing
+        let zero = ZeroTotal.ask('Invoice', App.qeRecalc().total);
+        if (!zero) return;
         if (form.customer_id.value === '__new__') {
             if (!(await App.qeSaveNewCustomer())) return;
         }
@@ -2617,10 +2622,10 @@ const App = {
         // with their Tax boxes off
         const total = App.qeRecalc().total;
         const entry = App.qeInvoiceData(form);
-        // lines that add up to $0.00: asked first, as the invoice form asks
-        // (ZeroTotal); Yes saves it, No leaves the entry as typed
-        const zero = ZeroTotal.ask('Invoice', total);
-        if (!zero) return;
+        if (ZeroTotal.isZero(total) && !zero.allow_zero_total) {
+            zero = ZeroTotal.ask('Invoice', total);
+            if (!zero) return;
+        }
         try {
             const inv = await SalesLines.sendAllowingZero(flags => {
                 const data = { ...entry, ...flags };
