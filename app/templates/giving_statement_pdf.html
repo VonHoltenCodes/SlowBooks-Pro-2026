@@ -51,16 +51,13 @@
        their headings never wrap. */
     table.activity .closing { width: 0; min-width: 100%; }
     table.activity > thead > tr > th, table.activity > tbody > tr > td.d, table.activity > tbody > tr > td.r { white-space: nowrap; }
-    /* A reference longer than most wraps in a column of a set width and the
-       description has the rest of the table's, so the figures' columns are
-       as wide as their figures and headings and stay where they are
-       whatever the text. */
-    table.activity > tbody > tr > td.ref { width: 0.8in; min-width: 0.8in; overflow-wrap: anywhere; }
-    table.activity > tbody > tr > td.desc { width: 100%; }
-    /* The description may have less room than a word is wide: a word of it
-       then breaks inside (text longer than a memo is measured too slowly
-       for that, and breaks between its words and inside its long ones). */
-    table.activity > tbody > tr > td.desc.squeeze { overflow-wrap: anywhere; }
+    /* A reference is on one line in a column as wide as that line and no
+       wider than this, and a longer one wraps there; the description has
+       the rest of the table and asks for no width of its own, so the
+       figures' columns are as wide as their figures and headings and stay
+       where they are whatever the text (_print_text.html has the rule). */
+    table.activity > tbody > tr > td.ref { max-width: 0.8in; }
+    table.activity > tbody > tr > td.desc { width: 100%; max-width: 0.6in; }
     /* Seven columns of six- and seven-figure amounts, and headings, none of
        which wrap, ran the gift table, and the summary in its last cell,
        past the page's width (W-226: 8.5 pt at six figures). Its figures
@@ -153,9 +150,8 @@
             {% if loop.last and not st.in_kind %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
                 <td class="d">{{ g.date | fdate }}</td>
-                <td{% if g.number is long_text(10) %} class="ref"{% endif %}>{{ g.number or '' }}</td>
-                {%- set squeeze = ' squeeze' if not g.description is long_text(200) else '' %}
-                <td class="desc{{ squeeze }}">{{ g.description | desc }}</td>
+                <td class="ref">{{ (g.number or '') | own_width }}</td>
+                <td class="desc">{{ g.description | desc }}</td>
                 <td class="r">{{ g.amount | currency }}</td>
                 <td class="r">{% if g.fair_value_amount %}{{ g.fair_value_amount | currency }}{% endif %}</td>
                 <td class="r">{{ g.deductible | currency }}</td>
@@ -176,7 +172,7 @@
         <tbody>
         {% for g in st.in_kind %}
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
-            <tr><td class="d">{{ g.date | fdate }}</td><td{% if g.number is long_text(10) %} class="ref"{% endif %}>{{ g.number }}</td><td class="desc">{% for ln in g.in_kind_lines %}{{ ln.description }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
+            <tr><td class="d">{{ g.date | fdate }}</td><td class="ref">{{ g.number | own_width }}</td><td class="desc">{% for ln in g.in_kind_lines %}{{ ln.description }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
         {% endfor %}
         <tr class="doc-end"><td colspan="3">
     <div style="font-size:8.5pt;color:#555;">Values of non-cash gifts are not stated; the donor determines fair market value.</div>

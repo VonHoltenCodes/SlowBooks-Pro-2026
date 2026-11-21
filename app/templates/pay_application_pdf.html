@@ -34,12 +34,11 @@
     /* The description has the rest of the table's width and wraps in it, so
        the figures' columns are as wide as their figures and headings and
        stay where they are whatever the text. */
-    table.cont > tbody > tr > td.desc { width: 100%; }
-    /* it may have less room than a word is wide: a word of it then breaks
-       inside (text longer than a memo is measured too slowly for that, and
-       breaks between its words and inside its long ones) */
-    table.cont > tbody > tr > td.desc.squeeze { overflow-wrap: anywhere; }
-    table.cont > tbody > tr > td.item { overflow-wrap: anywhere; }
+    table.cont > tbody > tr > td.desc { width: 100%; max-width: 0.5in; }
+    /* An item number is on one line in a column as wide as that line and
+       no wider than this, and a longer one wraps there
+       (_print_text.html has the rule). */
+    table.cont > tbody > tr > td.item { max-width: 0.75in; }
     table.cont > tbody > tr.totals > td { font-weight: 700; border-top: 2px solid #003366; }
     /* Ten columns of six- and seven-figure amounts, which never wrap, ran
        the line detail past the right margin (W-226: 3 pt at six figures,
@@ -132,9 +131,8 @@
         {% for line in pa.lines %}
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
-                <td class="item">{{ line.item_no or '' }}</td>
-                {%- set squeeze = ' squeeze' if not line.description is long_text(200) else '' %}
-                <td class="desc{{ squeeze }}">{{ line.description | desc }}</td>
+                <td class="item">{{ (line.item_no or '') | own_width }}</td>
+                <td class="desc">{{ line.description | desc }}</td>
                 <td class="r">{{ line.scheduled_value | currency }}</td>
                 <td class="r">{{ line.previous | currency }}</td>
                 <td class="r">{{ line.this_period | currency }}</td>

@@ -24,18 +24,16 @@
     table.items > thead > tr > th.r { text-align: right; }
     table.items > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
     table.items > tbody > tr > td.nw { white-space: nowrap; }
-    /* Who it is from, the reference and the method are on one line while
-       they are short, as the date is; a longer one wraps in a column of a
-       set width, so the Amount column and the total stay where they are. */
-    table.items > tbody > tr > td.from { width: 1.7in; min-width: 1.7in; overflow-wrap: anywhere; }
-    table.items > tbody > tr > td.ref { width: 0.9in; min-width: 0.9in; overflow-wrap: anywhere; }
-    table.items > tbody > tr > td.method { width: 0.8in; min-width: 0.8in; overflow-wrap: anywhere; }
-    table.items > tbody > tr > td.desc { width: 100%; }
-    /* The description has the room the other columns leave it, which may be
-       narrower than a word: a word of it then breaks inside (text longer
-       than a memo is measured too slowly for that, and breaks between its
-       words and inside its long ones, as text does everywhere). */
-    table.items > tbody > tr > td.desc.squeeze { overflow-wrap: anywhere; }
+    /* Who it is from, the reference and the method are on one line, as the
+       date is, in a column as wide as that line and no wider than this;
+       text wider than its column wraps there. The description has the rest
+       of the table and asks for no width of its own, so the Amount column
+       and the total are where they are whatever the text
+       (_print_text.html has the rule). */
+    table.items > tbody > tr > td.from { max-width: 1.3in; }
+    table.items > tbody > tr > td.ref { max-width: 0.85in; }
+    table.items > tbody > tr > td.method { max-width: 0.85in; }
+    table.items > tbody > tr > td.desc { width: 100%; max-width: 0.9in; }
     table.items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     table.items > tbody > tr.alt { background: #f7f9fb; }
     /* The last row, the totals and the footer are one unbreakable group of
@@ -113,12 +111,11 @@
             {% if loop.last and not others %}</tbody><tbody class="doc-tail">{% endif %}
             <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td class="nw">{{ p.date | fdate }}</td>
-                <td class="{{ 'from' if p.received_from is long_text(20) else 'nw' }}">{{ p.received_from }}</td>
-                {%- set squeeze = ' squeeze' if not ((p.description or '') ~ (p.document or '')) is long_text(200) else '' %}
-                <td class="desc{{ squeeze }}">{{ p.description | desc }}{% if p.document %} ({{ p.document }}){% endif %}</td>
+                <td class="from">{{ p.received_from | own_width }}</td>
+                <td class="desc">{{ p.description | desc }}{% if p.document %} ({{ p.document }}){% endif %}</td>
                 {%- set ref = p.check_number or p.payment_reference or p.reference %}
-                <td class="{{ 'ref' if ref is long_text(10) else 'nw' }}">{{ ref }}</td>
-                <td class="{{ 'method' if p.method is long_text(10) else 'nw' }}">{{ p.method }}</td>
+                <td class="ref">{{ ref | own_width }}</td>
+                <td class="method">{{ p.method | own_width }}</td>
                 <td class="r">{{ p.amount | currency }}</td>
             </tr>
         {% endfor %}
@@ -127,11 +124,10 @@
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr{% if (loop.index + (deposit.payments | length)) is even %} class="alt"{% endif %}>
                 <td class="nw">{{ deposit.date | fdate }}</td>
-                <td class="{{ 'from' if o.received_from is long_text(20) else 'nw' }}">{{ o.received_from }}</td>
-                {%- set squeeze = ' squeeze' if not ((o.account_name or '') ~ (o.memo or '')) is long_text(200) else '' %}
-                <td class="desc{{ squeeze }}">{{ o.account_name }}{% if o.memo %} ({{ o.memo | desc }}){% endif %}</td>
-                <td class="{{ 'ref' if o.check_number is long_text(10) else 'nw' }}">{{ o.check_number }}</td>
-                <td class="{{ 'method' if o.method is long_text(10) else 'nw' }}">{{ o.method }}</td>
+                <td class="from">{{ o.received_from | own_width }}</td>
+                <td class="desc">{{ o.account_name }}{% if o.memo %} ({{ o.memo | desc }}){% endif %}</td>
+                <td class="ref">{{ o.check_number | own_width }}</td>
+                <td class="method">{{ o.method | own_width }}</td>
                 <td class="r">{{ o.amount | currency }}</td>
             </tr>
         {% endfor %}

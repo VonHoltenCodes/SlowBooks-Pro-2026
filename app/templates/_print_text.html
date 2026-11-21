@@ -8,19 +8,33 @@
    address, a reference, a name typed with no spaces) is set in a
    .long-word element by the renderer (pdf_service.break_long_words), on
    every printed page, and may break at any character: it never holds a
-   column or a row open. A description that has only the room the other
-   columns leave it (td.desc.squeeze) may break inside any word.
+   column or a row open.
+
+   A table of a description and columns beside it: the description has the
+   rest of the table's width (width: 100%) and claims none of its own
+   (max-width: a cell's max-width is the most its text may ask of the
+   table, in WeasyPrint and in a browser alike), so a word of it wider
+   than what is left breaks inside. A column of short text beside it (who
+   a deposit is from, a reference, an item number) is as wide as its text
+   set on one line (the own_width filter's .one-line, which takes no height
+   and prints nothing) and never wider than its own max-width: text that
+   fits is on one line, longer text wraps there. No count of characters
+   decides any of it; a count is not a width.
 
    What must keep its width says so where it is styled: figures, dates and
-   labels are white-space: nowrap, and a column of short text beside a
-   description has a width of its own. #}
+   labels are white-space: nowrap. #}
     html { overflow-wrap: break-word; }
     .long-word { overflow-wrap: anywhere; }
     .long-word-gap { display: inline-block; width: 0; }
     /* a figure is on one line */
     td.r, td.num { white-space: nowrap; }
-    /* a unit a person typed beside a quantity, when it is a long one, wraps in a width of its own */
-    td.r > .unit { display: inline-block; max-width: 1.2in; white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+    /* the width of a cell's text on one line (the own_width filter): it
+       gives a column of short text its width, and nothing else */
+    .one-line { display: block; height: 0; overflow: hidden; visibility: hidden; white-space: nowrap; }
+    /* a quantity with the unit a person typed beside it is on one line in a
+       column as wide as that line and no wider than this; a longer unit
+       wraps under the quantity */
+    td.r.words { white-space: normal; max-width: 1.3in; }
     /* The heading row of a page: the title is a label and keeps its width;
        the block beside it has the rest, and a long name or address wraps
        there without squeezing or pushing the title. */
@@ -28,6 +42,10 @@
     .header > :first-child { flex: 1 1 0%; min-width: 0; }
     .header > :last-child { flex: none; }
     .header h1 { white-space: nowrap; }
+    /* The row of addresses under it: each has its share of the row whatever
+       is typed in it, so a wide word wraps there and the box beside the
+       addresses (an invoice's Amount Due) is where it is with any text. */
+    .address-block { min-width: 0; }
     /* a document's number, and what a person typed beside the dates, wrap in
        a width of their own; a date stays on one line */
     .invoice-number, .doc-number { max-width: 3.4in; margin-left: auto; }

@@ -46,11 +46,22 @@
        (break-word, not anywhere, which split MARGIN into M/AR/GI/N);
        amounts stay on one line. #}
     table.report th.amount { white-space: normal; overflow-wrap: break-word; }
-    {# A column past the columns of words holds figures and short text, on
-       one line each. What is longer there (a long memo in the General
-       Ledger's Description), or holds a word long enough to break inside,
-       wraps in its column as words do. #}
+    {# A column past the columns of words holds figures, each on one line,
+       and in some reports words (the General Ledger's Reference and
+       Description). A cell of words wraps in its column as words do: it is
+       on one line while the sheet has the room, and no longer holds the
+       columns of figures past the margin when it has not. Which a cell is
+       is read from what is in it (pdf_service._is_figure), never from how
+       long it is. #}
     table.report td.amount.words { white-space: normal; }
+    {# A word that may be wider than its column's share of the sheet (.w,
+       pdf_service._capped) counts for no more than that share when
+       WeasyPrint measures the columns (its max-width, set for each table
+       in report_pdf.html). A browser gives an inline element no max-width:
+       there the word may break at any character, which keeps it from
+       holding its column open the same. WeasyPrint does not read an
+       @supports rule, so the saved PDF sets the word as any other. #}
+    @supports (overflow-wrap: anywhere) { table.report .w { overflow-wrap: anywhere; } }
     {# the heading: the period and the date keep their width at the right,
        and the title and the company's name wrap in the rest #}
     .report-header > :first-child { flex: 1 1 0%; min-width: 0; }

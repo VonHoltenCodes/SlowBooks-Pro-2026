@@ -106,8 +106,9 @@ def test_chromium_sets_every_totals_label_on_one_line(
 # (the documents, the records and the saved PDF's half of this are
 # tests/test_print_text_never_widens.py's). Each page is laid out in a
 # window as wide as its sheet's printing area, as Chromium's print lays it
-# out, once with ordinary text and once with an unbreakable word of 120
-# characters in every field a person types.
+# out, with ordinary text, with an unbreakable word of 120 characters in
+# every field a person types, and with a word of 19 characters as wide as
+# letters come there.
 # ---------------------------------------------------------------------------
 
 INK = """(width) => {
@@ -186,26 +187,32 @@ def test_chromium_keeps_a_long_word_inside_the_page(
     try:
         for kind, maker in text.MAKERS.items():
             drawn = {}
-            for name, w in (("ordinary", text._ordinary), ("long", text._long)):
+            for name, w in (
+                ("ordinary", text._ordinary),
+                ("long", text._long),
+                ("wide words", text._wide),
+            ):
                 text._settings(client, w)
                 drawn[name] = text._draw(
                     client, printed, maker, seed_accounts, db_session, w
                 )
-            for (what, plain_html), (_w, long_html) in zip(
-                drawn["ordinary"], drawn["long"]
-            ):
-                _past, plain_figures = laid_out(plain_html)
-                past, figures = laid_out(long_html)
-                said = f"{kind}, {what} (Chromium)"
-                wrong += [f"{said}: {p}" for p in past]
-                wrong += [
-                    f"{said}: {t} is on {lines} lines"
-                    for t, _end, _start, lines in figures
-                    if lines != 1
-                ]
-                wrong += text._compare(
-                    kind, said, [f[:3] for f in figures], [f[:3] for f in plain_figures]
-                )
+            plain = [laid_out(html)[1] for _what, html in drawn.pop("ordinary")]
+            for name, pages in drawn.items():
+                for (what, html), plain_figures in zip(pages, plain):
+                    past, figures = laid_out(html)
+                    said = f"{kind}, {what}, {name} (Chromium)"
+                    wrong += [f"{said}: {p}" for p in past]
+                    wrong += [
+                        f"{said}: {t} is on {lines} lines"
+                        for t, _end, _start, lines in figures
+                        if lines != 1
+                    ]
+                    wrong += text._compare(
+                        kind,
+                        said,
+                        [f[:3] for f in figures],
+                        [f[:3] for f in plain_figures],
+                    )
     finally:
         page.close()
     assert not wrong, "\n".join(wrong[:60]) + f"\n({len(wrong)} in all)"

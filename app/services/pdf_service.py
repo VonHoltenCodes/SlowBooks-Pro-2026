@@ -2,7 +2,9 @@
 # PDF generation — WeasyPrint + Jinja2 templates.
 # ============================================================================
 
+import calendar
 import re
+import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
 from typing import NamedTuple
@@ -21,8 +23,12 @@ TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 # Every word of LONG_WORD characters or more on a printed page is now set in
 # a <span class="long-word">, which may break at any character, so it never
 # holds a column, a flex row or a box wider than the page gives it. Shorter
-# words are as they were: they break between words only, and a column is
-# never narrower than its longest one.
+# words are as they were: they break between words only, and inside when
+# one alone is wider than its line. A count of characters is not a width
+# (nineteen W's are wider than twenty ordinary letters), so a table's
+# columns are kept by widths, not by this: the description asks for none
+# of its own, and a column of short text is as wide as its text up to the
+# most its template gives it (``_own_width``, and _print_text.html).
 #
 # It is done to the page once it is drawn, not in each template, so no
 # field can be missed: Template.render() of this environment answers the
@@ -40,7 +46,9 @@ TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 # more than a thousand characters of words. Such a word's lines end at a
 # piece's end, a few characters short of the column's edge, and a long last
 # line cut in two (choose_last_line) is cut where a piece starts, so its
-# two parts are set as the whole was.
+# two parts are set as the whole was. A piece is of whole letters: a mark
+# stays with its letter and a joined emoji in one (``_letters``), so text
+# written without spaces (Thai) is shaped in pieces as it is whole.
 # ----------------------------------------------------------------------------
 LONG_WORD = 20
 # up to this long, a word is one piece (it may fit a line): it moves to the
@@ -62,6 +70,61 @@ _SPAN = '<span class="long-word">'
 _GAP = '<span class="long-word-gap"></span>'
 
 
+def _joins_back(char: str, before: str) -> bool:
+    """Whether a character is set with the one before it, as one letter to
+    the eye: a mark over or under its letter (an accent typed after it, a
+    Thai vowel or tone mark, a keycap's box), a joiner and what it joins (a
+    family is four people and three joiners), a skin tone, the second letter
+    of a flag, a consonant after a virama. A piece of a long word never
+    starts with one: apart from its letter a mark prints on a dotted circle,
+    and a family prints as its members."""
+    code = ord(char[0]) if len(char) == 1 else 0
+    if not code or code < 0x300:
+        return False
+    if unicodedata.category(char) in ("Mn", "Mc", "Me"):
+        return True
+    if code in (0x200C, 0x200D, 0x0E33, 0x0EB3) or 0x1F3FB <= code <= 0x1F3FF:
+        return True
+    # the vowels and final consonants of a Korean syllable typed in parts,
+    # and an emoji's tag letters
+    if 0x1160 <= code <= 0x11FF or 0xE0020 <= code <= 0xE007F:
+        return True
+    if len(before) != 1:
+        return False
+    if before == "\u200d" or unicodedata.combining(before) == 9:
+        return True
+    return False
+
+
+def _letters(chars: list) -> list:
+    """A word's characters gathered as a reader counts them: each letter
+    with its marks, each joined emoji and each flag as one."""
+    out, flag = [], False
+    for char in chars:
+        pair = len(char) == 1 and 0x1F1E6 <= ord(char) <= 0x1F1FF
+        if out and (_joins_back(char, out[-1][-1]) or (pair and flag)):
+            out[-1].append(char)
+            flag = False
+        else:
+            out.append([char])
+            flag = pair
+    return out
+
+
+def _pieces(chars: list) -> list:
+    """A word longer than any line as short pieces, each of whole letters
+    (see ``_letters``) and of _LONG_WORD_PIECE characters or a few more."""
+    pieces, piece = [], []
+    for letter in _letters(chars):
+        piece.extend(letter)
+        if len(piece) >= _LONG_WORD_PIECE:
+            pieces.append("".join(piece))
+            piece = []
+    if piece:
+        pieces.append("".join(piece))
+    return pieces
+
+
 def _wrap_words(text: str, least: int, gap_first: bool = False) -> str:
     """One run of text (no tags in it) with every word of ``least``
     characters or more in a long-word span."""
@@ -70,8 +133,8 @@ def _wrap_words(text: str, least: int, gap_first: bool = False) -> str:
         chars = _CHAR.findall(match.group(0))
         if len(chars) < least:
             return match.group(0)
-        size = len(chars) if len(chars) <= LONG_WORD_WHOLE else _LONG_WORD_PIECE
-        pieces = ["".join(chars[i : i + size]) for i in range(0, len(chars), size)]
+        whole = len(chars) <= LONG_WORD_WHOLE
+        pieces = ["".join(chars)] if whole else _pieces(chars)
         made = _GAP.join(f"{_SPAN}{piece}</span>" for piece in pieces)
         return (_GAP if gap_first and match.start() == 0 else "") + made
 
@@ -469,25 +532,165 @@ def _desc(value):
 _jinja_env.filters["desc"] = _desc
 
 
-def _long_text(value, most: int) -> bool:
-    """Whether a value is too long to be set on one line in a column that
-    takes its width from what is in it (the deposit slip's Received from):
-    a short one stays on one line, a longer one wraps in a width of its own
-    (app/templates/_print_text.html has the rule)."""
-    return len(str(value or "")) > most
+def _own_width(value):
+    """A value for a column of short text beside a description (who a
+    deposit is from, a reference, an item number, a unit): the text, and
+    before it the same text on one line in an element that takes no height
+    and prints nothing (.one-line, app/templates/_print_text.html).
+
+    The column is as wide as its widest cell, and a cell that wraps is only
+    as wide as its longest word: beside a description that has the rest of
+    the table, a name would print a word to a line. The line that does not
+    wrap is what gives the column the width of its text; the template gives
+    the cell the most it may be, and text wider than that wraps there. No
+    count of characters decides it: twenty capital W's are wider than
+    twenty ordinary letters."""
+    from markupsafe import Markup, escape
+
+    text = escape("" if value is None else value)
+    if not str(text).strip():
+        return text
+    return Markup('<span class="one-line" aria-hidden="true">%s</span>%s') % (
+        text,
+        text,
+    )
 
 
-_jinja_env.tests["long_text"] = _long_text
+_jinja_env.filters["own_width"] = _own_width
+
+# what a report prints on one line: a number, an amount, a percentage, a
+# date. A word in one is a currency or a unit (three letters at most) or a
+# month.
+_MONTHS = frozenset(
+    name.lower().rstrip(".")
+    for names in (calendar.month_name, calendar.month_abbr)
+    for name in names
+    if name
+)
 
 
-def _long_word(value) -> bool:
-    """Whether a value holds a word of LONG_WORD characters or more, which
-    may break inside the word: a report's figures column that holds one
-    lets it wrap."""
-    return bool(re.search(r"\S{%d,}" % LONG_WORD, str(value or "")))
+def _is_figure(value) -> bool:
+    """Whether a report's cell is a figure, which is on one line, and not
+    words, which wrap in their column: by what is in it, never by how long
+    it is. A reference and a memo are words, and so is one word alone
+    ("Wire", "INV-1042"): a word may have to break inside, which a line
+    that never wraps cannot."""
+    if value is None or isinstance(value, (int, float)):
+        return True
+    tokens = str(value).split()
+    if len(tokens) > 4:
+        return False
+    digits = False
+    for token in tokens:
+        bare = token.strip(".,;:()[]%+-−–—$€£¥")
+        if not bare:
+            continue
+        if bare.isalpha():
+            if len(bare) > 3 and bare.lower() not in _MONTHS:
+                return False
+            continue
+        if not all(c.isdigit() or not c.isalnum() for c in bare):
+            return False
+        digits = True
+    return digits or not any(t.strip("—–-−") for t in tokens)
 
 
-_jinja_env.tests["long_word"] = _long_word
+_jinja_env.tests["figure"] = _is_figure
+
+# A report's columns share the sheet by what is in them, and each is at
+# least as wide as its longest word: six columns of words with a wide word
+# in each were wider than the sheet. A word that may be wider than its
+# column's share of the sheet is set in a .w element, which counts for no
+# more than that share when the columns are measured (max-width, in ems of
+# its own text); in a column narrower than the word it breaks inside, as a
+# word longer than its line does everywhere. An ordinary word is narrower
+# than the least share: it is not set in one, and the page's text is as it
+# was. Which words may be wider is judged generously from their letters
+# (``_em_width``): a word judged wide that is not is in a .w that changes
+# nothing, since the element's max-width is the measure, not the judgment.
+_CAP_MOST_EM = 13.0
+_CAP_LEAST_EM = 9.0
+_REPORT_EM_PX = 10.5
+_REPORT_FIGURE_PX = 84.0
+_REPORT_CELL_PAD_PX = 12.0
+# the printing width of a report's sheet, in CSS pixels (_report_theme.html:
+# 16 mm at each side)
+_REPORT_SHEET_PX = {
+    ("letter", False): 695.0,
+    ("letter", True): 935.0,
+    ("a4", False): 672.0,
+    ("a4", True): 1001.0,
+}
+
+
+def _word_cap(section: dict, paper_size: str = "letter", landscape=False) -> float:
+    """The most a word of one of a report section's columns counts for, in
+    ems: the sheet's width, less what its columns of figures take, shared
+    by its columns of words."""
+    columns = len(section.get("columns") or []) or 1
+    rows = section.get("rows") or []
+    words = set()
+    for row in rows:
+        for at, cell in enumerate(row.get("cells") or []):
+            if at not in words and not _is_figure(cell):
+                words.add(at)
+    words.add(0)
+    figures = max(0, columns - len(words))
+    sheet = _REPORT_SHEET_PX[
+        ("a4" if paper_size == "a4" else "letter", bool(landscape))
+    ]
+    room = sheet - figures * _REPORT_FIGURE_PX - columns * _REPORT_CELL_PAD_PX
+    share = room / len(words) / _REPORT_EM_PX
+    return round(max(_CAP_LEAST_EM, min(_CAP_MOST_EM, share)), 2)
+
+
+_jinja_env.filters["word_cap"] = _word_cap
+
+
+_NARROW = frozenset("ijlI.,;:'!|`()[]{}/\\-")
+_FULL = frozenset("mwMW@%")
+
+
+def _em_width(word: str) -> float:
+    """The most a word may measure, in ems, whatever the font: each letter
+    at the widest a sans-serif face sets its kind."""
+    width = 0.0
+    for char in word:
+        if char in _NARROW:
+            width += 0.45
+        elif char in _FULL:
+            width += 1.0
+        elif char.isascii():
+            width += 0.8 if char.isupper() else 0.68
+        else:
+            width += 1.3 if ord(char) >= 0x2E80 else 0.8
+    return width
+
+
+def _capped(value, cap: float = _CAP_MOST_EM):
+    """A report's cell with each word that may be wider than ``cap`` ems in
+    a .w element (see ``_word_cap``)."""
+    from markupsafe import Markup, escape
+
+    text = "" if value is None else str(value)
+    if hasattr(value, "__html__") or len(text) * 1.3 <= cap:
+        return value
+    parts = re.split(r"(\s+)", text)
+    if not any(_em_width(part) > cap for part in parts):
+        return value
+    return Markup(
+        "".join(
+            (
+                f'<span class="w">{escape(part)}</span>'
+                if _em_width(part) > cap
+                else str(escape(part))
+            )
+            for part in parts
+        )
+    )
+
+
+_jinja_env.filters["capped"] = _capped
 
 
 def _joined_head(head: str, blanks: int = 0):

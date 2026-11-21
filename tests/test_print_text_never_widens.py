@@ -15,16 +15,19 @@ past the page margin. The renderer sets every word of 20 characters or more
 in an element that may break at any character
 (pdf_service.break_long_words), so no template and no field can be missed.
 
-Every printed template is drawn here three times from the same records:
-with ordinary text, with many ordinary words, and with an unbreakable word
-of 120 characters (or the most the field takes) in every field a person
-types, and laid out as the PDF is. No ink may pass the right or left margin,
+Every printed template is drawn here five times from the same records: with
+ordinary text, with many ordinary words, with an unbreakable word of 120
+characters (or the most the field takes) in every field a person types,
+with a word of 19 characters as wide as letters come there (too short to be
+set to break, and wider than twenty ordinary letters), and with 39
+characters of ordinary words, and laid out as the PDF is. No ink may pass the right or left margin,
 every figure must end at the x it ends at with ordinary text, and the
 page's own words (its labels, headings, dates and figures) are never broken.
 Chromium's half is tests/test_print_r24_browser.py's.
 """
 
 import re
+import zlib
 from decimal import Decimal
 from html.parser import HTMLParser
 from pathlib import Path
@@ -54,6 +57,23 @@ WORDS = "Northwest Regional Medical Center Foundation Auxiliary of Greater Sprin
 def _wordy(tag, most=LONG):
     """Ordinary words, as many as a long name or a long memo has."""
     return (tag.capitalize() + " " + WORDS)[:most].rstrip()
+
+
+def _wide(tag, most=LONG):
+    """A word of under 20 characters, as wide as letters come: no count of
+    characters lets it break, and no column may be held open by it."""
+    code, n = "", zlib.crc32(tag.encode())
+    for _ in range(10):
+        code, n = code + "MW%"[n % 3], n // 3
+    return ("W" * 9 + code)[-min(most, 19) :]
+
+
+def _worded(tag, most=LONG):
+    """Ordinary words, 39 characters of them: under every count a cell was
+    once kept on one line by."""
+    return (tag.capitalize() + " & Sons Roofing Company of " + WORDS)[
+        : min(most, 39)
+    ].rstrip()
 
 
 def _path(body, loc):
@@ -911,17 +931,24 @@ class _Words(HTMLParser):
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.text, self.skip = [], 0
+        self.text, self.skip, self.open = [], 0, []
 
     def handle_starttag(self, tag, attrs):
         self.skip += tag in ("style", "script", "title")
         if tag in self.BREAKS:
             self.text.append(" ")
+        if tag == "span":
+            # a column's text on one line, set before the text itself and
+            # not printed (the own_width filter): not part of its word
+            self.open.append("one-line" in (dict(attrs).get("class") or "").split())
+            self.skip += self.open[-1]
 
     def handle_endtag(self, tag):
         self.skip -= tag in ("style", "script", "title")
         if tag in self.BREAKS:
             self.text.append(" ")
+        if tag == "span" and self.open:
+            self.skip -= self.open.pop()
 
     def handle_data(self, data):
         if not self.skip:
@@ -936,7 +963,7 @@ def _whole_words(html):
     words, long = set(), []
     for word in "".join(parser.text).lower().split():
         words.add(word)
-        if len(word) > 40 or "x" * 8 in word:
+        if len(word) > 40 or "x" * 8 in word or "w" * 5 in word:
             long.append(word)
         pieces = re.split(r"(?<=[-/@,.:;)])|(?=[(@])", word)
         for i in range(len(pieces)):
@@ -982,6 +1009,9 @@ def survey(html, fixed=None):
         def walk(node, margin, cut_lo, cut_hi):
             margin = margin or isinstance(node, wb.MarginBox)
             style = getattr(node, "style", None)
+            if style is not None and style["visibility"] != "visible":
+                # what gives a column its width and prints nothing
+                return
             if (
                 style is not None
                 and not isinstance(node, (wb.TextBox, wb.InlineBox, wb.LineBox))
@@ -1102,9 +1132,15 @@ def _compare(kind, what, figures, plain_figures):
 
 
 def _problems(client, printed, kind, accounts, db):
-    """What is wrong with one kind of document, drawn three times."""
+    """What is wrong with one kind of document, drawn five times."""
     drawn = {}
-    for name, w in (("ordinary", _ordinary), ("many words", _wordy), ("long", _long)):
+    for name, w in (
+        ("ordinary", _ordinary),
+        ("many words", _wordy),
+        ("long", _long),
+        ("wide words", _wide),
+        ("39 characters", _worded),
+    ):
         _settings(client, w)
         drawn[name] = _draw(client, printed, MAKERS[kind], accounts, db, w)
     ordinary = drawn.pop("ordinary")

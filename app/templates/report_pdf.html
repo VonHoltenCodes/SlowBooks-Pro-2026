@@ -4,6 +4,11 @@
     <title>{{ (sections[0].title if sections and sections[0].title else 'Report') }}</title>
     <meta charset="utf-8">
     {% include "_report_theme.html" %}
+    {# the most a word of each section's columns counts for when the columns
+       are measured: its share of the sheet (pdf_service._word_cap) #}
+    <style>
+    {% for section in sections %}#report-{{ loop.index }} .w { max-width: {{ section | word_cap(paper_size, landscape) }}em; }
+    {% endfor %}</style>
 </head>
 <body>
     {% for section in sections %}
@@ -19,13 +24,14 @@
                 Generated {{ generated_on }}
             </div>
         </div>
-        <table class="report">
+        {% set cap = section | word_cap(paper_size, landscape) %}
+        <table class="report" id="report-{{ loop.index }}">
             <thead>
                 <tr>
                     {% for col in section.columns %}
                     {# section.text_columns: how many columns from the left are words, read
                        from the left (the P&L Detail's Type to Split, #477); one by default #}
-                    <th {% if loop.index0 >= (section.text_columns or 1) %}class="amount"{% endif %}>{{ col }}</th>
+                    <th {% if loop.index0 >= (section.text_columns or 1) %}class="amount"{% endif %}>{{ col | capped(cap) }}</th>
                     {% endfor %}
                 </tr>
             </thead>
@@ -37,7 +43,7 @@
                 <tr class="{{ row.style or '' }}">
                     {% for cell in row.cells %}
                     {# row.indent: the account's level under its heading (#390, #416) #}
-                    <td {% if loop.index0 >= (section.text_columns or 1) %}class="amount{{ ' words' if cell is long_text(40) or cell is long_word }}"{% elif loop.first and row.indent %}style="padding-left: {{ 6 + 14 * row.indent }}px"{% endif %}>{{ cell }}</td>
+                    <td {% if loop.index0 >= (section.text_columns or 1) %}class="amount{{ '' if cell is figure else ' words' }}"{% elif loop.first and row.indent %}style="padding-left: {{ 6 + 14 * row.indent }}px"{% endif %}>{{ cell | capped(cap) }}</td>
                     {% endfor %}
                 </tr>
                 {% endfor %}
