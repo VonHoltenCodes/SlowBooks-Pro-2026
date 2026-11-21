@@ -75,9 +75,11 @@ def test_slowbooks_with_a_lower_case_b_is_only_an_identifier():
 
 
 def test_the_unreleased_changelog_spells_it_right():
+    # The newest section: "Unreleased" while it is open, else the release
+    # section the release commit wrote in its place.
     log = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    unreleased = log.split("### Unreleased", 1)[1].split("\n### v", 1)[0]
-    assert not re.search(r"Slowbooks(?![A-Za-z0-9_\-])", unreleased)
+    newest = log.split("\n### ", 1)[1].split("\n### ", 1)[0]
+    assert not re.search(r"Slowbooks(?![A-Za-z0-9_\-])", newest)
 
 
 def test_the_window_and_the_documents_say_slowbooks_pro():

@@ -55,25 +55,69 @@ Details, known gaps and how to report a barrier:
 
 ## What's New
 
-**v2.31 — Split expenses, lines that move, and stock that comes back.** An
-expense splits across several accounts, each line with its own job, cost
-code, class and billable mark, and the check stub lists every line (#599);
-every line form moves a line up or down, drags it, and inserts one in the
-middle (#604); Enter Bill shows the vendor's balance, last bills and
-payments and notes beside the form (#601); a register entry takes
-attachments (#600). A credit memo's lines take their own class and job
-(#640), a return puts the cost back with the quantity, at the original
-sale's cost when the memo names the invoice (#641), an item of your own can
-carry a negative price as a discount (#639), and a sale past what is on hand
-says so, or is refused by a setting (#642). The statements hide zero
-balances on request (#625), each piece of a pay run posts to an account you
-choose, with net pay able to wait in 2300 Payroll Liabilities (#620), the
-job reports read a timestamp on the local day (#644), Cc and Bcc addresses
-are read the way a mail program reads them (#611), the Windows installer
-replaces the program file on a same-version reinstall (#643), and About
-credits the artists from the community art repo (#635).
+**v2.32 — The Fast Rack, Books Check, Activity on every document, and
+tax-exempt jobs.** The top bar's buttons are each sign-in's own Fast Rack,
+up to eight in the order you set, and the logo sits at the top of the
+sidebar (#978); the desktop app finds the words on the screen with Ctrl+F
+(#1092); Books Check ties every subledger to its control account and names
+the documents behind a difference (#893); every document, job, customer and
+vendor shows its Activity, what changed, who did it and when (#894); and job
+cost and journal entries stay off A/P and A/R, with accrued job costs that
+reverse themselves (#897). A job can be sales-tax exempt with its
+certificate on file, a document carries its own exempt switch and says so on
+the PDF, and the Sales Tax report lists exempt sales by reason (#864); a
+sales document made through the API starts at the company's tax rate, as the
+forms do (#1129); payment terms can fall due days after the end of the month
+(#1091); Make Deposits takes lines for money never invoiced (#792) and lists
+only customer money (#821), and a deposit prints onto the bank's pre-printed
+slips (#798, #883); every new document takes attachments before its first
+save (#796, #881); one inventory adjustment holds several items (#801). A
+construction estimate can price each line as cost plus a markup (#774), and
+its cost side is the contractor's own (#824); the Estimate Closing Rate
+report shows bids won, lost and open (#795), and an estimate made in error
+can be voided (#1128); the Reports page opens on the starred reports (#794)
+and Budget vs Actual shows every month (#797). The bank register sorts
+newest first and opens where you choose (#903), To review keeps each line's
+class, job and name (#904), and SimpleFIN refreshes its accounts, moves a
+mapping to a replacement card and takes a new token without disconnecting
+(#905). To review lines take a memo (#1049), can be ticked and added
+together (#1053), look further back for a match (#1050) and receive a
+payment or pay bills straight from the line (#1056); the name picked is the
+entry's payee (#1063), and a bank rule shows on its row (#1064) and can name
+a customer and carry a memo (#1075). Income by Customer and Sales by Item
+follow the cash basis (#1062) and count deposits from the bank (#1065); an
+invoice line takes a cost code and type, so a job's revenue reads by cost
+code (#1055), and the job's Cost Detail shows revenue on its rows (#1066)
+and hides zero balances (#1052). Explanations sit behind a small tortoise
+button beside the field or section, still read by a screen reader and found
+by Find a setting (#977); an item can post to a liability such as a security
+deposit (#1038); Quick Entry lines take a class (#1051); a printed
+document's dates sit beside its title (#1041) and its last page keeps a row
+with the totals (#1045, #1046, #1047); and a company whose file is gone can
+be removed from the list (#1054). Invoices import from a CSV in SlowBooks'
+own template (#882), and an import cuts a value too long for its column and
+says so (#902); an estimate's email reads a saved template of its own
+(#957); every password field has a show-password eye (#970); an invoice
+lists the purchase orders that fill it (#986); Save & New on Receive
+Payments and card charges (#1006, #1011); Print all from the Invoices list
+(#1007); a check's memo can be the bill's invoice number (#800) and its
+amount can drop the dollar sign (#799); payroll figures each run with its
+own year's tables (#818), a Washington or Oregon employer share follows the
+agency's letter (#825), salaried L&I goes on 160 hours (#826) and a
+California employer's 2026 Form 940 carries the credit reduction (#809);
+online payments can clear through an account per provider with the fee and
+the payout (#583, #584); a file from before 2.29.0 is sent to 2.31.14 first
+(#769), the Server Edition runs with debug off (#812), and Settings →
+Connections connects an AI assistant, Claude or Grok, with one button,
+nothing to install and no account (#1087), and still points Claude Desktop
+and Claude Code to SlowBooks Switchboard (#829). The desktop window's title
+names the open company and its text can be selected and copied (#1145,
+#1146). Outgoing email now verifies the mail server's security certificate
+before it sends the password or any mail: a mail server with a self-signed
+or mismatched certificate will stop accepting mail from SlowBooks Pro until
+its certificate is fixed (#1150).
 
-Patch releases and everything before 2.31 are in [CHANGELOG.md](CHANGELOG.md).
+Patch releases and everything before 2.32 are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Wait — it does *that*?
 
@@ -91,6 +135,11 @@ And the whole app is agent-operable: every install serves a
 self-documenting local REST API (835 operations) — built for Claude
 Code and Grok first, and any agentic CLI works; the
 [AI setup guide](https://www.slowbookspro.com/ai/) has the paste-prompt.
+Settings → Connections → **Connect to AI assistant** connects Claude or
+Grok to the books through the free SlowBooks relay with one button: no
+second program, no account, email or password, and a one-time sign-in code
+so only someone at the books can approve it; what the assistant reads
+passes through the relay to the assistant's provider.
 What stays on your machine is the company file and the API. A cloud-backed
 CLI's model does not: what the agent reads from your books goes to its
 provider under that provider's terms, and only a model you run locally, and
@@ -120,11 +169,12 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   credits, AP aging
 - **Double-entry core** — auto + manual journals, closing-date
   enforcement, automatic audit log, 50-account contractor chart
-- **Banking** — the register is the ledger (entries post, feeds are a review queue, reconciliation over ledger lines), transfers, deposits, check printing,
+- **Banking** — the register is the ledger (entries post, feeds are a review queue, reconciliation over ledger lines), transfers, deposits (onto the bank's pre-printed slips too), check printing,
   OFX/QFX + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN and Mercury bank feeds,
   shared auto-categorization rules
 - **Reports & tax** — P&L (plain & by Class), Balance Sheet, Trial
-  Balance, agings, GL, Cash Flow, Sales Tax with pay-to-government flow,
+  Balance, agings, GL, Cash Flow, Sales Tax with pay-to-government flow
+  and exempt sales by reason (exemption certificates on the job),
   Schedule C, printable PDF pack
 - **Payroll & HR** — full US module with W-2/W-3/940/941, deductions,
   garnishments, PTO, onboarding, and a token-accessed employee portal
@@ -152,7 +202,7 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   receipts, and QuickBooks Online from its own Export data zip with no
   Intuit developer app ([docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md)),
   Migrate Data for Xero / MYOB / Sage 50 / Wave / Zoho Books / GnuCash,
-  Opening Balances wizard
+  invoices from a CSV in SlowBooks' own template, Opening Balances wizard
 - **Fixed assets** — register, depreciation runs, disposal with
   gain/loss, reconciliation report
 - **Nonprofit mode** — your own words on every screen and document; funds
