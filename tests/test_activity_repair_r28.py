@@ -197,10 +197,12 @@ def test_a_register_payment_changed_to_a_deposit_names_no_account(
     more = {"description": memo} if memo else {}
     entry = _register_entry(client, seed_accounts, **more)
     said = _save_entry(client, db_session, entry, seed_accounts, amount="100", **more)
-    name = memo or "Ridge"
+    # neither line has a memo of its own (the entry's Memo is the entry's,
+    # and with none typed the lines hold the payee): named by its account
+    bank, category = seed_accounts["1000"].name, seed_accounts["6900"].name
     assert said == [
-        f"Line {name}, debit $100.00: Credit $100.00 → Debit $100.00",
-        f"Line {name}, credit $100.00: Debit $100.00 → Credit $100.00",
+        f"Line {bank}, debit $100.00: Credit $100.00 → Debit $100.00",
+        f"Line {category}, credit $100.00: Debit $100.00 → Credit $100.00",
     ]
 
 
@@ -221,9 +223,10 @@ def test_a_register_entry_split_in_two_edits_its_bank_line(
             {"category_account_id": acc["6000"].id, "amount": "-50"},
         ],
     )
-    assert "Line May fuel, credit $110.00: Credit $100.00 → $110.00" in said, said
-    assert "Line May fuel, debit $60.00: Debit $100.00 → $60.00" in said, said
-    assert "Line added: May fuel, debit $50.00" in said, said
+    bank, first, second = (acc[n].name for n in ("1000", "6900", "6000"))
+    assert f"Line {bank}, credit $110.00: Credit $100.00 → $110.00" in said, said
+    assert f"Line {first}, debit $60.00: Debit $100.00 → $60.00" in said, said
+    assert f"Line added: {second}, debit $50.00" in said, said
     assert len(said) == 3, said
 
 
@@ -456,14 +459,12 @@ def test_a_new_documents_unnamed_lines_are_named_by_their_place(
     assert _newest(client, "invoice", inv)["details"] == [
         "Line: Deck, $100.00",
         "Line 2 ($60.00)",
-        "Line 3 ($0.00)",
+        "Line 3",  # a line with no amount is named without one
     ]
     _age(db_session)
     r = client.put(f"/api/invoices/{inv}", json={"lines": lines[:2]})
     assert r.status_code == 200, r.text
-    assert _newest(client, "invoice", inv)["details"] == [
-        "Line removed: Line 3 ($0.00)"
-    ]
+    assert _newest(client, "invoice", inv)["details"] == ["Line removed: Line 3"]
 
 
 # ---------------------------------------------------------------------------
