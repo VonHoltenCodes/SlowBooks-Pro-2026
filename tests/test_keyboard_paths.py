@@ -281,10 +281,10 @@ def test_the_line_class_and_function_cells_leave_their_names_to_the_grid_rule():
         in utils
     )
     assert '<select class="${cls}">${Nonprofit.optionsHtml(selected' in utils
-    # the rule that names them: the column heading and "line N"
-    assert "rowName = `line ${row.sectionRowIndex + 1}`;" in utils
-    # (since the line forms rename by place it returns the name with a mark
-    # saying it was named by its line, so the rule is the expression itself)
+    # the rule that names them: the column heading and "line N", N being the
+    # line's place among the lines (a row that belongs to the line above it,
+    # a nonprofit's Split chooser, is not a line and takes that line's number)
+    assert "rowName = `line ${_linePlaces(body, places).get(row)}`;" in utils
     assert "[heading, rowName].filter(Boolean).join(', ')" in utils
 
 
