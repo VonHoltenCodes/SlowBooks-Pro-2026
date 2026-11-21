@@ -340,6 +340,22 @@ def next_rule(rules, days: int, spent: set):
     return None, False
 
 
+def rule_for_a_run(rules, days: int, spent: set, reached: set):
+    """(rule, ready, held): what a run (automatic, or Send due reminders)
+    does for the invoice, decided here once for the run and for the
+    Collections list, so the list never says "ready" for a reminder the
+    run will not send. `spent` are the rules that have gone; `reached` the
+    rules whose reminder failed and still reached someone. Such a rule is
+    spent for a run: when it is the one that would go, it is held (not
+    ready) until Remind sends it by hand."""
+    rule, ready = next_rule(rules, days, spent | reached)
+    if not ready:
+        by_hand, would_go = next_rule(rules, days, spent)
+        if would_go:  # only the copy that went out holds it back
+            return by_hand, False, True
+    return rule, ready, False
+
+
 def _spent_by_invoice(db: Session, invoice_ids) -> dict:
     """invoice id -> the rule ids that have gone, or are going right now
     (a live claim counts: the other window is sending it)."""
@@ -457,13 +473,14 @@ def plan_reminders(db: Session, today: date, invoice_ids=None, settings=None):
     settings = settings or get_all_settings(db)
     rules = [r for r in list_rules(db) if r.enabled]
     invoices = open_invoices(db, invoice_ids)
-    spent = _spent_by_invoice(db, [i.id for i in invoices])
-    for inv_id, rule_ids in _reached_by_invoice(db, [i.id for i in invoices]).items():
-        spent.setdefault(inv_id, set()).update(rule_ids)
+    ids = [i.id for i in invoices]
+    spent, reached = _spent_by_invoice(db, ids), _reached_by_invoice(db, ids)
     sends, skipped = [], []
     for inv in invoices:
         days = (today - inv.due_date).days
-        rule, ready = next_rule(rules, days, spent.get(inv.id, set()))
+        rule, ready, _held = rule_for_a_run(
+            rules, days, spent.get(inv.id, set()), reached.get(inv.id, set())
+        )
         if not ready:
             continue
         to, reason = recipients_for(inv.customer, settings)
@@ -882,7 +899,7 @@ def invoice_rows(
         customer_ids = [customer_id] + [s.id for s in billed_subs(db, customer_id)]
     invoices = open_invoices(db, customer_ids=customer_ids)
     ids = [i.id for i in invoices]
-    spent = _spent_by_invoice(db, ids)
+    spent, reached = _spent_by_invoice(db, ids), _reached_by_invoice(db, ids)
     last: dict = {}
     if ids:
         rows = (
@@ -898,7 +915,9 @@ def invoice_rows(
         days = (as_of - inv.due_date).days
         if overdue_only and days <= 0:
             continue
-        rule, ready = next_rule(rules, days, spent.get(inv.id, set()))
+        rule, ready, held = rule_for_a_run(
+            rules, days, spent.get(inv.id, set()), reached.get(inv.id, set())
+        )
         row = last.get(inv.id)
         last_rule = all_rules.get(row.rule_id) if row else None
         to, reason = recipients_for(inv.customer, settings)
@@ -940,6 +959,9 @@ def invoice_rows(
                             inv.due_date + timedelta(days=rule.days_from_due)
                         ).isoformat(),
                         "ready": ready,
+                        # failed for the customer though a copy went out:
+                        # no run sends it again, Remind now does
+                        "held": held,
                     }
                     if rule
                     else None

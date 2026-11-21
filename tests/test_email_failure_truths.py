@@ -1282,6 +1282,12 @@ def test_a_reminder_that_reached_a_copy_is_not_sent_again_by_the_run(
     # the run offers nothing for it; Remind, by hand, is not held back
     due = client.get("/api/collections/reminders/due").json()
     assert due["items"] == []
+    # and the Collections list does not call it ready: it is held
+    (listed,) = client.get("/api/collections/invoices").json()["items"]
+    assert listed["last_reminder"]["status"] == "failed"
+    nxt = listed["next_reminder"]
+    assert nxt["rule_id"] == row.rule_id
+    assert (nxt["ready"], nxt["held"]) == (False, True)
     by_hand = client.post(f"/api/collections/invoices/{inv.id}/remind")
     assert by_hand.status_code == 400, by_hand.text
     assert by_hand.json()["detail"] == line
@@ -1307,6 +1313,9 @@ def test_a_reminder_held_back_goes_when_remind_reaches_the_customer(
     assert r.status_code == 200, r.text
     assert working.messages == 1
     assert [r.status for r in _reminder_rows(db_session)] == ["failed", "sent"]
+    (listed,) = client.get("/api/collections/invoices").json()["items"]
+    nxt = listed["next_reminder"]
+    assert nxt is None or (nxt["ready"], nxt["held"]) == (False, False)
     _three_runs(client, db_session, working)
     assert working.messages == 1
 
@@ -1324,6 +1333,11 @@ def test_a_reminder_that_reached_nobody_is_tried_again_by_each_run(
     rcpts = [line for line in server.lines if line.upper().startswith("RCPT")]
     assert len(rcpts) == 3 and server.messages == 0
     assert [r.status for r in _reminder_rows(db_session)] == ["failed"] * 3
+    # the list says ready, and the run agrees: it has it to send
+    (listed,) = client.get("/api/collections/invoices").json()["items"]
+    nxt = listed["next_reminder"]
+    assert (nxt["ready"], nxt["held"]) == (True, False)
+    assert len(client.get("/api/collections/reminders/due").json()["items"]) == 1
 
 
 def test_a_refused_copy_beside_a_reminder_that_went_is_sent_once(
