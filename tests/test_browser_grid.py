@@ -199,6 +199,31 @@ def _heads(page):
     )
 
 
+# The save done: the Report Center drawn again with the name listed, and the
+# report open again over it, drawn (`ready`, inside #report-content), in a
+# dialog that is not the one saved from (`old`, its #report-content).
+SAVED_AND_REOPENED = """([old, name, ready]) => {
+    const listed = [...document.querySelectorAll('#page-content .saved-report-row')]
+        .some(r => r.textContent.includes(name));
+    const now = document.getElementById('report-content');
+    return listed && !!now && now !== old && !!now.querySelector(ready)
+        && !document.getElementById('modal-overlay').classList.contains('hidden');
+}"""
+
+
+def _save_report(page, name, ready):
+    """Add to Saved Reports…, named `name`. The save draws the address again:
+    the Report Center first, then, a turn later and after the view's own
+    reads, the report over it (App.withDocument). The Saved Reports list
+    showing is not that done: Escape pressed in between closed the dialog
+    saved from, the report then opened again over the list, and the wait
+    for no dialog ran out (CI, once). The wait is for the report reopened."""
+    page.evaluate("(n) => { window.prompt = () => n; }", name)
+    old = page.evaluate_handle("() => document.getElementById('report-content')")
+    page.get_by_role("button", name="Add to Saved Reports…").click()
+    page.wait_for_function(SAVED_AND_REOPENED, arg=[old, name, ready])
+
+
 # ── R1: the wide grid ────────────────────────────────────────────────────
 
 
@@ -404,9 +429,7 @@ def test_the_grid_saves_as_pdf_and_csv_and_as_a_saved_report(
         csv = company.get(opens[1])
         assert csv.status_code == 200 and "Site Prep" in csv.text
 
-        page.evaluate("() => { window.prompt = () => 'Divisions, September'; }")
-        page.get_by_role("button", name="Add to Saved Reports…").click()
-        page.wait_for_selector("#saved-reports-list")
+        _save_report(page, "Divisions, September", ".pivot-grid")
         saved = company.get("/api/saved-reports").json()
         mine = next(s for s in saved if s["name"] == "Divisions, September")
         assert mine["report_type"] == "profit_loss_by_class"
@@ -487,9 +510,7 @@ def test_the_class_p_and_l_saves_with_its_class_and_reopens(
     try:
         page.wait_for_selector("#class-pl-body table")
         page.wait_for_function(f"({TITLE})() === 'Profit & Loss — Plumbing'")
-        page.evaluate("() => { window.prompt = () => 'Plumbing, September'; }")
-        page.get_by_role("button", name="Add to Saved Reports…").click()
-        page.wait_for_selector("#saved-reports-list")
+        _save_report(page, "Plumbing, September", "#class-pl-body table")
         saved = next(
             s
             for s in company.get("/api/saved-reports").json()
@@ -681,9 +702,7 @@ def test_choosing_columns_says_filtered_and_rides_on_the_address_and_exports(
         page.get_by_role("checkbox", name="Site Prep").check()
         page.get_by_role("button", name="Apply").click()
         page.wait_for_selector(".grid-filtered")
-        page.evaluate("() => { window.prompt = () => 'Site Prep only'; }")
-        page.get_by_role("button", name="Add to Saved Reports…").click()
-        page.wait_for_selector("#saved-reports-list")
+        _save_report(page, "Site Prep only", ".pivot-grid")
         saved = next(
             s
             for s in company.get("/api/saved-reports").json()
