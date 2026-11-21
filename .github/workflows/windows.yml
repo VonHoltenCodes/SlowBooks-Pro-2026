@@ -42,7 +42,9 @@ jobs:
           if (-not $ver) { Write-Error "Could not parse __version__ from app/__init__.py"; exit 1 }
           Write-Host "Version: $ver"
           if ("${{ github.ref }}".StartsWith("refs/tags/v")) {
-            $tagver = "${{ github.ref_name }}".TrimStart("v")
+            # A pre-release tag (v2.32.0-beta.1) builds the version it is a
+            # pre-release OF: only "-beta.<number>" may follow the version.
+            $tagver = "${{ github.ref_name }}".TrimStart("v") -replace '-beta\.\d+$', ''
             if ($tagver -ne $ver) { Write-Error "Tag ${{ github.ref_name }} != app version $ver"; exit 1 }
           }
           "APP_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -252,6 +254,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          # a -beta.N tag's release is a pre-release: GitHub never offers it
+          # as the latest, and the site's latest.json is not touched by it
+          prerelease: ${{ contains(github.ref_name, '-beta.') }}
           files: |
             SlowBooksPro-windows-x64.zip
             SlowBooksPro-Setup-x64.exe
