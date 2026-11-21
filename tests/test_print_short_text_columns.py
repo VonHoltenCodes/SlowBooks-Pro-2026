@@ -778,6 +778,78 @@ def test_an_amount_of_eleven_figures_and_more_prints_whole(
     assert not wrong, "\n".join(wrong[:20])
 
 
+# References that a report sets as an amount would be: commas, a decimal
+# point, a currency sign, a percent. None is an amount a report prints.
+AMOUNT_LIKE = (
+    "101,102,103,104,105,106,107,108,109,110",
+    "1," + ",".join(["234"] * 10),
+    TRACE[:30] + ".5",
+    TRACE[:20] + "." + TRACE[:20],
+    "$" + TRACE[:30],
+    TRACE[:26] + "%",
+    "2026 " + TRACE[:20] + ".1",
+    "$" + TRACE[:14] + ".99",
+)
+
+
+@pytest.mark.parametrize("paper", ["letter", "a4"])
+def test_a_reference_shaped_like_an_amount_wraps_beside_a_large_amount(
+    client, seed_accounts, pages, paper
+):
+    """A long reference with commas, a decimal point, a currency sign or a
+    percent was taken for an amount, whatever its length, and set on one
+    line: beside amounts of thirteen figures, the General Ledger's Balance
+    column printed past the margin."""
+    pytest.importorskip("weasyprint")
+    ok(client.put("/api/settings", json={"pdf_paper_size": paper}))
+    wrong = []
+    for reference in AMOUNT_LIKE:
+        _payment(
+            client, "Acme Supply Partners of the Midwest", reference, "9999999999999.99"
+        )
+        html = page_of(pages, client, GL)
+        said = f"{paper}, after {reference!r}"
+        wrong += [f"{said}: {p}" for p in past_the_margin(html)]
+        wrong += [f"{said}: {o} is outside its cell" for o in leaves_its_cell(html)]
+        for row in rows(html, "report"):
+            for _x, _w, lines in row:
+                if any(text.MONEY.match(ln) for ln in lines) and len(lines) != 1:
+                    wrong.append(f"{said}: a figure prints as {lines}")
+    assert not wrong, "\n".join(wrong[:20])
+
+
+def test_an_amount_is_what_a_report_prints_as_one():
+    """The largest amount SlowBooks keeps (thirteen figures and cents) is an
+    amount, in every shape a report prints it; a longer run of digits, more
+    groups of three, or more than two decimal places is not."""
+    from app.services.pdf_service import _is_amount
+
+    for amount in (
+        "$12.34",
+        "-$9,999,999,999,999.99",
+        "($9,999,999,999,999.99)",
+        "-9,999,999,999,999.99",
+        "9999999999999.99",
+        "-$9999999999999.99",
+        "1,234",
+        "12.5%",
+        "-3.25%",
+        "100%",
+    ):
+        assert _is_amount(amount), amount
+    for words in AMOUNT_LIKE + (
+        "1,234,567,890,123,456.78",
+        "12345678901234.56",
+        "$12345678901234",
+        "1.234",
+        "1042",
+        TRACE[:26],
+    ):
+        for token in words.split():
+            if len(token) > 12:
+                assert not _is_amount(token), token
+
+
 # --- the running head ---------------------------------------------------------
 
 

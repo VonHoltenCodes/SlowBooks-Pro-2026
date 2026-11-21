@@ -614,16 +614,23 @@ def _figure_em(token: str) -> float:
 
 
 # An amount as a report sets it: a sign, a currency, digits in groups of
-# three or with cents, a percent. However many figures it has, it is an
-# amount and prints whole on one line; only a bare run of digits (a trace
-# number) is judged by its width.
+# three or with cents, a percent. An amount prints whole on one line up to
+# the largest one SlowBooks keeps (thirteen figures and cents); anything
+# else, a bare run of digits (a trace number) or a reference of numbers
+# with commas, points or a sign in it, is judged by its width.
 _AMOUNT = re.compile(
-    r"[-−+]?\(?[-−+]?[$€£¥]?[-−]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)\)?%?"
+    r"[-−+]?\(?[-−+]?[$€£¥]?[-−]?"
+    r"(?:\d{1,3}(?:,\d{3}){1,4}|\d{1,13})"
+    r"(?:\.(?P<places>\d{1,4}))?\)?(?P<percent>%)?"
 )
 
 
 def _is_amount(token: str) -> bool:
-    return bool(_AMOUNT.fullmatch(token)) and any(c in token for c in "$€£¥.,%")
+    m = _AMOUNT.fullmatch(token)
+    if not m or not any(c in token for c in "$€£¥.,%"):
+        return False
+    # cents for money; a percent may have a few more places
+    return len(m["places"] or "") <= (4 if m["percent"] else 2)
 
 
 def _one_line(value, cap: float = 0.0) -> bool:
