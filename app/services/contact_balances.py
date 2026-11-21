@@ -157,8 +157,9 @@ def customer_balances(
     and credits applied to it by that date), each payment and credit memo
     dated on or before it at the part not yet applied then, and the named
     journal lines to that date. Books Check sets these beside a ledger and
-    an aging as of today, so a document, a payment or an application on the
-    far side of the date is neither side's yet."""
+    an aging read to the same date, so a document, a payment or an
+    application on the far side of the date is neither side's; it passes
+    the last day anything is dated, and every one is both sides'."""
     if customer_ids is not None:
         customer_ids = list(customer_ids)  # read twice below
     ids = _ids(customer_ids)
