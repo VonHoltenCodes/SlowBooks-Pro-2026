@@ -407,13 +407,11 @@ jobs:
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
-          # in the log rather than guessed at. The timeout is generous because
-          # the alembic migration tests walk 36 migrations against a real file
-          # and take ~3 s on Linux but far longer here — a Windows runner's
-          # file I/O with real-time scanning was the difference before the
-          # Defender exclusions above. 120 s catches a genuine hang without
-          # failing an honestly slow test (the slowest test here is well under
-          # a minute).
+          # in the log rather than guessed at. The migration chain is 124 steps.
+          # Tests that walk it in subprocesses carry their own 300 s budget
+          # through the alembic_cli fixture (tests/conftest.py); --timeout=120
+          # is the limit for every other test, and on Windows reaching it ends
+          # the worker ("worker crashed"), not the test.
           # one worker per core here too (#770): 14 minutes against 22
           # serial. worksteal suits this job, which has no browser tests
           # (no Playwright) and no Tesseract to starve; each worker has its
@@ -662,7 +660,10 @@ jobs:
           # 444 with round 26: ten WeasyPrint cases of the totals' right edge
           # (test_pdf_totals_right_edge_w226.py, one per document) and the bid with
           # tables' long scope line (test_pdf_bid_tables_long_line_new277.py).
-          MAX_SKIPS: "444"
+          # 448 with round 28's in-house audit: the relay link's two read-only-folder tests
+          # (POSIX folder modes), and two modules without playwright
+          # (test_browser_line_controls_r29.py, test_browser_zero_total_ask_r29.py).
+          MAX_SKIPS: "448"
         run: |
           total=0
           for f in shards/*/skips.txt; do
