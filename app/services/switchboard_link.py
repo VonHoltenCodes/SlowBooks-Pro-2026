@@ -1952,6 +1952,14 @@ def status(session=None) -> dict:
         "can_disconnect": False,
         # the line runs in another window on this computer
         "line_elsewhere": False,
+        # a server serving companies, not one desktop window: the panel's
+        # words for a company that cannot answer now
+        "server_edition": _server_edition(),
+        # the company this request works in, by name, for an administrator's
+        # Add (its own name: nothing of any other company)
+        "here_name": "",
+        # its file, while it is on the connection (what Take off names)
+        "here_file": "",
         # relay names a Disconnect could not delete yet (NEW-269)
         "pending": pending_notices(),
     }
@@ -1971,7 +1979,11 @@ def status(session=None) -> dict:
     manager, _ = _may_manage(session, entries, reachable_only=True)
     out.update(linked=True, on_link=mine is not None, this_company=mine is not None)
     if mine is not None:
-        out.update(company=mine["name"], token_label=mine["token_label"])
+        out.update(
+            company=mine["name"],
+            token_label=mine["token_label"],
+            here_file=mine["file"],
+        )
         out["can_take_off"] = admin
     if manager:
         out["companies"] = [
@@ -1980,6 +1992,8 @@ def status(session=None) -> dict:
                 "name": e["name"],
                 "books": e["books"],
                 "state": _entry_state(e, here),
+                # the company this request works in
+                "here": e["file"] == here,
             }
             for e in entries
         ]
@@ -2002,6 +2016,7 @@ def status(session=None) -> dict:
             out["sentence"] = ONE_ON_POSTGRES
         elif _may_manage(session, entries, reachable_only=False, adding=True)[0]:
             out["can_add"] = len(entries) < MAX_COMPANIES
+            out["here_name"] = _here_name()
         elif not manager:
             out["sentence"] = NOT_A_MANAGER_ADD.format(name=_here_name())
     return out
