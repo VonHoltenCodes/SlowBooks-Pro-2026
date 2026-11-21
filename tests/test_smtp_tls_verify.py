@@ -18,6 +18,7 @@ import secrets
 import socket
 import ssl
 import threading
+import time
 
 import pytest
 from cryptography import x509
@@ -31,6 +32,8 @@ from app.services.email_service import send_email, smtp_tls_context
 from app.services.settings_service import set_setting
 
 HOST = "localhost"
+# the longest a stub waits for its connection; close() ends the wait sooner
+ACCEPT_WAIT = 300
 
 
 # -- throwaway certificates --------------------------------------------------
@@ -161,10 +164,18 @@ class StubSMTP:
         self.raw = b""
         self.messages = []
         self.handshake_failed = False
+        self.accepted = threading.Event()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(1)
-        self.sock.settimeout(10)
+        # The stub waits for its one connection until close(), however long
+        # the test takes to get to the send. A short wait counted from here
+        # can run out before a slow test sends: one that builds a year of
+        # books first (test_batch_send_reason_w211's giving statements)
+        # would then reach a socket nobody reads, and its send would say
+        # "could not be reached". The bound is only for a
+        # platform where close() does not wake the wait.
+        self.sock.settimeout(ACCEPT_WAIT)
         self.port = self.sock.getsockname()[1]
         self.thread = threading.Thread(target=self._serve, daemon=True)
         self.thread.start()
@@ -174,6 +185,7 @@ class StubSMTP:
             conn, _ = self.sock.accept()
         except OSError:
             return
+        self.accepted.set()
         conn.settimeout(10)
         try:
             self._talk(conn)
@@ -254,6 +266,13 @@ class StubSMTP:
             return
 
     def close(self):
+        if not self.accepted.is_set():
+            # nothing connected: wake the wait for one instead of sitting it out
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.sock.close()
         self.thread.join(timeout=10)
         self.sock.close()
 
@@ -451,3 +470,29 @@ def test_an_exception_reads_the_same_as_its_stored_text():
     assert "certificate could not be verified" in email_errors.failure_sentence(
         unknown, HOST
     )
+
+
+# -- the stub itself -----------------------------------------------------------
+
+
+def test_the_stub_answers_a_send_that_comes_long_after_it_started(
+    db_session, pki, trust_ca
+):
+    """A test may take a while to build its books before it sends: the
+    stub is still there to answer (it waited ten seconds from its start,
+    and a send after that timed out)."""
+    stub = StubSMTP(*pki["self_signed"])
+    time.sleep(11)
+    ok, row = _send(db_session, stub, secrets.token_urlsafe(16))
+    assert not ok
+    assert row.error_message == (
+        f"Certificate not verified ({HOST}): certificate is self-signed"
+    ), row.error_message
+
+
+def test_closing_a_stub_nothing_connected_to_is_prompt():
+    stub = StubSMTP()
+    started = time.monotonic()
+    stub.close()
+    assert time.monotonic() - started < 5
+    assert not stub.thread.is_alive()
