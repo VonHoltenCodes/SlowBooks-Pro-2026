@@ -44,7 +44,7 @@ def test_a_change_orders_lines_say_only_what_changed(client, seed_customer, db_s
     url = f"/api/change-orders/{co['id']}"
     created = _newest(client, "change_order", co["id"])
     # the lines as made, with their real amounts, once
-    assert created["details"] == ["Line: Deck, $100.00", "Line: $200.00"]
+    assert created["details"] == ["Line: Deck, $100.00", "Line 2 ($200.00)"]
 
     # the form's save: every line sent again with no ids, only the title new
     _age(db_session)

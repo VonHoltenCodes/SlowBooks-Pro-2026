@@ -73,7 +73,9 @@ class DocType:
     # this kind's own words for a field of its form, before the common ones
     # (a register entry's Payee is the entry's description)
     field_words: tuple[tuple[str, str], ...] = ()
-    # and for a field of its lines (a register entry's Memo is on its lines)
+    # and for a field of its lines (a register entry's, an expense's and a
+    # card charge's Memo is kept on its lines: one field of the form, which
+    # with no memo typed holds the payee)
     line_words: tuple[tuple[str, str], ...] = ()
 
 
@@ -180,6 +182,7 @@ DOC_TYPES: dict[str, DocType] = {
         attachment_types=("expense",),
         source_types=("expense",),
         number_fields=_TXN_NUMBER,
+        line_words=_REGISTER_LINE_WORDS,
     ),
     "cc_charge": DocType(
         "Card Charge",
@@ -188,6 +191,7 @@ DOC_TYPES: dict[str, DocType] = {
         attachment_types=("cc_charge",),
         source_types=("cc_charge",),
         number_fields=_TXN_NUMBER,
+        line_words=_REGISTER_LINE_WORDS,
     ),
     "check": DocType(
         "Check",
@@ -936,15 +940,6 @@ def _line_money(values: dict) -> str:
     return money_text(number) if side == "amount" else f"{side} {money_text(number)}"
 
 
-def _line_words(words: _Words, values: dict) -> str:
-    """A line as the document's creation lists it: its name and its
-    amount; a line with no name, its amount."""
-    label, money = _line_title(words, values), _line_money(values)
-    if label and money:
-        return f"{label}, {money}"
-    return label or money or "a line"
-
-
 def _line_name(words: _Words, values: dict, place: int, alone: bool = False) -> str:
     """A line as a change names it, the same on every kind: by its
     description, else its item's name, else its account's name, each with
@@ -1376,7 +1371,12 @@ def _compare_lines(
     The lines before and the lines after are two lists. They are paired in
     passes. A line paired in one pass is out of the later ones, and within
     a pass the lines pair in their original order, so the same save always
-    reads the same way.
+    reads the same way. Where several lines of a pass share what the pass
+    pairs on, the nearest pair first: lines that also share their subject
+    (item, else account) and amount, then their subject, then their amount,
+    then in order. So lines that all carry one description (a memo copied
+    to each line of a journal entry; every register entry) pair each with
+    the line on its own account, never across accounts (B4).
 
     0. Identity, only where the kind's form keeps line ids (`keeps_ids`: a
        purchase order, a pay application). A line the save kept by its id
@@ -1447,9 +1447,14 @@ def _compare_lines(
     left, new = list(before), list(after)
     pairs: list[tuple[dict, dict]] = []
 
-    def take(key) -> None:
-        """Pair, in order, the lines whose `key` is the same; a line whose
-        key is None is not in this pass."""
+    def take(*keys) -> None:
+        """Pair, in order, the lines for which every one of `keys` is the
+        same; a line with a key of None is not in this step."""
+
+        def key(v):
+            found = tuple(k(v) for k in keys)
+            return None if None in found else found
+
         waiting: dict = {}
         for a in new:
             k = key(a)
@@ -1474,6 +1479,11 @@ def _compare_lines(
     def subject(v):
         return None if _line_label(v) else _line_subject(v)
 
+    def figure(v):
+        # the amount as a tie-breaker: a line with none, or with zero,
+        # still takes part
+        return _line_amount(v) or ("none", 0)
+
     def amount(v):
         found = _line_amount(v)
         return found if found is not None and found[1] != 0 else None  # B3
@@ -1488,7 +1498,13 @@ def _compare_lines(
         take(lambda v: v.get("_row"))
     take(lambda v: _line_content(v, fk, skip))
     if not keeps_ids:
+        # pass 2, nearest first: the same subject, then the same amount
+        take(description, _line_subject, figure)
+        take(description, _line_subject)
+        take(description, amount)
         take(description)
+        # pass 3, nearest first
+        take(subject, figure)
         take(subject)
         take(account_and_figure)
         take(amount)
@@ -1508,12 +1524,29 @@ def _side_flip(before: dict, after: dict) -> str | None:
     )
 
 
+def _class_of(words: _Words, values: dict) -> str:
+    """A line's class in words: the one its id names, else the name kept
+    on the line; "" for none (and for the class that stands for none)."""
+    cid = values.get("class_id")
+    if cid not in (None, ""):
+        return "" if _no_class(words, cid) else words.value("class_id", cid)
+    return str(values.get("class_name") or "").strip()
+
+
 def _field_changes(
     words: _Words, table, before: dict, after: dict, fields, line: bool = False
 ) -> list:
     """Each of `fields` old → new, numbers as a person reads them (W-223:
     "Quantity 1 → 3", not "1.0000 → 3.0")."""
     fields = list(fields)
+    if "class_name" in fields:
+        # a line that keeps its class by id and again by name has one
+        # Class: said once, by what it was and what it is
+        b, a = _class_of(words, before), _class_of(words, after)
+        before, after = {**before, "class_name": b}, {**after, "class_name": a}
+        fields = [
+            f for f in fields if f != "class_id" and (f != "class_name" or b != a)
+        ]
     flip = None
     if "debit" in fields and "credit" in fields:
         flip = _side_flip(before, after)
@@ -1535,6 +1568,21 @@ def _field_changes(
     return out
 
 
+def _header_copy(field: str, before, after, header) -> bool:
+    """Whether a ledger line's change of `field` is the document's own
+    change of it, copied onto the line by the save (the entry's Class and
+    Job; on a kind with one Memo, its memo or payee)."""
+    was, now = header
+    names = [field] + (["memo"] if field == "description" else [])
+    return any(
+        (g in was or g in now)
+        and not _same_value(was.get(g), now.get(g))
+        and _same_value(before, was.get(g))
+        and _same_value(after, now.get(g))
+        for g in names
+    )
+
+
 def _line_changes(
     words: _Words,
     table: str,
@@ -1544,10 +1592,18 @@ def _line_changes(
     keeps_ids: bool = False,
     skip=frozenset(),
     one_memo: bool = False,
+    header: tuple[dict, dict] | None = None,
 ) -> list[str]:
     """One save's change of a document's lines in sentences: each edited
     line field by field, then each line added, then each removed, once,
-    with its real amount. The pairing is `_compare_lines`, the one rule."""
+    with its real amount. The pairing is `_compare_lines`, the one rule.
+
+    `header`, for a kind kept as a journal entry: the document's own
+    fields before and after the save. What the save copies from them onto
+    every ledger line (the entry's Class and Job; with `one_memo`, the
+    payee a line holds while no memo is typed) is the document's change,
+    said there once and never again on a line. `one_memo`: the kind's form
+    has one Memo, kept on each line; its change is said once."""
     pairs, removed, added = _compare_lines(before, after, fk, keeps_ids, skip)
     place_before = {id(b): i + 1 for i, b in enumerate(before)}
     place_after = {id(a): i + 1 for i, a in enumerate(after)}
@@ -1555,22 +1611,44 @@ def _line_changes(
     edits = []
     for b, a in sorted(pairs, key=lambda pair: place_after[id(pair[1])]):
         fields = _line_diff_fields(b, a, fk, skip)
-        moved = _field_changes(words, table, b, a, fields, line=True)
-        if moved:
-            edits.append((a, fields, moved))
+        shown_b, shown_a = b, a
+        if header and one_memo:
+            # with no memo typed the line holds the payee: no memo
+            shown_b = _memo_only(b, header[0])
+            shown_a = _memo_only(a, header[1])
+            if "description" in fields and _same_value(
+                shown_b.get("description"), shown_a.get("description")
+            ):
+                fields.remove("description")
+        if header:
+            copied = {
+                f
+                for f in fields
+                if f in ("class_id", "job_id") or (one_memo and f == "description")
+                if _header_copy(f, shown_b.get(f), shown_a.get(f), header)
+            }
+            if "class_id" in copied:
+                copied.add("function")  # follows the class it was copied with
+            fields = [f for f in fields if f not in copied]
+        if fields:
+            edits.append((shown_b, shown_a, a, fields))
     # one memo kept on every line of the entry (a register entry's) is one
     # field of its form: its change is said once, not once a line
-    memo = [e for e in edits if e[1] == ["description"]]
-    shared = (
-        one_memo and len(memo) > 1 and len({tuple(e[2]) for e in memo}) == 1 and memo
-    )
-    for a, fields, moved in edits:
-        if shared and fields == ["description"]:
-            if a is shared[0][0]:
-                said.extend(moved)
-            continue
-        name = _line_name(words, a, place_after[id(a)])
-        said.append(f"Line {name}: " + "; ".join(moved))
+    memo = [
+        tuple(_field_changes(words, table, b, a, ["description"], line=True))
+        for b, a, _, fields in edits
+        if "description" in fields
+    ]
+    shared = one_memo and len(memo) > 1 and len(set(memo)) == 1
+    if shared:
+        said.extend(memo[0])
+    for b, a, line, fields in edits:
+        if shared:
+            fields = [f for f in fields if f != "description"]
+        moved = _field_changes(words, table, b, a, fields, line=True)
+        if moved:
+            name = _line_name(words, line, place_after[id(line)])
+            said.append(f"Line {name}: " + "; ".join(moved))
     said.extend(
         f"Line added: {_line_name(words, a, place_after[id(a)], alone=True)}"
         for a in added
@@ -1580,6 +1658,15 @@ def _line_changes(
         for b in removed
     )
     return said
+
+
+def _memo_only(line: dict, head: dict) -> dict:
+    """A ledger line of a kind with one Memo, its description emptied when
+    it is only the payee the line holds while no memo is typed."""
+    text = str(line.get("description") or "").strip()
+    if text and text == str(head.get("description") or "").strip():
+        return {**line, "description": ""}
+    return line
 
 
 # Line tables whose form replaces every line on each save. A change order's
@@ -1600,8 +1687,9 @@ class _LineReplay:
     they were before it and as it left them, each in the document's order.
 
     A save that rewrites the lines (an invoice, estimate or bill deletes
-    and inserts them; a change order bulk-deletes them, which writes no
-    audit row, and inserts them at 0 before its recompute) leaves deleted
+    and inserts them; so does a change order, which in earlier builds
+    deleted them in bulk with no audit row, and inserts them at 0 before
+    its recompute) leaves deleted
     and inserted rows; a save that keeps a line by its id (a purchase
     order, a pay application) leaves an edit of that row, or nothing.
 
@@ -1742,11 +1830,24 @@ def _line_details(
         table: _LineReplay(words, table, fk, doc_id, [r for g in groups for r in g])
         for table, fk in tables.items()
     }
+    ledger = dt.table == "transactions"
+    head: dict = {}  # the document's own fields, save by save (B8)
     for gi, group in enumerate(groups):
         created = any(
             r.table_name == dt.table and r.record_id == doc_id and r.action == "INSERT"
             for r in group
         )
+        was, news = dict(head), {}
+        for r in group:
+            if r.table_name == dt.table and r.record_id == doc_id:
+                if r.action == "UPDATE":
+                    for f, v in (r.old_values or {}).items():
+                        if f not in news:
+                            was.setdefault(f, v)
+                if r.action != "DELETE":
+                    news.update(r.new_values or {})
+        now = {**was, **news}
+        head = now
         snaps: dict[str, tuple[list[dict], list[dict]]] = {}
         touched = set()
         for table in tables:
@@ -1771,7 +1872,16 @@ def _line_details(
                 continue
             before, after = snaps[table]
             if created and not before:
-                said.extend(f"Line: {_line_words(words, v)}" for v in after)
+                # named as a change names it: a line with nothing to name
+                # it by its place ("Line 2 ($60.00)")
+                said.extend(
+                    (
+                        f"Line: {_line_name(words, v, i)}"
+                        if _line_title(words, v)
+                        else _line_name(words, v, i, alone=True)
+                    )
+                    for i, v in enumerate(after, 1)
+                )
                 made.setdefault(gi, {})[table] = after
                 continue
             if dt.typed_lines and table != dt.typed_lines:
@@ -1789,6 +1899,9 @@ def _line_details(
                     after,
                     dt.line_ids,
                     one_memo=bool(dt.line_words),
+                    header=(
+                        (was, now) if ledger and table == "transaction_lines" else None
+                    ),
                 )
             )
         out[gi] = said
@@ -1852,6 +1965,12 @@ def _copy_details(
                     old_lines,
                     new_lines[table],
                     skip=_COPY_LINE_SKIP,
+                    one_memo=bool(dt.line_words),
+                    header=(
+                        (old_values, new_values)
+                        if old_values and table == "transaction_lines"
+                        else None
+                    ),
                 )
             )
     said.extend(_field_changes(words, dt.table, old_values, new_values, totals))
@@ -1884,6 +2003,7 @@ def _audit_events(
         who = words.data(actor)
         heads: list[tuple[str, str]] = []  # (kind, sentence)
         details: list[str] = []
+        of_lines: list[str] = []  # the lines' changes, after the document's
         tail: list[str] = []  # the document's totals, said after its lines
         # a void's reason, said after its sentence as typed (no vocabulary
         # swap in the person's own words)
@@ -2006,7 +2126,7 @@ def _audit_events(
             elif r.table_name in line_tables:
                 # the save's lines, said once as one change of the set (W-215)
                 if not lines_said:
-                    details.extend(line_said.get(gi, []))
+                    of_lines.extend(line_said.get(gi, []))
                     tail.extend(line_tail.get(gi, []))
                     lines_said = True
             elif r.table_name == "attachments":
@@ -2020,6 +2140,9 @@ def _audit_events(
                 sentence = _related_sentence(words, kinds[r.id], r, doc_id)
                 if sentence:
                     heads.append((kinds[r.id], f"{sentence} by {who}"))
+        # the document's own fields first, then its lines, the same in
+        # every save, whichever the save happened to write first
+        details.extend(of_lines)
         if not any(kind == "created" for kind, _ in heads):
             # the save that made the document lists its lines; its totals
             # filling in from $0.00 are no change anyone made
@@ -2234,12 +2357,16 @@ def _email_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
             "giving_statement": "Giving statement emailed",
         }.get(r.entity_type, "Emailed")
         if r.status == "sent":
-            text = f"{what} to {r.recipient} by {who}."
+            # an address and a name are left as typed (B10)
+            text = f"{what} to {words.data(r.recipient)} by {words.data(who)}."
             details = [f"Subject: {r.subject}"] if r.subject else []
             if r.cc:
                 details.append(f"Cc: {r.cc}")
         else:
-            text = f"An email to {r.recipient} by {who} could not be sent."
+            text = (
+                f"An email to {words.data(r.recipient)} by {words.data(who)}"
+                " could not be sent."
+            )
             # the one reader of the stored text, scrubbed (W-228)
             details = [reader.read(r, admin=False).sentence]
         out.append(
