@@ -257,22 +257,24 @@ def test_an_upload_not_placed_by_name_is_named_as_uploaded(client):
     )
 
 
-def test_an_upload_too_large_is_named_as_uploaded():
-    import asyncio
-    import io
+def test_an_upload_too_large_is_named_as_uploaded(client, monkeypatch):
+    """Through the migration route (its own read_limited call and label),
+    with the size limit shrunk so a small file is over it."""
+    from app.routes import migration
 
-    from fastapi import HTTPException, UploadFile
+    real = migration.read_limited
 
-    from app.services.upload_limits import read_limited
+    def small_limit(file, **kwargs):
+        return real(file, max_bytes=8, **kwargs)
 
-    upload = UploadFile(io.BytesIO(b"x" * 64), filename="Invoices.csv")
-    with pytest.raises(HTTPException) as refused:
-        asyncio.run(
-            read_limited(
-                upload, max_bytes=8, label=said("Migration file {}", upload.filename)
-            )
-        )
-    assert Terms("nonprofit").worded(refused.value.detail) == (
+    monkeypatch.setattr(migration, "read_limited", small_limit)
+    _company_type(client, "nonprofit")
+    r = client.post(
+        "/api/migration/myob/dry-run",
+        files=[_csv("Invoices.csv", "Date,Account,Debit\n")],
+    )
+    assert r.status_code == 413, r.text
+    assert r.json()["detail"] == (
         "Migration file Invoices.csv is too large (limit 0 MB)."
     )
 
@@ -292,4 +294,99 @@ def test_a_company_file_name_taken_is_said_as_typed(client, data_dir):
     assert r.status_code == 400, r.text
     assert r.json()["detail"] == (
         "A company file named 'customer-invoices.db' already exists"
+    )
+
+
+def _a_job(client):
+    who = client.post("/api/customers", json={"name": "Lakeside Library"})
+    assert who.status_code in (200, 201), who.text
+    job = client.post(
+        "/api/jobs", json={"customer_id": who.json()["id"], "name": "Reading room"}
+    )
+    assert job.status_code in (200, 201), job.text
+    return job.json()
+
+
+def test_a_budget_row_of_an_unknown_cost_type_is_said_as_typed(client):
+    _company_type(client, "nonprofit")
+    job = _a_job(client)
+    r = client.put(
+        f"/api/jobs/{job['id']}/budgets",
+        json={"rows": [{"cost_type": "customer", "amount": 5}]},
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "Unknown cost type 'customer'"
+
+
+def test_a_job_cost_line_of_an_unknown_cost_type_is_said_as_typed(
+    client, seed_accounts
+):
+    _company_type(client, "nonprofit")
+    job = _a_job(client)
+    body = {
+        "date": "2026-03-02",
+        "job_id": job["id"],
+        "lines": [{"cost_type": "customer", "amount": "5.00"}],
+    }
+    r = client.post("/api/job-costs", json=body)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "Line 1: unknown cost type 'customer'"
+
+
+def test_a_server_database_name_taken_is_said_as_typed(client, db_session, monkeypatch):
+    """A server (PostgreSQL) install names each company's database; one
+    already registered is refused before the database is made, so the
+    check runs here against the companies table with the server path
+    switched on."""
+    from app.models.companies import Company
+    from app.services import company_service
+
+    _company_type(client, "nonprofit")
+    db_session.add(Company(name="Lakeside", database_name="customer-books"))
+    db_session.commit()
+    monkeypatch.setattr(company_service, "_is_sqlite", lambda: False)
+    r = client.post(
+        "/api/companies", json={"name": "Lakeside", "database_name": "customer-books"}
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "Database 'customer-books' already exists"
+
+
+def test_a_forecast_cell_of_an_unknown_cost_type_is_said_as_typed(client):
+    _company_type(client, "nonprofit")
+    job = _a_job(client)
+    code = client.post(
+        "/api/cost-codes",
+        json={"code": "L-100", "name": "Mailing", "cost_type": "material"},
+    )
+    assert code.status_code == 201, code.text
+    entry = {"cost_code_id": code.json()["id"], "cost_type": "customer", "amount": "1"}
+    r = client.put(
+        f"/api/jobs/{job['id']}/cost-to-complete-forecast", json={"entries": [entry]}
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "Unknown cost type 'customer'"
+
+
+def test_a_document_line_of_an_unknown_cost_type_is_said_as_typed(
+    client, seed_accounts
+):
+    # every form's line goes through line_cost_type; a journal entry here
+    _company_type(client, "nonprofit")
+    body = {
+        "date": "2026-03-02",
+        "description": "Mailing",
+        "lines": [
+            {
+                "account_id": seed_accounts["1000"].id,
+                "debit": "5",
+                "cost_type": "customer",
+            },
+            {"account_id": seed_accounts["3000"].id, "credit": "5"},
+        ],
+    }
+    r = client.post("/api/journal", json=body)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == (
+        "Unknown cost type 'customer' — add it under Settings → Cost Types"
     )

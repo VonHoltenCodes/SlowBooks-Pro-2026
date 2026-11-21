@@ -378,7 +378,7 @@ def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get
             _locked_budget_409(db, locked_keys[key])
         if row.cost_type and row.cost_type not in types:
             raise HTTPException(
-                status_code=422, detail=f"Unknown cost type '{row.cost_type}'"
+                status_code=422, detail=said("Unknown cost type '{}'", row.cost_type)
             )
         if row.cost_code_id and not db.get(CostCode, row.cost_code_id):
             raise HTTPException(status_code=404, detail="Cost code not found")

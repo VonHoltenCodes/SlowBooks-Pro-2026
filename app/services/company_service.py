@@ -599,7 +599,10 @@ def create_company(
     # Check if company already exists
     existing = db.query(Company).filter(Company.database_name == database_name).first()
     if existing:
-        return {"success": False, "error": f"Database '{database_name}' already exists"}
+        return {
+            "success": False,
+            "error": said("Database '{}' already exists", database_name),
+        }
 
     # Create the database
     base_url = _base_url()

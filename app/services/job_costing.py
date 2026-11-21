@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from app.models.accounts import Account, AccountType
 from app.models.cost_codes import CostCode
 from app.services.account_tree import forms_cycle
+from app.services.terminology import said
 from app.models.estimates import Estimate
 from app.models.job_costing import (
     DEFAULT_COST_TYPES,
@@ -166,7 +167,10 @@ def line_cost_type(
         if cost_type not in cost_type_map(db):
             raise HTTPException(
                 status_code=422,
-                detail=f"Unknown cost type '{cost_type}' — add it under Settings → Cost Types",
+                detail=said(
+                    "Unknown cost type '{}' — add it under Settings → Cost Types",
+                    cost_type,
+                ),
             )
         return cost_type
     if cost_code_id:

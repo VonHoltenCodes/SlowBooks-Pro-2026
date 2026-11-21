@@ -13,6 +13,12 @@ function) that fills in text the request carried:
 - a str field of an endpoint's own parameters (query, path, form), or of
   a pydantic body, read as ``data.field`` or out of ``data.model_dump()``
   by its key;
+- a str field of a model in a body's list-of-models field, read off the
+  loop variable of a ``for`` or comprehension over that field, directly
+  (``for row in data.rows``) or through ``enumerate()``
+  (``for i, ln in enumerate(data.lines)``); not an item taken by index
+  (``data.rows[0]``), a list first copied to another name, or a nested
+  model's field (``data.address.street``);
 - an uploaded file's ``.filename`` or ``.content_type``;
 - ``request.query_params``;
 - anything made from those by simple steps (strip, upper, a slice,
@@ -93,6 +99,17 @@ def _model(tp):
     return None
 
 
+def _item_model(tp):
+    """The model a list (or tuple, set) of models holds: ``list[Row]``."""
+    for t in _unwrap(tp):
+        if typing.get_origin(t) in (list, tuple, set, frozenset):
+            for a in typing.get_args(t):
+                model = _model(a) if a is not Ellipsis else None
+                if model is not None:
+                    return model
+    return None
+
+
 def _is_upload(tp) -> bool:
     for t in _unwrap(tp):
         if (
@@ -155,6 +172,7 @@ class _Function:
                 targets, value = [n.target], n.value
             elif isinstance(n, (ast.For, ast.AsyncFor, ast.comprehension)):
                 targets, value = [n.target], n.iter
+                grew = self._bind_items(n.target, n.iter) or grew
             if value is None:
                 continue
             text = self.is_text(value) or (
@@ -174,6 +192,38 @@ class _Function:
                         self.dicts[t.id] = model
                         grew = True
         return grew
+
+    def _items_of(self, e):
+        """The model each item of ``e`` is, when ``e`` is a body's list of
+        models: ``data.rows`` for ``rows: list[Row]``."""
+        if (
+            isinstance(e, ast.Attribute)
+            and isinstance(e.value, ast.Name)
+            and e.value.id in self.models
+        ):
+            field = self.models[e.value.id].model_fields.get(e.attr)
+            return _item_model(field.annotation) if field else None
+        return None
+
+    def _bind_items(self, target, iterable) -> bool:
+        """A loop over a body's list of models binds its target to that
+        model: ``for row in data.rows``, ``for i, ln in enumerate(data.lines)``."""
+        if (
+            isinstance(iterable, ast.Call)
+            and isinstance(iterable.func, ast.Name)
+            and iterable.func.id == "enumerate"
+            and iterable.args
+            and isinstance(target, (ast.Tuple, ast.List))
+            and len(target.elts) == 2
+        ):
+            iterable, target = iterable.args[0], target.elts[1]
+        model = self._items_of(iterable)
+        if model is None or not isinstance(target, ast.Name):
+            return False
+        if self.models.get(target.id) is model:
+            return False
+        self.models[target.id] = model
+        return True
 
     def _dumped(self, e):
         for c in ast.walk(e):
@@ -383,9 +433,15 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
+class Row(BaseModel):
+    kind: str = ""
+    amount: int = 0
+
+
 class Body(BaseModel):
     code: str
     count: int = 0
+    rows: list[Row] = []
 
 
 def _check(number):
@@ -401,6 +457,13 @@ def a(data: Body, q: str = ""):
         raise HTTPException(status_code=409, detail=f"{changes['code']} again")
     if data.count:
         raise HTTPException(status_code=409, detail=f"{data.count} is fine")
+    for row in data.rows:
+        if row.amount:
+            raise HTTPException(status_code=422, detail=f"{row.amount} is fine")
+        raise HTTPException(status_code=422, detail=f"Unknown kind '{row.kind}'")
+    for i, ln in enumerate(data.rows):
+        kind = ln.kind or "other"
+        raise HTTPException(status_code=422, detail=f"Line {i + 1}: '{kind}'")
     msg = f"Code {code} already exists"
     raise HTTPException(status_code=409, detail=msg + f" ({q})")
 
@@ -438,7 +501,9 @@ def helper(text):
         "_check: {number[:40]}",
         "a: {changes['code']}",
         "a: {code}",
+        "a: {kind}",
         "a: {q}",
+        "a: {row.kind}",
         "b: {file.filename}",
         "b: {name}",
     ]

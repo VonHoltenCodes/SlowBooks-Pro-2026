@@ -383,7 +383,8 @@ def create_job_cost(data: JobCostCreate, db: Session = Depends(get_db)):
         )
         if ctype not in types:
             raise HTTPException(
-                status_code=422, detail=f"Line {i + 1}: unknown cost type '{ctype}'"
+                status_code=422,
+                detail=said("Line {}: unknown cost type '{}'", i + 1, ctype),
             )
         credit_account_id = ln.credit_account_id
         if ln.accrue:
