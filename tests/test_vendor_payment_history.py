@@ -14,6 +14,8 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from app.models.bills import BillPayment
 from app.models.contacts import Vendor
 from app.services.csv_export import VENDOR_PAYMENT_COLUMNS
@@ -22,6 +24,15 @@ from app.services.form_1099 import compute_1099_data
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT / "app/static/js/vendors.js").read_text(encoding="utf-8")
 YEAR = date.today().year
+
+
+@pytest.fixture(autouse=True)
+def _this_year():
+    """The app reads its own today on every request, so the test's year is
+    read when each test starts, not once at import: a run that crosses New
+    Year's must not leave the later tests a year behind the app."""
+    global YEAR
+    YEAR = date.today().year
 
 
 def _vendor(db_session, name="Blue Heron Installs", **extra):
@@ -106,7 +117,8 @@ def test_the_bill_payment_subtotal_for_a_year_is_the_1099_figure(
 
 def test_the_range_is_year_to_date_unless_asked(client, db_session, seed_accounts):
     v = _vendor(db_session)
-    _bill_payment(db_session, v, date(YEAR, 1, 5), "10.00")
+    # January 1 is in the year to date whatever day the run is on
+    _bill_payment(db_session, v, date(YEAR, 1, 1), "10.00")
     _bill_payment(db_session, v, date(YEAR - 1, 6, 5), "20.00")
     h = client.get(f"/api/vendors/{v.id}/payment-history").json()
     assert (
@@ -125,10 +137,11 @@ def test_a_voided_expense_is_listed_marked_and_not_counted(
     client, db_session, seed_accounts
 ):
     v = _vendor(db_session, name="Harbor Hardware")
+    # dated January 1 so both are in the year to date on any day of the year
     kept = _expense(
-        client, seed_accounts, v, date(YEAR, 4, 1), "30.30", reference="rcpt 7"
+        client, seed_accounts, v, date(YEAR, 1, 1), "30.30", reference="rcpt 7"
     )
-    gone = _expense(client, seed_accounts, v, date(YEAR, 4, 2), "12.00", memo="Twice")
+    gone = _expense(client, seed_accounts, v, date(YEAR, 1, 1), "12.00", memo="Twice")
     assert client.post(f"/api/expenses/{gone}/void").status_code == 200
     h = client.get(f"/api/vendors/{v.id}/payment-history").json()
     assert [(r["id"], r["is_voided"]) for r in h["rows"]] == [

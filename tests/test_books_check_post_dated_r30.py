@@ -36,9 +36,34 @@ from app.models.transactions import Transaction, TransactionLine
 from app.services.books_check import books_check
 from app.services.undeposited_funds import waiting_balance, waiting_items
 
-TODAY = date.today()
-AHEAD = TODAY + timedelta(days=9)
-PAST = TODAY - timedelta(days=20)
+# The app reads date.today() on every request, so the test's "today" is read
+# at the start of each test, not once at import: a run that crosses midnight
+# must not leave every later case a day behind the app. The parametrize
+# tables below name their days ("today", "ahead", "past") for the same
+# reason and _day() turns a name into the date for the running test.
+OFFSETS = {"today": 0, "ahead": 9, "past": -20}
+TODAY = AHEAD = PAST = None
+
+
+def _set_days():
+    global TODAY, AHEAD, PAST
+    TODAY = date.today()
+    AHEAD = TODAY + timedelta(days=OFFSETS["ahead"])
+    PAST = TODAY + timedelta(days=OFFSETS["past"])
+
+
+_set_days()
+
+
+@pytest.fixture(autouse=True)
+def _todays_dates():
+    _set_days()
+
+
+def _day(name):
+    return {"today": TODAY, "ahead": AHEAD, "past": PAST}[name]
+
+
 TODAY_ONLY = ("customer_balances", "vendor_balances", "undeposited_funds", "inventory")
 BASE_ANSWERS = Path(__file__).parent / "fixtures" / "books_check_r30_base.json"
 AGREE = "The payments waiting to be deposited add up to 1200 Undeposited Funds"
@@ -564,9 +589,9 @@ def _line_of_new_payment(co, when, amount):
 # what the deposit dated today took (dated ahead), what still waits today
 # and earlier -> the row's two figures
 A_DEPOSIT_TODAY_OF_A_POST_DATED_PAYMENT = {
-    "the same amount still waits": (100, [(TODAY, 100)], (100.0, 0.0)),
-    "more than it took still waits": (80, [(TODAY, 100)], (100.0, 20.0)),
-    "two payments still wait": (100, [(TODAY, 60), (PAST, 40)], (100.0, 0.0)),
+    "the same amount still waits": (100, [("today", 100)], (100.0, 0.0)),
+    "more than it took still waits": (80, [("today", 100)], (100.0, 20.0)),
+    "two payments still wait": (100, [("today", 60), ("past", 40)], (100.0, 0.0)),
     "nothing else waits": (100, [], (0.0, -100.0)),
 }
 
@@ -580,7 +605,7 @@ def test_a_deposit_today_that_named_a_post_dated_payment_took_only_that(co, case
     took, others, figures = A_DEPOSIT_TODAY_OF_A_POST_DATED_PAYMENT[case]
     ahead = _line_of_new_payment(co, AHEAD, took)
     for when, amount in others:
-        _payment(co, when, amount=amount)
+        _payment(co, _day(when), amount=amount)
     _deposit(co, TODAY, line_ids=[ahead])
     uf = _rows(co)["undeposited_funds"]
     assert uf["status"] == "difference", uf
@@ -601,31 +626,31 @@ NOT_COUNTING = {
     # a typed deposit dated ahead takes today's payment on the Make
     # Deposits page, which then shows the post-dated one: 100 either way
     "typed deposit ahead of as much": (
-        [(TODAY, 100), (AHEAD, 100)],
-        [(AHEAD, 100)],
+        [("today", 100), ("ahead", 100)],
+        [("ahead", 100)],
         ("pass", 100.0, None),
     ),
     # 40 of the post-dated payment is what that page still shows
     "typed deposit ahead of part of a post-dated payment": (
-        [(AHEAD, 100)],
-        [(AHEAD, 60)],
+        [("ahead", 100)],
+        [("ahead", 60)],
         ("pass", 0.0, "$40.00"),
     ),
     "typed deposit ahead with older and post-dated money": (
-        [(PAST, 30), (AHEAD, 100)],
-        [(AHEAD, 30)],
+        [("past", 30), ("ahead", 100)],
+        [("ahead", 30)],
         ("pass", 30.0, "$70.00"),
     ),
     # the page shows less than the row: the deposit dated ahead has taken
     # more than is dated ahead, and the row does not claim to leave it out
     "typed deposit ahead of more than is post-dated": (
-        [(TODAY, 100), (AHEAD, 50)],
-        [(AHEAD, 100)],
+        [("today", 100), ("ahead", 50)],
+        [("ahead", 100)],
         ("pass", 100.0, None),
     ),
     "typed deposit today over what waits today": (
-        [(TODAY, 100), (AHEAD, 100)],
-        [(TODAY, 150)],
+        [("today", 100), ("ahead", 100)],
+        [("today", 150)],
         ("difference", 0.0, "$50.00"),
     ),
 }
@@ -638,9 +663,9 @@ def test_what_the_row_leaves_out_is_the_rest_of_the_make_deposits_total(co, case
     always add up to what the page shows (round 30 rework)."""
     payments, deposits, (status, waiting, left_out) = NOT_COUNTING[case]
     for when, amount in payments:
-        _payment(co, when, amount=amount)
+        _payment(co, _day(when), amount=amount)
     for when, total in deposits:
-        _deposit(co, when, total=total)
+        _deposit(co, _day(when), total=total)
     uf = _rows(co)["undeposited_funds"]
     assert (uf["status"], uf["subledger"]) == (status, waiting), uf
     db = co["db"]

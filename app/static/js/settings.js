@@ -968,10 +968,16 @@ const SettingsPage = {
                         makes is in the audit log as <code>token:&lt;label&gt;</code>. Before it creates a ${T('customer')}, vendor, item,
                         employee, account or document with little on it, the assistant is told to ask you for what is missing
                         (it may not make anything up), and after a create it is told what was left blank. On the desktop the
-                        connection is up only while SlowBooks Pro is open. Disconnect ends it, revokes the token and has the
+                        connection is up only while SlowBooks Pro is open. Disconnect ends it, revokes each company's token and has the
                         relay delete its record of these books. The <strong>relay name</strong> shown while connected is how
                         that record is known: if Disconnect cannot reach the relay, SlowBooks Pro will keep trying to remove
-                        the record itself, and the name stays here in case you ever need to ask support@slowbookspro.com about it.` },
+                        the record itself, and the name stays here in case you ever need to ask support@slowbookspro.com about it.
+                        The connection is made in one company. An administrator of each other company adds it there, and the
+                        assistant names which company's books it works in on every call. On a server, adding a company,
+                        showing a sign-in code and Disconnect take someone who is an administrator of every company on the
+                        connection; an administrator of this company alone sees only this company and can take it off.
+                        A company's access ends when the administrator who added it is no longer one there. The connection
+                        holds a key to each company's books on this computer, so treat its sign-in codes like a master key.` },
                         { id: 'settings-switchboard-help', text: `<strong>Without the relay: SlowBooks Switchboard.</strong> SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
@@ -1380,7 +1386,9 @@ const SettingsPage = {
                         stays revoked: make a new one instead. A bookkeeper token is
                         what <code>sbplive setup</code> asks for, to let Claude work
                         the books through SlowBooks Switchboard (Connections, AI
-                        assistants); make a read-only one for an agent that only reports.` },
+                        assistants); make a read-only one for an agent that only reports.
+                        A token whose name starts with "AI assistant" stops working
+                        when the administrator who made it is no longer one here.` },
                     ])}</div>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
@@ -2022,7 +2030,7 @@ const SettingsPage = {
             const rows = tokens.map(t => `<tr>
                 <td>${escapeHtml(t.label)}</td>
                 <td style="font-family:var(--font-mono); font-size:10px;">${escapeHtml(t.token_hint)}&hellip;</td>
-                <td>${escapeHtml(t.role)}${t.refused ? `<div style="font-size:10px;color:var(--text-danger)">no longer accepted: tokens can't be administrators. Revoke it and make a bookkeeper, accountant or read-only token (tick Can make backups if it makes backups). Settings, payroll and HR need an administrator signed in.</div>` : ''}</td>
+                <td>${escapeHtml(t.role)}${t.refused ? `<div style="font-size:10px;color:var(--text-danger)">no longer accepted: tokens can't be administrators. Revoke it and make a bookkeeper, accountant or read-only token (tick Can make backups if it makes backups). Settings, payroll and HR need an administrator signed in.</div>` : ''}${t.maker_gone ? `<div style="font-size:10px;color:var(--text-danger)">not working: the administrator who made it is no longer an administrator of this company. Revoke it and make a new one.</div>` : ''}</td>
                 <td>${t.is_active
                     ? `<input type="checkbox" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
                     : (t.allow_backups ? 'Yes' : 'No')}</td>
@@ -2729,6 +2737,11 @@ const SettingsPage = {
     // The panel: words for everyone, an administrator's buttons (data-admin,
     // so the bookkeeper sweep knows them as the administrator's). `error` is
     // a refusal or failure to show (the server's own sentence).
+    //
+    // One connection can reach several companies. The server gives the list
+    // of them (st.companies) only to someone who is an administrator of
+    // every company on it; anyone else hears about this company alone. Each
+    // button's name says which company it is for, so no two are alike.
     switchboardHtml(st, code, error, fallback, busy) {
         st = st || {};
         const admin = !!st.can_manage;
@@ -2737,6 +2750,8 @@ const SettingsPage = {
         const words = SettingsPage.claudeStateWords(st);
         const colour = st.state === 'connected' ? 'var(--text-success)'
             : (st.state === 'unreachable' ? 'var(--text-warning)' : 'var(--text-muted)');
+        const list = Array.isArray(st.companies) && st.companies.length ? st.companies : null;
+        const here = st.company || st.here_name || 'this company';
         // every block of the panel carries an id: a refresh replaces only the
         // blocks that changed (_claudeRedraw), found again by these
         let html = `<div id="claude-relay-status"><span style="color:var(--text-muted);">Status:</span> <strong id="claude-relay-state" style="color:${colour};">${escapeHtml(words)}</strong>`
@@ -2771,27 +2786,125 @@ const SettingsPage = {
                 + (admin ? '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" aria-label="Dismiss the removal notice" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>' : '')
                 + '</div>';
         }
+        // the companies on the connection, for someone who holds power over
+        // all of them; each name in a block of its own, keyed by its file, so
+        // a selection in one name stays when another's note changes
+        if (list) html += SettingsPage.claudeCompaniesHtml(st, list);
+        else if (st.linked && st.this_company && st.state !== 'damaged') {
+            // on the connection, without power over the whole of it: this
+            // company alone, never another company's name or how many
+            html += `<div id="claude-relay-on-link" style="margin-top:4px;">${escapeHtml(SettingsPage.claudeOnLinkWords(st))}</div>`;
+        }
         if (!admin) return html;
         if (!st.linked) {
             html += `<div id="claude-relay-connect-row" style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin${off} onclick="SettingsPage.connectClaude()">${busy === 'connect' ? 'Connecting…' : 'Connect to AI assistant'}</button></div>`;
             return html;
         }
-        if (!st.this_company && st.state !== 'damaged') return html;
-        if (st.address) {
+        if (st.can_add) {
+            html += `<div id="claude-relay-add" style="margin-top:8px;">${escapeHtml(SettingsPage.claudeAddWords(here, st.next_label))}</div>`;
+        }
+        if (list && st.address) {
             html += '<div id="claude-relay-lines" style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
                 + copyLineHtml('claude-relay-address', 'Connector address', st.address, 'SettingsPage.copyClaudeAddress()')
                 + (st.slug ? copyLineHtml('claude-relay-name', 'Relay name', st.slug, 'SettingsPage.copyClaudeRelayName()') : '')
                 + '</div>';
         }
-        if (code && code.code) {
+        if (code && code.code && st.can_code) {
             html += '<div id="claude-relay-code-box" style="margin-top:8px;">'
                 + `<div><span style="color:var(--text-muted);">Sign-in code:</span> <code id="claude-relay-code" style="font-family:var(--font-mono); font-size:14px; user-select:all;">${escapeHtml(code.code)}</code></div>`
-                + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div></div>`;
+                + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div>`
+                + (list && list.length > 1 ? '<div id="claude-relay-code-reach" style="margin-top:2px;">Anyone who signs an assistant in with this code can work every company listed above.</div>' : '')
+                + '</div>';
         }
-        html += '<div id="claude-relay-buttons" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
-        if (st.this_company) html += `<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin${off} onclick="SettingsPage.claudeCode()">Show a sign-in code</button>`;
-        html += `<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin${off} onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>`;
+        // a manager who is offered no code is told why: which companies it
+        // waits for
+        if (list && !st.can_code && Array.isArray(st.code_needs) && st.code_needs.length) {
+            html += `<div id="claude-relay-code-needs" style="margin-top:4px; overflow-wrap:anywhere;">${escapeHtml(SettingsPage.claudeCodeNeedsWords(st.code_needs))}</div>`;
+        }
+        const presses = [];
+        // a long company name with no spaces wraps inside its button
+        const wraps = ' style="max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:left;"';
+        if (st.can_add) {
+            presses.push(`<button type="button" class="btn btn-primary btn-sm" id="claude-add" data-admin${off}${wraps} onclick="SettingsPage.addClaudeCompany()">${escapeHtml(busy === 'add' ? 'Adding…' : `Add ${here} to the AI connection`)}</button>`);
+        }
+        if (st.can_code) presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin${off} onclick="SettingsPage.claudeCode()">Show a sign-in code</button>`);
+        // this company off the connection; with it alone on the connection,
+        // that is what Disconnect does, so only Disconnect is offered
+        if (st.can_take_off && st.this_company && !(list && list.length === 1)) {
+            presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-take-off" data-admin${off}${wraps} onclick="SettingsPage.takeClaudeOff('')">${escapeHtml(`Take ${here} off the AI connection`)}</button>`);
+        }
+        // a company whose token is already turned off there: someone with
+        // power over the connection only drops the dead entry
+        if (list && list.length > 1) {
+            for (const co of list) {
+                if ((co.state !== 'refused' && co.state !== 'maker_gone') || co.file === SettingsPage._claudeHereFile(st, list)) continue;
+                presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-take-off-${SettingsPage.claudeKey(co.file)}" data-admin${off}${wraps} data-file="${escapeHtml(co.file)}" onclick="SettingsPage.takeClaudeOff(this.dataset.file)">${escapeHtml(`Take ${co.name || co.file} off the AI connection`)}</button>`);
+            }
+        }
+        if (st.can_disconnect) presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin${off} onclick="SettingsPage.disconnectClaude()">Disconnect the AI assistant</button>`);
+        if (presses.length) html += `<div id="claude-relay-buttons" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${presses.join('')}</div>`;
         return html;
+    },
+
+    // An id made from a company's file that no other file gives: letters
+    // and digits as they are, anything else as its character code.
+    claudeKey(file) {
+        return String(file || '').replace(/[^A-Za-z0-9]/g, ch => '_' + ch.charCodeAt(0).toString(16) + '_');
+    },
+
+    // Which listed company is the one this panel is open in (none when it
+    // is not on the connection).
+    _claudeHereFile(st, list) {
+        const mine = list.find(co => co && co.here === true);
+        return mine ? mine.file : null;
+    },
+
+    // What a company's name carries in the list: this company, and why it
+    // cannot answer now.
+    claudeNote(state) {
+        return ({
+            not_open_here: 'not open on this computer',
+            other_window: 'open in another window',
+            not_served: 'not served by this server now',
+            locked: 'locked',
+            refused: 'turned off in that company',
+            maker_gone: 'the person who added it is no longer an administrator there',
+        })[state] || '';
+    },
+
+    claudeCompaniesHtml(st, list) {
+        const mine = SettingsPage._claudeHereFile(st, list);
+        const names = list.map(co => {
+            const here = co.file === mine;
+            // the company the panel is open in is "this company", not "that"
+            const note = here && co.state === 'refused'
+                ? 'turned off in this company'
+                : (here && co.state === 'maker_gone'
+                    ? 'the person who added it is no longer an administrator here'
+                    : SettingsPage.claudeNote(co.state));
+            const notes = [here ? 'this company' : '', note].filter(Boolean);
+            const said = (co.name || co.file) + (notes.length ? ` (${notes.join('; ')})` : '');
+            return `<span id="claude-relay-co-${SettingsPage.claudeKey(co.file)}">${escapeHtml(said)}</span>`;
+        });
+        const lead = st.state === 'connected' ? 'Connected. ' : '';
+        let html = `<div id="claude-relay-companies" style="margin-top:4px; overflow-wrap:anywhere;">${lead}The AI assistant can work the books of: ${names.join(', ')}.</div>`;
+        if (!st.server_edition && list.length > 1) {
+            html += '<div id="claude-relay-desktop" style="margin-top:4px;">On this computer only the open company answers. When the assistant asks for another, open that company here.</div>';
+        }
+        return html;
+    },
+
+    claudeOnLinkWords(st) {
+        const label = st.token_label || 'AI assistant (relay)';
+        return `${st.company || 'This company'} is on this computer's AI assistant connection. The assistant works these books as a bookkeeper; every change is recorded here as token:${label}.`;
+    },
+
+    claudeAddWords(name, label) {
+        return `Add ${name} to the AI assistant connection, and the assistant can work ${name}'s books as a bookkeeper. Every change it makes is recorded in ${name}'s audit log as token:${label || 'AI assistant (relay)'}.`;
+    },
+
+    claudeCodeNeedsWords(names) {
+        return `A sign-in code reaches every company on the connection, so it is offered only while each of them can answer now and you are an administrator of each. Not now: ${names.join(', ')}.`;
     },
 
     // Where a selection's end is: the nearest element above it that has an
@@ -2853,9 +2966,9 @@ const SettingsPage = {
 
     // Put the keyboard on the control `id` or, when it is gone or off, on
     // its neighbor in the panel: the next control in the order they stood
-    // in (`order`), else the one before, else one of the panel's own three
-    // (Connect, Show a sign-in code, Disconnect), else any control it has,
-    // else the panel itself. Never left on the page's body, where a
+    // in (`order`), else the one before, else one of the panel's own presses
+    // (Connect, Add, Show a sign-in code, Take off, Disconnect), else any
+    // control it has, else the panel itself. Never left on the page's body, where a
     // keyboard user would start again from the top of the page.
     _claudeFocusNear(el, id, order) {
         if (!el || typeof el.contains !== 'function') return;
@@ -2867,7 +2980,7 @@ const SettingsPage = {
         const after = at < 0 ? [] : order.slice(at + 1);
         const before = at < 0 ? [] : order.slice(0, at).reverse();
         let to = usable(id);
-        for (const other of [...after, ...before, 'claude-connect', 'claude-code', 'claude-disconnect']) {
+        for (const other of [...after, ...before, 'claude-connect', 'claude-add', 'claude-code', 'claude-take-off', 'claude-disconnect']) {
             if (to) break;
             to = usable(other);
         }
@@ -2950,8 +3063,11 @@ const SettingsPage = {
         const c = SettingsPage._claude;
         // a refusal that said something was in the way goes once the panel
         // shows it (connected, or no longer connected): it is no longer news
+        // (but "a connection already exists; use Add" stays while the panel
+        // offers Add: that is the press it points to)
         if (c.goes && c.error && c.status
-            && (c.goes === 'linked') === !!c.status.linked) { c.error = ''; }
+            && (c.goes === 'linked') === !!c.status.linked
+            && !(c.goes === 'linked' && c.status.can_add)) { c.error = ''; }
         if (!c.error) { c.goes = ''; c.looks = 0; }
         const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback, c.busy);
         // A refresh that changes nothing draws nothing: the keyboard focus, a
@@ -3005,8 +3121,8 @@ const SettingsPage = {
     },
 
     // One press of the panel at a time (the server's rule too): `kind` is
-    // 'connect', 'code' or 'disconnect', `id` the button pressed. While it
-    // is worked on the panel's three buttons are off, through every refresh;
+    // 'connect', 'add', 'code', 'take-off' or 'disconnect', `id` the button
+    // pressed. While it is worked on the panel's buttons are off, through every refresh;
     // a second press does nothing. `work` sets what the panel shows next;
     // true from it has the panel read again. The keyboard comes back to the
     // button pressed, or to its neighbor when that button is gone.
@@ -3110,9 +3226,88 @@ const SettingsPage = {
         await SettingsPage.loadSwitchboard();
     },
 
+    // The companies the connection reaches, when this person may see them.
+    _claudeList() {
+        const st = SettingsPage._claude.status || {};
+        return Array.isArray(st.companies) ? st.companies : [];
+    },
+
+    async addClaudeCompany() {
+        const st = SettingsPage._claude.status || {};
+        const name = st.here_name || 'this company';
+        if (!confirm(`Add ${name}? Every assistant already signed in to this connection, and any signed in later, will be able to read and change ${name}'s books as a bookkeeper. You can take it off again here at any time.`)) return;
+        await SettingsPage._claudePress('add', 'claude-add', async c => {
+            try {
+                c.status = await API.post('/switchboard/add');
+                toast(`${name} is on the AI assistant connection.`);
+                return false;
+            } catch (err) {
+                SettingsPage._claudeRefused(c, err, '');
+                return true;
+            }
+        });
+    },
+
+    // Take a company off the connection: `file` is a listed company's file,
+    // or '' for the company this panel is open in.
+    async takeClaudeOff(file) {
+        const st = SettingsPage._claude.status || {};
+        const co = file ? SettingsPage._claudeList().find(e => e && e.file === file) : null;
+        const target = file || st.here_file || '';
+        const name = file ? ((co && (co.name || co.file)) || file) : (st.company || 'this company');
+        if (!confirm(SettingsPage.claudeTakeOffQuestion(st, SettingsPage._claudeList(), file, name))) return;
+        const id = file ? `claude-take-off-${SettingsPage.claudeKey(file)}` : 'claude-take-off';
+        await SettingsPage._claudePress('take-off', id, async c => {
+            try {
+                const r = await API.post('/switchboard/take-off', { file: target });
+                if (r && r.state === undefined && 'unlinked' in r) {
+                    // it was the last company: that is a Disconnect
+                    SettingsPage._claudeDisconnected(r);
+                    return true;
+                }
+                c.status = r;
+                const result = ((r && r.results) || [])[0] || {};
+                toast(result.result === 'later'
+                    ? `${name} is off the AI assistant connection. It is not open now; its token will be turned off the next time it is opened.`
+                    : `${name} is off the AI assistant connection, and its token is turned off.`);
+                return false;
+            } catch (err) {
+                SettingsPage._claudeRefused(c, err, '');
+                return true;
+            }
+        });
+    },
+
+    // What Take off asks first. A company whose token is already off there
+    // (a manager's button) is only removed from the connection; only someone
+    // who sees the list is told that other companies stay connected.
+    claudeTakeOffQuestion(st, list, file, name) {
+        if (file) {
+            const co = (list || []).find(e => e && e.file === file);
+            if (co && co.state === 'maker_gone') {
+                return `Take ${name} off the AI connection? The person who added it is no longer an administrator there, so that company refuses its token; this removes it from the connection and turns the token off. The other companies stay connected.`;
+            }
+            return `Take ${name} off the AI connection? Its token is already turned off in that company; this removes it from the connection. The other companies stay connected.`;
+        }
+        const label = (st || {}).token_label || 'AI assistant (relay)';
+        const others = list && list.length > 1 ? ' The other companies stay connected.' : '';
+        return `Take ${name} off? Its token, ${label}, is turned off at once and the assistant can no longer reach these books.${others}`;
+    },
+
+    // What Disconnect asks first: with several companies, every one of them
+    // by name, and what becomes of one that is not open now.
+    claudeDisconnectQuestion(st, list) {
+        if (list.length > 1) {
+            const all = list.length === 2 ? 'both companies' : `all ${list.length} companies`;
+            const names = list.map(co => co.name || co.file).join(', ');
+            return `Disconnect the AI assistant from ${all}? The relay forgets this connection and each company's AI assistant token is turned off: ${names}. A company that is not open now has its token turned off the next time it opens; until then it cannot be used, because its secret is deleted from this computer.`;
+        }
+        return 'Disconnect the AI assistant? The connection ends, the relay deletes its record of these books, and the token "'
+            + ((st || {}).token_label || 'AI assistant (relay)') + '" is revoked.';
+    },
+
     async disconnectClaude() {
-        if (!confirm('Disconnect the AI assistant? The connection ends, the relay deletes its record of these books, and the token "'
-            + ((SettingsPage._claude.status || {}).token_label || 'AI assistant (relay)') + '" is revoked.')) return;
+        if (!confirm(SettingsPage.claudeDisconnectQuestion(SettingsPage._claude.status || {}, SettingsPage._claudeList()))) return;
         await SettingsPage._claudePress('disconnect', 'claude-disconnect', async c => {
             await SettingsPage._claudeDisconnect(c);
             return true;
@@ -3122,31 +3317,43 @@ const SettingsPage = {
     async _claudeDisconnect(c) {
         try {
             const r = await API.post('/switchboard/disconnect');
-            SettingsPage._claude.fallback = null;
-            const done = 'The AI assistant is disconnected' + (r && r.revoked ? ' and the token revoked. ' : '. ');
-            if (r && r.say && r.sentence) {
-                // something the relay could not do, with no notice kept for
-                // it: the server's sentence stays on the panel until dismissed
-                SettingsPage._claude.error = r.sentence;
-                toast('The AI assistant is disconnected. See the message on the panel.');
-            } else if (r && r.unlinked === false && r.slug) {
-                // the relay still holds its record: the relay name is on the
-                // panel, from the server's status (NEW-269), and the toast
-                // says why, as the relay answered
-                toast(done + (r.why === 'refused'
-                    ? 'The relay did not accept the request to delete its record: see the relay name below.'
-                    : (r.why === 'unconfirmed'
-                        ? 'The relay did not confirm that it deleted its record: see the relay name below.'
-                        : 'The relay was out of reach: see the relay name below.')));
-            } else {
-                toast(r && r.deleted
-                    ? 'The AI assistant is disconnected, and the relay deleted its record of these books.'
-                    : 'The AI assistant is disconnected.');
-            }
-            SettingsPage._claude.code = null;
+            SettingsPage._claudeDisconnected(r);
         } catch (err) {
             SettingsPage._claudeRefused(c, err, 'unlinked');
         }
+    },
+
+    // What a Disconnect did, on the panel and in a passing message.
+    _claudeDisconnected(r) {
+        SettingsPage._claude.fallback = null;
+        const done = 'The AI assistant is disconnected' + (r && r.revoked ? ' and the token revoked. ' : '. ');
+        // companies not open now: their tokens are turned off when they open
+        const later = ((r && r.results) || []).filter(x => x && x.result === 'later').map(x => x.name || x.file);
+        if (later.length && r && (r.unlinked || r.pending)) {
+            // the relay was told (or its name is in the notice below): what
+            // is left to say is which companies are not open now
+            SettingsPage._claude.error = 'Disconnected.' + later.map(name => ` ${name} is not open now; its token will be turned off the next time it is opened.`).join('');
+            toast('The AI assistant is disconnected. See the message on the panel.');
+        } else if (r && r.say && r.sentence) {
+            // something the relay could not do, with no notice kept for
+            // it: the server's sentence stays on the panel until dismissed
+            SettingsPage._claude.error = r.sentence;
+            toast('The AI assistant is disconnected. See the message on the panel.');
+        } else if (r && r.unlinked === false && r.slug) {
+            // the relay still holds its record: the relay name is on the
+            // panel, from the server's status (NEW-269), and the toast
+            // says why, as the relay answered
+            toast(done + (r.why === 'refused'
+                ? 'The relay did not accept the request to delete its record: see the relay name below.'
+                : (r.why === 'unconfirmed'
+                    ? 'The relay did not confirm that it deleted its record: see the relay name below.'
+                    : 'The relay was out of reach: see the relay name below.')));
+        } else {
+            toast(r && r.deleted
+                ? 'The AI assistant is disconnected, and the relay deleted its record of these books.'
+                : 'The AI assistant is disconnected.');
+        }
+        SettingsPage._claude.code = null;
     },
 
     async loadOcrStatus() {

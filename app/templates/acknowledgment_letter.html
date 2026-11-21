@@ -3,6 +3,7 @@
 <head>
     <title>Acknowledgment letter</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.75in 0.75in 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11pt; color: #333; line-height: 1.5; }
     .header { border-bottom: 3px solid #003366; padding-bottom: 12px; margin-bottom: 24px; }
@@ -14,6 +15,8 @@
     .body-text p { margin: 0 0 12px; }
     .gift-box { margin: 16px 0; padding: 10px 12px; border: 1px solid #999; font-size: 10pt; }
     .gift-box td { padding: 2px 12px 2px 0; }
+    /* the labels keep their width, so what is beside them starts at one place */
+    .gift-box td:first-child { white-space: nowrap; }
     .signature-line { margin-top: 48px; border-top: 1px solid #333; width: 250px; padding-top: 4px; font-size: 9pt; }
     .footer { margin-top: 48px; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #e0e0e0; padding-top: 8px; }
 </style>

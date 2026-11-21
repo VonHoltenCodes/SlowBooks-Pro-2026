@@ -6,6 +6,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.payroll import Employee
 from app.models.deductions import (
@@ -40,7 +41,7 @@ def create_garnishment(data: GarnishmentOrderCreate, db: Session = Depends(get_d
         gtype = GarnishmentType(data.garnishment_type)
         method = GarnishmentMethod(data.calc_method)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
+        raise HTTPException(status_code=400, detail=said("Invalid value: {}", e))
     order = GarnishmentOrder(
         employee_id=data.employee_id,
         garnishment_type=gtype,

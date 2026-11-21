@@ -666,7 +666,16 @@ jobs:
           # statement (test_reports_giving_statement_agree_r29.py), and two modules
           # without playwright (test_browser_line_controls_r29.py,
           # test_browser_zero_total_ask_r29.py).
-          MAX_SKIPS: "454"
+          # 455 with one connection for every company (2.32.0-beta.2):
+          # test_browser_multicompany_b2.py, one module without playwright. Its
+          # four lock tests (test_switchboard_multicompany_b2.py) run here.
+          # 474 with the printed-page fixes: nineteen WeasyPrint cases that measure
+          # where text lands on the page, sixteen in test_print_short_text_columns.py,
+          # one in test_print_text_never_widens.py and two in
+          # test_pdf_last_line_new271.py.
+          # 475 with the field ticket's "Set on save" note:
+          # test_browser_set_on_save_reason_r31.py, one module without playwright.
+          MAX_SKIPS: "475"
         run: |
           total=0
           for f in shards/*/skips.txt; do

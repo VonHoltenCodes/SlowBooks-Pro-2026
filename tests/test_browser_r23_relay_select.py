@@ -359,7 +359,7 @@ def test_no_two_buttons_of_the_panel_share_a_name(relay, client, engine):
                 "Copy the connector address",
                 "Copy the relay name",
                 "Show a sign-in code",
-                "Disconnect",
+                "Disconnect the AI assistant",
             }
             for name in names:
                 assert page.get_by_role("button", name=name, exact=True).count() == 1

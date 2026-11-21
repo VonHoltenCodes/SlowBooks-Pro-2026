@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>SlowBooks Analytics — {{ period.name|upper }}</title>
     <style>
+{% include '_print_text.html' %}
         @page {
             size: {{ 'A4' if paper_size == 'a4' else 'letter' }};
             margin: 0.75in 0.6in;

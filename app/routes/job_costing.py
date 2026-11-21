@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, object_session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
 from app.models.accounts import Account, AccountType
@@ -81,7 +82,7 @@ def create_cost_type(data: CostTypeCreate, db: Session = Depends(get_db)):
     ensure_default_cost_types(db)
     if db.query(CostType).filter(CostType.code == data.code).first():
         raise HTTPException(
-            status_code=409, detail=f"Cost type '{data.code}' already exists"
+            status_code=409, detail=said("Cost type '{}' already exists", data.code)
         )
     for f in ("default_account_id", "offset_account_id", "burden_offset_account_id"):
         _account_or_404(db, getattr(data, f))
@@ -382,7 +383,8 @@ def create_job_cost(data: JobCostCreate, db: Session = Depends(get_db)):
         )
         if ctype not in types:
             raise HTTPException(
-                status_code=422, detail=f"Line {i + 1}: unknown cost type '{ctype}'"
+                status_code=422,
+                detail=said("Line {}: unknown cost type '{}'", i + 1, ctype),
             )
         credit_account_id = ln.credit_account_id
         if ln.accrue:

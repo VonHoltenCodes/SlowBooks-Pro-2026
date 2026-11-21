@@ -3,6 +3,7 @@
 <head>
     <title>Statement</title>
 <style>
+{% include '_print_text.html' %}
     {# The paper follows the pdf_paper_size setting, as the report PDFs do (#807). #}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
@@ -24,7 +25,10 @@
     /* Date, type, number and the amounts never wrap; Description takes the
        rest of the width and wraps inside it. */
     table.activity > thead > tr > th, table.activity > tbody > tr > td.nw, table.activity > tbody > tr > td.r { white-space: nowrap; }
-    table.activity > tbody > tr > td.desc { width: 100%; }
+    table.activity > tbody > tr > td.desc { width: 100%; max-width: 0.9in; }
+    /* a number is on one line in a column as wide as that line and no
+       wider than this, and a longer one wraps there */
+    table.activity > tbody > tr > td.number { max-width: 1.1in; }
     table.activity > tbody > tr.alt { background: #f7f9fb; }
     /* The last line, the summary and the footer are one unbreakable group of
        the activity table (#1047, as #1039 for the invoice): the summary never
@@ -100,7 +104,7 @@
             <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td class="nw">{{ line.date | fdate }}</td>
                 <td class="nw">{{ line.type }}</td>
-                <td class="nw">{{ line.number }}</td>
+                <td class="number">{{ line.number | own_width }}</td>
                 <td class="desc">{{ line.description | desc }}</td>
                 <td class="r"{% if line.amount < 0 %} style="color: #006600;"{% endif %}>{{ money(line.amount) }}</td>
                 <td class="r">{{ money(line.balance) }}</td>

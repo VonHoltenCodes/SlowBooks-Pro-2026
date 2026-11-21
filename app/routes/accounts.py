@@ -18,6 +18,7 @@ from app.models.accounts import (
     detail_type_problem,
 )
 from app.services import control_accounts
+from app.services.terminology import said
 from app.services.account_tree import (
     BASE_WORDS,
     MAX_DEPTH,
@@ -59,9 +60,11 @@ def _reject_duplicate_number(db: Session, number, exclude_id=None):
     if clash:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"Account number {number} is already used by "
-                f"'{clash.name}'. Account numbers must be unique."
+            detail=said(
+                "Account number {} is already used by '{}'. Account numbers "
+                "must be unique.",
+                number,
+                clash.name,
             ),
         )
 
@@ -84,9 +87,10 @@ def _check_account_number(number) -> None:
     if len(number) > 20 or not _ACCOUNT_NUMBER_RE.fullmatch(number):
         raise HTTPException(
             status_code=400,
-            detail=(
-                f'"{number[:40]}" is not an account number. Use digits, like '
-                "6150; a sub-account can use 6150.1 or 6150-01."
+            detail=said(
+                '"{}" is not an account number. Use digits, like 6150; a '
+                "sub-account can use 6150.1 or 6150-01.",
+                number[:40],
             ),
         )
 

@@ -171,7 +171,7 @@ lesson: synthetic inputs hide every real fault).
   OT × 1.5, DT × 2; burden % = employee's, else the labor type's. Only
   submitted/approved entries post, once each (`time_entries.job_cost_id`).
 - **Budgets have no period** (a budget is a job-to-date number); actuals
-  honour the period filter. Estimate-seeded rows are replaced on re-seed;
+  honor the period filter. Estimate-seeded rows are replaced on re-seed;
   rows edited by hand become `manual` and survive.
 - **Cost types stay a string key** on cost codes / lines (`cost_types.code`),
   validated against the table by the routes, so the earlier `cost_type`

@@ -55,67 +55,70 @@ Details, known gaps and how to report a barrier:
 
 ## What's New
 
-**v2.32 — The Fast Rack, Books Check, Activity on every document, and
-tax-exempt jobs.** The top bar's buttons are each sign-in's own Fast Rack,
-up to eight in the order you set, and the logo sits at the top of the
-sidebar (#978); the desktop app finds the words on the screen with Ctrl+F
-(#1092); Books Check ties every subledger to its control account and names
-the documents behind a difference (#893); every document, job, customer and
-vendor shows its Activity, what changed, who did it and when (#894); and job
-cost and journal entries stay off A/P and A/R, with accrued job costs that
-reverse themselves (#897). A job can be sales-tax exempt with its
-certificate on file, a document carries its own exempt switch and says so on
-the PDF, and the Sales Tax report lists exempt sales by reason (#864); a
-sales document made through the API starts at the company's tax rate, as the
-forms do (#1129); payment terms can fall due days after the end of the month
-(#1091); Make Deposits takes lines for money never invoiced (#792) and lists
-only customer money (#821), and a deposit prints onto the bank's pre-printed
-slips (#798, #883); every new document takes attachments before its first
-save (#796, #881); one inventory adjustment holds several items (#801). A
-construction estimate can price each line as cost plus a markup (#774), and
-its cost side is the contractor's own (#824); the Estimate Closing Rate
-report shows bids won, lost and open (#795), and an estimate made in error
-can be voided (#1128); the Reports page opens on the starred reports (#794)
-and Budget vs Actual shows every month (#797). The bank register sorts
-newest first and opens where you choose (#903), To review keeps each line's
-class, job and name (#904), and SimpleFIN refreshes its accounts, moves a
-mapping to a replacement card and takes a new token without disconnecting
-(#905). To review lines take a memo (#1049), can be ticked and added
-together (#1053), look further back for a match (#1050) and receive a
-payment or pay bills straight from the line (#1056); the name picked is the
-entry's payee (#1063), and a bank rule shows on its row (#1064) and can name
-a customer and carry a memo (#1075). Income by Customer and Sales by Item
-follow the cash basis (#1062) and count deposits from the bank (#1065); an
-invoice line takes a cost code and type, so a job's revenue reads by cost
-code (#1055), and the job's Cost Detail shows revenue on its rows (#1066)
-and hides zero balances (#1052). Explanations sit behind a small tortoise
-button beside the field or section, still read by a screen reader and found
-by Find a setting (#977); an item can post to a liability such as a security
-deposit (#1038); Quick Entry lines take a class (#1051); a printed
-document's dates sit beside its title (#1041) and its last page keeps a row
-with the totals (#1045, #1046, #1047); and a company whose file is gone can
-be removed from the list (#1054). Invoices import from a CSV in SlowBooks'
-own template (#882), and an import cuts a value too long for its column and
-says so (#902); an estimate's email reads a saved template of its own
-(#957); every password field has a show-password eye (#970); an invoice
-lists the purchase orders that fill it (#986); Save & New on Receive
-Payments and card charges (#1006, #1011); Print all from the Invoices list
-(#1007); a check's memo can be the bill's invoice number (#800) and its
-amount can drop the dollar sign (#799); payroll figures each run with its
-own year's tables (#818), a Washington or Oregon employer share follows the
-agency's letter (#825), salaried L&I goes on 160 hours (#826) and a
-California employer's 2026 Form 940 carries the credit reduction (#809);
-online payments can clear through an account per provider with the fee and
-the payout (#583, #584); a file from before 2.29.0 is sent to 2.31.14 first
-(#769), the Server Edition runs with debug off (#812), and Settings →
-Connections connects an AI assistant, Claude or Grok, with one button,
-nothing to install and no account (#1087), and still points Claude Desktop
-and Claude Code to SlowBooks Switchboard (#829). The desktop window's title
-names the open company and its text can be selected and copied (#1145,
-#1146). Outgoing email now verifies the mail server's security certificate
-before it sends the password or any mail: a mail server with a self-signed
-or mismatched certificate will stop accepting mail from SlowBooks Pro until
-its certificate is fixed (#1150).
+**v2.32 — Connect to AI assistant, the Fast Rack, Books Check, Activity on
+every document, and tax-exempt jobs.** Settings → Connections → **Connect to
+AI assistant** connects an AI assistant, Claude or Grok, to the books with
+one button, nothing to install and no account (#1087), and one connection
+reaches every company you add to it, each through a token of its own and in
+its own audit log (#1208); Claude Desktop and Claude Code can use SlowBooks
+Switchboard instead (#829). The top bar's buttons are each sign-in's own
+Fast Rack, up to eight in the order you set, and the logo sits at the top of
+the sidebar (#978); the desktop app finds the words on the screen with
+Ctrl+F (#1092); Books Check ties every subledger to its control account and
+names the documents behind a difference (#893); every document, job,
+customer and vendor shows its Activity, what changed, who did it and when
+(#894); and job cost and journal entries stay off A/P and A/R, with accrued
+job costs that reverse themselves (#897). A job can be sales-tax exempt with
+its certificate on file, a document carries its own exempt switch and says
+so on the PDF, and the Sales Tax report lists exempt sales by reason (#864);
+a sales document made through the API starts at the company's tax rate, as
+the forms do (#1129); payment terms can fall due days after the end of the
+month (#1091); Make Deposits takes lines for money never invoiced (#792) and
+lists only customer money (#821), and a deposit prints onto the bank's
+pre-printed slips (#798, #883); every new document takes attachments before
+its first save (#796, #881); one inventory adjustment holds several items
+(#801). A construction estimate can price each line as cost plus a markup
+(#774), and its cost side is the contractor's own (#824); the Estimate
+Closing Rate report shows bids won, lost and open (#795), and an estimate
+made in error can be voided (#1128); the Reports page opens on the starred
+reports (#794) and Budget vs Actual shows every month (#797). The bank
+register sorts newest first and opens where you choose (#903), To review
+keeps each line's class, job and name (#904), and SimpleFIN refreshes its
+accounts, moves a mapping to a replacement card and takes a new token
+without disconnecting (#905). To review lines take a memo (#1049), can be
+ticked and added together (#1053), look further back for a match (#1050) and
+receive a payment or pay bills straight from the line (#1056); the name
+picked is the entry's payee (#1063), and a bank rule shows on its row
+(#1064) and can name a customer and carry a memo (#1075). Income by Customer
+and Sales by Item follow the cash basis (#1062) and count deposits from the
+bank (#1065); an invoice line takes a cost code and type, so a job's revenue
+reads by cost code (#1055), and the job's Cost Detail shows revenue on its
+rows (#1066) and hides zero balances (#1052). Explanations sit behind a
+small tortoise button beside the field or section, still read by a screen
+reader and found by Find a setting (#977); an item can post to a liability
+such as a security deposit (#1038); Quick Entry lines take a class (#1051);
+a printed document's dates sit beside its title (#1041) and its last page
+keeps a row with the totals (#1045, #1046, #1047); a long word or number on
+a printed page no longer pushes the figures off the paper (#1209); and a
+company whose file is gone can be removed from the list (#1054). Invoices
+import from a CSV in SlowBooks' own template (#882), and an import cuts a
+value too long for its column and says so (#902); an estimate's email reads
+a saved template of its own (#957); every password field has a show-password
+eye (#970); an invoice lists the purchase orders that fill it (#986); Save &
+New on Receive Payments and card charges (#1006, #1011); Print all from the
+Invoices list (#1007); a check's memo can be the bill's invoice number
+(#800) and its amount can drop the dollar sign (#799); payroll figures each
+run with its own year's tables (#818), a Washington or Oregon employer share
+follows the agency's letter (#825), salaried L&I goes on 160 hours (#826)
+and a California employer's 2026 Form 940 carries the credit reduction
+(#809); online payments can clear through an account per provider with the
+fee and the payout (#583, #584); a file from before 2.29.0 is sent to
+2.31.14 first (#769), and the Server Edition runs with debug off (#812). The
+desktop window's title names the open company and its text can be selected
+and copied (#1145, #1146). Outgoing email now verifies the mail server's
+security certificate before it sends the password or any mail: a mail server
+with a self-signed or mismatched certificate will stop accepting mail from
+SlowBooks Pro until its certificate is fixed (#1150).
 
 Patch releases and everything before 2.32 are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -138,8 +141,9 @@ Code and Grok first, and any agentic CLI works; the
 Settings → Connections → **Connect to AI assistant** connects Claude or
 Grok to the books through the free SlowBooks relay with one button: no
 second program, no account, email or password, and a one-time sign-in code
-so only someone at the books can approve it; what the assistant reads
-passes through the relay to the assistant's provider.
+so only someone at the books can approve it; one connection reaches every
+company you add to it, and what the assistant reads passes through the
+relay to the assistant's provider.
 What stays on your machine is the company file and the API. A cloud-backed
 CLI's model does not: what the agent reads from your books goes to its
 provider under that provider's terms, and only a model you run locally, and

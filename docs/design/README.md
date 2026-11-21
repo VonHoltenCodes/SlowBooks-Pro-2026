@@ -2,7 +2,7 @@
 
 Thinking that has not been built, kept where it can be found.
 
-**Nothing in this directory is committed product behaviour.** Each file says
+**Nothing in this directory is committed product behavior.** Each file says
 its own status at the top. They are here rather than on long-lived branches
 because a branch holding one markdown file is a bad container for an idea: it
 falls behind, nobody browses it, and the only way to read it is to know it
