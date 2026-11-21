@@ -1166,3 +1166,15 @@ def test_no_secret_in_an_answer_a_log_or_the_leftovers(three, relay, caplog):
             assert secret not in r.text
     for r in answers:
         assert "sbp_" not in r.text and "sbd_" not in r.text
+
+
+def test_stopping_the_retry_never_waits_on_a_thread_that_has_not_begun():
+    """The stop at shutdown runs beside whatever arms the retry. A thread
+    that was made and not yet started is signaled, never joined."""
+    stop_event = threading.Event()
+    unstarted = threading.Thread(target=lambda: None, daemon=True)
+    with link._owed_lock:
+        link._owed_retry["thread"], link._owed_retry["stop"] = unstarted, stop_event
+    link.stop_owed_retry(timeout=0.1)
+    assert stop_event.is_set()
+    assert link._owed_retry["thread"] is None and link._owed_retry["stop"] is None

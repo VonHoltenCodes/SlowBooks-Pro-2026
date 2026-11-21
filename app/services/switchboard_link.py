@@ -1828,7 +1828,13 @@ def _arm_owed_retry() -> None:
             daemon=True,
         )
         _owed_retry["thread"], _owed_retry["stop"] = made, stop_event
-    made.start()
+        # Started under the lock, so a stop never finds a thread that has
+        # not begun. The thread takes this lock only as it ends.
+        try:
+            made.start()
+        except RuntimeError:
+            _owed_retry["thread"] = _owed_retry["stop"] = None
+            logger.warning("the retry of an owed AI assistant drop did not start")
 
 
 def stop_owed_retry(timeout: float = 0.0) -> None:
@@ -1840,7 +1846,7 @@ def stop_owed_retry(timeout: float = 0.0) -> None:
         _owed_retry["thread"] = _owed_retry["stop"] = None
     if stop_event is not None:
         stop_event.set()
-    if made is not None and timeout > 0:
+    if made is not None and timeout > 0 and made.ident is not None:
         made.join(timeout)
 
 
