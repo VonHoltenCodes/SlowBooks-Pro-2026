@@ -799,13 +799,15 @@ const EstimatesPage = {
     // A commercial-bid line that carries its own markup (made through the
     // API) keeps it: the markup shows under the cost, and its rate shows the
     // marked-up price read-only (#774).
+    // It is named by its line: nameFields puts the number right as the row
+    // lands and whenever the lines change (data-line-name).
     keptMarkupHtml(line) {
         // kept on every company's rows, so a Business or Nonprofit save does
         // not drop the rule that priced the line in construction (#774);
         // only construction prices by it, so only there is it shown
         if (line.markup_pct == null) return '';
         if (!Terms.isConstruction()) return `<input type="hidden" class="line-markup" value="${escapeHtml(line.markup_pct)}">`;
-        return `<label style="display:block; font-size:11px; color:var(--text-muted);">+<input class="line-markup" type="number" step="0.0001" min="-100" max="10000" style="width:64px;" value="${escapeHtml(line.markup_pct)}" aria-label="Markup percent" title="This line's own markup on its cost" oninput="EstimatesPage.recalc()">%</label>`;
+        return `<label style="display:block; font-size:11px; color:var(--text-muted);">+<input class="line-markup" type="number" step="0.0001" min="-100" max="10000" style="width:64px;" value="${escapeHtml(line.markup_pct)}" aria-label="Markup percent, line 1" data-line-name title="This line's own markup on its cost" oninput="EstimatesPage.recalc()">%</label>`;
     },
 
     addLine() {
