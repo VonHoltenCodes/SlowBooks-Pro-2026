@@ -12,7 +12,9 @@ function page(seen) {
     const ctx = {
         console, window: {}, location: { hash: '#/' },
         document: { addEventListener() {}, getElementById: () => null, querySelector: () => null },
-        T: s => { seen.push(s); return s; },
+        T: s => s,
+        // a sentence of ours is reworded by Terms.text; T() is for one dictionary term
+        Terms: { text: s => { seen.push(s); return s; } },
         escapeHtml: s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
         openModal() {}, closeModal() {}, toast() {},
         formatDate: s => s || '', formatCurrency: n => String(n), $: () => null, $$: () => [], App: {}, API: {},
@@ -31,7 +33,8 @@ test('a held reminder is not called ready and points at Remind now', () => {
     assert.ok(!html.includes('ready'));
     assert.ok(!html.includes('2026-10-21'));
     assert.ok(html.includes('Check the email address, then use Remind now.'));
-    assert.ok(seen.includes('held: use Remind now'), 'the words go through T()');
+    assert.ok(seen.includes('held: use Remind now'), "the words go through the company's vocabulary");
+    assert.ok(seen.some(s => s.endsWith('then use Remind now.')), 'and so does the reason');
 });
 
 test('a reminder a run will send still reads ready, one ahead reads its date', () => {
