@@ -613,16 +613,32 @@ def _figure_em(token: str) -> float:
     )
 
 
+# An amount as a report sets it: a sign, a currency, digits in groups of
+# three or with cents, a percent. However many figures it has, it is an
+# amount and prints whole on one line; only a bare run of digits (a trace
+# number) is judged by its width.
+_AMOUNT = re.compile(
+    r"[-−+]?\(?[-−+]?[$€£¥]?[-−]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)\)?%?"
+)
+
+
+def _is_amount(token: str) -> bool:
+    return bool(_AMOUNT.fullmatch(token)) and any(c in token for c in "$€£¥.,%")
+
+
 def _one_line(value, cap: float = 0.0) -> bool:
     """Whether a report's cell is a figure that is set on one line: a
     figure (``_is_figure``) with nothing in it wider than ``cap`` ems, the
-    most a word of its section's columns counts for (``_word_cap``)."""
+    most a word of its section's columns counts for (``_word_cap``). An
+    amount is always on one line, whatever its width (``_is_amount``)."""
     if not _is_figure(value):
         return False
     if value is None or isinstance(value, (int, float)):
         return True
     cap = cap or _CAP_MOST_EM
-    return all(_figure_em(token) <= cap for token in str(value).split())
+    return all(
+        _is_amount(token) or _figure_em(token) <= cap for token in str(value).split()
+    )
 
 
 _jinja_env.tests["one_line"] = _one_line

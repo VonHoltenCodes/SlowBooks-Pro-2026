@@ -702,6 +702,12 @@ def test_a_report_figure_is_on_one_line_while_it_is_no_wider_than_a_column():
             "September 30, 2026",
             "1042",
             "4111111111111",
+            # an amount of eleven figures and more is an amount, never words
+            "-$12,345,678,901.23",
+            "($123,456,789,012.34)",
+            "-$9,999,999,999,999.99",
+            "USD -9,999,999,999,999.99",
+            "12345678901.23",
             1234.5,
             None,
         ):
@@ -718,6 +724,58 @@ def test_a_report_figure_is_on_one_line_while_it_is_no_wider_than_a_column():
         ):
             assert not _one_line(words, cap), (words, cap)
     assert 'class="w"' in str(_capped(TRACE[:26], _CAP_MOST_EM))
+
+
+@pytest.mark.parametrize(
+    "amount,reference",
+    [
+        ("12345678901.23", TRACE[:16]),
+        ("123456789012.34", TRACE[:16]),
+        ("9999999999999.99", "1042"),
+    ],
+)
+def test_an_amount_of_eleven_figures_and_more_prints_whole(
+    client, seed_accounts, pages, amount, reference
+):
+    """An amount of eleven figures and more was judged by its width as a
+    run of digits is: its cell was set as words, and a negative balance
+    printed its minus sign alone on one line and the amount on the next."""
+    pytest.importorskip("weasyprint")
+    c = ok(
+        client.post(
+            "/api/customers?force=true",
+            json={"name": "Whitfield & Sons Roofing Company of Ohio"},
+        )
+    )
+    ok(
+        client.post(
+            "/api/invoices",
+            json={
+                "customer_id": c["id"],
+                "date": "2026-03-03",
+                "lines": [{"description": "Roof", "quantity": 1, "rate": amount}],
+            },
+        )
+    )
+    _payment(client, "Acme Supply Partners of the Midwest", reference, amount)
+    wrong = []
+    for url in (GL, "/api/reports/ar-aging/pdf?as_of_date=2026-12-31"):
+        html = page_of(pages, client, url)
+        said = f"{url.split('?')[0]}, {amount}"
+        wrong += [f"{said}: {o} is outside its cell" for o in leaves_its_cell(html)]
+        wrong += [f"{said}: {p}" for p in past_the_margin(html)]
+        figures = 0
+        for row in rows(html, "report"):
+            for _x, _w, lines in row:
+                money = [ln for ln in lines if text.MONEY.match(ln)]
+                figures += len(money)
+                # a piece of an amount: its sign alone, or digits cut short
+                pieces = [ln for ln in lines if ln in "-−" or "$" in ln]
+                if pieces and (len(lines) != 1 or not money):
+                    wrong.append(f"{said}: a figure prints as {lines}")
+        if not figures:
+            wrong.append(f"{said}: no figure printed")
+    assert not wrong, "\n".join(wrong[:20])
 
 
 # --- the running head ---------------------------------------------------------
