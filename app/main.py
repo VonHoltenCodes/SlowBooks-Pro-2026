@@ -848,7 +848,12 @@ async def _method_not_allowed_handler(request: Request, exc: StarletteHTTPExcept
     ):
         terms = _company_terms()
         if terms.has_words:
-            worded = terms.text(exc.detail)
+            # an email address in a sentence is data, not prose: the words
+            # around it are reworded, the address never is
+            worded = "".join(
+                part if "@" in part else terms.text(part)
+                for part in _re.split(r"(\S*@\S*)", exc.detail)
+            )
             if worded != exc.detail:
                 return JSONResponse(
                     status_code=exc.status_code,

@@ -214,6 +214,11 @@ _LAST_RESPONSE = re.compile(r"Last response: (\(.*\))\s*$", re.S)
 #       ("; signed-in" ends the tag of a 530 that came after the server had
 #        accepted our sign-in: the sentence must not say none is set)
 #   [sender not-smtp] The answer was not an SMTP reply: …
+#   [data not-smtp after-body] …   [data after-body] 251 …
+#       (an answer to the whole message that is neither a yes nor a
+#        refusal: the message had been handed over when it came)
+#   [recipients  550 5.1.1] : 550 5.1.1 …   (a refused address with nothing
+#       in it to name keeps its reply code in the tag all the same)
 # Two failures of our own keep the fixed text every release has stored for
 # them, with no tag: "SMTP not configured", and the secure-connection
 # texts below ("Certificate not verified (host): certificate is
@@ -260,6 +265,7 @@ def _not_smtp_words(rest) -> str:
 
 
 _SIGNED_IN = "signed-in"
+_AFTER_BODY = "after-body"
 
 
 def _tag(text: str):
@@ -276,6 +282,11 @@ def _tag(text: str):
     elif arg.endswith("; " + _SIGNED_IN):
         arg, signed_in = arg[: -len("; " + _SIGNED_IN)], True
     return stage, arg, words, signed_in
+
+
+def _is_not_smtp(arg: str) -> bool:
+    """Whether a tag says the answer was not an SMTP reply."""
+    return (arg or "").split(" ")[0] == "not-smtp"
 
 
 def _address(value) -> str:
@@ -295,6 +306,13 @@ def _fitting(items, limit: int) -> list[str]:
     return kept
 
 
+def _storable(text: str) -> str:
+    """Text every database can keep: a NUL character (a 0x00 byte in a
+    server's reply) is one PostgreSQL refuses in text, which would lose
+    the row of the failed send. It is replaced as an unreadable byte is."""
+    return text.replace("\x00", "\ufffd")
+
+
 def stored_text(
     error, stage: str = "local", after_body: bool = False, signed_in: bool = False
 ) -> str:
@@ -310,12 +328,17 @@ def stored_text(
     if isinstance(error, MailTLSError) and error.refusal:
         # the server answered STARTTLS with a refusal: its reply is kept
         host, code, said = error.refusal
-        stage, arg, words = "starttls", _address(host), _code_words(code, said)
+        stage, arg = "starttls", _address(host)
+        if _is_reply_code(code):
+            words = _code_words(code, said)
+        else:
+            # not an SMTP reply: never "-1 ...", never called a reply
+            words = _not_smtp_words(said)
     elif isinstance(error, MailTLSError) or (
         isinstance(error, str) and stage == "setup"
     ):
         # our own fixed text, as every release has stored it
-        return _decoded(str(error))[:_STORED_LIMIT]
+        return _storable(_decoded(str(error))[:_STORED_LIMIT])
     elif isinstance(error, str):
         stage, words = "local", _decoded(error)
     elif isinstance(error, MailLocalError):
@@ -330,12 +353,15 @@ def stored_text(
             answered = _reply_words(reply)
             lines.append(f"{name}: {answered}" if answered else name)
             asks_sign_in = asks_sign_in or code == 530
-            if name:
-                found = [name]
-                if _is_reply_code(code):
-                    # an answer that was not an SMTP reply has no code
-                    found += [str(code), _enhanced(said)]
-                entries.append(" ".join(p for p in found if p))
+            found = []
+            if _is_reply_code(code):
+                # an answer that was not an SMTP reply has no code
+                found = [p for p in (str(code), _enhanced(said)) if p]
+            if name or found:
+                # an address with nothing left of it to name still keeps
+                # its reply code here (" 550 5.1.1"): the sentence is
+                # chosen from our tag alone
+                entries.append(" ".join([name] + found))
         arg = ", ".join(_fitting(entries, _TAG_REFUSED))
         delivered = [_address(a) for a in getattr(error, "delivered", ())]
         delivered = _fitting([a for a in delivered if a], _TAG_SENT)
@@ -368,13 +394,21 @@ def stored_text(
             # smtplib's -1: what answered did not speak SMTP (a web
             # server's port, say). Its line is kept, the "-1" is not.
             arg, words = "not-smtp", _not_smtp_words(error.smtp_error)
+        if (
+            after_body
+            and stage == "data"
+            and not (_is_reply_code(code) and code >= 400)
+        ):
+            # an answer to the whole message that neither took it nor
+            # refused it: the message had been handed over when it came
+            arg = f"{arg} {_AFTER_BODY}" if arg else _AFTER_BODY
     elif isinstance(error, smtplib.SMTPServerDisconnected):
         # "Connection unexpectedly closed: timed out" is a read that timed
         # out, and nothing closed: the plain cause
         stage = "disconnected"
         words = _plain_cause(_decoded(str(error))) or "Connection closed"
         if after_body:
-            arg = "after-body"
+            arg = _AFTER_BODY
     elif isinstance(error, OSError) and not isinstance(error, smtplib.SMTPException):
         # "Connection refused", "timed out", "Name or service not known":
         # the system's message, without Python's "[Errno 111]" in front
@@ -384,7 +418,7 @@ def stored_text(
         stage = "socket"
         words = _plain_cause(_decoded(said)) or "Connection failed"
         if after_body:
-            arg = "after-body"
+            arg = _AFTER_BODY
     elif isinstance(error, smtplib.SMTPException):
         said = str(error)
         last = _LAST_RESPONSE.search(said)
@@ -409,7 +443,7 @@ def stored_text(
     text = f"[{stage}{' ' + arg if arg else ''}] {words}"
     if len(text) > _STORED_LIMIT:
         text = text[: _STORED_LIMIT - 1] + "…"
-    return text
+    return _storable(text)
 
 
 def _tag_recipients(arg: str):
@@ -425,7 +459,7 @@ def _tag_recipients(arg: str):
             code = int(tokens[1])
             if len(tokens) > 2 and _ENHANCED.fullmatch(tokens[2]):
                 enhanced = tokens[2]
-        if name:
+        if name or code is not None:
             refused.append((name, code, enhanced))
     return refused, [a for a in sent_part.split(", ") if a]
 
@@ -466,12 +500,16 @@ def _holds_reply(stored: str) -> bool:
     text = (stored or "").strip()
     tagged = _tag(text)
     if tagged:
-        stage, arg, _words, _ = tagged
-        if arg == "not-smtp" or (stage == "auth" and arg in _OUR_AUTH):
+        stage, arg, words, _ = tagged
+        if _is_not_smtp(arg) or (stage == "auth" and arg in _OUR_AUTH):
             return False
-        if stage == "recipients" and arg:
-            # at least one refused address was answered with a reply
+        if stage == "recipients":
+            # at least one refused address was answered with a reply (its
+            # code stands in our tag; a row without one is not read for it)
             return any(c is not None for _, c, _ in _tag_recipients(arg)[0])
+        if words.lstrip().startswith(_NOT_SMTP):
+            # words of ours: what answered did not speak SMTP
+            return False
         return stage in _REPLY_STAGES
     value = _as_value(text)
     if isinstance(value, dict):
@@ -559,6 +597,11 @@ _SIGN_IN_AGAIN_SENTENCE = (
     "The mail server accepted the sign-in and then asked for one again, so "
     "the email was not sent. Ask your mail provider why."
 )
+# the same when it asked only for some of the addresses and a copy went out
+_SIGN_IN_AGAIN_FOR_SOME = (
+    "The mail server accepted the sign-in and then asked for one again. Ask "
+    "your mail provider why."
+)
 # an address of ours an SMTP envelope cannot carry (found before sending)
 _ADDRESS_LETTERS_SENTENCE = (
     "This address has a character that cannot be sent to the mail server (a "
@@ -624,6 +667,16 @@ _LOST_AFTER_BODY_SENTENCE = (
     "to it, before it answered, so the email may or may not have gone out. "
     "Check with the recipient before sending it again."
 )
+# the same, when what came back after the whole message was not a reply
+# that says either way
+_ANSWER_UNREAD_SENTENCE = (
+    "The mail server's answer after the message was handed to it could not "
+    "be read, so the email may or may not have gone out. Check with the "
+    "recipient before sending it again."
+)
+# sentences of a send that may have gone out: nothing that reports one
+# says flatly that it was not sent
+_UNSURE = (_LOST_AFTER_BODY_SENTENCE, _ANSWER_UNREAD_SENTENCE)
 _GOOGLE_SENTENCE = (
     "Google will not accept a normal password here. Turn on "
     "2-Step Verification on the account and use a 16-character "
@@ -643,6 +696,10 @@ _COPY_WENT_SENTENCE = " A copy still went to: {}."
 # beside a refused address, one the server only put off (a 4xx): said too,
 # so a deferred To is never left out because a copy was refused outright
 _ALSO_LATER_SENTENCE = " The mail server asked to try again later for: {}."
+# an address the message did not go to, where the sentence before it does
+# not name it: one the server wanted a sign-in for, or gave no usable
+# answer for, while a copy went out
+_NOT_TAKEN_FOR_SENTENCE = " The mail server did not take the email for: {}."
 # the To address took the message and a Cc or Bcc was refused: a sent row's
 # note
 _COPY_REFUSED_NOTE = "The mail server refused a copy to: {}."
@@ -748,30 +805,33 @@ def _stage_kind(
 
 
 def _refused_kind(refused, words="", signed_in: bool = False):
-    """(kind, addresses, put-off addresses) for the refused recipients
-    [(address, code, enhanced)]: the 5xx addresses are refused, the 4xx
-    ones put off; only 4xx ones mean try again later. An address whose
-    answer was not an SMTP reply has no code."""
+    """(kind, refused addresses, put-off addresses, addresses with no
+    usable answer) for the refused recipients [(address, code, enhanced)]:
+    the 5xx addresses are refused, the 4xx ones put off; only 4xx ones
+    mean try again later. An address whose answer was not an SMTP reply
+    has no code; that, and a code that is no refusal (a 252, which smtplib
+    does not take for a yes), is an address the message did not go to and
+    nothing more is known of."""
     hard = [(n, c, e) for n, c, e in refused if c is not None and c >= 500]
     later = [str(n) for n, c, _ in refused if c is not None and 400 <= c < 500]
+    odd = [str(n) for n, c, _ in refused if c is None or c < 400]
     if hard:
         names = [str(n) for n, _, _ in hard]
         if all(c == 530 for _, c, _ in hard):
             # the server wants a sign-in before it takes a recipient
-            return _asks_sign_in(words, signed_in), [], []
+            return _asks_sign_in(words, signed_in), names, later, odd
         if all(e in _TOO_BIG_CODES for _, _, e in hard):
             # over the size limit (some servers say so at RCPT, from the
             # SIZE the message was announced with): not a bad address
-            return "too-big", [], []
+            return "too-big", names, later, odd
         if all(e.startswith("5.7.") for _, _, e in hard):
-            return "not-allowed", names, later
-        return "refused", names, later
+            return "not-allowed", names, later, odd
+        return "refused", names, later, odd
     if later:
-        return "later", [], []
-    if refused:
-        # nothing that answered for these addresses spoke SMTP
-        return "not-smtp", [], []
-    return "other", [], []
+        return "later", [], later, odd
+    # the server had answered every command before this one, so it was
+    # reached: the general sentence, whatever these answers were
+    return "other", [], [], odd
 
 
 class _Read:
@@ -779,17 +839,18 @@ class _Read:
     is about (the refused recipients, or the From address), and the
     addresses the message still went to."""
 
-    __slots__ = ("kind", "names", "delivered", "later")
+    __slots__ = ("kind", "names", "delivered", "later", "odd")
 
-    def __init__(self, kind, names=(), delivered=(), later=()):
+    def __init__(self, kind, names=(), delivered=(), later=(), odd=()):
         self.kind = kind
         self.names = [str(n) for n in names if n]
         self.delivered = list(delivered)
         # recipients the server put off (4xx) beside the refused ones
         self.later = [str(n) for n in later if n]
+        # recipients whose answer was neither a yes nor a refusal
+        self.odd = [str(n) for n in odd if n]
 
 
-_RECIPIENT_LINE = re.compile(r"^(.*?): (\d{3})\b(?:[ -]([245]\.\d{1,3}\.\d{1,3}))?")
 _CODE_FIRST = re.compile(r"(\d{3})(?:[ -]([245]\.\d{1,3}\.\d{1,3}))?(?=\s|$)")
 
 
@@ -807,10 +868,8 @@ def _classify_text(text: str) -> _Read:
             words = reply[1] if isinstance(reply, tuple) and len(reply) > 1 else ""
             refused.append((str(addr), _code(reply), _enhanced(words)))
             said.append(_text(words))
-        kind, names, later = _refused_kind(refused, " ".join(said))
-        if kind == "not-smtp":
-            kind = "unreachable"
-        return _Read(kind if kind != "other" else None, names, later=later)
+        kind, names, later, odd = _refused_kind(refused, " ".join(said))
+        return _Read(kind, names, later=later, odd=odd)
     code = _code(value)
     if code is None:
         if text in _NO_SIGN_IN_OFFERED:
@@ -833,28 +892,16 @@ def _classify_tagged(
     stage: str, arg: str, words: str, signed_in: bool = False
 ) -> _Read:
     if stage == "recipients":
-        if arg:
-            # the addresses and codes stand in our tag, not read from the lines
-            refused, delivered = _tag_recipients(arg)
-            kind, names, later = _refused_kind(refused, words, signed_in)
-            if kind == "not-smtp":
-                # with a copy taken the server was reached: no better
-                # sentence than the general one, and the copy is said
-                kind = "other" if delivered else "unreachable"
-            return _Read(kind, names, delivered, later)
-        refused = []
-        for line in words.splitlines():
-            found = _RECIPIENT_LINE.match(line.strip())
-            if found:
-                refused.append(
-                    (found.group(1), int(found.group(2)), found.group(3) or "")
-                )
+        # the addresses and codes stand in our tag. They are never read
+        # from the lines under it, which hold what the server said: a row
+        # whose tag names nobody is an address refused, and no more.
+        refused, delivered = _tag_recipients(arg)
         if not refused:
-            return _Read("other")
-        kind, names, later = _refused_kind(refused, words, signed_in)
-        return _Read(kind, names, later=later)
+            return _Read("refused")
+        kind, names, later, odd = _refused_kind(refused, words, signed_in)
+        return _Read(kind, names, delivered, later, odd)
     if stage in ("disconnected", "socket"):
-        if arg == "after-body":
+        if arg == _AFTER_BODY:
             return _Read("lost-after-body")
         return _Read("unreachable")
     if stage in ("local", "other"):
@@ -873,11 +920,21 @@ def _classify_tagged(
         return _Read("letters")
     if stage == "auth" and arg == "none-offered":
         return _Read("none-offered")
-    if arg == "not-smtp":
-        return _Read("unreachable")
+    after_body = arg.split(" ")[-1] == _AFTER_BODY
+    if _is_not_smtp(arg):
+        if stage in ("connect", "helo"):
+            # nothing that spoke SMTP was ever on the line (a web server's
+            # port, say)
+            return _Read("unreachable")
+        # the server had been reached and had answered before this: the
+        # message may have been taken when it had all been handed over
+        return _Read("answer-unread" if after_body else "other")
     found = _CODE_FIRST.match(words.strip())
     code = int(found.group(1)) if found else None
     enhanced = (found.group(2) or "") if found else ""
+    if code is not None and code < 400 and stage in ("sender", "data", "response"):
+        # a reply that is no refusal, where smtplib wanted another one
+        return _Read("answer-unread" if after_body else "other")
     kind = _stage_kind(stage, code, enhanced, words, signed_in)
     if stage == "sender" and kind == "sender":
         # the address in a sender tag is the From address we sent with
@@ -1044,16 +1101,27 @@ def _reading(error, host: str = ""):
         return "tls", tls
     read = _classify_text(text)
     kind = read.kind
-    if kind in ("refused", "not-allowed"):
-        if not read.names:
-            return kind, _REFUSED_NO_NAME
-        form = _REFUSED_SENTENCE if kind == "refused" else _NOT_ALLOWED_SENTENCE
-        sentence = form.format(", ".join(read.names))
-        if read.later:
-            sentence += _ALSO_LATER_SENTENCE.format(", ".join(read.later))
+    listed = kind in ("refused", "not-allowed")
+    # what follows the sentence when some addresses fared differently: who
+    # was put off, who the message did not go to though the sentence does
+    # not name them, and who a copy still went to. Addresses of ours only.
+    tail = ""
+    if listed or read.delivered:
+        if listed and read.later:
+            tail += _ALSO_LATER_SENTENCE.format(", ".join(read.later))
+        missed = ([] if listed else read.names) + read.odd
+        if missed:
+            tail += _NOT_TAKEN_FOR_SENTENCE.format(", ".join(missed))
         if read.delivered:
-            sentence += _COPY_WENT_SENTENCE.format(", ".join(read.delivered))
-        return kind, sentence
+            tail += _COPY_WENT_SENTENCE.format(", ".join(read.delivered))
+    if listed:
+        if not read.names:
+            return kind, _REFUSED_NO_NAME + tail
+        form = _REFUSED_SENTENCE if kind == "refused" else _NOT_ALLOWED_SENTENCE
+        return kind, form.format(", ".join(read.names)) + tail
+    if kind == "later" and read.later and tail:
+        # beside a copy that went: who was put off
+        return kind, _ALSO_LATER_SENTENCE.format(", ".join(read.later)).strip() + tail
     if kind == "sender":
         if read.names:
             return kind, _SENDER_REFUSED_SENTENCE.format(read.names[0])
@@ -1082,12 +1150,14 @@ def _reading(error, host: str = ""):
         "letters": _SIGN_IN_LETTERS_SENTENCE,
         "too-big": _TOO_BIG_SENTENCE,
         "lost-after-body": _LOST_AFTER_BODY_SENTENCE,
+        "answer-unread": _ANSWER_UNREAD_SENTENCE,
     }
     if kind in fixed:
         sentence = fixed[kind]
-        if kind in ("later", "too-big", "other") and read.delivered:
-            sentence += _COPY_WENT_SENTENCE.format(", ".join(read.delivered))
-        return kind, sentence
+        if kind == "sign-in-again" and read.delivered:
+            # a copy went out: "the email was not sent" would be untrue
+            sentence = _SIGN_IN_AGAIN_FOR_SOME
+        return kind, sentence + tail
     if kind == "auth":
         return kind, _credentials_sentence(host, text)
     if kind == "auth-534":
@@ -1120,7 +1190,7 @@ def _copy_note(stored: str) -> str:
     if not tagged or tagged[0] != "recipients":
         return ""
     refused, _ = _tag_recipients(tagged[1])
-    names = [name for name, _, _ in refused]
+    names = [name for name, _, _ in refused if name]
     return _COPY_REFUSED_NOTE.format(", ".join(names)) if names else ""
 
 
@@ -1156,6 +1226,12 @@ class LoggedFailure:
     def unexplained(self) -> bool:
         """The sentence does not say why the send failed."""
         return self.sentence in _UNEXPLAINED or self.general
+
+    @property
+    def unsure(self) -> bool:
+        """The message was handed over and nothing says whether it was
+        taken: it may have gone out."""
+        return self.sentence in _UNSURE
 
     @property
     def general(self) -> bool:
@@ -1302,6 +1378,26 @@ def sentence_for_last_send(db, entity_type: str, entity_id, admin: bool = False)
     return failure.reason()
 
 
+# what is said of a send before its sentence. A send that may have gone
+# out is never opened with a flat "could not be sent".
+_MAY_HAVE_BEEN_SENT = "may or may not have been sent."
+
+
+def failed_send_line(
+    db, entity_type: str, entity_id, admin: bool, what: str, ran: bool = True
+) -> str:
+    """One line of a batch result (or Remind's answer) for the send just
+    made for this document: "<what> could not be sent. <the sentence>", or
+    "<what> may or may not have been sent. <the sentence>" when the
+    message was handed over and nothing says whether it was taken. `ran`
+    False: send_email() never ran, so there is no row of this send."""
+    failure = last_send_failure(db, entity_type, entity_id, admin) if ran else None
+    if failure is not None and failure.unsure:
+        return f"{what} {_MAY_HAVE_BEEN_SENT} {failure.sentence}"
+    why = sentence_for_last_send(db, entity_type, entity_id, admin) if ran else ""
+    return f"{what} could not be sent. {why}".rstrip()
+
+
 def send_failed_detail(db, entity_type: str, entity_id, admin: bool) -> str:
     """The 502 a document's Email button answers with when the send failed:
     what went wrong in a sentence, else the advice to check the SMTP
@@ -1309,6 +1405,10 @@ def send_failed_detail(db, entity_type: str, entity_id, admin: bool) -> str:
     Given as written: it names addresses of ours, which are not prose for
     the company's vocabulary to reword."""
     failure = last_send_failure(db, entity_type, entity_id, admin)
+    if failure is not None and failure.unsure:
+        # it may have gone out, and the sentence is the whole reason:
+        # there is nothing more to read elsewhere
+        return AsWritten(f"Email {_MAY_HAVE_BEEN_SENT} {failure.sentence}")
     detail = "Email could not be sent. "
     if failure is not None and not failure.general:
         detail += failure.reason(pointer=False) + " "
@@ -1331,7 +1431,10 @@ def failed_test_email_detail(db, admin: bool, host: str = "") -> str:
         said = failure_sentence("", host)
     else:
         said = failure.with_reply()
-    detail = f"Test email failed to send. {said} "
+    if failure is not None and failure.unsure:
+        detail = f"Test email {_MAY_HAVE_BEEN_SENT} {said} "
+    else:
+        detail = f"Test email failed to send. {said} "
     if admin:
         detail += "The full list is under Settings → Email (SMTP) → Recent sends."
     else:

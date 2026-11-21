@@ -38,7 +38,6 @@ from tests.test_email_failure_rule import no_pdfs  # noqa: F401
 from tests.test_email_failure_sentences import (
     COPY,
     TO,
-    UNREACHABLE,
     WANTS_SIGN_IN,
     _read,
     _refuse,
@@ -51,6 +50,7 @@ SEE_WHY = where_to_see_why(True)
 POINTER = where_to_see_why(False)
 BLIND = "blind@example.test"
 NOT_SMTP = "The answer was not an SMTP reply: …"
+GENERAL = "The email could not be sent."
 FULL_LIST = "The full list is under Settings → Email (SMTP) → Recent sends."
 SIGNED_IN_AND_ASKED_AGAIN = (
     "The mail server accepted the sign-in and then asked for one again, so "
@@ -71,19 +71,20 @@ def test_an_answer_with_no_reply_code_is_not_called_a_reply(
 ):
     """smtplib reads a line with no three-digit code as code -1. The row
     keeps the line in words of ours, never "-1 ...", and Test Email does
-    not call it the mail server's reply."""
+    not call it the mail server's reply. The server had answered every
+    command before this one, so it is not said to be out of reach."""
     canary = _canary()
     server = stub({step: [f"abc {canary} x"]})
     _configure(db_session, server.port)
     r = client.post("/api/settings/test-email")
     assert r.status_code == 502, r.text
     said = r.json()["detail"]
-    assert said == f"Test email failed to send. {UNREACHABLE} {FULL_LIST}"
+    assert said == f"Test email failed to send. {GENERAL} {FULL_LIST}"
     assert "reply" not in said and "-1" not in said and canary not in said
     row = db_session.query(EmailLog).order_by(EmailLog.id.desc()).first()
     assert "-1" not in row.error_message
     (shown,) = client.get("/api/email-log").json()["rows"]
-    assert shown["failure"] == UNREACHABLE
+    assert shown["failure"] == GENERAL
     line = shown["error_message"]
     assert line.endswith(f"{NOT_SMTP}{canary} x") and "-1" not in line
     if step == "MAIL":
@@ -109,7 +110,7 @@ def test_no_stored_row_holds_smtplibs_minus_one(error):
     assert "-1" not in stored
     assert server_words(stored).endswith(f"{NOT_SMTP}garbage line")
     assert not email_errors._holds_reply(stored)
-    assert failure_sentence(stored) == UNREACHABLE
+    assert failure_sentence(stored) == GENERAL
 
 
 def test_a_row_of_an_earlier_release_with_minus_one_reads_the_same():
@@ -126,14 +127,16 @@ def test_a_row_of_an_earlier_release_with_minus_one_reads_the_same():
 
 def test_an_answer_with_no_code_for_the_to_address_while_a_copy_went(db_session, stub):
     """The server was reached (it took the copy), so "could not be
-    reached" would be untrue: the general sentence, and the copy is said."""
+    reached" would be untrue: the general sentence, who the message did
+    not go to, and the copy."""
     canary = _canary()
     server = stub({"RCPT": _refuse(TO, f"abc {canary}")})
     ok, row = _send(db_session, server, cc=[COPY])
     assert not ok and server.messages == 1
     seen = _read(db_session, row)
     assert seen.sentence == (
-        f"The email could not be sent. A copy still went to: {COPY}."
+        f"The email could not be sent. The mail server did not take the email "
+        f"for: {TO}. A copy still went to: {COPY}."
     )
     assert seen.reason() == f"{seen.sentence} {POINTER}"
     mine = _read(db_session, row, admin=True)
@@ -143,10 +146,12 @@ def test_an_answer_with_no_code_for_the_to_address_while_a_copy_went(db_session,
     from app.services.email_errors import send_failed_detail, sentence_for_last_send
 
     assert sentence_for_last_send(db_session, "", 0) == (
-        f"A copy still went to: {COPY}. {POINTER}"
+        f"The mail server did not take the email for: {TO}. A copy still "
+        f"went to: {COPY}. {POINTER}"
     )
     assert send_failed_detail(db_session, "", 0, False) == (
-        f"Email could not be sent. A copy still went to: {COPY}. {POINTER}"
+        f"Email could not be sent. The mail server did not take the email "
+        f"for: {TO}. A copy still went to: {COPY}. {POINTER}"
     )
 
 
@@ -485,3 +490,376 @@ def test_any_other_fault_says_it_is_not_the_servers_and_where_its_cause_is(
     )
     assert mine.with_reply() == mine.sentence  # not called a reply
     assert secret not in row.error_message and "RuntimeError" not in row.error_message
+
+
+# -- a refused address the tag cannot name ------------------------------------------
+
+REFUSED_NO_NAME = (
+    "An address was refused by the mail server. Check the addresses and send again."
+)
+NOT_TAKEN = "The mail server did not take the email for: {}."
+COPY_WENT = "A copy still went to: {}."
+LOST_AFTER_BODY = (
+    "The connection to the mail server was lost after the message was handed "
+    "to it, before it answered, so the email may or may not have gone out. "
+    "Check with the recipient before sending it again."
+)
+ANSWER_UNREAD = (
+    "The mail server's answer after the message was handed to it could not "
+    "be read, so the email may or may not have gone out. Check with the "
+    "recipient before sending it again."
+)
+
+
+@pytest.mark.parametrize("typed", ["];", ",", "; ;"])
+@pytest.mark.parametrize("status", ["550", "400"])
+def test_a_to_address_with_nothing_to_name_is_never_read_from_the_servers_line(
+    db_session, stub, typed, status
+):
+    """Nothing of such a To address is left for our tag, and the answer
+    here has no reply code: the name and the sentence are not taken from
+    the line the server wrote, whatever ": NNN" stands in it."""
+    canary = _canary()
+    server = stub({"RCPT": [f"HTTP/1.1 400 Bad Request {canary} status: {status} Bad"]})
+    ok, row = _send(db_session, server, to=typed)
+    assert not ok
+    for admin in (False, True):
+        seen = _read(db_session, row, admin)
+        assert seen.sentence == REFUSED_NO_NAME
+        assert canary not in seen.reason()
+    assert canary in _read(db_session, row, admin=True).reply
+
+
+def test_a_nameless_address_keeps_its_reply_code_in_our_tag(db_session, stub):
+    server = stub({"RCPT": ["451 4.7.1 Greylisted"]})
+    ok, row = _send(db_session, server, to="];")
+    assert not ok
+    assert row.error_message == "[recipients  451 4.7.1] : 451 4.7.1 Greylisted"
+    assert _read(db_session, row).sentence == (
+        "The mail server asked to try again later."
+    )
+    assert email_errors._holds_reply(row.error_message)
+
+
+@pytest.mark.parametrize("status", ["550", "400", "451"])
+def test_a_row_whose_tag_names_nobody_reads_as_an_address_refused(status):
+    """What unreleased builds stored for refused recipients: no address in
+    the tag. It reads without a name, and never by the server's line."""
+    canary = _canary()
+    stored = (
+        f"[recipients] {TO}: -1 TP/1.1 400 Bad Request {canary} status: {status} Bad"
+    )
+    said = failure_sentence(stored)
+    assert said == REFUSED_NO_NAME
+    assert not email_errors._holds_reply(stored)
+
+
+# -- STARTTLS answered with something that is not a reply ----------------------------
+
+
+def test_a_starttls_answer_with_no_reply_code_is_not_called_a_reply(
+    client, db_session, stub
+):
+    canary = _canary()
+    server = stub(
+        {"EHLO": ["250-stub", "250 STARTTLS"], "STARTTLS": [f"nope {canary}"]}
+    )
+    _configure(db_session, server.port, use_tls="true")
+    r = client.post("/api/settings/test-email")
+    assert r.status_code == 502, r.text
+    said = r.json()["detail"]
+    assert "reply" not in said and "-1" not in said and canary not in said
+    assert said.startswith(
+        "Test email failed to send. SlowBooks Pro could not set up a secure "
+        "connection to the mail server, so nothing was sent"
+    )
+    row = db_session.query(EmailLog).order_by(EmailLog.id.desc()).first()
+    assert row.error_message == f"[starttls 127.0.0.1] {NOT_SMTP}{canary}"
+    (shown,) = client.get("/api/email-log").json()["rows"]
+    assert shown["error_message"] == f"{NOT_SMTP}{canary}"
+
+
+# -- a reply with a byte no database text can hold -----------------------------------
+
+
+def test_a_nul_byte_in_a_reply_is_not_stored(db_session, stub):
+    """PostgreSQL refuses a NUL character in text: the row of the failed
+    send would be lost, and the send would raise."""
+    canary = _canary()
+    server = stub({"BODY": [f"554 5.7.1 refused \x00{canary}\x00"]})
+    ok, row = _send(db_session, server)
+    assert not ok
+    assert "\x00" not in row.error_message
+    assert row.error_message == f"[data] 554 5.7.1 refused �{canary}�"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        smtplib.SMTPDataError(554, b"5.7.1 a\x00b"),
+        smtplib.SMTPSenderRefused(553, b"a\x00b", FROM),
+        smtplib.SMTPRecipientsRefused({TO: (550, b"a\x00b")}),
+        smtplib.SMTPAuthenticationError(535, b"a\x00b"),
+        smtplib.SMTPServerDisconnected("a\x00b"),
+        OSError("a\x00b"),
+        "words of ours a\x00b",
+        email_errors.starttls_refused(
+            smtplib.SMTPResponseException(454, b"a\x00b"), "mail.example.test"
+        ),
+        email_errors.MailTLSError("Secure connection failed (a\x00b)"),
+    ],
+)
+def test_nothing_stored_holds_a_nul_character(error):
+    assert "\x00" not in stored_text(error)
+
+
+# -- the To address asked for a sign-in while a copy went ----------------------------
+
+
+def _always_bcc(db, address=BLIND):
+    set_setting(db, "smtp_always_bcc", address)
+    db.commit()
+
+
+def test_a_to_address_asked_for_a_sign_in_while_a_copy_went(db_session, stub):
+    """A server that takes its own mailboxes without a sign-in and wants
+    one to relay: the copy went, the To address did not, and both are
+    said."""
+    server = stub({"RCPT": _refuse(TO, "530 5.7.1 Authentication required for relay")})
+    _always_bcc(db_session)
+    ok, row = _send(db_session, server)
+    assert not ok and server.messages == 1
+    assert _read(db_session, row).sentence == (
+        f"{WANTS_SIGN_IN} {NOT_TAKEN.format(TO)} {COPY_WENT.format(BLIND)}"
+    )
+    from app.services.email_errors import failed_send_line, send_failed_detail
+
+    assert send_failed_detail(db_session, "", 0, False) == (
+        f"Email could not be sent. {WANTS_SIGN_IN} {NOT_TAKEN.format(TO)} "
+        f"{COPY_WENT.format(BLIND)} {POINTER}"
+    )
+    assert failed_send_line(db_session, "", 0, False, "Someone: the statement") == (
+        f"Someone: the statement could not be sent. {WANTS_SIGN_IN} "
+        f"{NOT_TAKEN.format(TO)} {COPY_WENT.format(BLIND)}"
+    )
+
+
+def test_the_same_530_after_a_sign_in_does_not_say_the_email_was_not_sent():
+    refused = RecipientsPartlyRefused(
+        {TO: (530, b"5.7.1 Authentication required")}, [BLIND]
+    )
+    said = failure_sentence(stored_text(refused, signed_in=True))
+    assert "was not sent" not in said
+    assert said == (
+        "The mail server accepted the sign-in and then asked for one again. "
+        f"Ask your mail provider why. {NOT_TAKEN.format(TO)} "
+        f"{COPY_WENT.format(BLIND)}"
+    )
+    # with no copy taken, nothing went out and the sentence says so
+    alone = smtplib.SMTPRecipientsRefused({TO: (530, b"5.7.1 Authentication required")})
+    assert failure_sentence(stored_text(alone, signed_in=True)) == (
+        SIGNED_IN_AND_ASKED_AGAIN
+    )
+
+
+def test_the_same_530_asking_for_starttls_says_the_copy_too():
+    refused = RecipientsPartlyRefused(
+        {TO: (530, b"5.7.0 Must issue a STARTTLS command first")}, [BLIND]
+    )
+    assert failure_sentence(stored_text(refused)) == (
+        "The mail server takes mail only over a secure connection. Turn on "
+        f"Use TLS under Settings → Email (SMTP). {NOT_TAKEN.format(TO)} "
+        f"{COPY_WENT.format(BLIND)}"
+    )
+
+
+# -- Activity and a typed copy in a nonprofit ----------------------------------------
+
+
+def test_a_nonprofits_activity_names_the_address_that_was_sent_to(
+    client, db_session, seed_accounts, stub, no_pdfs
+):
+    from tests.test_document_activity_894 import _activity, _customer, _invoice
+
+    refused = "invoices@customer.example.test"
+    taken = "ok@customer.example.test"
+    server = stub({"RCPT": _refuse(refused)})
+    _configure(db_session, server.port)
+    inv = _invoice(client, _customer(client)["id"])
+    _nonprofit(client)
+    url = f"/api/invoices/{inv['id']}/email"
+    r = client.post(url, json={"recipient": refused, "subject": "Probe", "message": ""})
+    assert r.status_code == 502, r.text
+    r = client.post(url, json={"recipient": taken, "subject": "Probe", "message": ""})
+    assert r.status_code == 200, r.text
+    events = _activity(client, "invoice", inv["id"])["events"]
+    texts = [e["text"] for e in events if e["kind"] == "emailed"]
+    assert len(texts) == 2
+    failed = next(t for t in texts if "could not be sent" in t)
+    sent = next(t for t in texts if t.startswith("Emailed to"))
+    assert failed.startswith(f"An email to {refused} by ")
+    assert sent.startswith(f"Emailed to {taken} by ")
+
+
+def test_a_nonprofits_answer_to_a_typed_copy_shows_what_was_typed(
+    client, db_session, seed_accounts, stub, no_pdfs
+):
+    from tests.test_document_activity_894 import _customer, _invoice
+
+    server = stub()
+    _configure(db_session, server.port)
+    customer = _customer(client)
+    inv = _invoice(client, customer["id"])
+    est = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": customer["id"],
+            "date": "2026-06-01",
+            "lines": [
+                {"description": "work", "quantity": 1, "rate": 100, "line_order": 0}
+            ],
+        },
+    )
+    assert est.status_code == 201, est.text
+    _nonprofit(client)
+    for url in (
+        f"/api/invoices/{inv['id']}/email",
+        f"/api/estimates/{est.json()['id']}/email",
+    ):
+        for typed in ("josé@invoice.example.test", "not a customer"):
+            r = client.post(
+                url,
+                json={"recipient": TO, "subject": "Probe", "message": "", "cc": typed},
+            )
+            assert r.status_code == 400, r.text
+            assert r.json()["detail"] == f"Not an email address: {typed}."
+    assert server.lines == []
+
+
+def test_an_address_in_any_error_is_not_reworded_and_the_prose_around_it_is(client):
+    """The one place every error body is reworded leaves an address as it
+    is, whoever wrote the sentence."""
+    from fastapi import HTTPException
+
+    from app.main import app
+
+    address = "invoices@customer.example.test"
+
+    @app.get("/api/_probe/worded")
+    def _probe():
+        raise HTTPException(status_code=400, detail=f"The invoice for {address} is.")
+
+    try:
+        _nonprofit(client)
+        r = client.get("/api/_probe/worded")
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == f"The pledge for {address} is."
+    finally:
+        app.router.routes[:] = [
+            route
+            for route in app.router.routes
+            if getattr(route, "path", "") != "/api/_probe/worded"
+        ]
+
+
+# -- a message handed over, and no word whether it was taken -------------------------
+
+
+def test_a_message_that_may_have_gone_out_is_never_said_flatly_not_sent(
+    client, db_session, seed_accounts, stub, no_pdfs
+):
+    from tests.test_document_activity_894 import _activity, _customer, _invoice
+    from tests.test_email_failure_rule import _overdue
+
+    server = stub({"BODY": "hang-up"})
+    _configure(db_session, server.port)
+    r = client.post("/api/settings/test-email")
+    assert r.status_code == 502, r.text
+    assert r.json()["detail"] == (
+        f"Test email may or may not have been sent. {LOST_AFTER_BODY} {FULL_LIST}"
+    )
+    inv = _invoice(client, _customer(client)["id"])
+    r = client.post(
+        f"/api/invoices/{inv['id']}/email",
+        json={"recipient": TO, "subject": "Probe", "message": ""},
+    )
+    assert r.status_code == 502, r.text
+    # the sentence is the whole reason: no pointer to a line that has less
+    assert r.json()["detail"] == (
+        f"Email may or may not have been sent. {LOST_AFTER_BODY}"
+    )
+    events = _activity(client, "invoice", inv["id"])["events"]
+    emailed = next(e for e in events if e["kind"] == "emailed")
+    assert emailed["text"].startswith(f"An email to {TO} by ")
+    assert emailed["text"].endswith(" may or may not have been sent.")
+    assert emailed["details"] == [LOST_AFTER_BODY]
+    _overdue(db_session)
+    run = client.post("/api/collections/statements/run", json={"force": True})
+    assert run.status_code == 200, run.text
+    lines = [e for e in run.json()["errors"] if e.startswith("Mail Probe")]
+    assert lines == [
+        f"Mail Probe: The statement may or may not have been sent. {LOST_AFTER_BODY}"
+    ]
+    for body in (r.text, run.text):
+        assert "could not be sent" not in body
+
+
+# -- an answer that is neither a yes nor a refusal, from a server that was reached ----
+
+
+def test_an_unreadable_answer_to_the_message_is_not_an_unreachable_server(
+    db_session, stub
+):
+    canary = _canary()
+    server = stub({"BODY": [f"hello {canary}"]})
+    ok, row = _send(db_session, server)
+    assert not ok and server.messages == 1
+    assert row.error_message.startswith("[data not-smtp after-body] ")
+    seen = _read(db_session, row, admin=True)
+    assert seen.sentence == ANSWER_UNREAD and seen.unsure
+    assert seen.with_reply() == ANSWER_UNREAD  # not called a reply
+
+
+def test_an_unreadable_answer_to_the_data_command_is_before_the_message(
+    db_session, stub
+):
+    server = stub({"DATA": ["hello there"]})
+    ok, row = _send(db_session, server)
+    assert not ok and server.messages == 0
+    assert row.error_message.startswith("[data not-smtp] ")
+    seen = _read(db_session, row)
+    assert seen.sentence == GENERAL and not seen.unsure
+
+
+def test_a_reply_that_is_no_refusal_is_not_an_unreachable_server(db_session, stub):
+    server = stub({"RCPT": ["252 cannot verify"]})
+    ok, row = _send(db_session, server)
+    assert not ok
+    assert row.error_message == f"[recipients {TO} 252] {TO}: 252 cannot verify"
+    seen = _read(db_session, row)
+    assert seen.sentence == GENERAL
+    assert seen.reason() == f"{GENERAL} {POINTER}"
+
+
+def test_a_to_address_with_no_usable_answer_is_said_beside_a_refused_copy(
+    db_session, stub
+):
+    """To answered with something that is no reply, a Cc refused, a Bcc
+    taken: the sentence does not leave out that the addressee was not
+    sent it."""
+
+    def rcpt(line):
+        if TO in line:
+            return ["abc huh"]
+        if COPY in line:
+            return ["550 5.1.1 User unknown"]
+        return ["250 2.1.5 OK"]
+
+    server = stub({"RCPT": rcpt})
+    _always_bcc(db_session)
+    ok, row = _send(db_session, server, cc=[COPY])
+    assert not ok and server.messages == 1
+    assert _read(db_session, row).sentence == (
+        f"The address was refused by the mail server: {COPY}. Check it and "
+        f"send again. {NOT_TAKEN.format(TO)} {COPY_WENT.format(BLIND)}"
+    )

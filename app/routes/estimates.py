@@ -44,7 +44,7 @@ from app.services.estimating import (
     markup_parts,
 )
 from app.services.sub_customers import invoice_addresses
-from app.services.terminology import terms_from_db
+from app.services.terminology import AsWritten, terms_from_db
 from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
@@ -1004,7 +1004,8 @@ def email_estimate(
     if rejected:
         raise HTTPException(
             status_code=400,
-            detail="Not an email address: " + ", ".join(rejected[:5]) + ".",
+            # what was typed, shown as it was typed
+            detail=AsWritten("Not an email address: " + ", ".join(rejected[:5]) + "."),
         )
     try:
         copy_lists(_get_smtp_settings(db), data.cc, data.bcc)

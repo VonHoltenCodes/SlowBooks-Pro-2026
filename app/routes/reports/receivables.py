@@ -26,7 +26,7 @@ from app.routes.reports._router import router
 from app.routes._roles import reads_mail_server_words
 from app.services.email_errors import (
     note_for_last_send,
-    sentence_for_last_send,
+    failed_send_line,
     with_notes,
 )
 from app.routes._helpers import refuse_unknown_filters
@@ -1073,17 +1073,15 @@ def batch_email_statements(request: Request, db: Session = Depends(get_db)):
             failed += 1
             # the reply's sentence when the send ran and the server said
             # why (#811); the raw text stays in the email log
-            why = (
-                sentence_for_last_send(
-                    db, "statement", cid, reads_mail_server_words(request)
-                )
-                if ran
-                else ""
-            )
             errors.append(
-                f"{customer.name}: the statement could not be sent. {why}".rstrip()
-                if why
-                else f"{customer.name}: the statement could not be sent."
+                failed_send_line(
+                    db,
+                    "statement",
+                    cid,
+                    reads_mail_server_words(request),
+                    f"{customer.name}: the statement",
+                    ran,
+                )
             )
 
     return with_notes({"sent": sent, "failed": failed, "errors": errors}, notes)
@@ -1181,14 +1179,15 @@ def collection_letters(
                     if note:
                         notes.append(f"{customer.name}: {note}")
                 else:
-                    why = sentence_for_last_send(
-                        db, "collection", cid, reads_mail_server_words(request)
-                    )
                     # the same words as the other batch sends (W-218)
                     errors.append(
-                        f"{customer.name}: the letter could not be sent. {why}"
-                        if why
-                        else f"{customer.name}: the letter could not be sent."
+                        failed_send_line(
+                            db,
+                            "collection",
+                            cid,
+                            reads_mail_server_words(request),
+                            f"{customer.name}: the letter",
+                        )
                     )
         except Exception:
             logger.exception(
