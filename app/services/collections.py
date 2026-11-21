@@ -576,14 +576,18 @@ def _html_body(text: str) -> str:
     return "<p>" + html.escape(text).replace("\n", "<br>") + "</p>"
 
 
-def _send_failed(what: str, entity_type: str, entity_id, db, ran=True) -> str:
-    """What a run records for a send that failed: the bookkeeper's sentence
-    for the reason when send_email() ran and the log row says (#811; a
-    certificate the mail server could not prove, say), the raw text staying
-    in the email log."""
+def _send_failed(
+    what: str, entity_type: str, entity_id, db, ran=True, admin: bool = False
+) -> str:
+    """What is said of a send that failed: the sentence for the reason when
+    send_email() ran and the log row says (a certificate the mail server
+    could not prove, say), never the mail server's own words. A sentence
+    that does not say why ends with where the reason can be read: `admin`
+    words that for the person who pressed the button; what a run RECORDS
+    is the reading with `admin` False, which is true for every reader."""
     from app.services.email_errors import sentence_for_last_send
 
-    why = sentence_for_last_send(db, entity_type, entity_id) if ran else ""
+    why = sentence_for_last_send(db, entity_type, entity_id, admin) if ran else ""
     if why:
         return f"{what} could not be sent. {why}"
     return f"{what} could not be sent."
@@ -625,16 +629,17 @@ def _claim_reminder(db: Session, plan, trigger: str):
     return row
 
 
-def _send_one(db, plan, settings, words, home, trigger):
+def _send_one(db, plan, settings, words, home, trigger, admin=False):
     """Claim, email and record one reminder. Returns None when it went out,
-    TAKEN when another window had claimed it, else the sentence to show.
-    Commits either way, so a crash later in a run keeps what has gone."""
+    TAKEN when another window had claimed it, else the sentence to show
+    (`admin` chooses where it says the reason can be read). Commits either
+    way, so a crash later in a run keeps what has gone."""
     row = _claim_reminder(db, plan, trigger)
     if row is None:
         return TAKEN
     inv, rule, days, to = plan["invoice"], plan["rule"], plan["days"], plan["to"]
     label = f"{document_label(inv, words)} {inv.invoice_number}"
-    error = None
+    error = shown = None
     ok = False
     log_id = None
     try:
@@ -656,6 +661,7 @@ def _send_one(db, plan, settings, words, home, trigger):
             log_id = _latest_log_id(db, "reminder", inv.id)
         else:
             error = _send_failed("The email", "reminder", inv.id, db)
+            shown = _send_failed("The email", "reminder", inv.id, db, admin=admin)
     except Exception:
         # The exception's own text stays in the log and the audit row; the
         # sentence that goes back to the screen names no internals.
@@ -669,10 +675,12 @@ def _send_one(db, plan, settings, words, home, trigger):
     db.commit()
     if ok:
         return None
-    return f"{to[0].name}, {label}: {error}"
+    return f"{to[0].name}, {label}: {shown or error}"
 
 
-def run_reminders(db: Session, trigger: str, invoice_ids=None) -> dict:
+def run_reminders(
+    db: Session, trigger: str, invoice_ids=None, admin: bool = False
+) -> dict:
     """Send every reminder due today (see plan_reminders) and report the
     counts. Raises EmailNotSetUp when something would send and mail is not
     set up. A reminder another window claimed first counts as skipped."""
@@ -688,7 +696,7 @@ def run_reminders(db: Session, trigger: str, invoice_ids=None) -> dict:
     home = home_currency(db)
     sent, taken, errors = 0, 0, []
     for plan in sends:
-        result = _send_one(db, plan, settings, words, home, trigger)
+        result = _send_one(db, plan, settings, words, home, trigger, admin)
         if result is None:
             sent += 1
         elif result is TAKEN:
@@ -748,7 +756,7 @@ def run_if_due(db: Session, today: date) -> dict:
     return {"ran": True, **run_reminders(db, "auto")}
 
 
-def remind_invoice(db: Session, invoice_id: int) -> dict:
+def remind_invoice(db: Session, invoice_id: int, admin: bool = False) -> dict:
     """Send one invoice its next reminder by hand, dated today: the firmest
     matching rule, else the nearest one ahead. Raises LookupError /
     RemindError / EmailNotSetUp."""
@@ -785,6 +793,7 @@ def remind_invoice(db: Session, invoice_id: int) -> dict:
         terms_from_db(db),
         home_currency(db),
         "manual",
+        admin,
     )
     if result is TAKEN:
         raise RemindError("Another window is sending this reminder right now.")
@@ -1049,7 +1058,7 @@ def _claim_statement(db: Session, cand: dict, period: str, force: bool):
     return existing
 
 
-def run_statements(db: Session, force: bool = False) -> dict:
+def run_statements(db: Session, force: bool = False, admin: bool = False) -> dict:
     """Email each customer's statement PDF as of today. `force` also resends
     to those who already had one this month; a customer with no email is
     never sent. A statement another window is sending counts as skipped."""
@@ -1113,7 +1122,10 @@ def run_statements(db: Session, force: bool = False) -> dict:
             sent += 1
         else:
             failed += 1
-            # the month's row's sentence, the reason a single send gives
-            # (W-211), not a pointer at a log
-            errors.append(f"{customer.name}: {row.error}")
+            # the reason a single send gives (the month's row keeps the
+            # same sentence, worded for every reader)
+            shown = _send_failed(
+                "The statement", "statement", customer.id, db, ran, admin
+            )
+            errors.append(f"{customer.name}: {shown}")
     return {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}

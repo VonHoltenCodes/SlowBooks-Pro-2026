@@ -975,7 +975,7 @@ def email_estimate(
     """Email the estimate PDF as an attachment, by the path an invoice uses:
     the same address checks, the same send_email (EmailLog row, always-copy
     settings) and the same 502 when SMTP is not set up."""
-    from app.routes._roles import is_admin
+    from app.routes._roles import reads_mail_server_words
     from app.services.email_errors import send_failed_detail
     from app.services.email_service import (
         _get_smtp_settings,
@@ -1033,7 +1033,9 @@ def email_estimate(
     if not sent:
         raise HTTPException(
             status_code=502,
-            detail=send_failed_detail(db, "estimate", est.id, is_admin(request)),
+            detail=send_failed_detail(
+                db, "estimate", est.id, reads_mail_server_words(request)
+            ),
         )
     return {"status": "sent"}
 

@@ -23,6 +23,7 @@ from app.services.pdf_service import (
 from app.services.settings_service import get_all_settings as get_settings
 from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
+from app.routes._roles import reads_mail_server_words
 from app.services.email_errors import sentence_for_last_send
 from app.routes._helpers import refuse_unknown_filters
 
@@ -978,7 +979,7 @@ def customer_statement_pdf(
 
 
 @router.post("/batch-email-statements")
-def batch_email_statements(db: Session = Depends(get_db)):
+def batch_email_statements(request: Request, db: Session = Depends(get_db)):
     """Email a statement to every customer with an overdue invoice.
 
     Reports what actually went out. send_email() returns False rather than
@@ -1064,7 +1065,13 @@ def batch_email_statements(db: Session = Depends(get_db)):
             failed += 1
             # the reply's sentence when the send ran and the server said
             # why (#811); the raw text stays in the email log
-            why = sentence_for_last_send(db, "statement", cid) if ran else ""
+            why = (
+                sentence_for_last_send(
+                    db, "statement", cid, reads_mail_server_words(request)
+                )
+                if ran
+                else ""
+            )
             errors.append(
                 f"{customer.name}: the statement could not be sent. {why}".rstrip()
                 if why
@@ -1162,7 +1169,9 @@ def collection_letters(
                 ):
                     emailed += 1
                 else:
-                    why = sentence_for_last_send(db, "collection", cid)
+                    why = sentence_for_last_send(
+                        db, "collection", cid, reads_mail_server_words(request)
+                    )
                     # the same words as the other batch sends (W-218)
                     errors.append(
                         f"{customer.name}: the letter could not be sent. {why}"

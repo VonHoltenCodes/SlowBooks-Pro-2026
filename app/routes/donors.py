@@ -128,13 +128,16 @@ def acknowledgment_email(
     if not sent:
         # what the server said, in a sentence, the way the invoice's Email
         # button answers (#811); the raw text stays in the email log
-        from app.routes._roles import is_admin
+        from app.routes._roles import reads_mail_server_words
         from app.services.email_errors import send_failed_detail
 
         raise HTTPException(
             status_code=502,
             detail=send_failed_detail(
-                db, f"acknowledgment_{kind}", gift_id, is_admin(request)
+                db,
+                f"acknowledgment_{kind}",
+                gift_id,
+                reads_mail_server_words(request),
             ),
         )
     return {"sent": True, "recipient": recipient}
@@ -281,9 +284,12 @@ def giving_statement_preview(year: Optional[int] = None, db: Session = Depends(g
 
 @router.post("/giving-statements/batch-email")
 def giving_statements_batch_email(
-    data: GivingStatementBatch, db: Session = Depends(get_db)
+    data: GivingStatementBatch, request: Request, db: Session = Depends(get_db)
 ):
     """Email each donor their statement (skipping those who opted out)."""
+    from app.routes._roles import reads_mail_server_words
+
+    admin = reads_mail_server_words(request)
     company = get_all_settings(db)
     # the donor's email names the display name when one is set (#679)
     org = (company.get("display_name") or "").strip() or company.get("company_name", "")
@@ -322,7 +328,7 @@ def giving_statements_batch_email(
                 # the reply's sentence when the server said why (#811)
                 from app.services.email_errors import sentence_for_last_send
 
-                why = sentence_for_last_send(db, "giving_statement", customer.id)
+                why = sentence_for_last_send(db, "giving_statement", customer.id, admin)
                 errors.append(
                     f"{customer.name}: the giving statement could not be sent. {why}"
                     if why
