@@ -266,8 +266,15 @@ def test_test_email_gives_the_sentence_then_the_servers_reply(client, stage):
     # the sentence, then (Test Email is an administrator's) the server's
     # reply as it was received; a connection that failed has no reply
     reply = "" if stage in NO_REPLY else f" The mail server's reply: {words}."
+    # a message handed over before the connection was lost may have gone
+    # out: the answer does not open by saying it was not sent
+    opening = (
+        "Test email may or may not have been sent."
+        if "may or may not have gone out" in sentence
+        else "Test email failed to send."
+    )
     assert detail == (
-        f"Test email failed to send. {sentence}{reply} The full list is under "
+        f"{opening} {sentence}{reply} The full list is under "
         "Settings → Email (SMTP) → Recent sends."
     )
     (row,) = client.get("/api/email-log?status=failed").json()["rows"]

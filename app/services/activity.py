@@ -2599,7 +2599,8 @@ def _email_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
             "giving_statement": "Giving statement emailed",
         }.get(r.entity_type, "Emailed")
         if r.status == "sent":
-            # an address and a name are left as typed (B10)
+            # the company's vocabulary rewords the prose alone: an address
+            # and a name are left as typed (B10)
             text = f"{what} to {words.data(r.recipient)} by {words.data(who)}."
             details = [f"Subject: {r.subject}"] if r.subject else []
             if r.cc:
@@ -2610,13 +2611,19 @@ def _email_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
             if note:
                 details.append(note)
         else:
-            text = (
-                f"An email to {words.data(r.recipient)} by {words.data(who)}"
-                " could not be sent."
-            )
             # the sentence alone, for every reader of Activity: the mail
             # server's words are never shown here
-            details = [reader.read(r, admin=False).reason()]
+            failure = reader.read(r, admin=False)
+            if failure.unsure:
+                # handed to the server, and nothing says whether it went
+                outcome = "may or may not have been sent"
+            else:
+                outcome = "could not be sent"
+            text = (
+                f"An email to {words.data(r.recipient)} by {words.data(who)}"
+                f" {outcome}."
+            )
+            details = [failure.reason()]
         out.append(
             _Event(
                 _utc(r.sent_at),

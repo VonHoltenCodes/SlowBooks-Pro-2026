@@ -352,13 +352,16 @@ def giving_statements_batch_email(
             else:
                 failed += 1
                 # the reply's sentence when the server said why (#811)
-                from app.services.email_errors import sentence_for_last_send
+                from app.services.email_errors import failed_send_line
 
-                why = sentence_for_last_send(db, "giving_statement", customer.id, admin)
                 errors.append(
-                    f"{customer.name}: the giving statement could not be sent. {why}"
-                    if why
-                    else f"{customer.name}: the giving statement could not be sent."
+                    failed_send_line(
+                        db,
+                        "giving_statement",
+                        customer.id,
+                        admin,
+                        f"{customer.name}: the giving statement",
+                    )
                 )
         except Exception:
             logger.exception("giving statement failed for customer %s", customer.id)

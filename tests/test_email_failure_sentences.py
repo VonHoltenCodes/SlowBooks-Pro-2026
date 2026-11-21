@@ -417,7 +417,8 @@ def test_a_to_address_asked_to_wait_while_a_copy_went(db_session, stub):
     ok, row = _send(db_session, server, cc=COPY)
     assert not ok
     assert _read(db_session, row).sentence == (
-        f"The mail server asked to try again later. A copy still went to: {COPY}."
+        f"The mail server asked to try again later for: {TO}. A copy still "
+        f"went to: {COPY}."
     )
 
 
@@ -444,8 +445,12 @@ def test_a_refusal_about_permission_is_not_a_bad_address(
     ok, row = _send(db_session, stub({"RCPT": [reply]}))
     assert not ok
     assert _read(db_session, row).sentence == sentence
-    # and from a row an earlier build stored, either way
-    assert failure_sentence(f"[recipients] {TO}: {reply}") == sentence
+    # a row whose tag names nobody (an unreleased build's) is never read
+    # for a name or a code: its lines are the server's
+    assert failure_sentence(f"[recipients] {TO}: {reply}") == (
+        "An address was refused by the mail server. Check the addresses and "
+        "send again."
+    )
     python_wrote = repr({TO: (int(reply[:3]), reply[4:].encode())})
     assert failure_sentence(python_wrote) == sentence
 

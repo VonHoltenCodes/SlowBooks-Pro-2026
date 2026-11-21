@@ -585,12 +585,9 @@ def _send_failed(
     that does not say why ends with where the reason can be read: `admin`
     words that for the person who pressed the button; what a run RECORDS
     is the reading with `admin` False, which is true for every reader."""
-    from app.services.email_errors import sentence_for_last_send
+    from app.services.email_errors import failed_send_line
 
-    why = sentence_for_last_send(db, entity_type, entity_id, admin) if ran else ""
-    if why:
-        return f"{what} could not be sent. {why}"
-    return f"{what} could not be sent."
+    return failed_send_line(db, entity_type, entity_id, admin, what, ran)
 
 
 def _latest_log_id(db: Session, entity_type: str, entity_id: int):
