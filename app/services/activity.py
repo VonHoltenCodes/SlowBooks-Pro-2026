@@ -258,6 +258,15 @@ DOC_TYPES: dict[str, DocType] = {
         number_fields=("name",),
     ),
 }
+# A posting that is a document of its own kind, by its source: read as that
+# kind whichever type its Activity is asked by (the Journal view asks for
+# every posting as a journal entry).
+_LEDGER_KINDS = {
+    "bank_entry": "bank_entry",
+    "expense": "expense",
+    "cc_charge": "cc_charge",
+    "deposit": "deposit",
+}
 # A sales receipt is an invoice row, called by its own name whichever of
 # the two types its Activity is asked for by (`_check_record`).
 DOC_TYPES["sales_receipt"] = replace(DOC_TYPES["invoice"], word="Sales Receipt")
@@ -995,14 +1004,18 @@ def _action_sentence(
     return f"Marked {after} by {who}"
 
 
-_LOST_NOTE = re.compile(r"(?:\A|\n)Lost \d{4}-\d{2}-\d{2}: (.+)\Z", re.S)
+_LOST_NOTE = re.compile(r"\ALost \d{4}-\d{2}-\d{2}: (.+)\Z", re.S)
 
 
 def _lost_reason(rows: list[AuditLog]) -> str | None:
     """Marking an estimate lost keeps the reason typed as a last line of
     its notes ("Lost 2026-11-20: Price"). That reason, when the save that
     set the status wrote one; None when it wrote none. The note is the
-    action's own, said in its sentence, never as a second "Edited" entry."""
+    action's own, said in its sentence, never as a second "Edited" entry.
+
+    The reason is read from what this save added after the notes it found,
+    and from nothing else: notes that already held such a line (the
+    estimate was lost before, or someone typed one) are the old notes."""
     if not any(
         "status" in (r.changed_fields or [])
         and _status_words((r.new_values or {}).get("status")) == "rejected"
@@ -1014,8 +1027,13 @@ def _lost_reason(rows: list[AuditLog]) -> str | None:
             continue
         old = str((r.old_values or {}).get("notes") or "")
         new = str((r.new_values or {}).get("notes") or "")
-        found = _LOST_NOTE.search(new)
-        if found and new.startswith(old) and REDACTED not in (old, new):
+        if REDACTED in (old, new) or not new.startswith(old):
+            continue
+        added = new[len(old) :]
+        if old and not added.startswith("\n"):
+            continue
+        found = _LOST_NOTE.match(added[1:] if old else added)
+        if found:
             return found.group(1).strip()
     return None
 
@@ -1685,7 +1703,9 @@ _ENTRY_HEADERS = {
 }
 
 
-def _entry_form(source: str, head: dict, lines: list[dict]) -> tuple[dict, list[dict]]:
+def _entry_form(
+    source: str, head: dict, lines: list[dict], vendor: str = ""
+) -> tuple[dict, list[dict]]:
     """A register entry, an expense or a card charge as its FORM holds it:
     ({"payee", "memo"}, its lines with each line's own memo and nothing
     else for a description).
@@ -1700,7 +1720,13 @@ def _entry_form(source: str, head: dict, lines: list[dict]) -> tuple[dict, list[
     memo is the memo ("" when the lines only hold the payee), and a line's
     description is its own memo or nothing: a line with none is named and
     paired by its account, like any line with no description, and the
-    payee and the memo are the entry's own fields, said once."""
+    payee and the memo are the entry's own fields, said once.
+
+    A memo of nothing but spaces is no memo, on the entry and on a line.
+    `vendor`: the name of the vendor a register entry is linked to. The
+    register's form has one Payee and no Vendor: the link follows the
+    payee typed, and an entry linked with no payee typed shows the
+    vendor's name as its payee."""
     prefix, bare = _ENTRY_HEADERS[source]
     text = str(head.get("description") or "").strip()
     if text == bare:
@@ -1709,6 +1735,7 @@ def _entry_form(source: str, head: dict, lines: list[dict]) -> tuple[dict, list[
         payee = text[len(prefix) :].strip()
     else:
         payee = text
+    payee = payee or str(vendor or "").strip()
     if isinstance(head.get("memo"), str):
         memo = head["memo"].strip()
         held = memo or payee
@@ -1720,7 +1747,7 @@ def _entry_form(source: str, head: dict, lines: list[dict]) -> tuple[dict, list[
     own = [
         (
             {**v, "description": ""}
-            if held and str(v.get("description") or "").strip() == held
+            if str(v.get("description") or "").strip() in (held, "")
             else v
         )
         for v in lines
@@ -1748,7 +1775,8 @@ def _form_changes(was: dict, now: dict) -> list[str]:
 
 def _entry_source(dt: DocType, head: dict, record: dict | None = None) -> str:
     """The kind of entry a document with one Payee and one Memo is, or ""
-    for any other document."""
+    for any other document. The kind is the record's own, whichever type
+    its Activity was asked by (`_check_record`)."""
     if not dt.line_words:
         return ""
     source = head.get("source_type") or (record or {}).get("source_type") or ""
@@ -1915,13 +1943,13 @@ def _take_total(before: list[dict], after: list[dict], fk: str) -> tuple | None:
 
 def _line_details(
     words: _Words, dt: DocType, doc_id: int, groups: list[list[AuditLog]]
-) -> tuple[dict[int, list[str]], dict[int, list[str]], dict[int, dict], dict]:
+) -> tuple[dict[int, list[str]], dict[int, list[str]], dict[int, dict], dict, set]:
     """What each save did to the document's lines, in words, by the index
     of its group (W-215); the total a save's lines moved, where the kind
     keeps its total on a line (a deposit), said after them; the lines the
     document was made with, by the index of the group that made it; and,
     for an entry read as its form holds it (`_entry_form`), each save's
-    change of its Payee and Memo.
+    change of its Payee and Memo, and the saves that changed its Payee.
 
     Each save is read as one change of the line set: the lines before it
     against the lines after it, paired by `_compare_lines` (the rule is in
@@ -1933,29 +1961,47 @@ def _line_details(
     tails: dict[int, list[str]] = {}
     made: dict[int, dict[str, list[dict]]] = {}
     forms: dict[int, list[str]] = {}
+    payee_moved: set[int] = set()
     if not tables:
-        return out, tails, made, forms
+        return out, tails, made, forms, payee_moved
     record = _row(words.db, dt.table, doc_id)
     replay = {
         table: _LineReplay(words, table, fk, doc_id, [r for g in groups for r in g])
         for table, fk in tables.items()
     }
     ledger = dt.table == "transactions"
-    head: dict = {}  # the document's own fields, save by save (B8)
+    # the document's own fields, save by save (B8). A document whose making
+    # is not in the log starts as the table has it with every edit in the
+    # log undone, as its lines do (`_LineReplay._origin`)
+    head: dict = _head_origin(
+        record,
+        [
+            r
+            for g in groups
+            for r in g
+            if r.table_name == dt.table and r.record_id == doc_id
+        ],
+    )
+
+    def linked(values: dict) -> str:
+        return words.name_of("vendors", values.get("vendor_id"))
+
     for gi, group in enumerate(groups):
         created = any(
             r.table_name == dt.table and r.record_id == doc_id and r.action == "INSERT"
             for r in group
         )
-        was, news = dict(head), {}
+        olds, news = {}, {}
         for r in group:
             if r.table_name == dt.table and r.record_id == doc_id:
                 if r.action == "UPDATE":
                     for f, v in (r.old_values or {}).items():
                         if f not in news:
-                            was.setdefault(f, v)
+                            olds.setdefault(f, v)
                 if r.action != "DELETE":
                     news.update(r.new_values or {})
+        # what the log says a field was is what it was
+        was = {**head, **olds}
         now = {**was, **news}
         head = now
         snaps: dict[str, tuple[list[dict], list[dict]]] = {}
@@ -1981,11 +2027,13 @@ def _line_details(
         source = _entry_source(dt, now, record)
         if source and "transaction_lines" in snaps:
             before, after = snaps["transaction_lines"]
-            form_was, before = _entry_form(source, was, before)
-            form_now, after = _entry_form(source, now, after)
+            form_was, before = _entry_form(source, was, before, linked(was))
+            form_now, after = _entry_form(source, now, after, linked(now))
             snaps["transaction_lines"] = (before, after)
             if not created:
                 forms[gi] = _form_changes(form_was, form_now)
+                if form_was["payee"] != form_now["payee"]:
+                    payee_moved.add(gi)
                 if forms[gi]:
                     touched.add("transaction_lines")
         for table, fk in tables.items():
@@ -2026,7 +2074,21 @@ def _line_details(
             )
         out[gi] = said
         tails[gi] = tail
-    return out, tails, made, forms
+    return out, tails, made, forms, payee_moved
+
+
+def _head_origin(record: dict, own: list[AuditLog]) -> dict:
+    """A document's own fields as they were before its first row in the
+    audit log, for a document made before the log kept its making (or by a
+    path that left no row of it): the row as the table has it, with every
+    edit in the log undone. Nothing for a document whose making is in the
+    log: its fields are read from there."""
+    if not record or any(r.action != "UPDATE" for r in own):
+        return {}
+    values = dict(record)
+    for r in reversed(own):
+        values.update(r.old_values or {})
+    return values
 
 
 def _lines_left(words: _Words, table: str, fk: str, doc_id: int) -> list[dict] | None:
@@ -2080,8 +2142,18 @@ def _copy_details(
         old_lines = _lines_left(words, table, fk, old_id)
         lines = new_lines.get(table)
         if source and table == "transaction_lines":
-            form_was, own_old = _entry_form(source, old_values, old_lines or [])
-            form_now, own_new = _entry_form(source, new_values, lines or [])
+            form_was, own_old = _entry_form(
+                source,
+                old_values,
+                old_lines or [],
+                words.name_of("vendors", old_values.get("vendor_id")),
+            )
+            form_now, own_new = _entry_form(
+                source,
+                new_values,
+                lines or [],
+                words.name_of("vendors", new_values.get("vendor_id")),
+            )
             if old_lines is None or lines is None:
                 # the log never held the lines (B9): only a memo kept on
                 # the entry itself can be compared
@@ -2127,7 +2199,7 @@ def _audit_events(
     line_tables = {t for t, _ in dt.lines}
     events: list[_Event] = []
     groups = _group(own + lines + attachments + [r for _, r in related])
-    line_said, line_tail, made_lines, form_said = _line_details(
+    line_said, line_tail, made_lines, form_said, payee_moved = _line_details(
         words, dt, doc_id, groups
     )
     record = _row(words.db, dt.table, doc_id)
@@ -2177,6 +2249,17 @@ def _audit_events(
             # never as the header's stored text (`_entry_form`)
             folded |= {"description", "memo"}
             details.extend(form_said.get(gi, []))
+            born = any(
+                r.table_name == dt.table
+                and r.record_id == doc_id
+                and r.action == "INSERT"
+                for r in group
+            )
+            if born or gi in payee_moved:
+                # the vendor an entry is linked to follows the payee typed
+                # (the form has one Payee): the payee's change, said once,
+                # and no field of the entry that made it
+                folded.add("vendor_id")
         lost = None  # the reason an estimate was marked lost for
         if dt.table == "estimates":
             lost = _lost_reason(mine)
@@ -2584,6 +2667,18 @@ def _check_record(db: Session, type_: str, doc_id: int) -> tuple[DocType, dict]:
     if dt.table == "invoices":
         # by what the row is, whichever of its two names it was asked by
         dt = DOC_TYPES["sales_receipt" if record.get("is_sales_receipt") else "invoice"]
+    if dt.table == "transactions" and dt.source_types is None:
+        # the same for a posting opened in the Journal view: a register
+        # entry, an expense, a card charge and a deposit are read as what
+        # they are there too, with the files attached in that view
+        own = DOC_TYPES.get(_LEDGER_KINDS.get(record.get("source_type") or "", ""))
+        if own is not None:
+            dt = replace(
+                own,
+                attachment_types=tuple(
+                    dict.fromkeys(own.attachment_types + dt.attachment_types)
+                ),
+            )
     return dt, record
 
 

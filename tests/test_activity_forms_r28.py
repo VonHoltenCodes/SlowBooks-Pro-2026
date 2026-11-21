@@ -15,10 +15,24 @@ memo was typed. Activity reads the form (`_entry_form`), so:
 - a sales receipt is called a sales receipt and lists no stored flag (B6);
 - marking an estimate lost is one entry, in the button's word;
 - a line with no amount is named without "$0.00".
+
+Third review: the reading is the record's own, not the asked type's.
+
+- the Journal view asks for every posting as a journal entry: a register
+  entry, an expense, a card charge and a deposit read there exactly as
+  they do in their own view;
+- the vendor a register entry is linked to follows its one Payee: said
+  once, as the Payee, and never as a field of the entry that made it;
+- the reason an estimate was marked lost for is what that save added to
+  the notes, whatever the notes already held;
+- a memo of spaces is no memo, on the entry and on its lines;
+- an entry whose making is not in the audit log starts as the table has
+  it with the log's edits undone: its payee is never read as a memo.
 """
 
 import pytest
 
+from app.models.audit import AuditLog
 from app.services.activity import _entry_form, _form_changes
 from app.services.entry_text import BANK_ENTRY_HEADER
 from app.services.settings_service import set_setting
@@ -419,3 +433,296 @@ def test_a_line_with_no_amount_is_named_without_one(client, seed_accounts, db_se
     assert (
         said[0] == "Line Note only, $25.00: Rate $0.00 → $25.00; Amount $0.00 → $25.00"
     )
+
+
+# ---------------------------------------------------------------------------
+# third review: the reading is the record's own, whichever type is asked
+# ---------------------------------------------------------------------------
+
+
+def _read(client, type_, id_):
+    return [
+        (e["kind"], e["text"], e["details"])
+        for e in _activity(client, type_, id_)["events"]
+    ]
+
+
+def _same_in_the_journal_view(client, kind, id_):
+    own = _read(client, kind, id_)
+    assert _read(client, "journal_entry", id_) == own, (kind, own)
+    stored = ("Expense: ", "CC Charge: ", "Credit Card Charge", BANK_ENTRY_HEADER)
+    assert not any(word in str(own) for word in stored), own
+    assert "Description" not in str(own) and "ournal entry" not in str(own), own
+    return own
+
+
+def test_a_register_entry_reads_the_same_in_the_journal_view(
+    client, seed_accounts, db_session
+):
+    a = seed_accounts
+    entry = _entry(client, a, check_number="501")
+    keep = {"category_account_id": a["6900"].id}
+    _save(client, db_session, entry, payee="Ridge Supply", amount="-120", **keep)
+    _save(client, db_session, entry, payee="", amount="-120", **keep)
+    _save(
+        client, db_session, entry, payee="", amount="-120", description="Fuel", **keep
+    )
+    own = _same_in_the_journal_view(client, "bank_entry", entry)
+    assert [details for _, _, details in own] == [
+        ["Memo set to Fuel"],
+        ["Payee cleared (was Ridge Supply)"],
+        [
+            "Payee Ridge → Ridge Supply",
+            f"Line {a['6900'].name}, debit $120.00: Debit $100.00 → $120.00",
+            f"Line {a['1000'].name}, credit $120.00: Credit $100.00 → $120.00",
+        ],
+        [
+            f"Line: {a['6900'].name}, debit $100.00",
+            f"Line: {a['1000'].name}, credit $100.00",
+        ],
+    ], own
+    assert own[-1][1].startswith("Register Entry 501 created by "), own
+
+
+@pytest.mark.parametrize("kind", ["expense", "cc_charge"])
+def test_a_corrected_copy_reads_the_same_in_the_journal_view(
+    client, books, db_session, kind  # noqa: F811
+):
+    _, base, new_id, *_ = KINDS[kind]
+    first = _body(kind, books)
+    second = (
+        _body(kind, books, memo=None)
+        | _other_payee(client, kind, "Zenith Tools")
+        | {"amount": "120.00"}
+    )
+    r = client.post(base, json=first)
+    assert r.status_code == 201, r.text
+    old = new_id(r.json())
+    _age(db_session)
+    r = client.post(f"{base}/{old}/replace", json=second)
+    assert r.status_code == 200, r.text
+    new = new_id(r.json())
+    _same_in_the_journal_view(client, kind, old)
+    own = _same_in_the_journal_view(client, kind, new)
+    expense, paid_from = _accounts(kind, books)
+    copy = next(e for e in own if e[0] == "replaces")
+    word = "expense" if kind == "expense" else "card charge"
+    assert copy[1].startswith("Corrected copy of "), copy
+    assert "journal" not in copy[1] and (word in copy[1] or "earlier" not in copy[1])
+    assert copy[2] == [
+        f"Payee {PAYEE[kind]} → Zenith Tools",
+        "Memo cleared (was paper)",
+        f"Line {expense}, debit $120.00: Debit $100.00 → $120.00",
+        f"Line {paid_from}, credit $120.00: Credit $100.00 → $120.00",
+    ], copy
+
+
+def test_a_deposit_reads_the_same_in_the_journal_view(
+    client, seed_accounts, db_session
+):
+    a = seed_accounts
+    cust = _customer(client)
+    inv = _invoice(client, cust["id"])
+    r = client.post(
+        "/api/payments",
+        json={
+            "customer_id": cust["id"],
+            "date": "2026-06-05",
+            "amount": "100.00",
+            "method": "Check",
+            "allocations": [{"invoice_id": inv["id"], "amount": "100.00"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    held = [
+        p["transaction_line_id"] for p in client.get("/api/deposits/pending").json()
+    ]
+    rebate = {"account_id": a["4900"].id, "amount": "10.00", "memo": "Rebate"}
+    dep = _deposit(client, a, [rebate])
+    for body in (
+        {"other_lines": [rebate | {"amount": "15.00"}]},
+        {"line_ids": held},
+    ):
+        _age(db_session)
+        r = client.put(f"/api/deposits/{dep}", json=body)
+        assert r.status_code == 200, r.text
+    own = _read(client, "deposit", dep)
+    assert _read(client, "journal_entry", dep) == own, own
+    assert any(text.startswith("Took payment of $100.00") for _, text, _ in own), own
+    edits = [details for kind, _, details in own if kind == "edited"]
+    assert ["Line Rebate, $15.00: Amount $10.00 → $15.00", "Total $10.00 → $15.00"] in (
+        edits
+    ), own
+    assert not any("Deposit to" in d or "Credit" in d for e in edits for d in e), own
+
+
+def test_a_true_journal_entry_is_still_a_journal_entry(
+    client, seed_accounts, db_session
+):
+    a = seed_accounts
+    r = client.post(
+        "/api/journal",
+        json={
+            "date": "2026-06-01",
+            "description": "Accrue rent",
+            "lines": [
+                {"account_id": a["6900"].id, "debit": "50", "credit": "0"},
+                {"account_id": a["1000"].id, "debit": "0", "credit": "50"},
+            ],
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    made = _activity(client, "journal_entry", r.json()["id"])["events"][-1]
+    assert made["text"].startswith("Journal Entry"), made
+
+
+def _vendor(client, name):
+    r = client.post("/api/vendors", json={"name": name})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_a_register_entrys_vendor_is_its_payee_said_once(
+    client, seed_accounts, db_session
+):
+    a = seed_accounts
+    _vendor(client, "Acme Supply")
+    _vendor(client, "Zenith Tools")
+    entry = _entry(client, a, payee="Acme Supply")
+    made = _activity(client, "bank_entry", entry)["events"]
+    assert len(made) == 1 and made[0]["details"] == [
+        f"Line: {a['6900'].name}, debit $100.00",
+        f"Line: {a['1000'].name}, credit $100.00",
+    ], made
+    keep = {"category_account_id": a["6900"].id, "amount": "-100"}
+    for payee, want in (
+        ("Zenith Tools", "Payee Acme Supply → Zenith Tools"),
+        ("Corner Store", "Payee Zenith Tools → Corner Store"),
+        ("Acme Supply", "Payee Corner Store → Acme Supply"),
+        ("", "Payee cleared (was Acme Supply)"),
+    ):
+        said = _save(client, db_session, entry, payee=payee, **keep)
+        assert said == [want], (payee, said)
+    assert "Vendor" not in str(_read(client, "bank_entry", entry))
+    assert "Vendor" not in str(_read(client, "journal_entry", entry))
+
+
+def test_a_vendor_linked_with_the_payee_untouched_is_still_said(
+    client, seed_accounts, db_session
+):
+    # only the API can do this: the form's vendor is its payee
+    a = seed_accounts
+    acme = _vendor(client, "Acme Supply")
+    entry = _entry(client, a)
+    said = _save(client, db_session, entry, vendor_id=acme)
+    assert said == ["Vendor set to Acme Supply"], said
+
+
+def _lost_sentences(client, est):
+    return [
+        e["text"]
+        for e in _activity(client, "estimate", est)["events"]
+        if e["text"].startswith("Marked lost")
+    ]
+
+
+def _estimate(client, customer_id, **more):
+    r = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": customer_id,
+            "date": "2026-06-01",
+            "lines": [{"description": "Deck", "quantity": 1, "rate": 100}],
+        }
+        | more,
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _lose(client, db_session, est, reason):
+    _age(db_session)
+    r = client.post(f"/api/estimates/{est}/lost", json={"reason": reason})
+    assert r.status_code == 200, r.text
+
+
+def test_an_estimate_lost_twice_gives_each_time_its_own_reason(
+    client, seed_customer, db_session
+):
+    est = _estimate(client, seed_customer.id)
+    _lose(client, db_session, est, "Price")
+    _age(db_session)
+    r = client.put(f"/api/estimates/{est}", json={"status": "pending"})
+    assert r.status_code == 200, r.text
+    _lose(client, db_session, est, "Timing")
+    said = _lost_sentences(client, est)
+    assert [s.split(": ", 1)[1] for s in said] == ["Timing.", "Price."], said
+    assert "Lost 20" not in str(_activity(client, "estimate", est)["events"])
+
+
+def test_a_lost_reason_is_not_the_note_that_was_already_there(
+    client, seed_customer, db_session
+):
+    est = _estimate(client, seed_customer.id, notes="Lost 2025-01-01: first time")
+    _lose(client, db_session, est, "Price")
+    (said,) = _lost_sentences(client, est)
+    assert said.endswith(": Price.") and "first time" not in said, said
+
+
+@pytest.mark.parametrize("memo", [None, "Fuel"])
+def test_a_register_memo_of_spaces_is_no_memo_and_names_no_line(
+    client, seed_accounts, db_session, memo
+):
+    a = seed_accounts
+    entry = _entry(client, a, **({"description": memo} if memo else {}))
+    keep = {"category_account_id": a["6900"].id, "amount": "-100", "payee": "Ridge"}
+    _save(client, db_session, entry, description="   ", **keep)
+    # the entry that made it, and before it only a memo that was there
+    edits = [details for _, _, details in _read(client, "bank_entry", entry)[:-1]]
+    assert edits == ([["Memo cleared (was Fuel)"]] if memo else []), edits
+
+
+def test_the_form_of_an_entry_with_a_blank_memo_or_a_linked_vendor():
+    lines = [
+        {"account_id": 1, "debit": "5", "description": "   "},
+        {"account_id": 2, "credit": "5", "description": "   "},
+    ]
+    form, own = _entry_form("bank_entry", {"description": "Ridge"}, lines)
+    assert form == {"payee": "Ridge", "memo": ""}
+    assert [v["description"] for v in own] == ["", ""]
+    head = {"description": BANK_ENTRY_HEADER}
+    assert _entry_form("bank_entry", head, [], "Acme Supply")[0]["payee"] == (
+        "Acme Supply"
+    )
+    assert _entry_form("bank_entry", {"description": "Ridge"}, [], "Acme Supply")[0][
+        "payee"
+    ] == ("Ridge")
+
+
+def test_an_entry_made_before_the_log_never_reads_its_payee_as_a_memo(
+    client, seed_accounts, db_session
+):
+    a = seed_accounts
+    entry = _entry(client, a)
+    db_session.query(AuditLog).filter(
+        AuditLog.action == "INSERT",
+        AuditLog.table_name.in_(["transactions", "transaction_lines"]),
+    ).delete(synchronize_session=False)
+    db_session.commit()
+    keep = {"category_account_id": a["6900"].id, "payee": "Ridge"}
+    said = _save(client, db_session, entry, description="Fuel", amount="-100", **keep)
+    assert said == ["Memo set to Fuel"], said
+    first = _read(client, "bank_entry", entry)
+    _save(client, db_session, entry, description="Fuel", amount="-120", **keep)
+    said = _save(
+        client,
+        db_session,
+        entry,
+        description="Fuel",
+        amount="-120",
+        category_account_id=a["6900"].id,
+        payee="Ridge Supply",
+    )
+    assert said == ["Payee Ridge → Ridge Supply"], said
+    # an entry, once shown, reads the same after later saves (B8)
+    assert _read(client, "bank_entry", entry)[-len(first) :] == first
