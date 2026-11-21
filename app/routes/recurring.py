@@ -165,7 +165,7 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     db.refresh(rec)
     resp = RecurringResponse.model_validate(rec)
     resp.customer_name = customer.name
-    resp.tax_note = certificate_warning(db, customer, rec.next_due)
+    resp.tax_note = certificate_warning(db, customer, rec.next_due, rec.job_id)
     return resp
 
 
@@ -251,7 +251,7 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
     resp = RecurringResponse.model_validate(rec)
     if rec.customer:
         resp.customer_name = rec.customer.name
-    resp.tax_note = certificate_warning(db, rec.customer, rec.next_due)
+    resp.tax_note = certificate_warning(db, rec.customer, rec.next_due, rec.job_id)
     return resp
 
 

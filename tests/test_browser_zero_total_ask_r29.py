@@ -10,6 +10,8 @@ add up to $0.00, asks the invoice's question with the kind's own name. No
 leaves the form as it stands and sends nothing; Yes goes on to the save,
 and a kind the server will not take that way answers in a sentence."""
 
+import re
+
 import pytest
 
 pytest.importorskip("playwright.sync_api")
@@ -167,6 +169,21 @@ def _forms(client):
             "#invoice-form [name=notes]",
             "Invoice updated",
             saved=True,
+        ),
+        # Quick Entry, the other form that makes invoices: one described
+        # line with no rate
+        _Form(
+            "invoice",
+            "#/quick-entry",
+            "null",
+            "#qe-form",
+            "#qe-lines",
+            "#qe-po",
+            re.compile(r"Invoice #\S+ created"),
+            saved=True,
+            prep="() => { document.querySelector('#qe-lines .line-desc').value"
+            " = 'Site visit, no charge'; }",
+            ready="() => !!document.querySelector('#qe-lines tr')",
         ),
         _Form(
             "estimate",
@@ -371,12 +388,71 @@ def test_every_line_form_asks_before_saving_nothing(browser, company):
             settle(page, handled)
             page.wait_for_timeout(300)
             assert asked == question, f.noun
-            assert page.evaluate(TOASTS) == [f.yes], f.noun
+            toasts = page.evaluate(TOASTS)
+            if isinstance(f.yes, str):
+                assert toasts == [f.yes], f.noun
+            else:
+                assert len(toasts) == 1 and f.yes.fullmatch(toasts[0]), (
+                    f.route,
+                    toasts,
+                )
             if f.saved:
                 assert len(writes) == 1, (f.noun, writes)
             assert errors == [], f.noun
         finally:
             page.close()
+
+    # A nonprofit's invoice form is titled, and answers, as a pledge whether
+    # or not the box that prints PLEDGE is ticked: it asks about a pledge too.
+    edit_invoice = _forms_invoice_opener(company)
+    assert (
+        company.put("/api/settings", json={"company_type": "nonprofit"}).status_code
+        == 200
+    )
+    page, handled = _open_at(browser, company, "#/invoices")
+    asked = []
+    page.on("dialog", lambda d: (asked.append(d.message), d.dismiss()))
+    try:
+        page.evaluate(f"async () => {{ await {edit_invoice}; }}")
+        page.wait_for_function(MODAL_SHOWN)
+        settle(page, handled)
+        assert (
+            page.evaluate(
+                "() => document.getElementById('modal-title').textContent.trim()"
+            )
+            == "Edit Pledge"
+        )
+        assert not page.evaluate(
+            "() => document.querySelector('#invoice-form [name=is_pledge]').checked"
+        )
+        page.evaluate(CLEAR_AMOUNTS, "#inv-lines")
+        settle(page, handled)
+        page.evaluate(SUBMIT, "#invoice-form")
+        settle(page, handled)
+        page.wait_for_timeout(150)
+        assert asked == [QUESTION.format(noun="pledge")]
+        assert page.evaluate(MODAL_SHOWN)
+    finally:
+        page.close()
+        r = company.put("/api/settings", json={"company_type": "construction"})
+        assert r.status_code == 200, r.text
+
+
+def _forms_invoice_opener(client):
+    """Opens a priced invoice that is not flagged a pledge."""
+    cust = _first(client, "/api/customers")
+    inv = _made(
+        client,
+        "/api/invoices",
+        {
+            "customer_id": cust,
+            "date": "2026-09-21",
+            "tax_rate": 0,
+            "lines": [{"description": "Demo", "quantity": 1, "rate": 100}],
+        },
+    )
+    assert not inv.get("is_pledge")
+    return f"InvoicesPage.showForm({inv['id']})"
 
 
 # ── a tax-exempt customer's certificate, on the sales forms ──────────────
@@ -407,7 +483,9 @@ def _note(page, handled, form):
     return page.evaluate(NOTE, form)
 
 
-def test_a_sales_form_warns_about_a_missing_or_expired_certificate(browser, company):
+def test_a_sales_form_warns_about_a_missing_or_expired_certificate(
+    browser, company, db_session
+):
     """Every sales form, in one pass: choosing a tax-exempt customer with
     no certificate on file says so under the customer, in the open and
     announced; a taxable customer takes it away; with an expired one on
@@ -494,6 +572,58 @@ def test_a_sales_form_warns_about_a_missing_or_expired_certificate(browser, comp
             finally:
                 page.close()
     assert permit is not None
+
+    # A saved recurring invoice is judged as of its next invoice, as the
+    # API's tax_note is, not as of the day it started: one begun while the
+    # certificate ran and due again after it expired says so when opened.
+    from datetime import date
+
+    from app.models.recurring import RecurringInvoice
+
+    schedule = {
+        "customer_id": exempt,
+        "start_date": "2026-06-01",
+        "frequency": "monthly",
+        "tax_rate": 0,
+        "lines": [{"description": "Benches", "quantity": 2, "rate": 150}],
+    }
+    rec = _made(company, "/api/recurring", schedule)
+    assert rec["tax_note"] is None
+    row = db_session.get(RecurringInvoice, rec["id"])
+    row.next_due = date(2026, 12, 1)  # as its runs would have left it
+    db_session.commit()
+    r = company.put(f"/api/recurring/{rec['id']}", json={"notes": "Monthly"})
+    assert r.status_code == 200 and r.json()["tax_note"] == EXPIRED, r.text
+    # and one on a job with its own current certificate is quiet, as the
+    # API is: the form has no job box, so it goes by the job the schedule has
+    job = _made(
+        company,
+        "/api/jobs",
+        {
+            "customer_id": exempt,
+            "name": "Gym floor",
+            "is_taxable": False,
+            "exempt_certificate_number": "EX-4410",
+            "exempt_certificate_state": "IL",
+            "exempt_certificate_kind": "public_entity",
+            "exempt_certificate_expires": "2027-12-31",
+        },
+    )
+    on_job = _made(
+        company,
+        "/api/recurring",
+        {**schedule, "start_date": "2026-09-21", "job_id": job["id"]},
+    )
+    assert on_job["tax_note"] is None
+    for rec_id, expected in ((rec["id"], EXPIRED), (on_job["id"], "")):
+        page, handled = _open_at(browser, company, "#/recurring")
+        try:
+            page.evaluate(f"async () => {{ await RecurringPage.showForm({rec_id}); }}")
+            page.wait_for_function(MODAL_SHOWN)
+            note = _note(page, handled, "#modal-body form")
+            assert (note["text"] if note else "") == expected, rec_id
+        finally:
+            page.close()
 
     # the customer's own page, beside Tax exempt
     page, handled = _open_at(browser, company, "#/customers")

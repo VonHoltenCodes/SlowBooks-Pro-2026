@@ -86,7 +86,7 @@ const RecurringPage = {
         const locked = id ? 'disabled title="A saved schedule keeps its customer and start date"' : '';
 
         openModal(id ? `Edit ${T('Recurring Invoices').replace(/s$/, '')}` : `New ${T('Recurring Invoices').replace(/s$/, '')}`, `
-            <form id="rec-form" onsubmit="RecurringPage.save(event, ${id})">
+            <form id="rec-form" ${id ? `data-exempt-as-of="${escapeHtml(rec.next_due || '')}" data-exempt-job="${escapeHtml(rec.job_id == null ? '' : rec.job_id)}"` : ''} onsubmit="RecurringPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
                         <select name="customer_id" id="rec-customer-select" required ${locked} onchange="RecurringPage.customerSelected(this.value)"><option value="">Select...</option>${custOpts}</select></div>

@@ -242,6 +242,61 @@ def test_a_recurring_invoice_says_it_as_of_its_next_invoice(
     assert r.json()["tax_note"] == EXPIRED
 
 
+def test_the_jobs_certificate_counts_on_every_sales_kind(
+    client, db_session, seed_accounts
+):
+    """A customer whose only certificate is the job's: every sales kind on
+    that job is judged with it, the credit memo and the recurring invoice
+    as the invoice is."""
+    customer = _customer(db_session)
+    r = client.post(
+        "/api/jobs",
+        json={
+            "customer_id": customer.id,
+            "name": "Gym floor",
+            "is_taxable": False,
+            **CERT,
+            "exempt_certificate_expires": "2027-12-31",
+        },
+    )
+    assert r.status_code == 201, r.text
+    job = r.json()["id"]
+    sale = {**_sale(customer.id), "job_id": job}
+    schedule = {
+        "customer_id": customer.id,
+        "job_id": job,
+        "start_date": DAY,
+        "frequency": "monthly",
+        "tax_rate": 0.0825,
+        "lines": LINES,
+    }
+    notes = {}
+    for path, body in (
+        ("/api/invoices", sale),
+        ("/api/estimates", sale),
+        ("/api/sales-receipts", sale),
+        ("/api/credit-memos", sale),
+        ("/api/recurring", schedule),
+    ):
+        r = client.post(path, json=body)
+        assert r.status_code == 201, (path, r.text)
+        notes[path] = r.json()["tax_note"]
+        if path == "/api/recurring":
+            assert r.json()["job_id"] == job
+            r = client.put(f"{path}/{r.json()['id']}", json={"notes": "Monthly"})
+            assert r.status_code == 200, r.text
+            notes[path + " update"] = r.json()["tax_note"]
+    assert notes == dict.fromkeys(notes), notes
+    # and off the job, the same customer has nothing on file
+    for path, body in (
+        ("/api/credit-memos", _sale(customer.id)),
+        ("/api/recurring", {**schedule, "job_id": None}),
+    ):
+        r = client.post(path, json=body)
+        assert r.status_code == 201, (path, r.text)
+        assert r.json()["tax_note"] == MISSING, path
+
+
 def test_a_current_certificate_and_a_taxable_customer_carry_no_note(
     client, db_session, seed_accounts
 ):
