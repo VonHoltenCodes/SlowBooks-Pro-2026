@@ -8,9 +8,10 @@
     {# The printed face is literal — the screen vocabulary (Invoice -> Pledge) must not leak onto a program-fee invoice. #}
     <title>{% if kind == 'DonationReceipt' %}Donation Receipt{% elif kind == 'Pledge' %}Pledge{% elif kind == 'SalesReceipt' %}Sales Receipt{% else %}Invoice{% endif %}</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     /* every page after the first names its document and page, in the top margin (#1035) */
-    @page { @top-center { content: {{ (('Donation receipt' if kind == 'DonationReceipt' else 'Pledge' if kind == 'Pledge' else 'Sales receipt' if kind == 'SalesReceipt' else 'Invoice') ~ ' ' ~ (inv.invoice_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; } }
+    @page { @top-center { content: {{ (('Donation receipt' if kind == 'DonationReceipt' else 'Pledge' if kind == 'Pledge' else 'Sales receipt' if kind == 'SalesReceipt' else 'Invoice') ~ ' ' ~ (inv.invoice_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; overflow-wrap: anywhere; } }
     @page :first { @top-center { content: none; } }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 14px; }
@@ -108,7 +109,7 @@
                 {# A sales receipt is paid at the time of sale: no due date, no terms. #}
                 {% if not inv.is_sales_receipt %}
                 <tr><th scope="row">{% if kind == 'Pledge' %}Due:{% else %}Due Date:{% endif %}</th><td>{{ inv.due_date | fdate }}</td></tr>
-                {% if kind != 'Pledge' and inv.terms %}<tr><th scope="row">Terms:</th><td>{{ inv.terms }}</td></tr>{% endif %}
+                {% if kind != 'Pledge' and inv.terms %}<tr><th scope="row">Terms:</th><td class="text">{{ inv.terms }}</td></tr>{% endif %}
                 {% endif %}
                 {% if inv.po_number %}<tr><th scope="row">PO #:</th><td class="po">{{ inv.po_number }}</td></tr>{% endif %}
             </table>
@@ -266,11 +267,11 @@
             {# the day the money came in and what was received, as the sentence
                below says them: a receipt paid later, or in part, is not its own
                date and total #}
-            <tr><td style="padding-right:12px;">Date of contribution</td><td>{{ (irs.date or inv.date) | fdate }}</td></tr>
-            <tr><td style="padding-right:12px;">Amount</td><td>{{ irs.amount_received | currency(cur) }}</td></tr>
+            <tr><td style="padding-right:12px; white-space:nowrap;">Date of contribution</td><td>{{ (irs.date or inv.date) | fdate }}</td></tr>
+            <tr><td style="padding-right:12px; white-space:nowrap;">Amount</td><td>{{ irs.amount_received | currency(cur) }}</td></tr>
             {% if inv.fair_value_amount %}
-            <tr><td style="padding-right:12px;">Fair value of goods or services</td><td>{{ inv.fair_value_amount | currency(cur) }}{% if inv.fair_value_description %} — {{ inv.fair_value_description }}{% endif %}</td></tr>
-            <tr><td style="padding-right:12px;">Deductible portion</td><td>{{ irs.deductible_amount | currency(cur) }}</td></tr>
+            <tr><td style="padding-right:12px; white-space:nowrap;">Fair value of goods or services</td><td>{{ inv.fair_value_amount | currency(cur) }}{% if inv.fair_value_description %} — {{ inv.fair_value_description }}{% endif %}</td></tr>
+            <tr><td style="padding-right:12px; white-space:nowrap;">Deductible portion</td><td>{{ irs.deductible_amount | currency(cur) }}</td></tr>
             {% endif %}
         </table>
         <div>{{ irs.text }}</div>

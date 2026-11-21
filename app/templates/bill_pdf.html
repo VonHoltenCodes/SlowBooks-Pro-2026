@@ -3,9 +3,10 @@
 <head>
     <title>Bill</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     /* every page after the first names its document and page, in the top margin (#1035) */
-    @page { @top-center { content: {{ ('Bill ' ~ (bill.bill_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; } }
+    @page { @top-center { content: {{ ('Bill ' ~ (bill.bill_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; overflow-wrap: anywhere; } }
     @page :first { @top-center { content: none; } }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 14px; }
@@ -85,9 +86,9 @@
             <table class="meta-table">
                 <tr><th scope="row">Date:</th><td>{{ bill.date | fdate }}</td></tr>
                 <tr><th scope="row">Due:</th><td>{{ bill.due_date | fdate }}</td></tr>
-                {% if bill.terms %}<tr><th scope="row">Terms:</th><td>{{ bill.terms }}</td></tr>{% endif %}
+                {% if bill.terms %}<tr><th scope="row">Terms:</th><td class="text">{{ bill.terms }}</td></tr>{% endif %}
                 <tr><th scope="row">Status:</th><td>{{ bill.status.value | title }}</td></tr>
-                {% if bill.ref_number %}<tr><th scope="row">Ref:</th><td>{{ bill.ref_number }}</td></tr>{% endif %}
+                {% if bill.ref_number %}<tr><th scope="row">Ref:</th><td class="text">{{ bill.ref_number }}</td></tr>{% endif %}
             </table>
         </div>
     </div>

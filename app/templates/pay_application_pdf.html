@@ -3,6 +3,7 @@
 <head>
     <title>Application for Payment</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
@@ -14,7 +15,8 @@
     .doc-number { font-size: 12pt; color: #666; margin-top: 4px; }
     .meta-table { width: 100%; margin-bottom: 16px; }
     .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; }
-    .meta-label { font-weight: 700; color: #4a4a6a; width: 120px; }
+    .meta-label { font-weight: 700; color: #4a4a6a; width: 120px; white-space: nowrap; }
+    .meta-table td.nw { white-space: nowrap; }
     .cert { float: right; margin-bottom: 16px; }
     /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
     .cert table { width: 300px; margin-left: auto; }
@@ -29,6 +31,14 @@
     table.cont > thead > tr > th.r { text-align: right; }
     table.cont > tbody > tr > td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
     table.cont > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* The description has the rest of the table's width and wraps in it, so
+       the figures' columns are as wide as their figures and headings and
+       stay where they are whatever the text. */
+    table.cont > tbody > tr > td.desc { width: 100%; max-width: 0.5in; }
+    /* An item number is on one line in a column as wide as that line and
+       no wider than this, and a longer one wraps there
+       (_print_text.html has the rule). */
+    table.cont > tbody > tr > td.item { max-width: 0.75in; }
     table.cont > tbody > tr.totals > td { font-weight: 700; border-top: 2px solid #003366; }
     /* Ten columns of six- and seven-figure amounts, which never wrap, ran
        the line detail past the right margin (W-226: 3 pt at six figures,
@@ -71,13 +81,13 @@
 
     <table class="meta-table"><tr>
         <td class="meta-label">Owner:</td><td>{{ header.owner }}</td>
-        <td class="meta-label">Application no:</td><td>{{ app.application_no }}</td>
+        <td class="meta-label">Application no:</td><td class="nw">{{ app.application_no }}</td>
     </tr><tr>
         <td class="meta-label">Project:</td><td>{{ header.job_name }}</td>
-        <td class="meta-label">Period to:</td><td>{{ app.period_to | fdate }}</td>
+        <td class="meta-label">Period to:</td><td class="nw">{{ app.period_to | fdate }}</td>
     </tr><tr>
-        <td class="meta-label">Date:</td><td>{{ app.date | fdate }}</td>
-        <td class="meta-label">Status:</td><td>{{ app.status | title }}</td>
+        <td class="meta-label">Date:</td><td class="nw">{{ app.date | fdate }}</td>
+        <td class="meta-label">Status:</td><td class="nw">{{ app.status | title }}</td>
     </tr></table>
 
     {# The summary of the payment application. #}
@@ -121,8 +131,8 @@
         {% for line in pa.lines %}
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
-                <td>{{ line.item_no or '' }}</td>
-                <td>{{ line.description | desc }}</td>
+                <td class="item">{{ (line.item_no or '') | own_width }}</td>
+                <td class="desc">{{ line.description | desc }}</td>
                 <td class="r">{{ line.scheduled_value | currency }}</td>
                 <td class="r">{{ line.previous | currency }}</td>
                 <td class="r">{{ line.this_period | currency }}</td>
