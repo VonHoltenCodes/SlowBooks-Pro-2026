@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.services.terminology import Sentence, said
 from app.database import get_db
 from app.models.settings import DEFAULT_SETTINGS
 from app.schemas.common import StrictModel
@@ -400,7 +401,9 @@ def _deposit_bank_account(db: Session, value, label: str):
     if acct is None:
         raise HTTPException(
             status_code=422,
-            detail=f"{label}: no account {text} in the chart. Nothing was saved.",
+            detail=said(
+                label + ": no account {} in the chart. Nothing was saved.", text
+            ),
         )
     if acct.bank_kind != "bank":
         raise HTTPException(
@@ -512,10 +515,11 @@ def update_settings(
         if other:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"Another company file ({other}) is already named "
-                    f"'{incoming['company_name'].strip()}'. Choose a name that "
-                    "tells the two apart."
+                detail=said(
+                    "Another company file ({}) is already named '{}'. Choose "
+                    "a name that tells the two apart.",
+                    other,
+                    incoming["company_name"].strip(),
                 ),
             )
     # Check every value before writing any: one refused field must not leave
@@ -546,7 +550,8 @@ def update_settings(
     if problems:
         raise HTTPException(
             status_code=422,
-            detail=" ".join(problems) + " Nothing was saved.",
+            # each problem keeps what was typed in it as typed (said)
+            detail=Sentence(" ").join(problems) + " Nothing was saved.",
         )
     _guard_clearing_accounts(db, cleaned)
     _guard_payroll_accounts(db, cleaned)

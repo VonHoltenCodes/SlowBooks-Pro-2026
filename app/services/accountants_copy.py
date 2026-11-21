@@ -42,6 +42,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.models.accountants_copies import AccountantsCopy
 from app.models.accounts import Account
 from app.models.transactions import Transaction
@@ -402,7 +403,11 @@ def open_copy(
     if target.exists():
         raise HTTPException(
             status_code=409,
-            detail=f"A company file named '{filename}' is already here. Open that one, or remove it first.",
+            detail=said(
+                "A company file named '{}' is already here. Open that one, or "
+                "remove it first.",
+                filename,
+            ),
         )
     work = Path(tempfile.mkdtemp(prefix="sbacopy-"))
     try:

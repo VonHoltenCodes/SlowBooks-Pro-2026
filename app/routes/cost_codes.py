@@ -10,6 +10,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from app.services.terminology import said
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
 from app.models.accounts import Account
@@ -87,7 +88,7 @@ def _check_code_clash(db: Session, code: str, exclude_id=None):
     clash = db.query(CostCode).filter(CostCode.code.ilike(code)).first()
     if clash and clash.id != exclude_id:
         raise HTTPException(
-            status_code=409, detail=f"Cost code '{clash.code}' already exists"
+            status_code=409, detail=said("Cost code '{}' already exists", clash.code)
         )
 
 

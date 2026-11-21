@@ -5,6 +5,7 @@ from decimal import Decimal
 from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
+from app.services.terminology import said
 from app.database import get_db
 from app.routes._helpers import clamp_pagination
 from app.routes.payroll._router import router
@@ -278,7 +279,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         run_type = PayRunType(data.run_type)
     except ValueError:
         raise HTTPException(
-            status_code=400, detail=f"Invalid run_type: {data.run_type}"
+            status_code=400, detail=said("Invalid run_type: {}", data.run_type)
         )
     if not data.stubs:
         # A run with nobody on it used to be a 201 that paid no one. An

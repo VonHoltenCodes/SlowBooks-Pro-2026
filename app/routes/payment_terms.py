@@ -19,6 +19,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.bills import Bill
 from app.models.contacts import Customer, Vendor
@@ -247,10 +248,9 @@ def _check_name(name: str, rule: dict) -> None:
             meaning = f"due in {parser._days(read.net_days)}"
         raise HTTPException(
             status_code=409,
-            detail=(
-                f'"{name}" already means {meaning}, so a term by that name keeps '
-                "that rule. Give this term another name."
-            ),
+            detail=said('"{}" already means ', name)
+            + meaning
+            + ", so a term by that name keeps that rule. Give this term another name.",
         )
 
 
@@ -270,7 +270,7 @@ def _existing_named(db: Session, name: str, except_id: int | None = None):
 
 def _taken(name: str):
     raise HTTPException(
-        status_code=409, detail=f'"{name}" is already on the terms list.'
+        status_code=409, detail=said('"{}" is already on the terms list.', name)
     )
 
 
@@ -410,10 +410,9 @@ def update_term(
         if docs or others:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"{term.name} {_carried(docs, others)}, so its name stays. Add "
-                    "a new term and make this one inactive."
-                ),
+                detail=said("{} ", term.name)
+                + _carried(docs, others)
+                + ", so its name stays. Add a new term and make this one inactive.",
             )
     rule = {k: getattr(term, k) for k in RULE_FIELDS}
     rule["discount_percent"] = (
@@ -439,10 +438,11 @@ def update_term(
         if docs:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"{term.name} {_carried(docs, None)}, so its rule stays as "
-                    "they were made under it. Add a new term and make this one "
-                    "inactive."
+                detail=said("{} ", term.name)
+                + _carried(docs, None)
+                + (
+                    ", so its rule stays as they were made under it. Add a new "
+                    "term and make this one inactive."
                 ),
             )
         _check_rule(proposed)

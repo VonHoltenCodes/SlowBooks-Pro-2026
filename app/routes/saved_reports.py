@@ -12,6 +12,7 @@ from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel
+from app.services.terminology import said
 from app.schemas.common import BIGINT_MAX, BIGINT_MIN, StrictModel
 from sqlalchemy.orm import Session
 
@@ -119,7 +120,11 @@ def create_saved_report(data: SavedReportCreate, db: Session = Depends(get_db)):
     if data.report_type not in _ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown report_type '{data.report_type}'. Allowed: {sorted(_ALLOWED_TYPES)}",
+            detail=said(
+                "Unknown report_type '{}'. Allowed: {}",
+                data.report_type,
+                sorted(_ALLOWED_TYPES),
+            ),
         )
     if not data.name.strip():
         raise HTTPException(status_code=400, detail="name is required")

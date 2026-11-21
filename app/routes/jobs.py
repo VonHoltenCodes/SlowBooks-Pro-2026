@@ -14,6 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session, joinedload
 
+from app.services.terminology import said
 from app.models.transactions import LEDGER_BASIS_OPTION, READ_ALL
 from app.database import get_db
 from app.routes._helpers import refuse_unknown_filters, reject_null_updates
@@ -98,7 +99,7 @@ def _check_name_clash(db: Session, customer_id: int, name: str, exclude_id=None)
     if clash and clash.id != exclude_id:
         raise HTTPException(
             status_code=409,
-            detail=f"This customer already has a job named '{clash.name}'",
+            detail=said("This customer already has a job named '{}'", clash.name),
         )
 
 

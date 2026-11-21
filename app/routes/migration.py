@@ -20,6 +20,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.routes._roles import may_run_payroll
 from app.database import get_db
 from app.services import (
@@ -55,7 +56,9 @@ SOURCES = {
 def _source(key: str):
     entry = SOURCES.get(key)
     if not entry:
-        raise HTTPException(status_code=400, detail=f"Unknown migration source: {key}")
+        raise HTTPException(
+            status_code=400, detail=said("Unknown migration source: {}", key)
+        )
     return entry
 
 
@@ -152,7 +155,9 @@ def _members(filename: str, content: bytes) -> list[tuple[str, bytes]]:
     try:
         archive = zipfile.ZipFile(io.BytesIO(content))
     except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail=f"{filename} is not a zip file")
+        raise HTTPException(
+            status_code=400, detail=said("{} is not a zip file", filename)
+        )
     members = []
     with archive:
         for info in archive.infolist():

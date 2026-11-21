@@ -19,6 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.bills import Bill
 from app.models.invoices import Invoice
@@ -96,13 +97,15 @@ async def scan_receipt(
     if content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="Receipt must be a PNG, JPEG, WebP image or PDF "
-            f"(got '{file.content_type or 'unknown'}').",
+            detail=said(
+                "Receipt must be a PNG, JPEG, WebP image or PDF (got '{}').",
+                file.content_type or "unknown",
+            ),
         )
     extension = Path(file.filename or "").suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(
-            status_code=400, detail=f"File extension '{extension}' not allowed"
+            status_code=400, detail=said("File extension '{}' not allowed", extension)
         )
 
     engine = ocr_engines.get_engine(get_setting_raw(db, "ocr_engine"))

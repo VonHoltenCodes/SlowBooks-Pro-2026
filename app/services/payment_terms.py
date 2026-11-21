@@ -21,6 +21,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.models.payment_terms import DATE_DRIVEN, END_OF_MONTH, STANDARD, PaymentTerm
 
 # What a document without a rule it understands has always been given.
@@ -418,8 +419,11 @@ def due_date_for(db: Session, on: date, text: Optional[str]) -> date:
     except OverflowError:
         raise HTTPException(
             status_code=422,
-            detail=f'"{(text or "").strip()}" from {on.isoformat()} runs past '
-            "the calendar; date the document earlier.",
+            detail=said(
+                '"{}" from {} runs past the calendar; date the document earlier.',
+                (text or "").strip(),
+                on.isoformat(),
+            ),
         )
 
 
@@ -777,9 +781,11 @@ def picked_term_id(
     if _key(term.name) != _key(text):
         raise HTTPException(
             status_code=409,
-            detail=(
-                f'The terms "{(text or "").strip()}" are not "{term.name}", so '
-                "they can't be tied to it. Change the terms or the term picked."
+            detail=said(
+                'The terms "{}" are not "{}", so they can\'t be tied to it. '
+                "Change the terms or the term picked.",
+                (text or "").strip(),
+                term.name,
             ),
         )
     return term.id
