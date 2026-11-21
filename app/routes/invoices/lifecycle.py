@@ -78,8 +78,10 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
         raise HTTPException(
             status_code=400,
             detail=(
-                "Cannot void an invoice with payments applied. Void the "
-                "payment(s) first, then void the invoice."
+                # no article before the noun: a company that calls it a
+                # pledge read "an pledge"
+                "This invoice has payments applied and cannot be voided. "
+                "Void the payment(s) first, then void the invoice."
             ),
         )
     check_closing_date(
@@ -796,4 +798,16 @@ def duplicate_invoice(
     if new_invoice.customer:
         resp.customer_name = invoice_customer_name(new_invoice)
     resp.jobs_left_off = left_off
+    # the copy is a new sale: its answer says what a new invoice's says
+    # about a missing or expired exemption certificate
+    from app.services.tax_exemption import note_certificate
+
+    note_certificate(
+        db,
+        resp,
+        new_invoice.customer,
+        new_invoice.date,
+        new_invoice.job_id,
+        bool(new_invoice.tax_exempt),
+    )
     return resp

@@ -9,8 +9,14 @@ NEW-276 / W-225: a server that refused the message itself (a 554 after the
 body, a refused DATA, a 554 greeting) lost its reason everywhere; batch
 sends pointed at a log that did not have it. Every stage of the
 conversation is run here against a plain loopback stub, and each answer
-says what was refused, in the server's words where we have no sentence of
-our own. No real network; the password is made up per test.
+says what was refused. No real network; the password is made up per test.
+
+The rule since: the server's own words are in no sentence. A refusal with
+no sentence of its own reads "The mail server refused the message." or
+"The mail server refused the connection.", ending with where the reason
+can be read; the server's reply is the line under the sentence in Recent
+sends and follows the sentence in Test Email's answer, both an
+administrator's, as it was received.
 """
 
 import secrets
@@ -60,7 +66,8 @@ class StageStub:
                 conn, _ = self.sock.accept()
             except OSError:
                 continue
-            conn.settimeout(5)
+            # no side of the conversation waits less than the client does
+            conn.settimeout(20)
             try:
                 self._talk(conn)
             except OSError:
@@ -135,14 +142,15 @@ class StageStub:
                 say("502 5.5.2 not implemented")
 
 
-# stage → (the failure's sentence, the server's words in Recent sends)
+# stage → (the failure's sentence, the line under it in Recent sends: the
+# server's reply, or the plain cause of a connection that failed)
 STAGES = {
     "greeting": (
-        "The mail server refused the connection: 554 5.3.2 no SMTP service here.",
+        "The mail server refused the connection.",
         "554 5.3.2 no SMTP service here",
     ),
     "ehlo": (
-        "The mail server refused the connection: 550 5.7.1 Client host rejected.",
+        "The mail server refused the connection.",
         "550 5.7.1 Client host rejected",
     ),
     "mail": (
@@ -156,20 +164,23 @@ STAGES = {
         f"{TO}: 550 5.1.1 User unknown",
     ),
     "data": (
-        "The mail server refused the message: 503 5.5.1 No valid recipients.",
+        "The mail server refused the message.",
         "503 5.5.1 No valid recipients",
     ),
     "body": (
-        "The mail server refused the message: 554 5.7.1 Message rejected as spam.",
+        "The mail server refused the message.",
         "554 5.7.1 Message rejected as spam",
     ),
     "utf8": (
-        "The mail server refused the message: 550 5.7.1 Absender ungültig.",
+        "The mail server refused the message.",
         "550 5.7.1 Absender ungültig",
     ),
+    # the stub hangs up once it has the whole message, before answering:
+    # the server was reached and may have taken it
     "drop": (
-        "The server could not be reached — check the host, port, and the Use "
-        "TLS setting.",
+        "The connection to the mail server was lost after the message was "
+        "handed to it, before it answered, so the email may or may not have "
+        "gone out. Check with the recipient before sending it again.",
         "Connection unexpectedly closed",
     ),
     "timeout": (
@@ -179,6 +190,11 @@ STAGES = {
         "timed out",
     ),
 }
+
+# the stages with no reply from the server: a connection that failed
+NO_REPLY = ("drop", "timeout")
+# where an administrator is told the reply can be read
+SEE_WHY = "The reason is under Settings → Email (SMTP) → Recent sends."
 
 # Python's wrapping, any piece of which in an answer is NEW-275
 PYTHON = ("b'", 'b"', "', '", "{'", "('", "\\x", "\\n", "[sender", "[data")
@@ -238,23 +254,36 @@ def stage(request, db_session, quick_timeout):
     server.close()
 
 
-def test_test_email_names_the_stage_in_the_servers_words(client, stage):
+def test_test_email_gives_the_sentence_then_the_servers_reply(client, stage):
     sentence, words = STAGES[stage]
+    if stage == "rcpt":
+        # Test Email sends to the From address
+        sentence, words = sentence.replace(TO, FROM), words.replace(TO, FROM)
     r = client.post("/api/settings/test-email")
     assert r.status_code == 502, r.text
     detail = r.json()["detail"]
     _plain(detail)
-    expected = f"Test email failed to send. {sentence} The full list is under "
-    if stage == "rcpt":
-        # Test Email sends to the From address
-        expected = expected.replace(TO, FROM)
-    assert detail.startswith(expected), detail
-    (row,) = client.get("/api/email-log?status=failed").json()["rows"]
-    assert (
-        row["failure"]
-        == expected[len("Test email failed to send. ") :].split(" The full list")[0]
+    # the sentence, then (Test Email is an administrator's) the server's
+    # reply as it was received; a connection that failed has no reply
+    reply = "" if stage in NO_REPLY else f" The mail server's reply: {words}."
+    # a message handed over before the connection was lost may have gone
+    # out: the answer does not open by saying it was not sent
+    opening = (
+        "Test email may or may not have been sent."
+        if "may or may not have gone out" in sentence
+        else "Test email failed to send."
     )
-    assert row["error_message"] == words.replace(TO, FROM)
+    assert detail == (
+        f"{opening} {sentence}{reply} The full list is under "
+        "Settings → Email (SMTP) → Recent sends."
+    )
+    (row,) = client.get("/api/email-log?status=failed").json()["rows"]
+    # `failure` is the sentence alone, for every reader; the reply (or the
+    # plain cause) is the row's other field, an administrator's
+    assert row["failure"] == sentence
+    assert row["error_message"] == words
+    if stage not in ("mail", "rcpt"):
+        assert words not in row["failure"]
 
 
 def _overdue(db):
@@ -292,7 +321,7 @@ def no_pdfs(monkeypatch):
 
 
 @pytest.mark.parametrize("which", ["body", "data", "greeting"])
-def test_every_batch_path_gives_the_reason_not_a_pointer(
+def test_every_batch_path_gives_the_sentence_a_single_send_gives(
     client, db_session, seed_accounts, seed_customer, no_pdfs, quick_timeout, which
 ):
     from tests.test_donor_documents import _giving_year
@@ -323,16 +352,19 @@ def test_every_batch_path_gives_the_reason_not_a_pointer(
     finally:
         server.close()
     assert len(answers) == 4, answers
+    # the stage, and nothing of the server's after it: the sentence ends
+    # with where the reply can be read (the reader here is an administrator)
     assert giving == [
-        f"Test Customer: the giving statement could not be sent. {sentence}"
+        f"Test Customer: the giving statement could not be sent. {sentence} {SEE_WHY}"
     ]
     for text in answers + giving:
-        assert text.endswith(sentence), text
+        assert text.endswith(f"could not be sent. {sentence} {SEE_WHY}"), text
         assert "email log" not in text
+        assert STAGES[which][1] not in text
         _plain(text)
 
 
-def test_a_documents_email_gives_the_servers_words(
+def test_a_documents_email_gives_the_sentence_and_never_the_servers_words(
     client, db_session, seed_accounts, monkeypatch, quick_timeout
 ):
     import app.routes.invoices.documents as documents
@@ -350,8 +382,8 @@ def test_a_documents_email_gives_the_servers_words(
     finally:
         server.close()
     assert r.status_code == 502, r.text
-    assert r.json()["detail"].startswith(
-        "Email could not be sent. " + STAGES["body"][0]
+    assert r.json()["detail"] == (
+        f"Email could not be sent. The mail server refused the message. {SEE_WHY}"
     )
 
 
@@ -361,7 +393,8 @@ OLD_ROWS = [
     (
         "(530, b'5.7.0 Authentication Required', 'books@example.com')",
         "530 5.7.0 Authentication Required",
-        "The mail server wants a sign-in",
+        # the old tuple does not say whether a sign-in was made
+        "The mail server asked for a sign-in before it would take the email.",
     ),
     (
         "{'mail199@example.com': (550, b'5.1.1 User unknown'), "
@@ -379,8 +412,8 @@ OLD_ROWS = [
     (
         "(554, b'5.7.1 Message rejected as spam')",
         "554 5.7.1 Message rejected as spam",
-        # the old tuple lost the stage, and its words are not said in the
-        # sentence (W-228, W-231); the administrator's line keeps them
+        # the old tuple lost the stage (W-231), and no sentence says the
+        # server's words; the administrator's line keeps them
         "The mail server refused the email.",
     ),
     (
@@ -437,17 +470,21 @@ def test_every_smtplib_exception_is_stored_as_plain_words():
         assert failure_sentence(stored_text(error)) == failure_sentence(error)
 
 
-def test_a_server_that_echoes_the_password_is_scrubbed():
+def test_a_reply_that_repeats_the_sign_in_is_kept_as_it_was_received():
+    """Nothing in a reply is changed or hidden: it is an administrator's,
+    who set the sign-in. The sentence, which everyone reads, holds none of
+    it."""
     import base64
 
     password = secrets.token_urlsafe(12)
     echoed = base64.b64encode(f"\0books\0{password}".encode()).decode()
-    error = smtplib.SMTPAuthenticationError(
-        535, f"5.7.8 rejected {echoed} ({password})".encode()
-    )
-    text = stored_text(error, hidden=[password], user="books")
-    assert password not in text and echoed not in text
-    assert text.endswith("535 5.7.8 rejected •••• (••••)")
+    said = f"5.7.8 rejected {echoed} ({password})"
+    error = smtplib.SMTPAuthenticationError(535, said.encode())
+    text = stored_text(error)
+    assert text == f"[auth] 535 {said}"
+    assert server_words(text) == f"535 {said}"
+    for sentence in (failure_sentence(text), failure_sentence(error)):
+        assert sentence == "The server rejected the username or password — check both."
 
 
 def test_the_retired_pointer_is_gone_from_the_app():

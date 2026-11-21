@@ -594,7 +594,7 @@ def update_settings(
 
 
 @router.post("/test-email")
-def test_email(db: Session = Depends(get_db)):
+def test_email(request: Request, db: Session = Depends(get_db)):
     """Feature 8: Send a test email to verify SMTP settings."""
     settings = get_all_settings(db)
     if not settings.get("smtp_host"):
@@ -610,31 +610,22 @@ def test_email(db: Session = Depends(get_db)):
             entity_type="settings_test",
         )
         if not sent:
-            # send_email() swallows the SMTP error and logs it; read that row
-            # back so the failure can say the reason itself (#447) instead of
-            # sending the user off to find a log that had no UI.
-            from app.models.email_log import EmailLog
-            from app.services.email_errors import FailureReader, failure_sentence
+            # send_email() swallows the SMTP error and logs it; the answer
+            # says the reason itself (#447): the sentence and, Test Email
+            # being an administrator's, the mail server's reply as it was
+            # received, read through the one reader of the log
+            from app.routes._roles import reads_mail_server_words
+            from app.services.email_errors import failed_test_email_detail
 
-            row = (
-                db.query(EmailLog)
-                .filter(EmailLog.entity_type == "settings_test")
-                .order_by(EmailLog.id.desc())
-                .first()
+            detail = failed_test_email_detail(
+                db, reads_mail_server_words(request), settings.get("smtp_host", "")
             )
-            # the sentence stands alone (W-216): the server's raw reply,
-            # which was pasted in front of it, stays on the log row for an
-            # administrator (Recent sends); read through the one reader,
-            # which scrubs any echo of the sign-in (W-228)
-            sentence = (
-                FailureReader(db).read(row, admin=False).sentence
-                if row is not None
-                else None
-            ) or failure_sentence("", settings.get("smtp_host", ""))
-            detail = "Test email failed to send. " + sentence
-            detail += " The full list is under Settings → Email (SMTP) → Recent sends."
             raise HTTPException(status_code=502, detail=detail)
-        return {"status": "sent"}
+        from app.services.email_errors import sent_answer
+
+        # with a note when the server refused a copy (an Always CC or
+        # Always BCC address it does not take)
+        return sent_answer(db, "settings_test", None)
     except HTTPException:
         # Don't let the catch-all below rewrite our own 502 into a 500.
         raise

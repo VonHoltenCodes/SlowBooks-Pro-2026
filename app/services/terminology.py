@@ -42,6 +42,9 @@ NONPROFIT: dict[str, str] = {
     "Recent Invoices": "Recent Pledges & Invoices",
     "The last five invoices": "The last five pledges and invoices",
     "Total Invoiced": "Total Pledged",
+    # Income by Customer's count column: every sales document in the row,
+    # so a nonprofit's names all three kinds it counts
+    "Invoices & Receipts": "Pledges, Invoices & Donations",
     "Sales Receipt": "Donation",
     "Sales Receipts": "Donations",
     "Enter Sales Receipts": "Enter Donations",
@@ -187,6 +190,33 @@ class Terms:
 
         return _WORD_RES[self.mode].sub(_swap, s)
 
+    def text_keeping_addresses(self, s: str) -> str:
+        """text() for a sentence that may hold an email address: the prose
+        is reworded, a run of characters with an @ in it never is (an
+        address is data: invoices@customer.example is nobody's address
+        once "invoices" is swapped).
+
+        The time taken grows with the length of the sentence and no
+        faster, whatever is in it: one pass cuts it at its white space,
+        and each stretch between two addresses is reworded whole (so a
+        phrase of two words is still found)."""
+        if not self._dict or not s:
+            return s
+        if "@" not in s:
+            return self.text(s)
+        out, prose = [], []
+        for piece in _WHITE_SPACE.split(s):
+            if "@" in piece:
+                if prose:
+                    out.append(self.text("".join(prose)))
+                    prose = []
+                out.append(piece)
+            else:
+                prose.append(piece)
+        if prose:
+            out.append(self.text("".join(prose)))
+        return "".join(out)
+
     def slug(self, key: str) -> str:
         """Filename form: ``profit-loss`` / ``statement-of-activities``."""
         return re.sub(r"[^a-z0-9]+", "-", self(key).lower()).strip("-")
@@ -194,6 +224,23 @@ class Terms:
     def compact(self, key: str) -> str:
         """CamelCase form for document filenames: ``SalesReceipt`` / ``Donation``."""
         return re.sub(r"\W", "", self(key))
+
+
+# white space, kept by split() so a sentence joins back as it was
+_WHITE_SPACE = re.compile(r"(\s+)")
+
+
+class AsWritten(str):
+    """Text that is shown exactly as it is written: the vocabulary swap
+    every HTTP error body passes through (app/main.py) leaves it alone.
+
+    For a sentence that holds data and not only prose of ours: an email
+    address, a mail server's reply, a document's own printed face, a
+    person's name. Swapping whole words inside those turns
+    invoices@customer.example into an address nobody was sent to. Whoever
+    builds such a sentence words its prose itself."""
+
+    __slots__ = ()
 
 
 def document_reference(face: str, number, name: str | None = None) -> str:

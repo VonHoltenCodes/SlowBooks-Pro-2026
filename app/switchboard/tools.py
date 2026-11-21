@@ -727,7 +727,14 @@ def with_left_blank(route: str, data, answer, tax=None, fallbacks=None):
             )
         elif tax["ask"]:
             blank.append(TAX_LABEL)
-        extra = {"tax_rate_source": tax["source"], "tax_note": tax["note"]}
+        # SlowBooks Pro may answer with a note of its own on the document (a
+        # missing or expired exemption certificate): it is kept, in front of
+        # ours, never written over
+        note = tax["note"]
+        theirs = record.get("tax_note")
+        if isinstance(theirs, str) and theirs.strip() and theirs.strip() not in note:
+            note = f"{theirs.strip()} {note}"
+        extra = {"tax_rate_source": tax["source"], "tax_note": note}
     out = {"left_blank": blank, "defaulted": defaulted, **extra}
     if isinstance(answer, dict):
         return {**answer, **out}

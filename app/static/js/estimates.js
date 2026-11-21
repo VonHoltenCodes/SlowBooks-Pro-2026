@@ -227,14 +227,16 @@ const EstimatesPage = {
         e.preventDefault();
         const form = e.target;
         try {
-            await API.post(`/estimates/${id}/email`, {
+            const res = await API.post(`/estimates/${id}/email`, {
                 recipient: form.recipient.value,
                 cc: form.cc.value.trim() || null,
                 bcc: form.bcc.value.trim() || null,
                 subject: form.subject.value.trim() || null,
                 message: form.message.value,
             });
-            toast('Estimate emailed');
+            // a copy the mail server refused is said with it
+            toast(res && res.note ? `Estimate emailed. ${res.note}` : 'Estimate emailed',
+                res && res.note ? 'warning' : 'success');
             closeModal();
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -787,9 +789,9 @@ const EstimatesPage = {
             ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}${CostTypes.cellHtml('line-cost-type', line.cost_type || null)}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
             ${EstimatesPage.unitCell(line)}
-            ${EstimatesPage.showsCost() ? `<td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" aria-label="Unit cost" oninput="EstimatesPage.recalc()"></td>
-            <td><input class="line-markup" type="number" step="0.0001" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" aria-label="Markup percent" oninput="EstimatesPage.recalc()"></td>` : ''}
-            <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" aria-label="Price" oninput="EstimatesPage.recalc()"></td>
+            ${EstimatesPage.showsCost() ? `<td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" oninput="EstimatesPage.recalc()"></td>
+            <td><input class="line-markup" type="number" step="0.0001" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" oninput="EstimatesPage.recalc()"></td>` : ''}
+            <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="EstimatesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="EstimatesPage.removeLine(${idx})">X</button></td>
@@ -799,13 +801,15 @@ const EstimatesPage = {
     // A commercial-bid line that carries its own markup (made through the
     // API) keeps it: the markup shows under the cost, and its rate shows the
     // marked-up price read-only (#774).
+    // It is named by its line: nameFields puts the number right as the row
+    // lands and whenever the lines change (data-line-name).
     keptMarkupHtml(line) {
         // kept on every company's rows, so a Business or Nonprofit save does
         // not drop the rule that priced the line in construction (#774);
         // only construction prices by it, so only there is it shown
         if (line.markup_pct == null) return '';
         if (!Terms.isConstruction()) return `<input type="hidden" class="line-markup" value="${escapeHtml(line.markup_pct)}">`;
-        return `<label style="display:block; font-size:11px; color:var(--text-muted);">+<input class="line-markup" type="number" step="0.0001" min="-100" max="10000" style="width:64px;" value="${escapeHtml(line.markup_pct)}" aria-label="Markup percent" title="This line's own markup on its cost" oninput="EstimatesPage.recalc()">%</label>`;
+        return `<label style="display:block; font-size:11px; color:var(--text-muted);">+<input class="line-markup" type="number" step="0.0001" min="-100" max="10000" style="width:64px;" value="${escapeHtml(line.markup_pct)}" aria-label="Markup percent, line 1" data-line-name title="This line's own markup on its cost" oninput="EstimatesPage.recalc()">%</label>`;
     },
 
     addLine() {
@@ -817,8 +821,8 @@ const EstimatesPage = {
 
     removeLine(idx) {
         const row = $(`[data-eline="${idx}"]`);
-        if (row) row.remove();
-        EstimatesPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => EstimatesPage.recalc())) EstimatesPage.recalc();
     },
 
     itemSelected(idx) {
@@ -964,6 +968,7 @@ const EstimatesPage = {
             data.terms = form.terms ? form.terms.value : null;
         }
 
+        if (!ZeroTotal.ask('Estimate', EstimatesPage.recalc().total)) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {

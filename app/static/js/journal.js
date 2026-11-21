@@ -466,7 +466,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                             <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="JournalPage.removeLine(this)">X</button></td>
                         </tr>
                         <tr data-jeline="1">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
@@ -474,7 +474,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                             <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="JournalPage.removeLine(this)">X</button></td>
                         </tr>
                     </tbody>
                 </table>
@@ -583,6 +583,11 @@ const JournalPage = {
         return lines;
     },
 
+    // The shared Remove line: names follow, and the keyboard stays on the form.
+    removeLine(btn) {
+        if (!LineOrder.removeLine(btn, () => JournalPage.recalc())) JournalPage.recalc();
+    },
+
     addLine() {
         const idx = JournalPage._lineCount++;
         const acctOpts = JournalPage._accounts.map(a =>
@@ -595,7 +600,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                 <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                 <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="JournalPage.removeLine(this)">X</button></td>
             </tr>`);
     },
 
@@ -608,22 +613,20 @@ const JournalPage = {
     splitApply(row, res) {
         const isDebit = (parseFloat(row.querySelector('.je-debit')?.value) || 0) > 0;
         const baseDesc = row.querySelector('.je-desc')?.value || '';
-        let anchor = row;
-        res.lines.forEach((ln, i) => {
-            const clone = row.cloneNode(true);
+        const shares = res.lines.map(ln => {
+            // a line of its own: its pickers plain again, its choices kept
+            const clone = LineOrder.cloneRow(row);
             clone.dataset.jeline = JournalPage._lineCount++;
-            // cloneNode drops <select> state; copy it by hand
-            row.querySelectorAll('select').forEach((sel, k) => { clone.querySelectorAll('select')[k].value = sel.value; });
             clone.querySelector('.je-desc').value = `${baseDesc} (${res.rule_name}: ${Nonprofit.label(ln.function) || ln.class_name || 'share'})`;
             clone.querySelector(isDebit ? '.je-debit' : '.je-credit').value = Number(ln.amount).toFixed(2);
             clone.querySelector(isDebit ? '.je-credit' : '.je-debit').value = 0;
             const fund = clone.querySelector('.je-function-fund'); if (fund) fund.value = ln.class_id || '';
             const fn = clone.querySelector('.je-function'); if (fn) fn.value = ln.function || '';
-            anchor.insertAdjacentElement('afterend', clone);
-            anchor = clone;
+            return clone;
         });
-        row.remove();
-        JournalPage.recalc();
+        // the shares take the line's place: every line named by its place
+        // again, the keyboard on the first share's Split
+        LineOrder.replaceRow(row, shares, () => JournalPage.recalc(), row.querySelector('.np-split'));
     },
 
     recalc() {
@@ -651,6 +654,7 @@ const JournalPage = {
         e.preventDefault();
         const form = e.target;
         const lines = JournalPage.collectLines();
+        if (!ZeroTotal.ask('Journal Entry', lines.reduce((sum, l) => sum + l.debit + l.credit, 0))) return;
         if (lines.length < 2) { toast('At least 2 lines required', 'error'); return; }
         // an entry already saved (opened from the journal or the register,
         // #388) asks before its changes save, as every edit does (#481)

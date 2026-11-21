@@ -178,8 +178,8 @@ const FieldTickets = {
         const typeOpts = Object.entries(FieldTickets.LINE_TYPES).map(([k, v]) => `<option value="${k}" ${type === k ? 'selected' : ''}>${v}</option>`).join('');
         const num = (cls, v, step) => `<input class="${cls}" ${d} type="number" step="${step}" value="${v ?? ''}" oninput="FieldTickets.recalc()" style="width:80px">`;
         return `<tr class="ft-line">
-            <td><select class="ft-type" ${d || (kind === 'material' ? 'disabled' : '')}>${typeOpts}</select></td>
-            <td><select class="ft-who" ${d}>${FieldTickets._whoOpts(line)}</select></td>
+            <td><select class="ft-type" ${d || (kind === 'material' ? 'disabled' : '')} onchange="FieldTickets.recalc()">${typeOpts}</select></td>
+            <td><select class="ft-who" ${d} onchange="FieldTickets.recalc()">${FieldTickets._whoOpts(line)}</select></td>
             <td><input class="ft-ldesc" ${d} value="${escapeHtml(line.description || '')}"></td>
             <td class="amount">${num('ft-qty', line.quantity, '0.0001')}</td>
             <td><input class="ft-unit" ${d} maxlength="20" value="${escapeHtml(line.unit || '')}" style="width:50px"></td>
@@ -219,22 +219,108 @@ const FieldTickets = {
         if (!body) return;
         const kind = FieldTickets._editing.kind;
         body.insertAdjacentHTML('beforeend', FieldTickets.lineRowHtml({ line_type: kind === 'material' ? 'material' : 'labor' }, body.children.length, kind, ''));
+        FieldTickets.recalc();
     },
 
+    // ---- What the lines add up to -------------------------------------
+    // One reading of the lines for the figures the form shows and for the
+    // $0.00 question, so the two cannot disagree. A rate left blank is the
+    // server's to fill when the ticket is saved (set_lines): the cost rate
+    // from the employee on a labor line, the equipment on an equipment
+    // line, else the item picked; the bill rate from the cost rate with the
+    // job's markup. The form does not know those rates (an employee's pay
+    // is not sent to everyone who writes tickets), so such a figure is
+    // null here, "Set on save" on the form, never $0.00. A blank rate with
+    // nothing to fill it from is 0, as the server stores it.
+
+    // Whether the server's default cost rate for the line is 0 for certain:
+    // nobody and nothing picked that the line's type takes a rate from, or
+    // equipment or an item whose own rate the list shows as 0.
+    _defaultIsZero(type, who) {
+        who = who || '';
+        const zero = v => v !== undefined && v !== null && v !== '' && Number(v) === 0;
+        const byId = (list, id) => (list || []).find(x => String(x.id) === id);
+        if (type === 'labor' && who.startsWith('emp:')) return false;
+        if (type === 'equipment' && who.startsWith('eq:')) {
+            const q = byId(FieldTickets._equipment, who.slice(3));
+            return !!q && zero(q.hourly_rate);
+        }
+        if (who.startsWith('item:')) {
+            const it = byId(FieldTickets._items, who.slice(5));
+            return !!it && zero(it.cost) && it.avg_cost !== undefined && !(Number(it.avg_cost) > 0);
+        }
+        return true;
+    },
+
+    // One line's cost and bill amounts from what is typed on it ({type, who,
+    // qty, cost, bill}, the boxes' own text): a number, or null where the
+    // rate is set on save.
+    lineFigures(kind, l) {
+        const q = parseFloat(l.qty) || 0;
+        const typed = v => v !== undefined && v !== null && v !== '';
+        const unknown = q !== 0 && !FieldTickets._defaultIsZero(l.type, l.who);
+        const cost = typed(l.cost) ? q * (parseFloat(l.cost) || 0) : (unknown ? null : 0);
+        if (kind !== 'tm') return { cost, bill: null };
+        let bill;
+        if (typed(l.bill)) bill = q * (parseFloat(l.bill) || 0);
+        else if (typed(l.cost)) bill = q !== 0 && (parseFloat(l.cost) || 0) !== 0 ? null : 0;
+        else bill = unknown ? null : 0;
+        return { cost, bill };
+    },
+
+    // The footer's figures: what the known amounts add up to, whether any
+    // amount is set on save, and whether every total the form shows reads
+    // $0.00 (a T&M ticket shows two, cost and bill; a material slip, cost).
+    totals(kind, lines) {
+        const t = { cost: 0, bill: 0, costPending: false, billPending: false, lines: [] };
+        for (const l of lines) {
+            const f = FieldTickets.lineFigures(kind, l);
+            t.lines.push(f);
+            if (f.cost === null) t.costPending = true; else t.cost += f.cost;
+            if (kind !== 'tm') continue;
+            if (f.bill === null) t.billPending = true; else t.bill += f.bill;
+        }
+        t.zero = !t.costPending && ZeroTotal.isZero(t.cost)
+            && (kind !== 'tm' || (!t.billPending && ZeroTotal.isZero(t.bill)));
+        return t;
+    },
+
+    ON_SAVE: 'Set on save',
+    ON_SAVE_WHY: "The rate is blank, so it is filled in when the ticket is saved: the employee's, equipment's or item's cost rate, and the bill rate from the cost rate with the job's markup.",
+
+    // A total as the footer words it: the known amounts, and that more is
+    // set on save.
+    _totalText(sum, pending) {
+        if (!pending) return formatCurrency(sum);
+        return ZeroTotal.isZero(sum) ? FieldTickets.ON_SAVE : `${formatCurrency(sum)} + ${FieldTickets.ON_SAVE.toLowerCase()}`;
+    },
+
+    // Draws every line's amounts and the footer, and returns the figures
+    // (totals) they were drawn from. A delivery ticket carries no money.
     recalc() {
         const kind = FieldTickets._editing?.kind;
-        if (kind === 'delivery') return;
-        let cost = 0, bill = 0;
-        $$('#ft-line-body tr.ft-line').forEach(tr => {
-            const q = parseFloat(tr.querySelector('.ft-qty')?.value) || 0;
-            const c = parseFloat(tr.querySelector('.ft-cost')?.value) || 0;
-            const b = parseFloat(tr.querySelector('.ft-bill')?.value) || 0;
-            const ce = tr.querySelector('.ft-cost-amt'); if (ce) ce.textContent = formatCurrency(q * c);
-            const be = tr.querySelector('.ft-bill-amt'); if (be) be.textContent = formatCurrency(q * b);
-            cost += q * c; bill += q * b;
+        if (kind === 'delivery') return null;
+        const rows = $$('#ft-line-body tr.ft-line');
+        const t = FieldTickets.totals(kind, rows.map(tr => ({
+            type: kind === 'material' ? 'material' : tr.querySelector('.ft-type')?.value,
+            who: tr.querySelector('.ft-who')?.value,
+            qty: tr.querySelector('.ft-qty')?.value,
+            cost: tr.querySelector('.ft-cost')?.value,
+            bill: tr.querySelector('.ft-bill')?.value,
+        })));
+        const put = (el, v) => {
+            if (!el) return;
+            el.textContent = v === null ? FieldTickets.ON_SAVE : formatCurrency(v);
+            if (v === null) el.title = FieldTickets.ON_SAVE_WHY; else el.removeAttribute('title');
+        };
+        rows.forEach((tr, i) => {
+            put(tr.querySelector('.ft-cost-amt'), t.lines[i].cost);
+            put(tr.querySelector('.ft-bill-amt'), t.lines[i].bill);
         });
+        const cell = (sum, pending) => `<td class="amount"${pending ? ` title="${escapeHtml(FieldTickets.ON_SAVE_WHY)}"` : ''}>${escapeHtml(FieldTickets._totalText(sum, pending))}</td>`;
         const foot = $('#ft-line-foot');
-        if (foot) foot.innerHTML = `<tr style="font-weight:600"><td colspan="${kind === 'tm' ? 8 : 7}">Total</td><td class="amount">${formatCurrency(cost)}</td>${kind === 'tm' ? `<td class="amount">${formatCurrency(bill)}</td>` : ''}<td></td></tr>`;
+        if (foot) foot.innerHTML = `<tr style="font-weight:600"><td colspan="${kind === 'tm' ? 8 : 7}">Total</td>${cell(t.cost, t.costPending)}${kind === 'tm' ? cell(t.bill, t.billPending) : ''}<td></td></tr>`;
+        return t;
     },
 
     // The body the API takes, from the form. A blank rate is left out so
@@ -289,6 +375,15 @@ const FieldTickets = {
         e.preventDefault();
         const t = FieldTickets._editing;
         const body = FieldTickets.collect();
+        // a ticket whose totals read $0.00 on the form is asked about first,
+        // as every line form asks (ZeroTotal): the figures the footer shows
+        // decide it (recalc), so the form never reads Total $0.00 and saves
+        // without the question. An amount that is set on save is not $0.00
+        // on the form, so it is not asked about. A delivery ticket counts
+        // what arrived and carries no money, so it is not asked.
+        if (t.kind !== 'delivery') {
+            if (!ZeroTotal.ask('Field Ticket', FieldTickets.recalc().zero ? 0 : 1)) return;
+        }
         const send = (extra) => t.id
             ? API.put(`/field-tickets/${t.id}`, { ...body, ...extra })
             : API.post('/field-tickets', { job_id: FieldTickets._job.id, kind: t.kind, ...body, ...extra });

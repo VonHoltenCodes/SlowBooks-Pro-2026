@@ -8,9 +8,6 @@ later issues (#555, #556); this one leaves those seams.
 """
 
 import importlib.util
-import os
-import subprocess
-import sys
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -1224,19 +1221,9 @@ def test_pdf_says_whether_markup_was_applied_and_the_revision(
 # ── Migration ───────────────────────────────────────────────────────────────
 
 
-def test_migration_upgrades_and_downgrades(tmp_path):
+def test_migration_upgrades_and_downgrades(tmp_path, alembic_cli):
     db = tmp_path / "mig.db"
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}"}
-
-    def run(*args):
-        return subprocess.run(
-            [sys.executable, "-m", "alembic", *args],
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
+    run = alembic_cli(db)  # one time budget for the walks (tests/conftest.py)
 
     assert run("upgrade", "head").returncode == 0
     assert run("downgrade", "-1").returncode == 0

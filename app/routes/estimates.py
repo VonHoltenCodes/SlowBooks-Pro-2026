@@ -44,8 +44,12 @@ from app.services.estimating import (
     markup_parts,
 )
 from app.services.sub_customers import invoice_addresses
-from app.services.terminology import terms_from_db
-from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
+from app.services.terminology import AsWritten, terms_from_db
+from app.services.tax_exemption import (
+    note_certificate,
+    refresh_certificate_copy,
+    settle_tax_exempt,
+)
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
@@ -616,6 +620,14 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
+    note_certificate(
+        db,
+        resp,
+        estimate.customer,
+        estimate.date,
+        estimate.job_id,
+        bool(estimate.tax_exempt),
+    )
     return resp
 
 
@@ -817,6 +829,14 @@ def update_estimate(
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
+    note_certificate(
+        db,
+        resp,
+        estimate.customer,
+        estimate.date,
+        estimate.job_id,
+        bool(estimate.tax_exempt),
+    )
     return resp
 
 
@@ -975,8 +995,8 @@ def email_estimate(
     """Email the estimate PDF as an attachment, by the path an invoice uses:
     the same address checks, the same send_email (EmailLog row, always-copy
     settings) and the same 502 when SMTP is not set up."""
-    from app.routes._roles import is_admin
-    from app.services.email_errors import send_failed_detail
+    from app.routes._roles import reads_mail_server_words
+    from app.services.email_errors import send_failed_detail, sent_answer
     from app.services.email_service import (
         _get_smtp_settings,
         bad_addresses,
@@ -1004,7 +1024,8 @@ def email_estimate(
     if rejected:
         raise HTTPException(
             status_code=400,
-            detail="Not an email address: " + ", ".join(rejected[:5]) + ".",
+            # what was typed, shown as it was typed
+            detail=AsWritten("Not an email address: " + ", ".join(rejected[:5]) + "."),
         )
     try:
         copy_lists(_get_smtp_settings(db), data.cc, data.bcc)
@@ -1033,9 +1054,12 @@ def email_estimate(
     if not sent:
         raise HTTPException(
             status_code=502,
-            detail=send_failed_detail(db, "estimate", est.id, is_admin(request)),
+            detail=send_failed_detail(
+                db, "estimate", est.id, reads_mail_server_words(request)
+            ),
         )
-    return {"status": "sent"}
+    # with a note when the server refused a copy
+    return sent_answer(db, "estimate", est.id)
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)
@@ -1264,4 +1288,14 @@ def convert_to_invoice(
     if invoice.customer:
         resp.customer_name = invoice.customer.name
     resp.jobs_left_off = left_off
+    # the invoice is a new sale: its answer says what a new invoice's says
+    # about a missing or expired exemption certificate
+    note_certificate(
+        db,
+        resp,
+        invoice.customer,
+        invoice.date,
+        invoice.job_id,
+        bool(invoice.tax_exempt),
+    )
     return resp

@@ -6,7 +6,8 @@ that moved up a place read as removed and added. Demo, Haul away $60,
 Patch $50 saved as Demo, Patch $55, Sweep up $40 read four entries. The
 leftover lines are now paired by the same description first, then by the
 same amount and quantity; only what is left unmatched was removed or
-added.
+added. (Round 28 made the pairing one rule, activity._compare_lines, and
+the amount alone is enough: tests/test_activity_line_rule_r28.py.)
 
 W-230: a purchase order's form sends each kept line's id, but when no old
 id was left the lines were paired by place, and Pulls $45 → Knobs $45 read

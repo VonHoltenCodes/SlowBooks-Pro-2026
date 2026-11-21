@@ -146,7 +146,12 @@ def test_the_line_cell_is_for_every_company_and_the_function_cell_for_nonprofits
     both = np[np.index("    cellHtml(cls, selected, fundSelected) {") :]
     both = both[: both.index("\n    },")]
     assert "Nonprofit.classCellHtml(cls, fundSelected) + (Nonprofit.enabled()" in both
-    assert '<select class="${cls}">${Nonprofit.optionsHtml(selected' in both
+    # the Function picker: no name of its own (nameFields names it by its
+    # column and line), sized to share its cell with Split, not to push it
+    # out over the next column
+    assert '<select class="${cls}" style="flex:1 1 5em;min-width:5em;">' in both
+    assert '">${Nonprofit.optionsHtml(selected' in both
+    assert "aria-label" not in both
     head = np[np.index("    headHtml() {") :]
     head = head[: head.index("\n")]
     assert "Nonprofit.classHeadHtml() + (Nonprofit.enabled() ?" in head

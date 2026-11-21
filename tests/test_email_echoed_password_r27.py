@@ -1,23 +1,23 @@
-"""Round 27: a password a mail server echoes is never shown (W-228).
+"""A mail server that repeats the sign-in in its reply (W-228).
 
-A row the previous build stored kept the server's reply as Python wrote it
-("(554, b'…')"). A server that repeats the sign-in in its refusal left the
-password in that text, and round 27 put the server's words in the
-sentence everyone reads: Recent sends, a document's Activity and
-GET /api/email-log, for every role. The administrator's line was masked
-with today's password alone, so the AUTH PLAIN form, and every form of a
-password changed since, showed.
+A server may answer a refused send with the sign-in it was given: the
+password as typed, its base64, the AUTH PLAIN argument. For a time the
+server's words were put in the sentence everyone reads (Recent sends, a
+document's Activity and GET /api/email-log, for every role), and then
+masked form by form.
 
-Every stored error now leaves storage through one reader
-(email_errors.FailureReader), which scrubs each form of the sign-in it
-knows, and any token after AUTH PLAIN / AUTH LOGIN / 334 whatever it
-decodes to. A row stored the old way gives no server words in its sentence
-to anyone; an administrator's line shows them, scrubbed. A test holds the
-app to that one reader.
+The rule now, as in every released version: the server's reply is an
+administrator's, who set the sign-in, and is shown as it was received,
+with nothing in it changed or hidden, in Recent sends (GET /api/email-log's
+`error_message` for an administrator) and in Test Email's answer. Nobody
+else is given any of it: every other reader, and every sentence, holds
+none of the server's words, so nothing a server repeats can reach them.
+Every stored error leaves storage through one reader
+(email_errors.FailureReader); a test holds the app to that.
 
-W-231: the old build stored the same tuple for a refused greeting and a
-refused message, so such a row says neither ("The mail server refused the
-email."); a new row keeps its precise stage.
+W-231: a row of a release before 2.32 stored the same tuple for a refused
+greeting and a refused message, so such a row says neither ("The mail
+server refused the email."); a new row keeps its stage.
 
 W-232: a timeout read "Connection unexpectedly closed: timed out"; it reads
 "timed out", and the other socket causes read as plain causes too.
@@ -42,8 +42,8 @@ from app.models.email_log import EmailLog
 from app.models.users import ROLE_BOOKKEEPER, User
 from app.services import auth as auth_service
 from app.services.email_errors import (
+    FailureReader,
     failure_sentence,
-    scrub_secrets,
     server_words,
     stored_text,
     tls_failure_text,
@@ -122,7 +122,12 @@ def _assert_clean(text, password):
         assert form not in (text or ""), "a form of the password is shown"
 
 
-def test_an_old_row_that_echoes_the_password_shows_it_nowhere(
+OLD_REFUSAL = "The mail server refused the email."
+# what a reader who is not given the reply is told instead
+ASK_AN_ADMINISTRATOR = "An administrator can see why under Settings → Recent sends."
+
+
+def test_an_old_row_that_echoes_the_password_shows_it_to_an_administrator_alone(
     client, seed_accounts, db_session
 ):
     password = secrets.token_urlsafe(12)
@@ -132,70 +137,104 @@ def test_an_old_row_that_echoes_the_password_shows_it_nowhere(
     _old_row(db_session, _echo(password), entity_id=inv["id"])
 
     admin = client.get("/api/email-log?status=failed").json()["rows"][0]
-    bk = _bookkeeper(db_session).get("/api/email-log?status=failed").json()
-    bk = bk["rows"][0]
-    events = _activity(client, "invoice", inv["id"])["events"]
-    emailed = next(e for e in events if e["kind"] == "emailed")
+    keeper = _bookkeeper(db_session)
+    bk = keeper.get("/api/email-log?status=failed").json()["rows"][0]
+    emailed = [
+        next(
+            e
+            for e in _activity(who, "invoice", inv["id"])["events"]
+            if e["kind"] == "emailed"
+        )
+        for who in (client, keeper)
+    ]
+    # nobody but an administrator, and no sentence, holds any form of it:
+    # the bookkeeper's whole row, Activity for both, the sentence for both
     for text in (
-        admin["error_message"],
         admin["failure"],
         bk["error_message"],
         bk["failure"],
-        *emailed["details"],
+        *(d for e in emailed for d in e["details"]),
+        *(e["text"] for e in emailed),
     ):
         _assert_clean(text, password)
-    # no server words in an old row's sentence, for anyone (W-228, W-231)
-    for sentence in (admin["failure"], bk["error_message"], *emailed["details"]):
-        assert sentence == "The mail server refused the email.", sentence
-    # the administrator still reads the server's words, masked
-    assert admin["error_message"].startswith("554 5.7.1 Message rejected")
-    assert admin["error_message"].count("••••") == 3, admin["error_message"]
+    # no server words in the sentence, for anyone
+    assert admin["failure"] == bk["failure"] == OLD_REFUSAL
+    # where it is all a reader gets, it ends with who can read the reason
+    for sentence in (bk["error_message"], *(d for e in emailed for d in e["details"])):
+        assert sentence == f"{OLD_REFUSAL} {ASK_AN_ADMINISTRATOR}", sentence
+    # the administrator reads the server's reply as it was received
+    assert admin["error_message"] == "554 " + _echo(password)
 
 
-def test_an_old_row_after_the_password_changed(client, db_session):
+def test_what_settings_holds_today_changes_nothing_in_how_a_row_reads(
+    client, db_session
+):
     old = secrets.token_urlsafe(12)
     _old_row(db_session, _echo(old))
+    before = client.get("/api/email-log?status=failed").json()["rows"][0]
     _sign_in(db_session, secrets.token_urlsafe(12))  # changed since
 
     admin = client.get("/api/email-log?status=failed").json()["rows"][0]
     bk = _bookkeeper(db_session).get("/api/email-log?status=failed").json()
-    # a non-administrator never sees an old row's words
+    # a non-administrator never sees a row's words
     _assert_clean(bk["rows"][0]["error_message"], old)
+    _assert_clean(bk["rows"][0]["failure"], old)
     _assert_clean(admin["failure"], old)
-    # the AUTH PLAIN token is masked whatever it decodes to
-    assert _b64(f"\0{USER}\0{old}") not in admin["error_message"]
-    assert "AUTH PLAIN •••• seen" in admin["error_message"]
+    # the reply is not read against the sign-in at all: the same before
+    # the change and after it, as it was received
+    assert admin["error_message"] == before["error_message"] == "554 " + _echo(old)
+    assert admin["failure"] == before["failure"] == OLD_REFUSAL
 
 
-def test_every_form_a_server_can_echo_is_masked():
+STAGE_ERRORS = {
+    "the greeting": lambda said: smtplib.SMTPConnectError(554, said),
+    "EHLO": lambda said: smtplib.SMTPHeloError(550, said),
+    "sign-in": lambda said: smtplib.SMTPAuthenticationError(535, said),
+    "MAIL FROM": lambda said: smtplib.SMTPSenderRefused(553, said, USER),
+    "RCPT": lambda said: smtplib.SMTPRecipientsRefused(
+        {"ap@example.test": (550, said)}
+    ),
+    "the message": lambda said: smtplib.SMTPDataError(554, said),
+    "another reply": lambda said: smtplib.SMTPResponseException(554, said),
+}
+
+
+@pytest.mark.parametrize("stage", sorted(STAGE_ERRORS))
+def test_no_form_a_server_can_echo_is_in_any_sentence(stage):
+    """Whatever a server repeats, at whatever stage: the sentence is ours
+    alone, from the exception, from the row stored now and from the row a
+    release before 2.32 stored. The reply itself is kept as received."""
     password = secrets.token_urlsafe(12) + "+/="  # quoted forms differ
-    login_user = _b64(USER)
-    text = (
-        f"plain {password} b64 {_b64(password)} plain-arg "
+    canary = "canary" + secrets.token_hex(8)
+    said = (
+        f"5.7.1 {canary} plain {password} b64 {_b64(password)} plain-arg "
         f"{_b64(chr(0) + USER + chr(0) + password)} user-arg "
-        f"{_b64(USER + chr(0) + USER + chr(0) + password)} login-user {login_user} "
-        f"url {quote(password, safe='')} done"
+        f"{_b64(USER + chr(0) + USER + chr(0) + password)} login-user "
+        f"{_b64(USER)} url {quote(password, safe='')} AUTH PLAIN "
+        f"{_b64(chr(0) + USER + chr(0) + password)} done"
     )
-    out = scrub_secrets(text, [password], USER)
-    _assert_clean(out, password)
-    assert login_user not in out
-    assert out.endswith("done")
-    # any token after AUTH PLAIN, AUTH LOGIN or 334, whatever it decodes to
-    other = _b64(secrets.token_urlsafe(9))
-    for lead in ("AUTH PLAIN", "auth login", "334"):
-        assert scrub_secrets(f"{lead} {other} seen", [], "") == f"{lead} •••• seen"
-    # an ordinary reply is left alone
-    reply = "554 5.7.1 Message rejected as spam"
-    assert scrub_secrets(reply, [password], USER) == reply
+    error = STAGE_ERRORS[stage](said.encode())
+    stored = stored_text(error)
+    for sentence in (
+        failure_sentence(error),
+        failure_sentence(stored),
+        failure_sentence(str(error)),
+    ):
+        _assert_clean(sentence, password)
+        assert canary not in sentence and "done" not in sentence, sentence
+    # an ordinary reply and this one are kept the same way: as received
+    assert said in stored
+    assert said in server_words(stored)
+    assert said in server_words(str(error))
 
 
-def test_a_new_row_is_scrubbed_when_stored_and_again_when_read(client, db_session):
+def test_a_new_row_keeps_the_reply_and_only_an_administrator_reads_it(
+    client, db_session
+):
     password = secrets.token_urlsafe(12)
     error = smtplib.SMTPDataError(554, _echo(password).encode())
-    stored = stored_text(error, hidden=[password], user=USER)
-    _assert_clean(stored, password)
-    # a tagged row holding the password (as if written unscrubbed) is still
-    # scrubbed on the way out, in the sentence and the line
+    stored = stored_text(error)
+    assert stored == "[data] 554 " + _echo(password)
     _sign_in(db_session, password)
     db_session.add(
         EmailLog(
@@ -204,22 +243,40 @@ def test_a_new_row_is_scrubbed_when_stored_and_again_when_read(client, db_sessio
             recipient="ap@example.test",
             subject="New",
             status="failed",
-            error_message="[data] 554 5.7.1 " + _echo(password),
+            error_message=stored,
         )
     )
     db_session.commit()
     admin = client.get("/api/email-log?status=failed").json()["rows"][0]
     bk = _bookkeeper(db_session).get("/api/email-log?status=failed").json()
-    for text in (admin["error_message"], admin["failure"], bk["rows"][0]["failure"]):
+    bk = bk["rows"][0]
+    for text in (admin["failure"], bk["failure"], bk["error_message"]):
         _assert_clean(text, password)
-    assert admin["failure"].startswith("The mail server refused the message: 554")
+    # the sentence holds none of the server's words, for anyone
+    assert admin["failure"] == bk["failure"] == "The mail server refused the message."
+    assert bk["error_message"] == (
+        f"The mail server refused the message. {ASK_AN_ADMINISTRATOR}"
+    )
+    # the administrator's line is the reply as it was received
+    assert admin["error_message"] == "554 " + _echo(password)
+    # and the reader gives the reply to an administrator alone
+    row = db_session.query(EmailLog).one()
+    reader = FailureReader(db_session)
+    assert reader.read(row, admin=False).reply is None
+    assert reader.read(row, admin=True).reply == "554 " + _echo(password)
+    assert reader.read(row, admin=True).reason() == (
+        "The mail server refused the message. The reason is under Settings → "
+        "Email (SMTP) → Recent sends."
+    )
 
 
 # -- one reader for the stored text ---------------------------------------
 
 _READER = "app/services/email_errors.py"
-# writes only: the column, and EmailLog(..., error_message=...) on a new row
-_WRITE = re.compile(r"^\s*error_message=")
+# writes only: EmailLog(..., error_message=...) on a new row, and a row's
+# column set to stored_text(...) (what a write may be is held by
+# tests/test_email_failure_rule.py)
+_WRITE = re.compile(r"^\s*(?:error_message=|\w+\.error_message = stored_text\()")
 
 
 def test_no_code_reads_the_stored_error_but_the_one_reader():
@@ -237,7 +294,7 @@ def test_no_code_reads_the_stored_error_but_the_one_reader():
             if rel == "app/models/email_log.py" and "Column(" in line:
                 continue
             if rel == "app/routes/email_log.py" and line.strip() == (
-                '"error_message": words if admin else failure,'
+                '"error_message": failure.reply if admin else failure.reason() or None,'
             ):
                 continue  # the API's field, filled from FailureReader
             offenders.append(f"{rel}:{n}: {line.strip()}")
@@ -259,15 +316,11 @@ def test_an_old_refusal_reads_true_for_either_stage():
         old = str(error)  # what the previous build stored
         assert failure_sentence(old) == "The mail server refused the email."
         assert server_words(old).startswith("554 5.")
-    # a new row keeps its stage
+    # a new row keeps its stage, and the sentence is the stage alone
     greeting = stored_text(smtplib.SMTPConnectError(554, b"5.3.2 no service"))
-    assert failure_sentence(greeting) == (
-        "The mail server refused the connection: 554 5.3.2 no service."
-    )
+    assert failure_sentence(greeting) == "The mail server refused the connection."
     body = stored_text(smtplib.SMTPDataError(554, b"5.7.1 spam"))
-    assert (
-        failure_sentence(body) == "The mail server refused the message: 554 5.7.1 spam."
-    )
+    assert failure_sentence(body) == "The mail server refused the message."
 
 
 # -- W-232: a socket failure reads as its plain cause -----------------------
@@ -330,7 +383,7 @@ def test_a_tls_failure_reads_as_its_plain_cause():
 
 
 @pytest.mark.parametrize("changed", [False, True])
-def test_the_macs_old_row_shows_no_form_of_the_password(
+def test_the_macs_old_row_shows_the_reply_to_an_administrator_alone(
     client, seed_accounts, db_session, changed
 ):
     """The row as the old build stored it (the Python repr) for a reply
@@ -358,14 +411,18 @@ def test_the_macs_old_row_shows_no_form_of_the_password(
     bk_client = _bookkeeper(db_session)
     bk = bk_client.get("/api/email-log?status=failed").json()["rows"][0]
     admin = client.get("/api/email-log?status=failed").json()["rows"][0]
-    seen = _activity(bk_client, "invoice", inv["id"])["events"]
-    emailed = next(e for e in seen if e["kind"] == "emailed")
-    # a non-administrator, and Activity, see no server words at all
-    for text in (bk["error_message"], bk["failure"], *emailed["details"]):
-        assert text == "The mail server refused the email.", text
-    # an administrator sees the words, every form of the password masked
-    line = admin["error_message"]
-    assert line.startswith("554 5.7.1 Rejected: AUTH PLAIN ••••"), line
+    # a non-administrator, and Activity for every reader, see no server
+    # words at all
+    assert bk["failure"] == admin["failure"] == OLD_REFUSAL
+    details = [bk["error_message"]]
+    for who in (bk_client, client):
+        seen = _activity(who, "invoice", inv["id"])["events"]
+        details += next(e for e in seen if e["kind"] == "emailed")["details"]
+    assert len(details) == 3
+    for text in details:
+        assert text == f"{OLD_REFUSAL} {ASK_AN_ADMINISTRATOR}", text
     for form in forms:
-        assert form not in line
-        assert form not in admin["failure"]
+        assert form not in bk_client.get("/api/email-log").text
+    # an administrator reads the reply as it was received, whatever the
+    # sign-in in Settings is today
+    assert admin["error_message"] == f"554 {words}"

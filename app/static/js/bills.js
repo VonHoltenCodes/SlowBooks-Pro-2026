@@ -804,24 +804,23 @@ const BillsPage = {
     },
     splitApply(row, res) {
         const baseDesc = row.querySelector('.line-desc')?.value || '';
-        let anchor = row;
-        res.lines.forEach((ln, n) => {
-            const clone = row.cloneNode(true);
+        const shares = res.lines.map((ln, n) => {
+            // a line of its own: its pickers plain again, its choices kept
+            const clone = LineOrder.cloneRow(row);
             clone.dataset.billline = BillsPage.lineCount++;
             // the stored line is the first share; the others are new lines,
             // so only it keeps the line's id (an id sent twice is refused)
             if (n > 0) clone.dataset.lineId = '';
-            row.querySelectorAll('select').forEach((sel, k) => { clone.querySelectorAll('select')[k].value = sel.value; });
             clone.querySelector('.line-desc').value = `${baseDesc} (${res.rule_name}: ${Nonprofit.label(ln.function) || ln.class_name || 'share'})`;
             clone.querySelector('.line-qty').value = 1;
             clone.querySelector('.line-rate').value = Number(ln.amount).toFixed(2);
             const fund = clone.querySelector('.line-function-fund'); if (fund) fund.value = ln.class_id || '';
             const fn = clone.querySelector('.line-function'); if (fn) fn.value = ln.function || '';
-            anchor.insertAdjacentElement('afterend', clone);
-            anchor = clone;
+            return clone;
         });
-        row.remove();
-        BillsPage.recalc();
+        // the shares take the line's place: every line named by its place
+        // again, the keyboard on the first share's Split
+        LineOrder.replaceRow(row, shares, () => BillsPage.recalc(), row.querySelector('.np-split'));
     },
 
     addLine(line = null) {
@@ -881,8 +880,10 @@ const BillsPage = {
         e.preventDefault();
         const form = e.target;
         const { lines, missing } = BillsPage.collectLines();
-        // A bill for $0.00 is refused (item picks used to leave the rate at
-        // 0 and save one silently — W-M1).
+        // A bill for $0.00 is asked about like every document's, and then
+        // refused (item picks used to leave the rate at 0 and save one
+        // silently — W-M1).
+        if (!ZeroTotal.ask('Bill', BillsPage.recalc())) return;
         if (BillsPage.recalc() <= 0) {
             toast('Enter what the vendor charged: an amount, or a quantity and rate, on at least one line.', 'error');
             return;

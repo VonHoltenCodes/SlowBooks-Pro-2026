@@ -203,4 +203,5 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
         payment=pay_resp,
         customer_name=invoice_out.customer_name,
         warnings=inv_resp.warnings,
+        tax_note=inv_resp.tax_note,
     )

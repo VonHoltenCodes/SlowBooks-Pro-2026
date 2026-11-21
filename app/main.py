@@ -37,6 +37,7 @@ from sqlalchemy.exc import DataError
 from app.services.control_accounts import MissingControlAccount
 from app.services.dimensions import class_ids_checked
 from app.services.rate_limit import limiter
+from app.services.terminology import AsWritten
 
 from app.routes import (
     dashboard,
@@ -837,10 +838,20 @@ async def _method_not_allowed_handler(request: Request, exc: StarletteHTTPExcept
     and the protected words ("Sales Tax") stay by the dictionary's own
     rule. The vocabulary audit's walk of a running server is what found
     it (scripts/audit/vocab_walk.py)."""
-    if isinstance(exc.detail, str) and exc.detail and exc.status_code != 405:
+    if (
+        isinstance(exc.detail, str)
+        and exc.detail
+        and exc.status_code != 405
+        # a sentence holding data (an email address, a mail server's
+        # reply) is shown as it was written
+        and not isinstance(exc.detail, AsWritten)
+    ):
         terms = _company_terms()
         if terms.has_words:
-            worded = terms.text(exc.detail)
+            # an email address in a sentence is data, not prose: the words
+            # around it are reworded, the address never is (in time that
+            # grows only with the length of the sentence)
+            worded = terms.text_keeping_addresses(exc.detail)
             if worded != exc.detail:
                 return JSONResponse(
                     status_code=exc.status_code,

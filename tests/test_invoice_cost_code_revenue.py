@@ -327,8 +327,13 @@ def test_the_sales_forms_draw_the_cells_while_a_job_is_chosen():
     js = ROOT / "app" / "static" / "js"
     utils = (js / "utils.js").read_text(encoding="utf-8")
     assert "const SalesCost" in utils
-    assert 'aria-label="Line cost code"' in utils
-    assert 'aria-label="Line cost type"' in utils
+    # the two cells carry no name of their own: like every other line field
+    # they are named from their column and the line they are on now ("Cost
+    # Code, line 2"), so no two lines read the same
+    # (tests/test_browser_line_controls_r29.py reads the names in a browser)
+    assert '<select class="line-cost-code">' in utils
+    assert '<select class="line-cost-type">' in utils
+    assert '<th scope="col" class="sales-cost-col"' in utils
     inv = (js / "invoices.js").read_text(encoding="utf-8")
     assert "SalesCost.headHtml()" in inv and "SalesCost.cellHtml(line)" in inv
     assert "SalesCost.sync(" in inv and "SalesCost.fromRow(row, form)" in inv

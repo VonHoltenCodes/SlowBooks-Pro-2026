@@ -762,11 +762,7 @@ const SettingsPage = {
                             <input name="smtp_from_email" type="email" value="${escapeHtml(s.smtp_from_email || '')}"></div>
                         <div class="form-group"><label>From Name</label>
                             <input name="smtp_from_name" value="${escapeHtml(s.smtp_from_name || '')}"></div>
-                        <div class="form-group"><label>Use TLS</label>
-                            <select name="smtp_use_tls">
-                                <option value="true" ${s.smtp_use_tls !== 'false' ? 'selected' : ''}>Yes</option>
-                                <option value="false" ${s.smtp_use_tls === 'false' ? 'selected' : ''}>No</option>
-                            </select></div>
+                        ${SettingsPage._useTlsFieldHtml(s)}
                         <div class="form-group"><label>Always CC</label>
                             <input name="smtp_always_cc" aria-describedby="smtp-always-cc-help" value="${escapeHtml(s.smtp_always_cc || '')}" placeholder="office@example.com"></div>
                         <div class="form-group"><label>Always BCC</label>
@@ -1471,6 +1467,8 @@ const SettingsPage = {
     _emailSourceLabel(entityType) {
         const map = {
             invoice: T('Invoice'),
+            estimate: 'Estimate',
+            reminder: 'Payment reminder',
             statement: 'Statement',
             giving_statement: 'Giving statement',
             collection: 'Collection letter',
@@ -1483,17 +1481,18 @@ const SettingsPage = {
         return entityType || '—';
     },
 
-    // A failed row's two lines: a sentence a person can act on, and the raw
-    // SMTP error under it. The sentence is the one the API returns
-    // (`failure`, from app/services/email_errors.py — the single mapping, so
-    // the list and the test-email message never word an error two ways). The
-    // server's words (plain text from the API, one refused address per line)
-    // are shown under it, unless the sentence already says them.
+    // A failed row's two lines: a sentence a person can act on, and the mail
+    // server's own reply under it. The sentence is the one the API returns
+    // (`failure`, from app/services/email_errors.py: the single mapping, so
+    // the list and the test-email message never word an error two ways); it
+    // never holds anything the server said. The server's reply
+    // (`error_message`: plain text as it was received, one refused address
+    // per line) comes only to an administrator, whose section this is.
     _emailLogFailure(row) {
-        let raw = (row.error_message || '').trim();
+        const raw = (row.error_message || '').trim();
         const sentence = (row.failure || '').trim() || 'The email could not be sent.';
-        if (raw && sentence.includes(raw.replace(/\s+/g, ' ').replace(/[.]$/, ''))) raw = '';
-        return { sentence, raw };
+        // a reader given the sentence in both fields sees it once
+        return { sentence, raw: raw.startsWith(sentence) ? raw.slice(sentence.length).trim() : raw };
     },
 
     // A stored send time in the operator's local zone. The server sends ISO
@@ -1522,6 +1521,12 @@ const SettingsPage = {
                     const f = SettingsPage._emailLogFailure(r);
                     detail = `<div style="color:var(--danger, #b00); margin-top:2px;">${escapeHtml(f.sentence)}</div>` +
                         (f.raw ? `<div style="color:var(--text-muted); font-family:var(--font-mono); word-break:break-word; white-space:pre-line;">${escapeHtml(f.raw)}</div>` : '');
+                } else if (r.note) {
+                    // sent, though the server refused a copy: who was refused,
+                    // and the server's reply to each under it
+                    const raw = (r.error_message || '').trim();
+                    detail = `<div style="color:var(--danger, #b00); margin-top:2px;">${escapeHtml(r.note)}</div>` +
+                        (raw ? `<div style="color:var(--text-muted); font-family:var(--font-mono); word-break:break-word; white-space:pre-line;">${escapeHtml(raw)}</div>` : '');
                 }
                 return `<tr>
                     <td style="white-space:nowrap;">${escapeHtml(SettingsPage._emailLogWhen(r.sent_at))}</td>
@@ -2477,10 +2482,41 @@ const SettingsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // Use TLS, with its warning beside it while it is No: shown in the open
+    // (it is a warning, not teaching text), tied to the select so a screen
+    // reader hears it on the control, and a polite live region so choosing
+    // No is announced. The element is always there and holds the sentence
+    // or nothing. It changes nothing about what is saved or how mail is sent.
+    TLS_OFF_WARNING: 'With Use TLS off, your mail password and your mail are sent without encryption.',
+
+    tlsIsOff(saved) {
+        return saved != null && String(saved).toLowerCase() !== 'true';
+    },
+
+    _useTlsFieldHtml(s) {
+        // off is whatever the mailer reads as off: any saved value but
+        // "true" in any case ("False", "no" or "0" written through the API
+        // send unencrypted just as "false" does). Never set: on.
+        const off = SettingsPage.tlsIsOff(s.smtp_use_tls);
+        return `<div class="form-group"><label>Use TLS</label>
+                            <select name="smtp_use_tls" aria-describedby="smtp-tls-off-warning" onchange="SettingsPage.tlsChanged(this)">
+                                <option value="true" ${off ? '' : 'selected'}>Yes</option>
+                                <option value="false" ${off ? 'selected' : ''}>No</option>
+                            </select>
+                            <div id="smtp-tls-off-warning" role="status" style="color:var(--text-warning); font-size:11px; font-weight:600; margin-top:4px;">${off ? escapeHtml(SettingsPage.TLS_OFF_WARNING) : ''}</div></div>`;
+    },
+
+    tlsChanged(select) {
+        const note = document.getElementById('smtp-tls-off-warning');
+        if (note) note.textContent = select.value === 'false' ? SettingsPage.TLS_OFF_WARNING : '';
+    },
+
     async testEmail() {
         try {
-            await API.post('/settings/test-email');
-            toast('Test email sent');
+            const res = await API.post('/settings/test-email');
+            // an Always CC or Always BCC address the server refused is said
+            toast(res && res.note ? `Test email sent. ${res.note}` : 'Test email sent',
+                res && res.note ? 'warning' : 'success');
         } catch (err) {
             // The failure now carries the reason; the full history is just
             // below, so point there and refresh it (#447).
@@ -2662,7 +2698,15 @@ const SettingsPage = {
     // error: a press's failure in the server's sentence, kept on the panel
     // until Dismiss or the next press (W-208: the 3-second refresh dropped
     // it); readError: the panel's own read failing, which a refresh clears
-    _claude: { status: null, code: null, error: '', readError: '', timer: null, fallback: null },
+    // busy: the press being worked on ('connect', 'code', 'disconnect'): its
+    // buttons stay off through every draw until it answers, so a timed
+    // refresh never gives back a button whose press is still in flight
+    // asked: counts the reads and the presses, so a read that was asked
+    // before a press answered never draws over what the press made
+    // goes: a refusal that says another press or a connection is in the way
+    // ('linked' / 'unlinked': what the panel shows once that is over); the
+    // sentence goes when the panel itself shows it, looked for a few times
+    _claude: { status: null, code: null, error: '', readError: '', timer: null, fallback: null, busy: '', asked: 0, goes: '', looks: 0 },
 
     // The state in words: what the panel says, for any role.
     claudeStateWords(st) {
@@ -2685,13 +2729,17 @@ const SettingsPage = {
     // The panel: words for everyone, an administrator's buttons (data-admin,
     // so the bookkeeper sweep knows them as the administrator's). `error` is
     // a refusal or failure to show (the server's own sentence).
-    switchboardHtml(st, code, error, fallback) {
+    switchboardHtml(st, code, error, fallback, busy) {
         st = st || {};
         const admin = !!st.can_manage;
+        // a press is being worked on: no second one until it answers
+        const off = busy ? ' disabled' : '';
         const words = SettingsPage.claudeStateWords(st);
         const colour = st.state === 'connected' ? 'var(--text-success)'
             : (st.state === 'unreachable' ? 'var(--text-warning)' : 'var(--text-muted)');
-        let html = `<div><span style="color:var(--text-muted);">Status:</span> <strong id="claude-relay-state" style="color:${colour};">${escapeHtml(words)}</strong>`
+        // every block of the panel carries an id: a refresh replaces only the
+        // blocks that changed (_claudeRedraw), found again by these
+        let html = `<div id="claude-relay-status"><span style="color:var(--text-muted);">Status:</span> <strong id="claude-relay-state" style="color:${colour};">${escapeHtml(words)}</strong>`
             + (st.linked && st.company && st.this_company ? ` <span style="color:var(--text-muted);">&middot; Company: ${escapeHtml(st.company)}</span>` : '')
             + '</div>';
         if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
@@ -2713,19 +2761,24 @@ const SettingsPage = {
             html += '<div id="claude-relay-fallback" role="alert" style="margin-top:8px;">'
                 + `<div>${escapeHtml(shown.sentence || '')}</div>`
                 + '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:6px;">'
-                + copyLineHtml('claude-relay-fallback-name', 'Relay name', shown.slug, 'SettingsPage.copyClaudeFallbackName()')
+                // the same line as copyLineHtml draws, its button named for the
+                // notice: while connected again the panel has a second Relay
+                // name line, and no two buttons share a name
+                + '<span style="font-size:12px; color:var(--text-muted);">Relay name</span>'
+                + `<code id="claude-relay-fallback-name" style="font-family:var(--font-mono); font-size:12px; user-select:all; overflow-wrap:anywhere;">${escapeHtml(shown.slug || '')}</code>`
+                + '<button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-copy" aria-label="Copy the relay name in the removal notice" onclick="SettingsPage.copyClaudeFallbackName()">Copy</button>'
                 + '</div>'
                 + (admin ? '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-fallback-dismiss" aria-label="Dismiss the removal notice" onclick="SettingsPage.dismissClaudeFallback()">Dismiss</button></div>' : '')
                 + '</div>';
         }
         if (!admin) return html;
         if (!st.linked) {
-            html += '<div style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin onclick="SettingsPage.connectClaude()">Connect to AI assistant</button></div>';
+            html += `<div id="claude-relay-connect-row" style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin${off} onclick="SettingsPage.connectClaude()">${busy === 'connect' ? 'Connecting…' : 'Connect to AI assistant'}</button></div>`;
             return html;
         }
         if (!st.this_company && st.state !== 'damaged') return html;
         if (st.address) {
-            html += '<div style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
+            html += '<div id="claude-relay-lines" style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
                 + copyLineHtml('claude-relay-address', 'Connector address', st.address, 'SettingsPage.copyClaudeAddress()')
                 + (st.slug ? copyLineHtml('claude-relay-name', 'Relay name', st.slug, 'SettingsPage.copyClaudeRelayName()') : '')
                 + '</div>';
@@ -2735,73 +2788,289 @@ const SettingsPage = {
                 + `<div><span style="color:var(--text-muted);">Sign-in code:</span> <code id="claude-relay-code" style="font-family:var(--font-mono); font-size:14px; user-select:all;">${escapeHtml(code.code)}</code></div>`
                 + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div></div>`;
         }
-        html += '<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
-        if (st.this_company) html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin onclick="SettingsPage.claudeCode()">Show a sign-in code</button>';
-        html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>';
+        html += '<div id="claude-relay-buttons" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
+        if (st.this_company) html += `<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin${off} onclick="SettingsPage.claudeCode()">Show a sign-in code</button>`;
+        html += `<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin${off} onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>`;
         return html;
+    },
+
+    // Where a selection's end is: the nearest element above it that has an
+    // id (every block of the panel has one), and the steps down from there
+    // to its node. Blocks coming and going around it do not move it.
+    _claudePath(el, node) {
+        const path = [];
+        while (node && node !== el && !(node.nodeType === 1 && node.id)) {
+            const parent = node.parentNode;
+            if (!parent) return null;
+            path.unshift(Array.prototype.indexOf.call(parent.childNodes, node));
+            node = parent;
+        }
+        if (!node) return null;
+        return { id: node === el ? '' : node.id, path };
+    },
+
+    _claudeNode(el, where) {
+        let node = where.id ? document.getElementById(where.id) : el;
+        if (node && node !== el && !el.contains(node)) return null;
+        for (const i of where.path) {
+            node = node && node.childNodes[i];
+        }
+        return node || null;
+    },
+
+    // What the person holds in the panel: the control with the keyboard and
+    // the text selected.
+    _claudeHeld(el) {
+        const held = { focus: null, range: null, order: [] };
+        if (typeof el.contains !== 'function') return held;
+        const active = document.activeElement;
+        if (active && active !== el && el.contains(active) && active.id) {
+            held.focus = active.id;
+            // the panel's controls in their order, to find a neighbor by
+            // if this one is gone after the draw
+            if (typeof el.querySelectorAll === 'function') {
+                held.order = Array.from(el.querySelectorAll('button[id], a[href][id]')).map(n => n.id);
+            }
+        }
+        const sel = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
+        if (sel && sel.rangeCount && !sel.isCollapsed
+            && el.contains(sel.anchorNode) && el.contains(sel.focusNode)) {
+            const r = sel.getRangeAt(0);
+            const from = SettingsPage._claudePath(el, r.startContainer);
+            const to = SettingsPage._claudePath(el, r.endContainer);
+            if (from && to) held.range = { from, to, start: r.startOffset, end: r.endOffset, text: String(sel) };
+        }
+        return held;
+    },
+
+    // Whether nothing on the page has the keyboard (a control that goes
+    // while it has it leaves the keyboard on the page's body).
+    _claudeAdrift() {
+        const active = document.activeElement;
+        return !active || active === document.body || active === document.documentElement
+            || (typeof active.isConnected === 'boolean' && !active.isConnected);
+    },
+
+    // Put the keyboard on the control `id` or, when it is gone or off, on
+    // its neighbor in the panel: the next control in the order they stood
+    // in (`order`), else the one before, else one of the panel's own three
+    // (Connect, Show a sign-in code, Disconnect), else any control it has,
+    // else the panel itself. Never left on the page's body, where a
+    // keyboard user would start again from the top of the page.
+    _claudeFocusNear(el, id, order) {
+        if (!el || typeof el.contains !== 'function') return;
+        const usable = other => {
+            const n = other ? document.getElementById(other) : null;
+            return n && el.contains(n) && !n.disabled ? n : null;
+        };
+        const at = (order || []).indexOf(id);
+        const after = at < 0 ? [] : order.slice(at + 1);
+        const before = at < 0 ? [] : order.slice(0, at).reverse();
+        let to = usable(id);
+        for (const other of [...after, ...before, 'claude-connect', 'claude-code', 'claude-disconnect']) {
+            if (to) break;
+            to = usable(other);
+        }
+        if (!to && typeof el.querySelector === 'function') {
+            to = el.querySelector('button:not([disabled]), a[href]');
+        }
+        if (!to) {
+            // nothing to press is left (a person who is not an
+            // administrator): the panel itself, so Tab goes on from here
+            el.setAttribute('tabindex', '-1');
+            to = el;
+        }
+        try { to.focus({ preventScroll: true }); } catch (e) { to.focus(); }
+    },
+
+    // Give back what a redraw took: the keyboard to the control with the
+    // same id (to its neighbor when that control is gone), and the
+    // selection where the same words are still there. What the redraw left
+    // alone is left alone here too.
+    _claudeGiveBack(el, held) {
+        if (held.focus && !(document.activeElement && document.activeElement.id === held.focus)
+            && SettingsPage._claudeAdrift()) {
+            // a button that is there but off is the one whose press is being
+            // worked on: the keyboard is not sent elsewhere meanwhile, the
+            // press hands it back when it answers (_claudePress)
+            const again = document.getElementById(held.focus);
+            if (!(again && el.contains(again) && again.disabled)) {
+                SettingsPage._claudeFocusNear(el, held.focus, held.order);
+            }
+        }
+        if (held.range) {
+            try {
+                const sel = window.getSelection();
+                if (sel && String(sel) === held.range.text && !sel.isCollapsed
+                    && el.contains(sel.anchorNode) && el.contains(sel.focusNode)) return;
+                const from = SettingsPage._claudeNode(el, held.range.from);
+                const to = SettingsPage._claudeNode(el, held.range.to);
+                if (from && to) {
+                    const r = document.createRange();
+                    r.setStart(from, held.range.start);
+                    r.setEnd(to, held.range.end);
+                    if (String(r) === held.range.text) {
+                        sel.removeAllRanges();
+                        sel.addRange(r);
+                    }
+                }
+            } catch (e) { /* the words are gone: nothing to select */ }
+        }
+    },
+
+    // Draw the panel anew, replacing only the blocks that changed: a block
+    // that reads the same stays the very node it was, so a selection or the
+    // keyboard inside it is never touched, and its alert is not announced
+    // again. (The first draw, over "Checking…", is the whole panel.)
+    _claudeRedraw(el, html) {
+        const blocks = el.children ? Array.from(el.children) : null;
+        const whole = !blocks || !blocks.length || typeof document.createElement !== 'function'
+            || blocks.length !== el.childNodes.length || blocks.some(n => !n.id);
+        if (whole) { el.innerHTML = html; return; }
+        const next = document.createElement('div');
+        next.innerHTML = html;
+        const was = new Map(blocks.map(n => [n.id, n]));
+        let at = el.firstChild;
+        for (const block of Array.from(next.children)) {
+            const same = block.id ? was.get(block.id) : null;
+            if (same && same.parentNode === el && same.isEqualNode(block)) {
+                // what stood between here and it is gone from the panel
+                while (at && at !== same) { const gone = at; at = at.nextSibling; gone.remove(); }
+                at = same.nextSibling;
+            } else {
+                el.insertBefore(block, at);
+            }
+        }
+        while (at) { const gone = at; at = at.nextSibling; gone.remove(); }
     },
 
     _drawSwitchboard() {
         const el = $('#switchboard-relay');
         if (!el) return;
         const c = SettingsPage._claude;
-        el.innerHTML = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback);
+        // a refusal that said something was in the way goes once the panel
+        // shows it (connected, or no longer connected): it is no longer news
+        if (c.goes && c.error && c.status
+            && (c.goes === 'linked') === !!c.status.linked) { c.error = ''; }
+        if (!c.error) { c.goes = ''; c.looks = 0; }
+        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback, c.busy);
+        // A refresh that changes nothing draws nothing: the keyboard focus, a
+        // selection (the relay name being copied) and the screen reader's
+        // place stay where they are, and an alert is not announced again.
+        // When something did change, only the blocks that changed are
+        // replaced, and what the person held in one of those is given back.
+        if (el._claudeDrawn !== html) {
+            const held = SettingsPage._claudeHeld(el);
+            SettingsPage._claudeRedraw(el, html);
+            el._claudeDrawn = html;
+            SettingsPage._claudeGiveBack(el, held);
+        }
         // while the line is coming up or the relay is away, the words follow
         // it: asked again in a few seconds, while the panel is on the page
         const state = c.status && c.status.state;
         // and while a relay name waits on the quiet retry, now and then, so
         // the notice goes when the relay has deleted the record (NEW-269)
         const waiting = ((c.status && c.status.pending) || []).some(p => p && !p.dismissed);
-        if ((state === 'connecting' || state === 'unreachable' || waiting) && !c.timer) {
+        // while another press is in the way, the panel looks again for a
+        // little longer than a press can take, so its sentence goes when
+        // the other press is over
+        const looking = !!(c.goes && c.error && c.looks < 6);
+        if ((state === 'connecting' || state === 'unreachable' || waiting || looking) && !c.timer) {
             c.timer = setTimeout(() => {
                 c.timer = null;
+                if (looking) c.looks += 1;
                 if (document.getElementById('switchboard-relay')) SettingsPage.loadSwitchboard();
-            }, waiting && state !== 'connecting' && state !== 'unreachable' ? 15000 : 3000);
+            }, waiting && !looking && state !== 'connecting' && state !== 'unreachable' ? 15000 : 3000);
         }
     },
 
     async loadSwitchboard() {
         const el = $('#switchboard-relay');
         if (!el) return;
+        const c = SettingsPage._claude;
+        const asked = c.asked = (c.asked || 0) + 1;
+        let status = null;
+        let readError = '';
         try {
-            SettingsPage._claude.status = await API.get('/switchboard/status');
-            SettingsPage._claude.readError = '';
+            status = await API.get('/switchboard/status');
         } catch (e) {
-            SettingsPage._claude.status = null;
-            SettingsPage._claude.readError = 'Could not read the AI assistant connection.';
+            readError = 'Could not read the AI assistant connection.';
         }
+        // a press answered, or a later read was asked, meanwhile: this
+        // answer is older than what the panel shows
+        if (asked !== c.asked) return;
+        c.status = status;
+        c.readError = readError;
         SettingsPage._drawSwitchboard();
+    },
+
+    // One press of the panel at a time (the server's rule too): `kind` is
+    // 'connect', 'code' or 'disconnect', `id` the button pressed. While it
+    // is worked on the panel's three buttons are off, through every refresh;
+    // a second press does nothing. `work` sets what the panel shows next;
+    // true from it has the panel read again. The keyboard comes back to the
+    // button pressed, or to its neighbor when that button is gone.
+    async _claudePress(kind, id, work) {
+        const c = SettingsPage._claude;
+        if (c.busy) return;
+        c.busy = kind;
+        // the next press clears the last one's sentence
+        c.error = '';
+        c.goes = '';
+        c.looks = 0;
+        const panel = $('#switchboard-relay');
+        const had = !!(panel && typeof panel.contains === 'function'
+            && document.activeElement && panel.contains(document.activeElement));
+        SettingsPage._drawSwitchboard();
+        let read = false;
+        try {
+            read = await work(c);
+        } finally {
+            c.busy = '';
+        }
+        // what a read asked before this answered is older than it
+        c.asked = (c.asked || 0) + 1;
+        if (read) await SettingsPage.loadSwitchboard();
+        else SettingsPage._drawSwitchboard();
+        if (had && SettingsPage._claudeAdrift()) SettingsPage._claudeFocusNear($('#switchboard-relay'), id, []);
+    },
+
+    // A refusal's sentence, kept on the panel. A 409 says something is in
+    // the way of the press (another press, a connection already there):
+    // `goes` is what the panel shows once that is so, and the sentence goes
+    // with it.
+    _claudeRefused(c, err, goes) {
+        c.error = err.message;
+        c.goes = err && err.status === 409 ? goes : '';
+        c.looks = 0;
     },
 
     async connectClaude() {
-        const button = $('#claude-connect');
-        if (button) { button.disabled = true; button.textContent = 'Connecting…'; }
-        // the next press clears the last one's sentence
-        SettingsPage._claude.error = '';
-        $('#claude-relay-error')?.remove();
-        try {
-            SettingsPage._claude.status = await API.post('/switchboard/connect');
-            SettingsPage._claude.code = null;
-            toast('The AI assistant is connected. Add the address in Claude or Grok, then show a sign-in code.');
-            SettingsPage._drawSwitchboard();
-        } catch (err) {
-            // nothing was made: the sentence stays, with Connect offered
-            // again (the panel read again, so it says what is really there)
-            SettingsPage._claude.error = err.message;
-            await SettingsPage.loadSwitchboard();
-        }
+        await SettingsPage._claudePress('connect', 'claude-connect', async c => {
+            try {
+                c.status = await API.post('/switchboard/connect');
+                c.code = null;
+                toast('The AI assistant is connected. Add the address in Claude or Grok, then show a sign-in code.');
+                return false;
+            } catch (err) {
+                // nothing was made: the sentence stays, with Connect offered
+                // again (the panel read again, so it says what is really there)
+                SettingsPage._claudeRefused(c, err, 'linked');
+                return true;
+            }
+        });
     },
 
     async claudeCode() {
-        SettingsPage._claude.error = '';
-        try {
-            SettingsPage._claude.code = await API.post('/switchboard/code');
-            SettingsPage._claude.error = '';
-        } catch (err) {
-            SettingsPage._claude.code = null;
-            SettingsPage._claude.error = err.message;
-        }
-        SettingsPage._drawSwitchboard();
+        await SettingsPage._claudePress('code', 'claude-code', async c => {
+            try {
+                c.code = await API.post('/switchboard/code');
+            } catch (err) {
+                c.code = null;
+                c.error = err.message;
+            }
+            return false;
+        });
     },
 
     async copyClaudeAddress() {
@@ -2828,7 +3097,7 @@ const SettingsPage = {
     dismissClaudeError() {
         SettingsPage._claude.error = '';
         SettingsPage._drawSwitchboard();
-        $('#claude-connect, #claude-code, #claude-disconnect')?.focus();
+        SettingsPage._claudeFocusNear($('#switchboard-relay'), '', []);
     },
 
     async dismissClaudeFallback() {
@@ -2844,25 +3113,40 @@ const SettingsPage = {
     async disconnectClaude() {
         if (!confirm('Disconnect the AI assistant? The connection ends, the relay deletes its record of these books, and the token "'
             + ((SettingsPage._claude.status || {}).token_label || 'AI assistant (relay)') + '" is revoked.')) return;
-        SettingsPage._claude.error = '';
+        await SettingsPage._claudePress('disconnect', 'claude-disconnect', async c => {
+            await SettingsPage._claudeDisconnect(c);
+            return true;
+        });
+    },
+
+    async _claudeDisconnect(c) {
         try {
             const r = await API.post('/switchboard/disconnect');
-            if (r && r.unlinked === false && r.slug) {
-                // the relay was out of reach: keep its name on the panel
-                // the name now comes from the server's status (NEW-269)
-                SettingsPage._claude.fallback = null;
-                toast('The AI assistant is disconnected and the token revoked. The relay was out of reach: see the relay name below.');
+            SettingsPage._claude.fallback = null;
+            const done = 'The AI assistant is disconnected' + (r && r.revoked ? ' and the token revoked. ' : '. ');
+            if (r && r.say && r.sentence) {
+                // something the relay could not do, with no notice kept for
+                // it: the server's sentence stays on the panel until dismissed
+                SettingsPage._claude.error = r.sentence;
+                toast('The AI assistant is disconnected. See the message on the panel.');
+            } else if (r && r.unlinked === false && r.slug) {
+                // the relay still holds its record: the relay name is on the
+                // panel, from the server's status (NEW-269), and the toast
+                // says why, as the relay answered
+                toast(done + (r.why === 'refused'
+                    ? 'The relay did not accept the request to delete its record: see the relay name below.'
+                    : (r.why === 'unconfirmed'
+                        ? 'The relay did not confirm that it deleted its record: see the relay name below.'
+                        : 'The relay was out of reach: see the relay name below.')));
             } else {
-                SettingsPage._claude.fallback = null;
                 toast(r && r.deleted
                     ? 'The AI assistant is disconnected, and the relay deleted its record of these books.'
                     : 'The AI assistant is disconnected.');
             }
             SettingsPage._claude.code = null;
         } catch (err) {
-            SettingsPage._claude.error = err.message;
+            SettingsPage._claudeRefused(c, err, 'unlinked');
         }
-        await SettingsPage.loadSwitchboard();
     },
 
     async loadOcrStatus() {
