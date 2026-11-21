@@ -340,9 +340,14 @@ HYPHENS = (
     " Contractor-furnished, owner-installed items are by others. "
 ) * 12
 NO_SPACES = "0123456789abcdefghijklmnopqrstuvwxyz" * 60
+# Long enough to run past the totals' page in any font. With a Japanese font
+# a line holds about 31 of these characters; a machine with none (the CI
+# runner) draws each as a narrow box for a missing glyph, about 66 to a line,
+# and 1200 characters then fit on the page with the totals: printed whole,
+# rightly, and nothing to cut. 3000 are some 45 lines even there.
 SCRIPT = (
     "見積書に記載された工事範囲は以下のとおりです。基礎工事および鉄骨工事を含みます。"
-    * 40
+    * 80
 )
 SEAM_CASES = [
     ("hyphens, an invoice", "invoice", 48, 900, HYPHENS),
@@ -351,7 +356,7 @@ SEAM_CASES = [
     ("no spaces, an invoice", "invoice", 47, 900, NO_SPACES),
     ("no spaces, a credit memo", "credit memo", 47, 1000, NO_SPACES),
     ("no spaces, a bill", "bill", 49, 900, NO_SPACES),
-    ("Japanese, an invoice", "invoice", 30, 1200, SCRIPT),
+    ("Japanese, an invoice", "invoice", 30, 3000, SCRIPT),
 ]
 
 
