@@ -1813,6 +1813,32 @@ const TxnWarn = {
     },
 };
 
+// One question for every line form before it saves a document with no lines,
+// or whose lines add up to $0.00: the invoice's own ("This invoice adds up to
+// $0.00. Save it anyway?"), with the kind's name in the company's words. Yes
+// goes on to the save, and what the server will not take that way it refuses
+// in a sentence the form shows; No leaves the form as it stands. A locked
+// form never gets here: its submit is answered by App.lockForms.
+const ZeroTotal = {
+    // the kind as the company says it: 'Sales Receipt' is a nonprofit's 'donation'
+    // (an invoice's name is not swapped: a nonprofit's is a pledge only when
+    // it is flagged one, so the invoice form passes the name as it prints)
+    noun(kind, literal) {
+        return String(!literal && typeof T === 'function' ? T(kind) : kind).toLowerCase();
+    },
+    question(kind, literal) { return `This ${ZeroTotal.noun(kind, literal)} adds up to $0.00. Save it anyway?`; },
+    isZero(total) { return Math.round((Number(total) || 0) * 100) === 0; },
+    // Before a save: null for No, else the flags to send with it: {} when
+    // there is something to save, {allow_zero_total: true} when the person
+    // said yes, which the invoice's and credit memo's server check takes as
+    // its answer, so it is asked once.
+    ask(kind, total, literal) {
+        if (!ZeroTotal.isZero(total)) return {};
+        return confirm(ZeroTotal.question(kind, literal)) ? { allow_zero_total: true } : null;
+    },
+};
+window.ZeroTotal = ZeroTotal;
+
 // A question with two answers named for what they do, over whatever is
 // open: resolves true for `yes`, false for `no` (and for Escape). Focus
 // starts on `no`, the safe answer, and Tab stays between the two.
@@ -1941,6 +1967,7 @@ const TaxExempt = {
             }
         }
         const exempt = custExempt || (!!sw && sw.checked);
+        TaxExempt.certificate(form || (tbody && tbody.closest ? tbody.closest('form') : null), custExempt ? c : null);
         if (!tbody) return exempt;
         tbody.querySelectorAll('.line-taxable').forEach(box => {
             if (exempt) {
@@ -1960,6 +1987,51 @@ const TaxExempt = {
     },
 
     SWITCH_TITLE: 'No sales tax on any line; the PDF says the sale is exempt',
+
+    // A tax-exempt customer whose exemption certificate is missing, or
+    // expired as of the document's date, is still not charged: the form says
+    // so in the open, under the customer, and nothing is blocked. The
+    // sentence is the server's (one function decides it, the same one the
+    // API's tax_note and the customer's page read). `customer` is the
+    // form's customer when marked tax exempt, else null. The note is a
+    // polite live region, there before it is filled, and it follows the
+    // customer, the date and the job; a look that fails says nothing.
+    certificate(form, customer) {
+        if (!form || !form.querySelector || typeof API === 'undefined') return;
+        const picker = form.querySelector('[name="customer_id"]');
+        if (!picker) return;
+        let note = form.querySelector('.tax-exempt-warning');
+        if (!note) {
+            if (!customer) return;
+            const group = picker.closest('.form-group') || picker.parentNode;
+            group.insertAdjacentHTML('beforeend',
+                '<div class="tax-exempt-warning" role="status" style="color:var(--text-warning); font-size:11px; font-weight:600; margin-top:4px;"></div>');
+            note = group.querySelector('.tax-exempt-warning');
+            // the date and the job change what is true; the customer and
+            // the lines already come through each form's recalc
+            const again = () => TaxExempt.certificate(form, note._customer || null);
+            for (const name of ['date', 'start_date', 'job_id']) {
+                const box = form.querySelector(`[name="${name}"]`);
+                if (box) box.addEventListener('change', again);
+            }
+        }
+        note._customer = customer;
+        const day = form.querySelector('[name="date"]') || form.querySelector('[name="start_date"]');
+        const job = form.querySelector('select[name="job_id"]');
+        const key = customer ? [customer.id, (day && day.value) || '', (job && job.value) || ''].join('|') : '';
+        if (note.dataset.key === key) return;
+        note.dataset.key = key;
+        // another customer's sentence never stands under this one's name
+        if (!customer || note.dataset.customer !== String(customer.id)) note.textContent = '';
+        note.dataset.customer = customer ? String(customer.id) : '';
+        if (!customer) return;
+        const query = [];
+        if (day && day.value) query.push(`as_of=${encodeURIComponent(day.value)}`);
+        if (job && job.value) query.push(`job_id=${encodeURIComponent(job.value)}`);
+        API.get(`/customers/${customer.id}/exemption-warning${query.length ? '?' + query.join('&') : ''}`)
+            .then(answer => { if (note.dataset.key === key) note.textContent = (answer && answer.warning) || ''; })
+            .catch(() => { if (note.dataset.key === key) note.textContent = ''; });
+    },
 
     // The header switch, named tax_exempt; `onchange` is the form's recalc.
     switchHtml(on, onchange) {

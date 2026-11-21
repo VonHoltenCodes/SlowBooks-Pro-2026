@@ -99,9 +99,9 @@ const CustomersPage = {
     // payments. Avoid the "click here to see notes, click here to see
     // invoices" gated-screen pattern.
     async showDetails(id) {
-        let customer, invoices, payments, permits, jobs, credits, subs;
+        let customer, invoices, payments, permits, jobs, credits, subs, exemption;
         try {
-            [customer, invoices, payments, permits, jobs, credits, subs] = await Promise.all([
+            [customer, invoices, payments, permits, jobs, credits, subs, exemption] = await Promise.all([
                 API.get(`/customers/${id}`),
                 fetchAllPages(`/invoices?customer_id=${id}`).catch(() => []),
                 fetchAllPages(`/payments?customer_id=${id}`).catch(() => []),
@@ -109,6 +109,9 @@ const CustomersPage = {
                 API.get(`/jobs?customer_id=${id}&include_inactive=true`).catch(() => []),
                 API.get(`/customers/${id}/credits`).catch(() => null),
                 API.get(`/customers/${id}/subs`).catch(() => null),
+                // a tax-exempt customer with no certificate on file, or an
+                // expired one: said beside "Tax exempt" (never blocks a sale)
+                API.get(`/customers/${id}/exemption-warning`).catch(() => null),
             ]);
         } catch (err) {
             toast(err.message, 'error');
@@ -218,6 +221,7 @@ const CustomersPage = {
                         ${customer.credit_limit ? ` · Credit limit: ${formatCurrency(customer.credit_limit)}` : ''}
                         ${customer.tax_id ? ` · Tax ID: <code>${escapeHtml(customer.tax_id)}</code>` : ''}
                     </div>
+                    ${exemption && exemption.warning ? `<div class="tax-exempt-warning" role="status" style="margin-top:4px;font-size:12px;font-weight:600;color:var(--text-warning)">${escapeHtml(exemption.warning)}</div>` : ''}
                     <div style="margin-top:4px;font-size:12px;color:var(--text-muted)">
                         ${T('Invoice')} reminders: ${customer.invoice_reminders_enabled === false ? 'Off' : 'Enabled'}
                         &nbsp;·&nbsp; Monthly statement: ${customer.monthly_statement ? 'Enabled' : 'Off'}

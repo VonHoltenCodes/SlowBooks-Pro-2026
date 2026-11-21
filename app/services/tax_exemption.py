@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from fastapi import HTTPException
@@ -97,6 +98,55 @@ def settle_tax_exempt(
     if current is not None:
         return bool(current)
     return default_tax_exempt(db, customer, job_id)
+
+
+# ── a tax-exempt customer's certificate: missing or expired ──────────────
+#
+# A customer marked tax exempt is never charged, certificate or not: nothing
+# here blocks a sale or changes a figure. What it does is say so when the
+# paper behind the exemption is not there, so the person can ask for it. A
+# certificate on file is one of the customer's reseller permits (active), or
+# the certificate of the document's own job. One with no expiry date never
+# expires. This is the one place that decides it: the sales forms, the API's
+# tax_note and the customer's page all read it, and no printed, emailed or
+# exported document does.
+
+
+def _day_words(day: date) -> str:
+    return f"{day.strftime('%B')} {day.day}, {day.year}"
+
+
+def certificate_warning(
+    db: Session, customer, as_of: Optional[date] = None, job_id: Optional[int] = None
+) -> Optional[str]:
+    """The sentence to show for a tax-exempt customer whose exemption
+    certificate is missing, or expired as of ``as_of`` (the document's date;
+    today when none is given), else None: "No exemption certificate is on
+    file for <customer>." or "<customer>'s exemption certificate expired on
+    <date>." (the latest expiry on file)."""
+    from app.models.jobs import Job
+    from app.models.reseller_permit import ResellerPermit
+
+    if not customer_exempt(customer):
+        return None
+    when = as_of or date.today()
+    expiries = [
+        expires
+        for (expires,) in db.query(ResellerPermit.expires_at).filter(
+            ResellerPermit.entity_type == "customer",
+            ResellerPermit.entity_id == customer.id,
+            ResellerPermit.is_active.isnot(False),
+        )
+    ]
+    job = db.get(Job, job_id) if job_id else None
+    if job is not None and job.exempt_certificate_number:
+        expiries.append(job.exempt_certificate_expires)
+    name = customer.name or "this customer"
+    if not expiries:
+        return f"No exemption certificate is on file for {name}."
+    if any(expires is None or expires >= when for expires in expiries):
+        return None
+    return f"{name}'s exemption certificate expired on {_day_words(max(expiries))}."
 
 
 # ── the job's certificate ────────────────────────────────────────────────

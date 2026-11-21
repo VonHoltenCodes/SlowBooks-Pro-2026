@@ -220,8 +220,10 @@ const ExpensesPage = {
     },
 
     removeLine(btn) {
-        // the shared Remove line: names follow, and the keyboard stays on the form
-        if (ExpensesPage.rows().length > 1 && LineOrder.removeLine(btn, () => ExpensesPage.recalc())) return;
+        // the shared Remove line: names follow, and the keyboard stays on the
+        // form. The last line goes like any other; a save with none is asked
+        // about.
+        if (LineOrder.removeLine(btn, () => ExpensesPage.recalc())) return;
         ExpensesPage.recalc();
     },
 
@@ -249,7 +251,6 @@ const ExpensesPage = {
         const leftEl = $('#expense-left');
         leftEl.textContent = formatCurrency(left);
         leftEl.style.color = left === 0 ? '' : 'var(--text-danger)';
-        document.querySelectorAll('#expense-lines .line-remove').forEach(b => { b.disabled = rows.length < 2; });
         return left;
     },
 
@@ -350,6 +351,7 @@ const ExpensesPage = {
                 is_billable: !!row.querySelector('.line-billable')?.checked,
             });
         });
+        if (!ZeroTotal.ask('Expense', lines.reduce((sum, l) => sum + l.amount, 0))) return;
         if (missing) {
             toast(`Choose an account for line ${missing.n}: where should it be recorded?`, 'error');
             missing.sel.focus();

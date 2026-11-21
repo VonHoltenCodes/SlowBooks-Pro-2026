@@ -45,7 +45,11 @@ from app.services.estimating import (
 )
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
-from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
+from app.services.tax_exemption import (
+    certificate_warning,
+    refresh_certificate_copy,
+    settle_tax_exempt,
+)
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
@@ -616,6 +620,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
+    resp.tax_note = certificate_warning(
+        db, estimate.customer, estimate.date, estimate.job_id
+    )
     return resp
 
 
@@ -817,6 +824,9 @@ def update_estimate(
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
+    resp.tax_note = certificate_warning(
+        db, estimate.customer, estimate.date, estimate.job_id
+    )
     return resp
 
 

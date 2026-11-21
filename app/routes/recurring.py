@@ -33,6 +33,7 @@ from app.services.recurring_service import (
 )
 from app.services.payment_terms import picked_term_id, retie
 from app.services.terminology import terms_from_db
+from app.services.tax_exemption import certificate_warning
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
 
@@ -164,6 +165,7 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     db.refresh(rec)
     resp = RecurringResponse.model_validate(rec)
     resp.customer_name = customer.name
+    resp.tax_note = certificate_warning(db, customer, rec.next_due)
     return resp
 
 
@@ -249,6 +251,7 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
     resp = RecurringResponse.model_validate(rec)
     if rec.customer:
         resp.customer_name = rec.customer.name
+    resp.tax_note = certificate_warning(db, rec.customer, rec.next_due)
     return resp
 
 

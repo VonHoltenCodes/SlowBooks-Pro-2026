@@ -964,6 +964,7 @@ const EstimatesPage = {
             data.terms = form.terms ? form.terms.value : null;
         }
 
+        if (!ZeroTotal.ask('Estimate', EstimatesPage.recalc().total)) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {

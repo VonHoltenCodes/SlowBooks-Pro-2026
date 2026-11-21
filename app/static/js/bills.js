@@ -881,8 +881,10 @@ const BillsPage = {
         e.preventDefault();
         const form = e.target;
         const { lines, missing } = BillsPage.collectLines();
-        // A bill for $0.00 is refused (item picks used to leave the rate at
-        // 0 and save one silently — W-M1).
+        // A bill for $0.00 is asked about like every document's, and then
+        // refused (item picks used to leave the rate at 0 and save one
+        // silently — W-M1).
+        if (!ZeroTotal.ask('Bill', BillsPage.recalc())) return;
         if (BillsPage.recalc() <= 0) {
             toast('Enter what the vendor charged: an amount, or a quantity and rate, on at least one line.', 'error');
             return;

@@ -1300,6 +1300,7 @@ const JobsPage = {
     async coSave(e, id) {
         if (e) e.preventDefault();
         const data = JobsPage.coReadForm();
+        if (!ZeroTotal.ask('Change Order', data.lines.reduce((sum, l) => sum + l.quantity * l.unit_cost, 0))) return;
         try {
             if (id) { const { kind, job_id, ...body } = data; await API.put(`/change-orders/${id}`, body); }
             else { await API.post('/change-orders', data); }

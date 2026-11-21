@@ -436,6 +436,7 @@ const MemorizedPage = {
         // is a line id (the grid draws one from a bill's line, or from the
         // template's own, and a template is saved whole)
         lines.forEach(l => { delete l.purchase_order_line_id; delete l.id; });
+        if (!ZeroTotal.ask('Memorized Bill', BillsPage.recalc())) return;
         if (BillsPage.recalc() <= 0) {
             toast('Enter what the vendor charges: an amount, or a quantity and rate, on at least one line.', 'error');
             return;
@@ -560,6 +561,7 @@ const MemorizedPage = {
         e.preventDefault();
         const form = e.target;
         const lines = JournalPage.collectLines();
+        if (!ZeroTotal.ask('Memorized Journal Entry', lines.reduce((sum, l) => sum + l.debit + l.credit, 0))) return;
         if (lines.length < 2) { toast('At least 2 lines required', 'error'); return; }
         if (!(await ClassWarn.ok(form, { rows: '#je-lines tr', cls: 'je-function' }))) return;
         const body = {
