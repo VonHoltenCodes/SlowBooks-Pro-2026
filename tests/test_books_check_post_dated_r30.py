@@ -3,38 +3,45 @@
 A customer payment dated next week was waiting on the Make Deposits list
 and not yet in Undeposited Funds as of today, so the row read "The payments
 waiting to be deposited add up to $100.00 and 1200 Undeposited Funds is
-$0.00, $100.00 apart" on books that agreed.
+$0.00, $100.00 apart" on books that agreed. The list has no date; the
+account beside it was read to today.
 
-The rule every row keeps now: two figures are set side by side only when
-both are taken over the same documents, so a document dated after the day
-the check is run as of is in both figures or in neither. A dated row (the
-agings, sales tax, payroll liabilities, the open accruals) reads both to
-the as-of day: neither. A row kept for today only (customer balances,
-vendor balances, the payments waiting to be deposited, the inventory
-valuation) sets the app's running state beside the whole ledger: both, and
-its sentence says how much of the figure is dated after today.
+The rule now: every row reads both of its figures to the as-of day, so a
+document dated after it is in neither. The Undeposited Funds row was the
+one that did not, and it now takes the list as it stood on that day: a
+payment dated later is not waiting yet, and a deposit dated later has taken
+nothing yet. When the Make Deposits page shows more than the row does, the
+row says how much ("not counting $100.00 dated after today"). Inventory is
+the one exception and is unchanged: it is kept for today only, valuation
+and ledger both read whole.
 
-A real difference still reads "apart", with the same documents, a
-post-dated document present or not. Every seeded difference is a direct
-database write, as in tests/test_books_check_893.py.
+Nothing else about Books Check moves. tests/fixtures/books_check_r30_base.json
+is the whole answer as the code before this change gave it (commit
+0633db03), for books with nothing dated after today and for the differences
+the Undeposited Funds row exists to catch; the answer now is the same, row
+for row. Every seeded difference is a direct database write, as in
+tests/test_books_check_893.py.
 """
 
+import json
+import re
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
-from app.models.bills import Bill
 from app.models.contacts import Customer, Vendor
-from app.models.invoices import Invoice, InvoiceStatus
-from app.models.items import Item
 from app.models.transactions import Transaction, TransactionLine
 from app.services.books_check import books_check
+from app.services.undeposited_funds import waiting_balance, waiting_items
 
 TODAY = date.today()
 AHEAD = TODAY + timedelta(days=9)
 PAST = TODAY - timedelta(days=20)
 TODAY_ONLY = ("customer_balances", "vendor_balances", "undeposited_funds", "inventory")
+BASE_ANSWERS = Path(__file__).parent / "fixtures" / "books_check_r30_base.json"
+AGREE = "The payments waiting to be deposited add up to 1200 Undeposited Funds"
 
 
 def _ok(r):
@@ -390,16 +397,20 @@ def _doc_payment_to_the_bank(co):
     _payment(co, AHEAD, invoice_id=_invoice(co, PAST), bank=True)
 
 
-def _doc_deposit_of_todays_payment(co):
+def _doc_typed_deposit_of_todays_payment(co):
     _payment(co, TODAY)
     _deposit(co, AHEAD, total=100)
+
+
+def _doc_ticked_deposit_of_todays_payment(co):
+    _payment(co, TODAY)
+    _deposit(co, AHEAD, line_ids=_pending_line_ids(co))
 
 
 def _doc_deposit_of_ticked_payments(co):
     _payment(co, TODAY)
     _payment(co, AHEAD, amount=30)
-    pending = _ok(co["client"].get("/api/deposits/pending"))
-    _deposit(co, AHEAD, line_ids=[p["transaction_line_id"] for p in pending])
+    _deposit(co, AHEAD, line_ids=_pending_line_ids(co))
 
 
 def _doc_bill_payment(co):
@@ -418,6 +429,15 @@ def _doc_journal_on_sales_tax(co):
     _journal(co, AHEAD, "6000", "2200")
 
 
+def _pending(co):
+    """The Make Deposits list, as its page reads it."""
+    return _ok(co["client"].get("/api/deposits/pending"))
+
+
+def _pending_line_ids(co):
+    return [p["transaction_line_id"] for p in _pending(co)]
+
+
 POST_DATED = {
     "customer payment, waiting": _doc_payment_waiting,
     "customer payment on an invoice due": _doc_payment_on_an_invoice_due,
@@ -426,7 +446,8 @@ POST_DATED = {
     "invoice selling stock": lambda co: _stock_invoice(co, AHEAD),
     "credit memo": lambda co: _credit_memo(co, AHEAD),
     "sales receipt": lambda co: _sales_receipt(co, AHEAD),
-    "deposit of today's payment": _doc_deposit_of_todays_payment,
+    "typed deposit of today's payment": _doc_typed_deposit_of_todays_payment,
+    "ticked deposit of today's payment": _doc_ticked_deposit_of_todays_payment,
     "deposit of ticked payments": _doc_deposit_of_ticked_payments,
     "bill": lambda co: _bill(co, AHEAD),
     "bill receiving stock": lambda co: _stock_bill(co, AHEAD),
@@ -460,57 +481,105 @@ def test_every_kind_at_once_leaves_every_row_agreeing(co):
 # ── the payments waiting to be deposited = Undeposited Funds ──────────────
 
 
-def test_w242_a_post_dated_payment_is_in_both_figures(co):
+def test_w242_a_post_dated_payment_is_in_neither_figure(co):
     _payment(co, AHEAD)
     uf = _rows(co)["undeposited_funds"]
     assert uf["status"] == "pass", uf
-    # the list's own figure (the payment is waiting and can be deposited)
-    # and the account over the whole ledger
-    assert (uf["subledger"], uf["control"], uf["difference"]) == (100.0, 100.0, 0.0)
-    assert uf["sentence"] == (
-        "The payments waiting to be deposited add up to 1200 Undeposited "
-        "Funds, counting $100.00 dated after today."
-    )
+    # not waiting yet as of today, and not in the account as of today
+    assert (uf["subledger"], uf["control"], uf["difference"]) == (0.0, 0.0, 0.0)
+    assert uf["sentence"] == AGREE + ", not counting $100.00 dated after today."
+    assert uf["documents"] == []
 
 
-@pytest.mark.parametrize(
-    "kind,waiting",
-    [
-        ("customer payment, waiting", 100.0),
-        ("customer payment on an invoice due", 100.0),
-        ("sales receipt", 64.8),
-        ("journal entry on Undeposited Funds", 55.0),
-        ("deposit of today's payment", 0.0),
-        ("deposit of ticked payments", 0.0),
-    ],
-)
-def test_each_post_dated_document_on_undeposited_funds_agrees(co, kind, waiting):
+# kind -> (the row's two figures, what the Make Deposits page adds up to,
+# what the row says it leaves out)
+ON_UNDEPOSITED_FUNDS = {
+    "customer payment, waiting": (0.0, 100.0, "$100.00"),
+    "customer payment on an invoice due": (0.0, 100.0, "$100.00"),
+    "sales receipt": (0.0, 64.8, "$64.80"),
+    "journal entry on Undeposited Funds": (0.0, 55.0, "$55.00"),
+    # a deposit dated ahead has taken nothing yet: today's payment still
+    # waits as of today and is still in the account as of today
+    "typed deposit of today's payment": (100.0, 0.0, None),
+    "ticked deposit of today's payment": (100.0, 0.0, None),
+    # ... and the post-dated payment it also took is in neither figure and
+    # no longer on the Make Deposits list, so there is nothing to say
+    "deposit of ticked payments": (100.0, 0.0, None),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(ON_UNDEPOSITED_FUNDS))
+def test_each_post_dated_document_on_undeposited_funds_agrees(co, kind):
+    figure, on_the_page, left_out = ON_UNDEPOSITED_FUNDS[kind]
     POST_DATED[kind](co)
     uf = _rows(co)["undeposited_funds"]
     assert uf["status"] == "pass", uf
-    assert uf["subledger"] == uf["control"] == waiting
-    # the figure is what the Make Deposits page adds up to
-    pending = _ok(co["client"].get("/api/deposits/pending"))
-    assert round(sum(p["amount"] for p in pending), 2) == waiting
-
-
-def test_a_post_dated_deposit_says_what_it_takes_off_the_account(co):
-    _payment(co, TODAY)
-    _deposit(co, AHEAD, total=100)
-    uf = _rows(co)["undeposited_funds"]
-    # the Balance Sheet as of today still shows the $100.00 on 1200
-    assert uf["sentence"] == (
-        "The payments waiting to be deposited add up to 1200 Undeposited "
-        "Funds, counting $100.00 taken off it by entries dated after today."
+    assert (uf["subledger"], uf["control"], uf["difference"]) == (figure, figure, 0.0)
+    assert round(sum(p["amount"] for p in _pending(co)), 2) == on_the_page
+    clause = f", not counting {left_out} dated after today" if left_out else ""
+    assert uf["sentence"] == f"{AGREE}{clause}."
+    # the account's figure is the Balance Sheet's as of today
+    db = co["db"]
+    db.expire_all()
+    on_1200 = sum(
+        (
+            Decimal(str(ln.debit)) - Decimal(str(ln.credit))
+            for ln, txn in db.query(TransactionLine, Transaction)
+            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+            .filter(TransactionLine.account_id == co["a"]["1200"])
+            if txn.date <= TODAY
+        ),
+        Decimal("0"),
     )
+    assert float(on_1200) == uf["control"]
+
+
+def test_the_row_says_once_what_it_leaves_out_beside_what_it_counts(co):
+    _payment(co, TODAY, amount=40)
+    _payment(co, AHEAD, amount=100)
+    _sales_receipt(co, AHEAD)
+    uf = _rows(co)["undeposited_funds"]
+    assert uf["status"] == "pass", uf
+    assert (uf["subledger"], uf["control"]) == (40.0, 40.0)
+    assert uf["sentence"] == AGREE + ", not counting $164.80 dated after today."
+    assert uf["sentence"].count("dated after today") == 1
+    assert round(sum(p["amount"] for p in _pending(co)), 2) == 204.8
 
 
 def test_nothing_post_dated_leaves_the_sentence_as_it_was(co):
     _payment(co, TODAY)
     uf = _rows(co)["undeposited_funds"]
-    assert uf["sentence"] == (
-        "The payments waiting to be deposited add up to 1200 Undeposited Funds."
-    )
+    assert (uf["subledger"], uf["control"]) == (100.0, 100.0)
+    assert uf["sentence"] == AGREE + "."
+
+
+def test_the_make_deposits_list_still_offers_a_post_dated_payment(co):
+    """The dated cut is Books Check's alone: the Make Deposits page lists a
+    payment dated next week and lets it be deposited, as before."""
+    _payment(co, TODAY, amount=40)
+    before = _pending(co)
+    assert [p["amount"] for p in before] == [40.0]
+    _payment(co, AHEAD, amount=100)
+    listed = _pending(co)
+    assert before[0] in listed
+    assert sorted((p["amount"], p["date"]) for p in listed) == [
+        (40.0, TODAY.isoformat()),
+        (100.0, AHEAD.isoformat()),
+    ]
+    db, uf_id = co["db"], co["a"]["1200"]
+    db.expire_all()
+    # with no day given, the service answers what it always did
+    assert waiting_balance(db, uf_id) == waiting_balance(db) == Decimal("140")
+    assert len(waiting_items(db, uf_id)) == 2
+    # and the dated list is the same list, cut at the day
+    assert waiting_balance(db, uf_id, TODAY) == Decimal("40")
+    assert waiting_balance(db, uf_id, AHEAD) == Decimal("140")
+    assert [ln.id for ln, _ in waiting_items(db, uf_id, AHEAD)] == [
+        ln.id for ln, _ in waiting_items(db, uf_id)
+    ]
+    # the whole of it can be deposited today
+    _deposit(co, TODAY, line_ids=_pending_line_ids(co))
+    assert _pending(co) == []
 
 
 def test_a_purchase_line_on_undeposited_funds_is_still_named(co):
@@ -525,215 +594,261 @@ def test_a_purchase_line_on_undeposited_funds_is_still_named(co):
     rows = _rows(co)
     _only_difference(rows, "undeposited_funds")
     uf = rows["undeposited_funds"]
-    assert (uf["subledger"], uf["control"], uf["difference"]) == (100.0, 135.0, -35.0)
+    assert (uf["subledger"], uf["control"], uf["difference"]) == (0.0, 35.0, -35.0)
     assert [(d["type"], d["id"], d["amount"]) for d in uf["documents"]] == [
         ("expense", stray.id, 35.0)
     ]
-    # the same difference and the same documents as without the payment
-    assert before["status"] == "difference" and before["difference"] == -35.0
-    assert uf["documents"] == before["documents"]
+    # the same figures and documents as without the payment; the sentence
+    # adds only what the Make Deposits page shows beyond the row
+    said = ", not counting $100.00 dated after today"
+    assert uf["sentence"].count(said) == 1
+    assert {**uf, "sentence": uf["sentence"].replace(said, "")} == before
     assert uf["sentence"].startswith(
-        "The payments waiting to be deposited add up to $100.00 and 1200 "
-        "Undeposited Funds is $135.00, counting $100.00 dated after today, "
+        "The payments waiting to be deposited add up to $0.00 and 1200 "
+        "Undeposited Funds is $35.00, not counting $100.00 dated after today, "
         "$35.00 apart. Look at the lines below"
     )
 
 
-def test_a_post_dated_purchase_line_on_undeposited_funds_is_named_too(co):
-    """A real difference that is itself dated after today is in the
-    account's figure like every other entry, and is named now, not on the
-    day it comes due."""
+def test_a_post_dated_purchase_line_waits_for_its_day(co):
+    """A line on 1200 that is not a customer's payment, dated after today,
+    is in neither figure yet, as before this change."""
     a = co["a"]
-    stray = _seeded(
+    _seeded(
         co["db"], [(a["1200"], "35", "0"), (a["1000"], "0", "35")], "cc_charge", AHEAD
     )
     rows = _rows(co)
+    assert _apart(rows) == {}
+    uf = rows["undeposited_funds"]
+    assert (uf["subledger"], uf["control"]) == (0.0, 0.0)
+    assert uf["sentence"] == AGREE + "."
+
+
+# ── nothing else moves: the answers the code gave before this change ──────
+
+
+def _ordinary(co):
+    """A month of ordinary books, nothing dated after today."""
+    inv = _invoice(co, PAST)
+    _payment(co, PAST, amount=40, invoice_id=inv)
+    _payment(co, TODAY, amount=25)
+    _taxed_invoice(co, TODAY)
+    _stock_invoice(co, PAST)
+    _credit_memo(co, PAST)
+    _sales_receipt(co, TODAY)
+    bill = _bill(co, PAST)
+    _bill(co, TODAY, amount=33)
+    _stock_bill(co, PAST)
+    _bill_payment(co, TODAY, bill, amount=20)
+    _vendor_credit(co, PAST)
+    _expense(co, TODAY)
+    _card_charge(co, PAST)
+    _journal(co, PAST, "6000", "1000")
+
+
+def _real_differences(co):
+    """A stray line on each control account, and a deposit entered by hand
+    that took more than was waiting."""
+    a, db = co["a"], co["db"]
+    _seeded(db, [(a["1100"], "80", "0"), (a["4000"], "0", "80")], "manual", PAST)
+    _seeded(db, [(a["6000"], "45", "0"), (a["2000"], "0", "45")], "manual", PAST)
+    _seeded(db, [(a["1200"], "35", "0"), (a["1000"], "0", "35")], "expense", PAST)
+    _seeded(db, [(a["1300"], "17", "0"), (a["1000"], "0", "17")], "manual", PAST)
+    _seeded(db, [(a["1000"], "500", "0"), (a["1200"], "0", "500")], "deposit", TODAY)
+
+
+def _stray_today_and_a_journal_credit_ahead(co):
+    """A purchase line sitting on 1200, and a journal entry dated ahead
+    that takes the same amount off the account."""
+    a = co["a"]
+    _seeded(co["db"], [(a["1200"], "50", "0"), (a["1000"], "0", "50")], "bill", PAST)
+    _journal(co, AHEAD, "6000", "1200", amount=50)
+
+
+def _stray_today_and_a_stray_credit_ahead(co):
+    a = co["a"]
+    _seeded(co["db"], [(a["1200"], "50", "0"), (a["1000"], "0", "50")], "bill", PAST)
+    _seeded(
+        co["db"], [(a["1000"], "50", "0"), (a["1200"], "0", "50")], "expense", AHEAD
+    )
+
+
+def _payment_today_and_a_stray_credit_ahead(co):
+    """A payment received today, and a purchase line dated ahead crediting
+    1200 for the same amount: not a deposit, a line to move."""
+    a = co["a"]
+    _payment(co, TODAY)
+    _seeded(
+        co["db"], [(a["6000"], "100", "0"), (a["1200"], "0", "100")], "expense", AHEAD
+    )
+
+
+def _agreeing(co):
+    _ordinary(co)
+
+
+def _apart_today(co):
+    _ordinary(co)
+    _real_differences(co)
+
+
+# name -> (the books, the rows that read "apart")
+AS_BEFORE = {
+    "ordinary books": (_agreeing, ()),
+    "ordinary books, differences": (
+        _apart_today,
+        (
+            "ar_aging",
+            "customer_balances",
+            "ap_aging",
+            "vendor_balances",
+            "undeposited_funds",
+            "inventory",
+        ),
+    ),
+    "purchase line today, journal credit ahead": (
+        _stray_today_and_a_journal_credit_ahead,
+        ("undeposited_funds",),
+    ),
+    "purchase line today, purchase credit ahead": (
+        _stray_today_and_a_stray_credit_ahead,
+        ("undeposited_funds",),
+    ),
+    "payment today, purchase credit ahead": (
+        _payment_today_and_a_stray_credit_ahead,
+        ("undeposited_funds",),
+    ),
+}
+COMPANIES = ("business", "nonprofit")
+
+
+def _dateless(answer):
+    """The answer with every date written as its distance from today, so
+    the answers of two days can be set side by side."""
+
+    def days(match):
+        return f"<day {(date.fromisoformat(match.group(0)) - TODAY).days:+d}>"
+
+    return json.loads(re.sub(r"\d{4}-\d{2}-\d{2}", days, json.dumps(answer)))
+
+
+def answer_for(co, name, company):
+    """The books of AS_BEFORE[name] in a company of that type, and the
+    whole Books Check answer for them as the page reads it."""
+    if company != "business":
+        _ok(co["client"].put("/api/settings", json={"company_type": company}))
+    AS_BEFORE[name][0](co)
+    return _dateless(_ok(co["client"].get("/api/reports/books-check")))
+
+
+@pytest.mark.parametrize("company", COMPANIES)
+@pytest.mark.parametrize("name", sorted(AS_BEFORE))
+def test_the_whole_answer_is_what_it_was_before_this_change(co, name, company):
+    answer = answer_for(co, name, company)
+    before = json.loads(BASE_ANSWERS.read_text())[f"{name} / {company}"]
+    assert answer == before
+    apart = {r["key"] for r in answer["rows"] if r["status"] == "difference"}
+    assert apart == set(AS_BEFORE[name][1])
+
+
+def test_a_stray_line_is_named_whatever_is_dated_after_it(co):
+    """The reviewers' cases, read closely: the purchase line on 1200 is
+    listed, and a credit dated ahead does not make the row agree over it."""
+    a = co["a"]
+    stray = _seeded(
+        co["db"], [(a["1200"], "50", "0"), (a["1000"], "0", "50")], "bill", PAST
+    )
+    alone = _rows(co)["undeposited_funds"]
+    assert (alone["status"], alone["subledger"], alone["control"]) == (
+        "difference",
+        0.0,
+        50.0,
+    )
+    assert [(d["id"], d["amount"]) for d in alone["documents"]] == [(stray.id, 50.0)]
+    _journal(co, AHEAD, "6000", "1200", amount=50)
+    assert _rows(co)["undeposited_funds"] == alone
+    credit = _seeded(
+        co["db"], [(a["1000"], "50", "0"), (a["1200"], "0", "50")], "expense", AHEAD
+    )
+    uf = _rows(co)["undeposited_funds"]
+    assert {**uf, "documents": alone["documents"]} == alone
+    assert [(d["id"], d["amount"]) for d in uf["documents"]] == [
+        (stray.id, 50.0),
+        (credit.id, -50.0),
+    ]
+
+
+def test_a_payment_taken_by_a_purchase_credit_dated_ahead_reads_apart(co):
+    _payment_today_and_a_stray_credit_ahead(co)
+    rows = _rows(co)
     _only_difference(rows, "undeposited_funds")
     uf = rows["undeposited_funds"]
-    assert uf["difference"] == -35.0
-    assert [(d["type"], d["id"]) for d in uf["documents"]] == [("cc_charge", stray.id)]
+    assert (uf["subledger"], uf["control"], uf["difference"]) == (0.0, 100.0, -100.0)
+    assert [(d["type"], d["amount"]) for d in uf["documents"]] == [("expense", -100.0)]
+    assert uf["sentence"].startswith(
+        "The payments waiting to be deposited add up to $0.00 and 1200 "
+        "Undeposited Funds is $100.00, $100.00 apart. Look at the lines below"
+    )
 
 
-# ── customer balances = Accounts Receivable ───────────────────────────────
+# ── the other rows, and a past day ────────────────────────────────────────
 
 
-def test_the_customer_row_counts_a_post_dated_invoice_on_both_sides(co):
+def test_no_other_row_says_anything_about_dates_after_today(co):
+    for kind in sorted(POST_DATED):
+        if kind != "pay run":
+            POST_DATED[kind](co)
+    rows = _rows(co)
+    for key, row in rows.items():
+        if key != "undeposited_funds":
+            assert "dated after today" not in row["sentence"], row
+    assert rows["customer_balances"]["sentence"] == (
+        "The customers' balances add up to 1100 Accounts Receivable."
+    )
+    assert rows["vendor_balances"]["sentence"] == (
+        "The vendors' balances add up to 2000 Accounts Payable."
+    )
+    assert rows["inventory"]["sentence"] == (
+        "The inventory valuation equals the ledger's Inventory."
+    )
+
+
+def test_the_customer_and_vendor_rows_read_both_figures_to_today(co):
     _invoice(co, PAST, amount=60)
     _invoice(co, AHEAD, amount=300)
-    rows = _rows(co)
-    assert _apart(rows) == {}
-    row = rows["customer_balances"]
-    # what the customer's own page shows: both invoices
-    assert (row["subledger"], row["control"]) == (360.0, 360.0)
-    assert row["sentence"] == (
-        "The customers' balances add up to 1100 Accounts Receivable, "
-        "counting $300.00 dated after today."
-    )
-    listed = _ok(co["client"].get("/api/customers"))
-    listed = listed["customers"] if isinstance(listed, dict) else listed
-    balance = next(c["balance"] for c in listed if c["id"] == co["customer"])
-    assert float(balance) == 360.0
-    # the dated row beside it reads both figures to today: neither
-    aging = rows["ar_aging"]
-    assert (aging["subledger"], aging["control"]) == (60.0, 60.0)
-
-
-@pytest.mark.parametrize(
-    "kind,balance,counting",
-    [
-        (
-            "customer payment to the bank",
-            0.0,
-            ", counting $100.00 taken off it by entries dated after today",
-        ),
-        (
-            "credit memo",
-            -48.6,
-            ", counting $48.60 taken off it by entries dated after today",
-        ),
-        ("invoice", 108.0, ", counting $108.00 dated after today"),
-    ],
-)
-def test_each_post_dated_document_on_the_customer_row_agrees(
-    co, kind, balance, counting
-):
-    POST_DATED[kind](co)
-    row = _rows(co)["customer_balances"]
-    assert row["status"] == "pass", row
-    assert row["subledger"] == row["control"] == balance
-    assert row["sentence"] == (
-        f"The customers' balances add up to 1100 Accounts Receivable{counting}."
-    )
-
-
-def test_an_invoice_whose_balance_drifted_is_still_named(co):
-    inv_id = _invoice(co, PAST, amount=60)
-    inv = co["db"].get(Invoice, inv_id)
-    inv.status = InvoiceStatus.SENT
-    co["db"].commit()
-    inv.balance_due = Decimal(str(inv.balance_due)) + Decimal("50")
-    co["db"].commit()
-    before = _rows(co)
-    _invoice(co, AHEAD, amount=300)
-    _payment(co, AHEAD, amount=20)
-    rows = _rows(co)
-    _only_difference(rows, "customer_balances", "ar_aging")
-    row = rows["customer_balances"]
-    assert row["difference"] == 50.0 == before["customer_balances"]["difference"]
-    assert row["documents"] == before["customer_balances"]["documents"]
-    assert [(d["type"], d["id"]) for d in row["documents"]] == [("invoice", inv_id)]
-    assert ", counting $280.00 dated after today, $50.00 apart." in row["sentence"]
-    assert rows["ar_aging"]["documents"] == before["ar_aging"]["documents"]
-
-
-# ── vendor balances = Accounts Payable ────────────────────────────────────
-
-
-def test_the_vendor_row_counts_a_post_dated_bill_on_both_sides(co):
     _bill(co, PAST, amount=45)
     _bill(co, AHEAD, amount=70)
     rows = _rows(co)
     assert _apart(rows) == {}
-    row = rows["vendor_balances"]
-    assert (row["subledger"], row["control"]) == (115.0, 115.0)
-    assert row["sentence"] == (
-        "The vendors' balances add up to 2000 Accounts Payable, counting "
-        "$70.00 dated after today."
-    )
-    aging = rows["ap_aging"]
-    assert (aging["subledger"], aging["control"]) == (45.0, 45.0)
+    for key, figure in (
+        ("customer_balances", 60.0),
+        ("ar_aging", 60.0),
+        ("vendor_balances", 45.0),
+        ("ap_aging", 45.0),
+    ):
+        assert (rows[key]["subledger"], rows[key]["control"]) == (figure, figure)
 
 
-@pytest.mark.parametrize(
-    "kind,balance,counting",
-    [
-        (
-            "bill payment",
-            0.0,
-            ", counting $70.00 taken off it by entries dated after today",
-        ),
-        (
-            "vendor credit",
-            -38.5,
-            ", counting $38.50 taken off it by entries dated after today",
-        ),
-        ("bill receiving stock", 20.0, ", counting $20.00 dated after today"),
-    ],
-)
-def test_each_post_dated_document_on_the_vendor_row_agrees(co, kind, balance, counting):
-    POST_DATED[kind](co)
-    row = _rows(co)["vendor_balances"]
-    assert row["status"] == "pass", row
-    assert row["subledger"] == row["control"] == balance
-    assert row["sentence"] == (
-        f"The vendors' balances add up to 2000 Accounts Payable{counting}."
-    )
-
-
-def test_a_bill_whose_balance_drifted_is_still_named(co):
-    bill_id = _bill(co, PAST, amount=45)
-    bill = co["db"].get(Bill, bill_id)
-    bill.balance_due = Decimal(str(bill.balance_due)) + Decimal("15")
-    co["db"].commit()
-    before = _rows(co)
-    _bill(co, AHEAD, amount=70)
+def test_a_stray_entry_on_a_control_account_is_named_before_its_reversal(co):
+    """A journal entry on Accounts Receivable or Accounts Payable dated
+    last month is reported though its reversal is dated next week."""
+    a, db = co["a"], co["db"]
+    ar = _seeded(db, [(a["1100"], "80", "0"), (a["4000"], "0", "80")], "manual", PAST)
+    _seeded(db, [(a["4000"], "80", "0"), (a["1100"], "0", "80")], "manual", AHEAD)
+    ap = _seeded(db, [(a["6000"], "45", "0"), (a["2000"], "0", "45")], "manual", PAST)
+    _seeded(db, [(a["2000"], "45", "0"), (a["6000"], "0", "45")], "manual", AHEAD)
     rows = _rows(co)
-    _only_difference(rows, "vendor_balances", "ap_aging")
-    row = rows["vendor_balances"]
-    assert row["difference"] == 15.0 == before["vendor_balances"]["difference"]
-    assert row["documents"] == before["vendor_balances"]["documents"]
-    assert [(d["type"], d["id"]) for d in row["documents"]] == [("bill", bill_id)]
-    assert ", counting $70.00 dated after today, $15.00 apart." in row["sentence"]
-
-
-# ── inventory valuation = Inventory ───────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "kind,value,counting",
-    [
-        ("bill receiving stock", 70.0, ", counting $20.00 dated after today"),
-        (
-            "invoice selling stock",
-            40.0,
-            ", counting $10.00 taken off it by entries dated after today",
-        ),
-        (
-            "sales receipt",
-            35.0,
-            ", counting $15.00 taken off it by entries dated after today",
-        ),
-    ],
-)
-def test_the_inventory_row_says_what_is_dated_after_today(co, kind, value, counting):
-    POST_DATED[kind](co)
-    row = _rows(co)["inventory"]
-    assert row["status"] == "pass", row
-    # the stock is on hand (or gone) now, and the ledger is read whole
-    assert row["subledger"] == row["control"] == value
-    assert row["sentence"] == (
-        f"The inventory valuation equals the ledger's Inventory{counting}."
+    _only_difference(
+        rows, "customer_balances", "ar_aging", "vendor_balances", "ap_aging"
     )
-
-
-def test_an_item_whose_count_drifted_is_still_named(co):
-    # the receipt first: a movement entered after the drift would carry the
-    # drifted count forward, whatever its date
-    _stock_bill(co, AHEAD)
-    item = co["db"].get(Item, co["item"])
-    item.quantity_on_hand = Decimal(str(item.quantity_on_hand)) + Decimal("5")
-    co["db"].commit()
-    rows = _rows(co)
-    _only_difference(rows, "inventory")
-    row = rows["inventory"]
-    assert (row["subledger"], row["control"], row["difference"]) == (95.0, 70.0, 25.0)
-    assert [(d["type"], d["id"], d["amount"]) for d in row["documents"]] == [
-        ("item", co["item"], 25.0)
-    ]
-    assert ", counting $20.00 dated after today, $25.00 apart." in row["sentence"]
-
-
-# ── the dated rows, and a past day ────────────────────────────────────────
+    for key, stray, figure in (
+        ("customer_balances", ar, 80.0),
+        ("vendor_balances", ap, 45.0),
+    ):
+        assert (rows[key]["subledger"], rows[key]["control"]) == (0.0, figure)
+        assert [(d["type"], d["id"]) for d in rows[key]["documents"]] == [
+            ("journal", stray.id)
+        ]
 
 
 def test_the_dated_rows_leave_a_post_dated_document_out_of_both_figures(co):
@@ -750,7 +865,6 @@ def test_the_dated_rows_leave_a_post_dated_document_out_of_both_figures(co):
         ("payroll_liabilities", 0.0),
     ):
         assert (rows[key]["subledger"], rows[key]["control"]) == (figure, figure)
-        assert "dated after today" not in rows[key]["sentence"]
 
 
 def test_a_real_difference_on_a_dated_row_is_named_beside_a_post_dated_one(co):

@@ -1309,22 +1309,15 @@ def current_valuation(db: Session) -> dict:
     }
 
 
-def inventory_account_ids(db: Session, items) -> set[int]:
-    """The accounts the ledger's Inventory balance is read from: 1300
-    Inventory and every one of `items`' own asset accounts."""
+def inventory_ledger_balance(db: Session, items) -> Optional[Decimal]:
+    """The ledger's Inventory balance (#821): what 1300 Inventory and every
+    tracked item's own asset account hold, debits less credits. None for a
+    chart with neither."""
     ids = {get_inventory_asset_account_id(db, it) for it in items}
     inv = db.query(Account).filter(Account.account_number == "1300").first()
     if inv is not None:
         ids.add(inv.id)
     ids.discard(None)
-    return ids
-
-
-def inventory_ledger_balance(db: Session, items) -> Optional[Decimal]:
-    """The ledger's Inventory balance (#821): what 1300 Inventory and every
-    tracked item's own asset account hold, debits less credits. None for a
-    chart with neither."""
-    ids = inventory_account_ids(db, items)
     if not ids:
         return None
     debit, credit = (

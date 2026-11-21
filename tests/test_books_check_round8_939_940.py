@@ -116,19 +116,8 @@ def test_a_post_dated_payment_on_an_invoice_due_is_no_difference(
     _payment(client, cust.id, today + timedelta(days=5), 60.0, inv_id, a["1000"].id)
     rows = _rows(db_session)
     assert _differences(rows) == {}, _differences(rows)
-    # the invoice is still open as of today: the customer owes it today,
-    # and the dated row (the A/R Aging beside the ledger to today) shows it
-    assert rows["ar_aging"]["subledger"] == 60.0
-    assert rows["ar_aging"]["control"] == 60.0
-    # the customer row is kept for today only and reads every document
-    # entered beside the whole ledger (round 30, W-242): the post-dated
-    # payment is in both figures, as on the customer's own page, and the
-    # row says so
-    assert rows["customer_balances"]["subledger"] == 0.0
-    assert rows["customer_balances"]["control"] == 0.0
-    assert "$60.00 taken off it by entries dated after today" in (
-        rows["customer_balances"]["sentence"]
-    )
+    # the invoice is still open as of today: the customer owes it today
+    assert rows["customer_balances"]["subledger"] == 60.0
 
 
 def test_the_vendor_side_reads_by_date_too(client, db_session, seed_accounts):
@@ -147,14 +136,8 @@ def test_the_vendor_side_reads_by_date_too(client, db_session, seed_accounts):
     assert _differences(rows) == {}, _differences(rows)
     # as of today: the 45.00 bill open, the 70.00 paid ahead of its bill held
     # as an unapplied payment, the agings' reading and the ledger's (-25.00)
-    assert rows["ap_aging"]["subledger"] == -25.0
-    assert rows["ap_aging"]["control"] == -25.0
-    # the vendor row is kept for today only and reads every document
-    # entered beside the whole ledger (round 30, W-242): both bills and
-    # both payments, on both sides
-    assert rows["vendor_balances"]["subledger"] == 0.0
-    assert rows["vendor_balances"]["control"] == 0.0
-    assert "$25.00 dated after today" in rows["vendor_balances"]["sentence"]
+    assert rows["vendor_balances"]["subledger"] == -25.0
+    assert rows["vendor_balances"]["control"] == -25.0
 
 
 # ── #940 ───────────────────────────────────────────────────────────────────

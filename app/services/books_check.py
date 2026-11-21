@@ -20,30 +20,19 @@
 # Accrual basis only in this cut: the agings, the deposits and the payable
 # figures are accrual figures. Cash-basis pairs are a follow-up.
 #
-# THE RULE EVERY ROW KEEPS: a row sets two figures side by side only when
-# both are taken over the same documents. A document dated after the day the
-# check is run as of is in both figures or in neither, never in one (W-242:
-# a customer payment dated next week was waiting on the Make Deposits list
-# and not yet in Undeposited Funds as of today, and the row read "apart" on
-# books that agreed). There are two kinds of row, and one way for each:
-#
-# - a DATED row (the agings, the open accruals, payroll liabilities, sales
-#   tax, retainage, the journal's own checks) reads both figures to the
-#   as-of day: its list is rebuilt for that day from the documents dated on
-#   or before it and what was applied to them by then, and the account is
-#   read to the same day. A document dated after it is in neither.
-# - a row KEPT FOR TODAY ONLY (customer balances, vendor balances, the
-#   payments waiting to be deposited, the inventory valuation) sets the
-#   app's running state, which has no date and so holds every document
-#   entered, post-dated ones too, beside the account over the WHOLE ledger,
-#   entries dated after today included (_whole_ledger_day). A document dated
-#   after today is in both. Such a row's figure can differ from the Balance
-#   Sheet as of today, so when entries dated after today are part of it the
-#   row says so in plain words (_counting_ahead). It is compared only when
-#   the check is run as of today (_today_only says so on any other day).
-#
-# A real difference is on both kinds of row exactly what it was: the rule
-# widens or narrows both figures together and never one to meet the other.
+# THE RULE FOR A DOCUMENT DATED AFTER THE AS-OF DAY: every row reads both of
+# its figures to the as-of day, so such a document is in neither. The list
+# is rebuilt for that day from the documents dated on or before it and what
+# was applied to them by then, and the account is read to the same day.
+# W-242 was the one row that read one figure each way: a customer payment
+# dated next week was on the Make Deposits list, which has no date, and not
+# yet in Undeposited Funds as of today, and the row read "apart" on books
+# that agreed. That row now takes the list as it stood on the as-of day
+# (undeposited_funds.waiting_balance(as_of=...)) and says how much the
+# Make Deposits page shows beyond it. The one exception is inventory: the
+# quantity on hand and the average cost are kept for today only and cannot
+# be rebuilt for a day, so its valuation and the ledger's Inventory are
+# both read whole, as they always were.
 # ============================================================================
 
 from __future__ import annotations
@@ -193,50 +182,6 @@ def _balance(
         .one()
     )
     return _q(_d(dr) - _d(cr) if debit_normal else _d(cr) - _d(dr))
-
-
-def _whole_ledger_day(db: Session, today: date) -> date:
-    """The last day anything in the books is dated, never before today: the
-    day a row kept for today only reads both of its figures to, so a
-    document dated after today is in both (the module's rule)."""
-    latest = [today]
-    for column in (
-        Transaction.date,
-        Invoice.date,
-        CreditMemo.date,
-        Payment.date,
-        Bill.date,
-        BillPayment.date,
-        VendorCredit.date,
-    ):
-        last = db.query(func.max(column)).scalar()
-        if last is not None:
-            latest.append(last)
-    return max(latest)
-
-
-def _counting_ahead(
-    db: Session,
-    account_ids: Iterable[int],
-    today: date,
-    through: date,
-    debit_normal: bool,
-) -> str:
-    """What a today-only row adds to its sentence when entries dated after
-    today are part of the account's figure, so nobody is misled who sets it
-    beside the Balance Sheet as of today: ", counting $100.00 dated after
-    today". Empty when nothing dated after today moves the figure."""
-    ids = list(account_ids)
-    if through <= today:
-        return ""
-    ahead = _balance(db, ids, through, debit_normal) - _balance(
-        db, ids, today, debit_normal
-    )
-    if ahead == ZERO:
-        return ""
-    if ahead > ZERO:
-        return f", counting {_money(ahead)} dated after today"
-    return f", counting {_money(-ahead)} taken off it by entries dated after today"
 
 
 def _account_words(db: Session, account_id: int) -> str:
@@ -604,10 +549,9 @@ def check_ar_aging(db: Session, as_of: date, t) -> Check:
 
 def _routed_customer_balances(db: Session, as_of: date) -> dict[int, Decimal]:
     """Each customer's balance on the A/R Aging row it lands on: a
-    sub-customer billed with its parent (#638) adds to the parent's. Read
-    to `as_of`, the day the ledger beside it is read to, so an invoice dated
-    after it is neither side's (#930); the customer row passes the whole
-    ledger's last day, and it is both sides'."""
+    sub-customer billed with its parent (#638) adds to the parent's. As of
+    the check's date, so a future-dated invoice is neither side's yet
+    (#930)."""
     from app.services.contact_balances import customer_balances
     from app.services.sub_customers import billed_with_parent
 
@@ -647,18 +591,15 @@ def check_customer_balances(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    # kept for today only: every document entered, beside the whole ledger
-    through = _whole_ledger_day(db, today)
-    ahead = _counting_ahead(db, [ar_id], today, through, True)
-    balances = _routed_customer_balances(db, through)
+    balances = _routed_customer_balances(db, as_of)
     sub = sum(balances.values(), ZERO)
-    ctl = _balance(db, [ar_id], through, True)
+    ctl = _balance(db, [ar_id], as_of, True)
     words = _account_words(db, ar_id)
 
     def documents():
         from app.models.contacts import Customer
 
-        rows = ar_aging_report(db, through)["items"]
+        rows = ar_aging_report(db, as_of)["items"]
         aged = {r["customer_id"]: _q(_d(r["total"])) for r in rows}
         # the party by name from its record (#930): a customer with no
         # aging row has a name all the same
@@ -678,9 +619,7 @@ def check_customer_balances(db: Session, as_of: date, today: date, t) -> Check:
                         f"Aging row is {_money(aged.get(cid, ZERO))}.",
                     )
                 )
-        return (
-            out + _invoice_drift(db, through) + _strays(db, ar_id, through, words, True)
-        )
+        return out + _invoice_drift(db, as_of) + _strays(db, ar_id, as_of, words, True)
 
     return _row(
         "customer_balances",
@@ -689,12 +628,9 @@ def check_customer_balances(db: Session, as_of: date, today: date, t) -> Check:
         ctl_label,
         sub,
         ctl,
-        f"The customers' balances add up to {words}{ahead}.",
-        "The customers' balances add up to {sub} and "
-        + words
-        + " is {ctl}"
-        + ahead
-        + ", {diff} apart. Look at the documents below: a customer whose balance is "
+        f"The customers' balances add up to {words}.",
+        "The customers' balances add up to {sub} and " + words + " is {ctl}, "
+        "{diff} apart. Look at the documents below: a customer whose balance is "
         "not their A/R Aging row, an invoice whose balance due drifted, or an "
         "entry posted straight to the account.",
         documents,
@@ -788,16 +724,13 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    # kept for today only: every document entered, beside the whole ledger
-    through = _whole_ledger_day(db, today)
-    ahead = _counting_ahead(db, [ap_id], today, through, False)
-    balances = {vid: _d(b) for vid, b in vendor_balances(db, as_of=through).items()}
+    balances = {vid: _d(b) for vid, b in vendor_balances(db, as_of=as_of).items()}
     sub = sum(balances.values(), ZERO)
-    ctl = _balance(db, [ap_id], through, False)
+    ctl = _balance(db, [ap_id], as_of, False)
     words = _account_words(db, ap_id)
 
     def documents():
-        rows = ap_aging_report(db, through)["items"]
+        rows = ap_aging_report(db, as_of)["items"]
         aged = {r["vendor_id"]: _q(_d(r["total"])) for r in rows}
         from app.models.contacts import Vendor
 
@@ -819,8 +752,8 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
                 )
         return (
             out
-            + _bill_drift(db, through)
-            + _credit_side(_strays(db, ap_id, through, words, False))
+            + _bill_drift(db, as_of)
+            + _credit_side(_strays(db, ap_id, as_of, words, False))
         )
 
     return _row(
@@ -830,12 +763,9 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
         ctl_label,
         sub,
         ctl,
-        f"The vendors' balances add up to {words}{ahead}.",
-        "The vendors' balances add up to {sub} and "
-        + words
-        + " is {ctl}"
-        + ahead
-        + ", {diff} apart. Look at the documents below: a vendor whose balance is "
+        f"The vendors' balances add up to {words}.",
+        "The vendors' balances add up to {sub} and " + words + " is {ctl}, "
+        "{diff} apart. Look at the documents below: a vendor whose balance is "
         "not their A/P Aging row, a bill whose balance due drifted, or an "
         "entry posted straight to the account.",
         documents,
@@ -954,6 +884,7 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
         dead_transaction_ids,
         uf_account_id,
         waiting_balance,
+        waiting_dated_after,
     )
 
     name, sub_label, ctl_label = (
@@ -982,17 +913,17 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    # Kept for today only. The Make Deposits list is the app's running
-    # state: a payment dated next week is waiting and can be deposited
-    # today, and a deposit dated next week has already taken its payments
-    # off the list. So the account beside it is read over the whole ledger
-    # (W-242: read to today, it left a post-dated payment's own entry out
-    # of one figure only, and the row read "apart" on books that agreed).
-    through = _whole_ledger_day(db, today)
-    ahead = _counting_ahead(db, [uf_id], today, through, True)
-    sub = waiting_balance(db, uf_id)
-    ctl = _balance(db, [uf_id], through, True)
+    # Both figures to the as-of day (W-242): what was waiting at the end of
+    # it, beside the account read to it. A payment dated later is on the
+    # Make Deposits list already and in neither figure here, so the row
+    # says how much of that list it leaves out.
+    sub = waiting_balance(db, uf_id, as_of)
+    ctl = _balance(db, [uf_id], as_of, True)
     words = _account_words(db, uf_id)
+    later = waiting_dated_after(db, as_of, uf_id)
+    not_counting = (
+        f", not counting {_money(later)} dated after today" if later > ZERO else ""
+    )
 
     def documents():
         # A line on 1200 that is not customer money and not a deposit: a
@@ -1030,11 +961,11 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
         ctl_label,
         sub,
         ctl,
-        f"The payments waiting to be deposited add up to {words}{ahead}.",
+        f"The payments waiting to be deposited add up to {words}{not_counting}.",
         "The payments waiting to be deposited add up to {sub} and "
         + words
         + " is {ctl}"
-        + ahead
+        + not_counting
         + ", {diff} apart. Look at the lines below, posted to the "
         "account by something other than a customer's payment, and at a "
         "deposit entered by hand that took more than was waiting.",
@@ -1053,7 +984,6 @@ def check_inventory(db: Session, as_of: date, today: date, t) -> Check:
     from app.services.inventory_service import (
         current_valuation,
         get_inventory_asset_account_id,
-        inventory_account_ids,
     )
 
     name, sub_label, ctl_label = (
@@ -1082,19 +1012,7 @@ def check_inventory(db: Session, as_of: date, today: date, t) -> Check:
             "one of its own, so there is no inventory to tie.",
             t,
         )
-    # Kept for today only: the quantity on hand and the average cost are
-    # the items' running state (a receipt dated next week is on hand now),
-    # and current_valuation reads the ledger beside them whole.
     sub, ctl = _d(val["total_value"]), _d(val["ledger_balance"])
-    ahead = _counting_ahead(
-        db,
-        inventory_account_ids(
-            db, db.query(Item).filter(Item.track_inventory, Item.is_active).all()
-        ),
-        today,
-        _whole_ledger_day(db, today),
-        True,
-    )
 
     def documents():
         out = []
@@ -1185,10 +1103,9 @@ def check_inventory(db: Session, as_of: date, today: date, t) -> Check:
         ctl_label,
         sub,
         ctl,
-        f"The inventory valuation equals the ledger's Inventory{ahead}.",
-        "The inventory valuation is {sub} and the ledger's Inventory is {ctl}"
-        + ahead
-        + ", {diff} apart. Look at the items and postings below: an item whose "
+        "The inventory valuation equals the ledger's Inventory.",
+        "The inventory valuation is {sub} and the ledger's Inventory is {ctl}, "
+        "{diff} apart. Look at the items and postings below: an item whose "
         "count or average cost drifted from its movements, an inactive item "
         "still holding stock, or a posting to an inventory account that moved "
         "no item.",
