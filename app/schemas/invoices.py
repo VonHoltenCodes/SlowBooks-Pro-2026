@@ -318,8 +318,9 @@ class InvoiceResponse(BaseModel):
     # sale took past what was on hand ("Widget: 2 on hand; this sale takes
     # it to -4."). The sale posted; this says what it did. Empty otherwise.
     warnings: list[str] = []
-    # On the answer to a create or an update only: a tax-exempt customer's
-    # exemption certificate is missing, or expired as of the document's date
+    # On the answer to a create or an update only: the exemption certificate
+    # behind an exempt sale (the tax-exempt customer's, or the exempt job's)
+    # is missing, or expired as of the document's date
     # (services/tax_exemption.certificate_warning). The sale is exempt all
     # the same; this is for the person to be told. Null otherwise.
     tax_note: Optional[str] = None

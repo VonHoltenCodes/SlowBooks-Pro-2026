@@ -57,6 +57,14 @@ WANTS_SIGN_IN = (
     "The mail server wants a sign-in, and none is set. Enter the username and "
     "password under Settings → Email (SMTP)."
 )
+SIGN_IN_ASKED = (
+    "The mail server asked for a sign-in before it would take the email. "
+    "Check the username and password under Settings → Email (SMTP)."
+)
+HUNG_UP = (
+    "The mail server ended the connection before the email was sent. Try "
+    "again; if it keeps happening, ask your mail provider."
+)
 TOO_BIG = (
     "The mail server refused the message because it is too large. Send a "
     "smaller attachment, or ask your mail provider about its size limit."
@@ -86,8 +94,10 @@ class Stub:
     """A plain SMTP server on 127.0.0.1 that follows a script. `say` maps a
     step (GREETING, EHLO, AUTH, MAIL, RCPT, DATA, BODY, QUIT) to the lines
     it answers with, or to a function of the client's line that returns
-    them; the word "hang-up" closes the connection instead. Steps not in
-    the script get the usual yes."""
+    them; the word "hang-up" closes the connection instead, and
+    ("then-hang-up", [lines]) answers with the lines and then closes it.
+    Each command is read to its end before it is answered or the
+    connection closed. Steps not in the script get the usual yes."""
 
     USUAL = {
         "GREETING": ["220 stub ESMTP"],
@@ -142,9 +152,12 @@ class Stub:
             lines = lines(line)
         if lines == "hang-up":
             return False
+        closes = isinstance(lines, tuple) and lines[0] == "then-hang-up"
+        if closes:
+            lines = lines[1]
         for text in lines:
             conn.sendall(text.encode("utf-8") + b"\r\n")
-        return True
+        return not closes
 
     def _talk(self, conn):
         f = conn.makefile("rb")
@@ -417,7 +430,8 @@ def test_a_to_address_asked_to_wait_while_a_copy_went(db_session, stub):
     ok, row = _send(db_session, server, cc=COPY)
     assert not ok
     assert _read(db_session, row).sentence == (
-        f"The mail server asked to try again later. A copy still went to: {COPY}."
+        f"The mail server asked to try again later for: {TO}. A copy still "
+        f"went to: {COPY}."
     )
 
 
@@ -444,9 +458,17 @@ def test_a_refusal_about_permission_is_not_a_bad_address(
     ok, row = _send(db_session, stub({"RCPT": [reply]}))
     assert not ok
     assert _read(db_session, row).sentence == sentence
-    # and from a row an earlier build stored, either way
-    assert failure_sentence(f"[recipients] {TO}: {reply}") == sentence
+    # a row whose tag names nobody (an unreleased build's) is never read
+    # for a name or a code: its lines are the server's
+    assert failure_sentence(f"[recipients] {TO}: {reply}") == (
+        "An address was refused by the mail server. Check the addresses and "
+        "send again."
+    )
     python_wrote = repr({TO: (int(reply[:3]), reply[4:].encode())})
+    if sentence == WANTS_SIGN_IN:
+        # a row of a release before 2.32 does not say whether a sign-in
+        # was made: its sentence is true either way
+        sentence = SIGN_IN_ASKED
     assert failure_sentence(python_wrote) == sentence
 
 
@@ -510,13 +532,22 @@ def test_a_port_nothing_listens_on_reads_as_a_server_not_reached(db_session):
     assert seen.reply and "[Errno" not in seen.reply and "[WinError" not in seen.reply
 
 
-def test_a_connection_dropped_mid_conversation_reads_as_a_server_not_reached(
+def test_a_connection_dropped_mid_conversation_reads_as_a_connection_ended(
     db_session, stub
 ):
+    """The server had greeted us and answered EHLO: it was reached, and
+    the sentence says it ended the connection (until round 30 this read
+    as a server that could not be reached)."""
     ok, row = _send(db_session, stub({"MAIL": "hang-up"}))
     assert not ok
-    assert row.error_message == "[disconnected] Connection unexpectedly closed"
-    assert _read(db_session, row).sentence == UNREACHABLE
+    assert row.error_message == (
+        "[disconnected at-mail] Connection unexpectedly closed"
+    )
+    assert _read(db_session, row).sentence == HUNG_UP
+    # a row that does not say how far the conversation got reads as before
+    assert failure_sentence("[disconnected] Connection unexpectedly closed") == (
+        UNREACHABLE
+    )
 
 
 # -- a message the server took is a sent message ----------------------------------
@@ -1033,12 +1064,16 @@ def test_a_hang_up_before_the_answer_to_the_message_says_it_may_have_gone(
     assert seen.reply == "Connection unexpectedly closed"
     (shown,) = client.get("/api/email-log").json()["rows"]
     assert shown["failure"] == LOST_AFTER_BODY
-    # lost any earlier, nothing had been handed over: as before
+    # lost any earlier, nothing had been handed over: nothing went out,
+    # and the server, which had answered, is not said to be out of reach
     for step in ("MAIL", "RCPT", "DATA"):
         ok, row = _send(db_session, stub({step: "hang-up"}))
         assert not ok
-        assert row.error_message == "[disconnected] Connection unexpectedly closed"
-        assert _read(db_session, row).sentence == UNREACHABLE
+        assert row.error_message == (
+            f"[disconnected at-{step.lower()}] Connection unexpectedly closed"
+        )
+        seen = _read(db_session, row)
+        assert seen.sentence == HUNG_UP and not seen.unsure
 
 
 def test_a_server_silent_after_the_message_says_it_may_have_gone(

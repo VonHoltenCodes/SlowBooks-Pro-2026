@@ -13,6 +13,13 @@ The rules, in one place:
   for an invoice 20 days late sends one email, not four.
 * A rule is spent for an invoice once a 'sent' audit row exists; a 'failed'
   row does not spend it, so the next run tries again.
+* But a reminder that reached anyone is spent for the run. When the To
+  address is turned away and a copy (another contact, an Always CC or BCC
+  address) takes the message, the send is a failed one, and the run
+  (automatic, or Send due reminders) does not send it again: the copy's
+  reader would get the same reminder every day. The row stays failed and
+  says who was refused and who a copy went to; a person fixes the address
+  and uses Remind, which is never held back by this.
 * An invoice's days from due are today minus its due date, one count for
   the list, the rules and the email. A firmer rule sent on or before the
   due date (Remind now pressed again) says the invoice is due today, due
@@ -333,6 +340,22 @@ def next_rule(rules, days: int, spent: set):
     return None, False
 
 
+def rule_for_a_run(rules, days: int, spent: set, reached: set):
+    """(rule, ready, held): what a run (automatic, or Send due reminders)
+    does for the invoice, decided here once for the run and for the
+    Collections list, so the list never says "ready" for a reminder the
+    run will not send. `spent` are the rules that have gone; `reached` the
+    rules whose reminder failed and still reached someone. Such a rule is
+    spent for a run: when it is the one that would go, it is held (not
+    ready) until Remind sends it by hand."""
+    rule, ready = next_rule(rules, days, spent | reached)
+    if not ready:
+        by_hand, would_go = next_rule(rules, days, spent)
+        if would_go:  # only the copy that went out holds it back
+            return by_hand, False, True
+    return rule, ready, False
+
+
 def _spent_by_invoice(db: Session, invoice_ids) -> dict:
     """invoice id -> the rule ids that have gone, or are going right now
     (a live claim counts: the other window is sending it)."""
@@ -348,6 +371,33 @@ def _spent_by_invoice(db: Session, invoice_ids) -> dict:
     for inv_id, rule_id in rows:
         spent.setdefault(inv_id, set()).add(rule_id)
     return spent
+
+
+def _reached_by_invoice(db: Session, invoice_ids) -> dict:
+    """invoice id -> the rule ids whose reminder failed and still reached
+    someone (a copy went out when the To address was turned away). What a
+    send reached is our own record of it on its email log row, read by the
+    one reader of those rows."""
+    reached: dict = {}
+    if not invoice_ids:
+        return reached
+    rows = (
+        db.query(InvoiceReminder.invoice_id, InvoiceReminder.rule_id, EmailLog)
+        .join(EmailLog, EmailLog.id == InvoiceReminder.email_log_id)
+        .filter(InvoiceReminder.invoice_id.in_(list(invoice_ids)))
+        .filter(InvoiceReminder.status == "failed")
+        .filter(EmailLog.status == "failed")
+        .all()
+    )
+    if not rows:
+        return reached
+    from app.services.email_errors import sends_that_reached_someone
+
+    went = sends_that_reached_someone(db, [log for _, _, log in rows])
+    for inv_id, rule_id, log in rows:
+        if log.id in went:
+            reached.setdefault(inv_id, set()).add(rule_id)
+    return reached
 
 
 def billed_sub_choice(settings: dict) -> str:
@@ -418,15 +468,19 @@ def _emails(people) -> str:
 
 def plan_reminders(db: Session, today: date, invoice_ids=None, settings=None):
     """(sends, skipped): what a run would email and what it would pass over
-    and why. Only invoices with a rule ready to go are listed in either."""
+    and why. Only invoices with a rule ready to go are listed in either. A
+    reminder that failed and still reached someone is spent for a run."""
     settings = settings or get_all_settings(db)
     rules = [r for r in list_rules(db) if r.enabled]
     invoices = open_invoices(db, invoice_ids)
-    spent = _spent_by_invoice(db, [i.id for i in invoices])
+    ids = [i.id for i in invoices]
+    spent, reached = _spent_by_invoice(db, ids), _reached_by_invoice(db, ids)
     sends, skipped = [], []
     for inv in invoices:
         days = (today - inv.due_date).days
-        rule, ready = next_rule(rules, days, spent.get(inv.id, set()))
+        rule, ready, _held = rule_for_a_run(
+            rules, days, spent.get(inv.id, set()), reached.get(inv.id, set())
+        )
         if not ready:
             continue
         to, reason = recipients_for(inv.customer, settings)
@@ -585,12 +639,9 @@ def _send_failed(
     that does not say why ends with where the reason can be read: `admin`
     words that for the person who pressed the button; what a run RECORDS
     is the reading with `admin` False, which is true for every reader."""
-    from app.services.email_errors import sentence_for_last_send
+    from app.services.email_errors import failed_send_line
 
-    why = sentence_for_last_send(db, entity_type, entity_id, admin) if ran else ""
-    if why:
-        return f"{what} could not be sent. {why}"
-    return f"{what} could not be sent."
+    return failed_send_line(db, entity_type, entity_id, admin, what, ran)
 
 
 def _latest_log_id(db: Session, entity_type: str, entity_id: int):
@@ -657,9 +708,10 @@ def _send_one(db, plan, settings, words, home, trigger, admin=False):
             entity_type="reminder",
             entity_id=inv.id,
         )
-        if ok:
-            log_id = _latest_log_id(db, "reminder", inv.id)
-        else:
+        # the send's own row in the email log, sent or failed: a failed
+        # one says who, if anyone, the message still went to
+        log_id = _latest_log_id(db, "reminder", inv.id)
+        if not ok:
             error = _send_failed("The email", "reminder", inv.id, db)
             shown = _send_failed("The email", "reminder", inv.id, db, admin=admin)
     except Exception:
@@ -847,7 +899,7 @@ def invoice_rows(
         customer_ids = [customer_id] + [s.id for s in billed_subs(db, customer_id)]
     invoices = open_invoices(db, customer_ids=customer_ids)
     ids = [i.id for i in invoices]
-    spent = _spent_by_invoice(db, ids)
+    spent, reached = _spent_by_invoice(db, ids), _reached_by_invoice(db, ids)
     last: dict = {}
     if ids:
         rows = (
@@ -863,7 +915,9 @@ def invoice_rows(
         days = (as_of - inv.due_date).days
         if overdue_only and days <= 0:
             continue
-        rule, ready = next_rule(rules, days, spent.get(inv.id, set()))
+        rule, ready, held = rule_for_a_run(
+            rules, days, spent.get(inv.id, set()), reached.get(inv.id, set())
+        )
         row = last.get(inv.id)
         last_rule = all_rules.get(row.rule_id) if row else None
         to, reason = recipients_for(inv.customer, settings)
@@ -905,6 +959,9 @@ def invoice_rows(
                             inv.due_date + timedelta(days=rule.days_from_due)
                         ).isoformat(),
                         "ready": ready,
+                        # failed for the customer though a copy went out:
+                        # no run sends it again, Remind now does
+                        "held": held,
                     }
                     if rule
                     else None

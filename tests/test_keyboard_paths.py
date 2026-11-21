@@ -280,7 +280,12 @@ def test_the_line_class_and_function_cells_leave_their_names_to_the_grid_rule():
         '<select class="${cls}-fund" data-no-search><option value="">Same as header</option>'
         in utils
     )
-    assert '<select class="${cls}">${Nonprofit.optionsHtml(selected' in utils
+    # the Function picker shares its cell with Split (side by side, so the
+    # mouse can reach Split); it still carries no name of its own
+    assert (
+        '<select class="${cls}" style="flex:1 1 5em;min-width:5em;">'
+        "${Nonprofit.optionsHtml(selected" in utils
+    )
     # the rule that names them: the column heading and "line N", N being the
     # line's place among the lines (a row that belongs to the line above it,
     # a nonprofit's Split chooser, is not a line and takes that line's number)

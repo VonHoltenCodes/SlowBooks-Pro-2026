@@ -326,3 +326,170 @@ def test_the_warning_is_on_no_printed_document(client, db_session, seed_accounts
     assert page.status_code == 200, page.text
     assert "No exemption certificate" not in page.text
     assert "certificate expired" not in page.text
+
+
+# ── a taxable customer's exempt job ──────────────────────────────────────
+
+JOB_EXPIRED = "The exemption certificate for the job Library expired on June 30, 2026."
+
+
+def _exempt_job(client, customer_id, expires="2026-06-30"):
+    r = client.post(
+        "/api/jobs",
+        json={
+            "customer_id": customer_id,
+            "name": "Library",
+            "is_taxable": False,
+            **CERT,
+            "exempt_certificate_expires": expires,
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_an_exempt_jobs_expired_certificate_is_said_for_a_taxable_customer(
+    client, db_session, seed_accounts
+):
+    """The sale is exempt because its job is, the customer being taxable:
+    the job's certificate is the paper, and its expiry is said by name. The
+    sale stays exempt and charges nothing."""
+    customer = _customer(db_session, name="Taxable Builder", taxable=True)
+    job = _exempt_job(client, customer.id)
+    when = date(2026, 9, 21)
+    assert certificate_warning(db_session, customer, when, job) == JOB_EXPIRED
+    # its last day still counts, a document switched to taxed has nothing to
+    # be told, and off the job the customer is simply taxable
+    assert certificate_warning(db_session, customer, date(2026, 6, 30), job) is None
+    assert certificate_warning(db_session, customer, when, job, False) is None
+    assert certificate_warning(db_session, customer, when) is None
+    assert _asked(client, customer.id, as_of=DAY, job_id=job) == JOB_EXPIRED
+    assert _asked(client, customer.id, as_of=DAY, job_id=job, tax_exempt=True) == (
+        JOB_EXPIRED
+    )
+    assert _asked(client, customer.id, as_of=DAY, job_id=job, tax_exempt=False) is None
+    assert _asked(client, customer.id, as_of=DAY) is None
+
+    sale = {**_sale(customer.id), "job_id": job}
+    for path in ("/api/invoices", "/api/estimates", "/api/sales-receipts"):
+        r = client.post(path, json=sale)
+        assert r.status_code == 201, (path, r.text)
+        doc = r.json()
+        assert doc["tax_note"] == JOB_EXPIRED, path
+        figures = doc.get("invoice") or doc
+        _exempt_figures(figures)
+        assert figures["tax_exempt"] is True, path
+    # the invoice's update says it again; switched to taxed it is charged
+    # and there is nothing to say
+    inv = client.post("/api/invoices", json=sale).json()
+    r = client.put(f"/api/invoices/{inv['id']}", json={"notes": "East wing"})
+    assert r.status_code == 200 and r.json()["tax_note"] == JOB_EXPIRED, r.text
+    r = client.post("/api/invoices", json={**sale, "tax_exempt": False})
+    assert r.status_code == 201, r.text
+    assert r.json()["tax_exempt"] is False
+    assert float(r.json()["tax_amount"]) == 24.75
+    assert r.json()["tax_note"] is None
+    # a recurring invoice on the job, whose invoices will be exempt as it is
+    r = client.post(
+        "/api/recurring",
+        json={
+            "customer_id": customer.id,
+            "job_id": job,
+            "start_date": DAY,
+            "frequency": "monthly",
+            "tax_rate": 0.0825,
+            "lines": LINES,
+        },
+    )
+    assert r.status_code == 201 and r.json()["tax_note"] == JOB_EXPIRED, r.text
+
+
+def test_an_exempt_job_with_a_current_certificate_is_quiet(
+    client, db_session, seed_accounts
+):
+    customer = _customer(db_session, name="Taxable Builder", taxable=True)
+    job = _exempt_job(client, customer.id, "2027-12-31")
+    r = client.post("/api/invoices", json={**_sale(customer.id), "job_id": job})
+    assert r.status_code == 201, r.text
+    assert r.json()["tax_exempt"] is True
+    assert r.json()["tax_note"] is None
+    assert _asked(client, customer.id, as_of=DAY, job_id=job) is None
+
+
+# ── an invoice made from another document ────────────────────────────────
+
+
+def test_a_converted_estimate_and_a_duplicate_say_it_too(
+    client, db_session, seed_accounts
+):
+    """An estimate's conversion and an invoice's duplicate each make a new
+    invoice: its answer carries the sentence a new invoice's does. The
+    duplicate is dated today, after the certificate ran out."""
+    customer = _customer(db_session)
+    _permit(client, customer.id, "2026-06-30")
+    est = client.post("/api/estimates", json=_sale(customer.id))
+    assert est.status_code == 201, est.text
+    r = client.post(f"/api/estimates/{est.json()['id']}/convert")
+    assert r.status_code == 200, r.text
+    _exempt_figures(r.json())
+    assert r.json()["tax_note"] == EXPIRED
+    r = client.post(f"/api/invoices/{r.json()['id']}/duplicate")
+    assert r.status_code == 201, r.text
+    _exempt_figures(r.json())
+    assert r.json()["tax_note"] == EXPIRED
+
+
+# ── the AI assistant connection ──────────────────────────────────────────
+
+
+def _sentence_then_rate_note(note, rate_note, where):
+    """The app's sentence, once, in front of the connection's own note."""
+    assert rate_note and MISSING not in rate_note, where
+    assert note == f"{MISSING} {rate_note}", where
+    assert note.startswith(MISSING) and note.endswith(rate_note), where
+    assert note.count(MISSING) == 1, where
+
+
+def test_the_assistant_connection_still_passes_the_sentence_on(
+    client, db_session, seed_accounts
+):
+    """An assistant that sends no tax_rate gets the connection's note about
+    the rate (what rate was used, and why) in tax_note. The sentence about
+    the certificate is kept there, in front of it, once, so the person is
+    still told; an assistant that gave the rate gets the sentence alone."""
+    from app.switchboard.client import ApiError
+    from app.switchboard.tools import sales_tax, with_left_blank, with_tax_rate
+
+    class _Api:
+        def get(self, path):
+            r = client.get(path)
+            if r.status_code >= 400:
+                raise ApiError(r.status_code, r.text)
+            return r.json()
+
+    customer = _customer(db_session)
+    body = {"customer_id": customer.id, "date": DAY, "lines": LINES}
+    for route in ("/api/invoices", "/api/estimates", "/api/sales-receipts"):
+        plan = sales_tax(_Api(), route, body)
+        assert plan is not None
+        r = client.post(route, json=with_tax_rate(body, plan))
+        assert r.status_code == 201, (route, r.text)
+        assert r.json()["tax_note"] == MISSING, route
+        told = with_left_blank(route, body, r.json(), plan)
+        # the app's sentence first, once, then the connection's own note
+        # about the rate
+        _sentence_then_rate_note(told["tax_note"], plan["note"], route)
+        assert "exemption_warning" not in told, route
+    # a credit memo too, and a document sent with its rate keeps the
+    # sentence alone
+    plan = sales_tax(_Api(), "/api/credit-memos", body)
+    r = client.post("/api/credit-memos", json=with_tax_rate(body, plan))
+    assert r.status_code == 201, r.text
+    assert r.json()["tax_note"] == MISSING
+    told = with_left_blank("/api/credit-memos", body, r.json(), plan)
+    _sentence_then_rate_note(told["tax_note"], plan["note"], "/api/credit-memos")
+    r = client.post("/api/invoices", json={**body, "tax_rate": 0})
+    assert r.status_code == 201, r.text
+    told = with_left_blank("/api/invoices", {**body, "tax_rate": 0}, r.json(), None)
+    assert told["tax_note"] == MISSING
+    assert "exemption_warning" not in told

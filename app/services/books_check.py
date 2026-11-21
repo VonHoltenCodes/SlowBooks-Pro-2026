@@ -19,6 +19,20 @@
 #
 # Accrual basis only in this cut: the agings, the deposits and the payable
 # figures are accrual figures. Cash-basis pairs are a follow-up.
+#
+# THE RULE FOR A DOCUMENT DATED AFTER THE AS-OF DAY: every row reads both of
+# its figures to the as-of day, so such a document is in neither. The list
+# is rebuilt for that day from the documents dated on or before it and what
+# was applied to them by then, and the account is read to the same day.
+# W-242 was the one row that read one figure each way: a customer payment
+# dated next week was on the Make Deposits list, which has no date, and not
+# yet in Undeposited Funds as of today, and the row read "apart" on books
+# that agreed. That row now takes the list as it stood on the as-of day
+# (undeposited_funds.waiting_balance(as_of=...)) and says how much the
+# Make Deposits page shows beyond it. The one exception is inventory: the
+# quantity on hand and the average cost are kept for today only and cannot
+# be rebuilt for a day, so its valuation and the ledger's Inventory are
+# both read whole, as they always were.
 # ============================================================================
 
 from __future__ import annotations
@@ -898,9 +912,20 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    sub = waiting_balance(db, uf_id)
+    # Both figures to the as-of day (W-242): what was waiting at the end of
+    # it, beside the account read to it. A payment dated later is on the
+    # Make Deposits list already and in neither figure here, so the row
+    # says how much of that list it leaves out.
+    sub = waiting_balance(db, uf_id, as_of)
     ctl = _balance(db, [uf_id], as_of, True)
     words = _account_words(db, uf_id)
+    # What the dated cut left out is the list's own arithmetic: the Make
+    # Deposits total less this row's figure, so the two always add up to
+    # what that page shows.
+    later = waiting_balance(db, uf_id) - sub
+    not_counting = (
+        f", not counting {_money(later)} dated after today" if later > ZERO else ""
+    )
 
     def documents():
         # A line on 1200 that is not customer money and not a deposit: a
@@ -938,10 +963,12 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
         ctl_label,
         sub,
         ctl,
-        f"The payments waiting to be deposited add up to {words}.",
+        f"The payments waiting to be deposited add up to {words}{not_counting}.",
         "The payments waiting to be deposited add up to {sub} and "
         + words
-        + " is {ctl}, {diff} apart. Look at the lines below, posted to the "
+        + " is {ctl}"
+        + not_counting
+        + ", {diff} apart. Look at the lines below, posted to the "
         "account by something other than a customer's payment, and at a "
         "deposit entered by hand that took more than was waiting.",
         documents,

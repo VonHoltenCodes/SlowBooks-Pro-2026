@@ -110,6 +110,9 @@ def settle_tax_exempt(
 # expires. This is the one place that decides it: the sales forms, the API's
 # tax_note and the customer's page all read it, and no printed, emailed or
 # exported document does.
+#
+# A taxable customer's sale can be exempt too, because its job is: then the
+# job's own certificate is the paper, and the sentence names the job.
 
 
 def _day_words(day: date) -> str:
@@ -117,19 +120,43 @@ def _day_words(day: date) -> str:
 
 
 def certificate_warning(
-    db: Session, customer, as_of: Optional[date] = None, job_id: Optional[int] = None
+    db: Session,
+    customer,
+    as_of: Optional[date] = None,
+    job_id: Optional[int] = None,
+    exempt: Optional[bool] = None,
 ) -> Optional[str]:
-    """The sentence to show for a tax-exempt customer whose exemption
-    certificate is missing, or expired as of ``as_of`` (the document's date;
-    today when none is given), else None: "No exemption certificate is on
-    file for <customer>." or "<customer>'s exemption certificate expired on
-    <date>." (the latest expiry on file)."""
+    """The sentence to show when the exemption certificate behind an exempt
+    sale is missing, or expired as of ``as_of`` (the document's date; today
+    when none is given), else None.
+
+    A tax-exempt customer: "No exemption certificate is on file for
+    <customer>." or "<customer>'s exemption certificate expired on <date>."
+    (the latest expiry on file, its job's certificate counted).
+
+    A taxable customer whose document is exempt because its job is (``job_id``
+    a job marked "Sales tax: exempt"): "The exemption certificate for the job
+    <job> expired on <date>.", or that none is on file for the job.
+    ``exempt`` is the document's own Tax exempt switch where it has one:
+    switched off, the sale is taxed and there is nothing to say; left out, the
+    document is as its job is."""
     from app.models.jobs import Job
     from app.models.reseller_permit import ResellerPermit
 
-    if not customer_exempt(customer):
-        return None
     when = as_of or date.today()
+    job = db.get(Job, job_id) if job_id else None
+    if not customer_exempt(customer):
+        if customer is None or exempt is False or not job_exempt(job):
+            return None
+        if not job.exempt_certificate_number:
+            return f"No exemption certificate is on file for the job {job.name}."
+        expires = job.exempt_certificate_expires
+        if expires is None or expires >= when:
+            return None
+        return (
+            f"The exemption certificate for the job {job.name} expired on "
+            f"{_day_words(expires)}."
+        )
     expiries = [
         expires
         for (expires,) in db.query(ResellerPermit.expires_at).filter(
@@ -138,7 +165,6 @@ def certificate_warning(
             ResellerPermit.is_active.isnot(False),
         )
     ]
-    job = db.get(Job, job_id) if job_id else None
     if job is not None and job.exempt_certificate_number:
         expiries.append(job.exempt_certificate_expires)
     name = customer.name or "this customer"
@@ -147,6 +173,14 @@ def certificate_warning(
     if any(expires is None or expires >= when for expires in expiries):
         return None
     return f"{name}'s exemption certificate expired on {_day_words(max(expiries))}."
+
+
+def note_certificate(db: Session, resp, customer, as_of, job_id, exempt=None):
+    """Put the sentence on a sales document's answer, in tax_note. The AI
+    assistant connection keeps it there, in front of its own note about the
+    rate, for a document sent without a tax_rate."""
+    resp.tax_note = certificate_warning(db, customer, as_of, job_id, exempt)
+    return resp
 
 
 # ── the job's certificate ────────────────────────────────────────────────

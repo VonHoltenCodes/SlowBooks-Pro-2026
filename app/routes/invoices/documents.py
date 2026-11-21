@@ -13,7 +13,7 @@ from app.models.invoices import Invoice
 from app.services.pdf_service import generate_invoice_pdf, render_invoice_html
 from app.services.settings_service import get_all_settings as get_settings
 from app.services.request_utils import content_disposition
-from app.services.terminology import terms_for
+from app.services.terminology import AsWritten, terms_for
 from app.services.donor_documents import invoice_doc_kind
 
 from app.routes.invoices._router import router
@@ -144,7 +144,8 @@ def email_invoice(
     if rejected:
         raise HTTPException(
             status_code=400,
-            detail="Not an email address: " + ", ".join(rejected[:5]) + ".",
+            # what was typed, shown as it was typed
+            detail=AsWritten("Not an email address: " + ", ".join(rejected[:5]) + "."),
         )
     # The caps count the always-copy settings too: forty-nine typed plus two
     # in Settings is fifty-one, refused here in the limit's own words rather

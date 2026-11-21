@@ -132,7 +132,11 @@ const CollectionsPage = {
         const n = r.next_reminder;
         if (!r.reminders_enabled) return `<span style="color:var(--text-muted)" title="${escapeHtml(r.skip_reason || '')}">off</span>`;
         if (!n) return '—';
-        const when = n.ready ? '<strong>ready</strong>' : escapeHtml(formatDate(n.due_on));
+        // held: it failed for the customer though a copy went out, so no run
+        // sends it again (the copy's reader would get it every day)
+        const when = n.held
+            ? `<strong style="color:var(--text-danger)" title="${escapeHtml(Terms.text('A copy of this reminder went out, so it is not sent again automatically or by Send due reminders. Check the email address, then use Remind now.'))}">${escapeHtml(Terms.text('held: use Remind now'))}</strong>`
+            : n.ready ? '<strong>ready</strong>' : escapeHtml(formatDate(n.due_on));
         // A tenant billed with its property is reminded wherever Settings says; the row names who
         const to = r.billed_to_name && r.reminder_to ? `<div style="font-size:11px;color:var(--text-muted)">to ${escapeHtml(r.reminder_to)}</div>` : '';
         return `${escapeHtml(n.label)}<div style="font-size:11px;color:var(--text-muted)">${when}</div>${to}`;

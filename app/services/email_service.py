@@ -254,6 +254,72 @@ def _watch_body(server) -> None:
         pass
 
 
+# the commands that begin a step of a send, and the name the step is
+# recorded under (EHLO and the HELO that follows a refused EHLO are one)
+_STEPS = {
+    "ehlo": "helo",
+    "helo": "helo",
+    "starttls": "starttls",
+    "auth": "auth",
+    "mail": "mail",
+    "rcpt": "rcpt",
+    "data": "data",
+}
+
+
+def _watch_steps(server) -> None:
+    """Keeps `server.heard`: [the step of the send under way, the reply
+    last read in it]. A server that greeted us and then ended the
+    connection is said to have done that, at that step, and a refusal it
+    gave there before it hung up is not lost. Works on whatever connection
+    a send is made on, as _watch_body does."""
+    putcmd, getreply = getattr(server, "putcmd", None), getattr(
+        server, "getreply", None
+    )
+    if not (callable(putcmd) and callable(getreply)):
+        return
+    heard = ["", None]
+
+    def watched_putcmd(cmd, *args, **kwargs):
+        step = _STEPS.get(str(cmd).strip().lower())
+        answering = heard[0] == "auth" and _reply_code(heard[1]) == 334
+        if step and not answering:
+            # (while the server waits for the rest of a sign-in, what is
+            # sent is an answer to it, whatever it spells)
+            if step != heard[0] or step not in ("helo", "auth"):
+                # each command is judged by its own reply; a sign-in (one
+                # method tried after another) and a greeting (EHLO, then
+                # HELO) are each one step
+                heard[1] = None
+            heard[0] = step
+        return putcmd(cmd, *args, **kwargs)
+
+    def watched_getreply():
+        reply = getreply()
+        heard[1] = reply
+        return reply
+
+    try:
+        server.heard = heard
+        server.putcmd, server.getreply = watched_putcmd, watched_getreply
+    except (AttributeError, TypeError):
+        pass
+
+
+def _reply_code(reply):
+    if isinstance(reply, tuple) and reply and isinstance(reply[0], int):
+        return reply[0]
+    return None
+
+
+def _heard(server):
+    """(step, last reply) as _watch_steps kept them, or ("", None)."""
+    heard = getattr(server, "heard", None)
+    if isinstance(heard, list) and len(heard) == 2 and isinstance(heard[0], str):
+        return heard[0], heard[1]
+    return "", None
+
+
 def _connect(host: str, port: int):
     """The connection a send is made on. smtplib.SMTP is looked up when
     called, so whatever stands in for it is used as it is."""
@@ -422,6 +488,7 @@ def send_email(
             # empty label), which Python reports as a codec error
             raise host_name_error() from None
         _watch_body(server)
+        _watch_steps(server)
         if use_tls:
             # verified every time; a failure raises before the login below
             _secure(server, host)
@@ -491,6 +558,8 @@ def send_email(
         return True
 
     except Exception as e:
+        # how far the conversation had got, before anything more is said
+        lost_at, last_reply = _heard(server)
         if server:
             try:
                 if isinstance(e, MailTLSError):
@@ -531,6 +600,8 @@ def send_email(
                 e,
                 after_body=getattr(server, "body_given", False) is True,
                 signed_in=signed_in,
+                lost_at=lost_at,
+                last_reply=last_reply,
             ),
         )
         db.add(log)

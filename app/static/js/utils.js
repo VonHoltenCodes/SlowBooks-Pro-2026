@@ -1967,7 +1967,12 @@ const TaxExempt = {
             }
         }
         const exempt = custExempt || (!!sw && sw.checked);
-        TaxExempt.certificate(form || (tbody && tbody.closest ? tbody.closest('form') : null), custExempt ? c : null);
+        // the paper behind the exemption: the customer's when the customer
+        // is exempt; the job's when a taxable customer's document is exempt
+        // by its switch (or, on a form with no switch, by the job it carries)
+        const docForm = form || (tbody && tbody.closest ? tbody.closest('form') : null);
+        const byJob = !custExempt && !!c && (sw ? sw.checked : !!(docForm && docForm.dataset && docForm.dataset.exemptJob));
+        TaxExempt.certificate(docForm, custExempt || byJob ? c : null);
         if (!tbody) return exempt;
         tbody.querySelectorAll('.line-taxable').forEach(box => {
             if (exempt) {
@@ -1993,7 +1998,10 @@ const TaxExempt = {
     // so in the open, under the customer, and nothing is blocked. The
     // sentence is the server's (one function decides it, the same one the
     // API's tax_note and the customer's page read). `customer` is the
-    // form's customer when marked tax exempt, else null. The note is a
+    // form's customer when the document is exempt (the customer is marked
+    // tax exempt, or the document's own switch is on, as an exempt job
+    // sets it: then the job's certificate is the one judged), else null.
+    // The note is a
     // polite live region, there before it is filled, and it follows the
     // customer, the date and the job; a look that fails says nothing.
     certificate(form, customer) {
@@ -2023,7 +2031,8 @@ const TaxExempt = {
         // it carries (its form shows neither as a box to read)
         const asOf = form.dataset.exemptAsOf || (day && day.value) || '';
         const jobId = (job ? job.value : form.dataset.exemptJob) || '';
-        const key = customer ? [customer.id, asOf, jobId].join('|') : '';
+        const sw = form.querySelector('[name="tax_exempt"]');
+        const key = customer ? [customer.id, asOf, jobId, sw ? sw.checked : ''].join('|') : '';
         if (note.dataset.key === key) return;
         note.dataset.key = key;
         // another customer's sentence never stands under this one's name
@@ -2033,6 +2042,7 @@ const TaxExempt = {
         const query = [];
         if (asOf) query.push(`as_of=${encodeURIComponent(asOf)}`);
         if (jobId) query.push(`job_id=${encodeURIComponent(jobId)}`);
+        if (sw) query.push(`tax_exempt=${sw.checked ? 'true' : 'false'}`);
         API.get(`/customers/${customer.id}/exemption-warning${query.length ? '?' + query.join('&') : ''}`)
             .then(answer => { if (note.dataset.key === key) note.textContent = (answer && answer.warning) || ''; })
             .catch(() => { if (note.dataset.key === key) note.textContent = ''; });
@@ -2148,10 +2158,14 @@ const Nonprofit = {
             .replace('<option value="">Same as header</option>', '<option value="">No class</option>');
     },
     headHtml() { return Nonprofit.classHeadHtml() + (Nonprofit.enabled() ? `<th scope="col">Function</th>` : ''); },
+    // The Function picker and Split share the cell side by side, the picker
+    // taking what room Split leaves: a picker as wide as the cell (the line
+    // tables' rule for a field) pushed Split out over the next column's
+    // control, where the mouse could not reach it.
     cellHtml(cls, selected, fundSelected) {
-        const split = Nonprofit.enabled() && (Nonprofit._rules || []).length ? ` <button type="button" class="btn btn-sm btn-secondary np-split" title="Split this line by an allocation rule" onclick="Nonprofit.splitRow(this)">Split</button>` : '';
+        const split = Nonprofit.enabled() && (Nonprofit._rules || []).length ? `<button type="button" class="btn btn-sm btn-secondary np-split" style="flex:none;" title="Split this line by an allocation rule" onclick="Nonprofit.splitRow(this)">Split</button>` : '';
         return Nonprofit.classCellHtml(cls, fundSelected) + (Nonprofit.enabled()
-            ? `<td style="white-space:nowrap"><select class="${cls}">${Nonprofit.optionsHtml(selected, '—')}</select>${split}</td>`
+            ? `<td><span class="np-function" style="display:flex;align-items:center;gap:4px;"><select class="${cls}" style="flex:1 1 5em;min-width:5em;">${Nonprofit.optionsHtml(selected, '—')}</select>${split}</span></td>`
             : '');
     },
     fromRow(row, cls) { return row.querySelector(`.${cls}`)?.value || null; },
@@ -2681,6 +2695,16 @@ function _cellText(cell) {
     return cell && !cell.querySelector(_FIELD_SEL) ? cell.textContent.replace(/\s+/g, ' ').trim() : '';
 }
 
+// A column heading's words and whether it marks its fields required: a
+// trailing "*" ("Account *") is the mark, not part of the name, so a field
+// under it is named "Account, line 2" and says it is required the way a
+// form group's field does (_requiredStar), not by a symbol in its name.
+function headingName(text) {
+    const words = String(text || '').replace(/\s+/g, ' ').trim();
+    const m = words.match(/^(.*?)\s*\*$/);
+    return m ? { name: m[1], required: true } : { name: words, required: false };
+}
+
 // A label's trailing "*" marks the field required: hidden from speech, and
 // the field says it is required instead.
 function _requiredStar(label, field) {
@@ -2710,6 +2734,29 @@ function _tieLabel(label, field) {
     _requiredStar(label, field);
 }
 
+// The words of the heading over a field. A heading that marks its column
+// required has the mark hidden from speech once (a screen reader reading
+// the heading itself does not say "star" either) and its field says it is
+// required.
+function _headingOver(h, field) {
+    const head = headingName(_cellText(h));
+    if (!head.required) return head.name;
+    for (let n = h.lastChild; n; n = n.previousSibling) {
+        if (n.nodeType === Node.ELEMENT_NODE && n.getAttribute('aria-hidden') === 'true') break;
+        if (n.nodeType !== Node.TEXT_NODE || !n.textContent.trim()) continue;
+        const m = n.textContent.match(/^(.*?)\s*\*\s*$/s);
+        if (!m) break;
+        n.textContent = m[1] + ' ';
+        const mark = document.createElement('span');
+        mark.setAttribute('aria-hidden', 'true');
+        mark.textContent = '*';
+        n.after(mark);
+        break;
+    }
+    if (!field.required) field.setAttribute('aria-required', 'true');
+    return head.name;
+}
+
 // A table field's name, and whether it is by place ("line N").
 function _gridName(field, places) {
     const cell = field.closest('td');
@@ -2724,7 +2771,7 @@ function _gridName(field, places) {
     if (head) {
         let at = 0;
         for (const h of head.cells) {
-            if (col >= at && col < at + (h.colSpan || 1)) { heading = _cellText(h); break; }
+            if (col >= at && col < at + (h.colSpan || 1)) { heading = _headingOver(h, field); break; }
             at += h.colSpan || 1;
         }
     }

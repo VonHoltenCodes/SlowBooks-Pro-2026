@@ -115,8 +115,9 @@ class RecurringResponse(BaseModel):
     id: int
     customer_id: int
     customer_name: Optional[str] = None
-    # On the answer to a create or an update only: a tax-exempt customer's
-    # exemption certificate is missing, or expired as of its next invoice's date
+    # On the answer to a create or an update only: the exemption certificate
+    # behind an exempt sale (the tax-exempt customer's, or the exempt job's)
+    # is missing, or expired as of its next invoice's date
     # (services/tax_exemption.certificate_warning). The sale is exempt all
     # the same; this is for the person to be told. Null otherwise.
     tax_note: Optional[str] = None

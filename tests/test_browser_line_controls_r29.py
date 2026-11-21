@@ -24,6 +24,11 @@ numbers, it moves with its line and goes with it), and Apply puts one line
 per share in the line's place, each named by its place, the keyboard on the
 first.
 
+Split is the mouse's as well as the keyboard's: it sits in its own cell,
+beside the Function picker, where a click on it reaches it. And an estimate
+line that keeps its own markup (the commercial bid) names that box by its
+line like every other field.
+
 Each sweep stays whole inside one test: the forms are walked one after the
 other on one company.
 """
@@ -144,11 +149,27 @@ MARK = """(sel) => [...document.querySelector(sel).querySelectorAll(':scope > tr
 
 CONTROLS = """(sel) => {
     const out = [];
+    // whether the heading over the control's cell marks its column required
+    // ("Account *"), colspans counted
+    const head = document.querySelector(sel).closest('table').tHead;
+    const starred = (el) => {
+        const cell = el.closest('td');
+        if (!cell || !head || !head.rows.length) return false;
+        let col = 0;
+        for (const c of cell.parentElement.cells) { if (c === cell) break; col += c.colSpan || 1; }
+        let at = 0;
+        for (const h of head.rows[head.rows.length - 1].cells) {
+            if (col >= at && col < at + (h.colSpan || 1)) return /\\*\\s*$/.test(h.textContent);
+            at += h.colSpan || 1;
+        }
+        return false;
+    };
     [...document.querySelector(sel).querySelectorAll(':scope > tr')].forEach((row, i) => {
         row.querySelectorAll('input:not([type=hidden]), select, textarea, button').forEach(el => {
             if (el.closest('[aria-hidden="true"]') || el.offsetParent === null) return;
             el.dataset.r29c = String(out.length);
-            out.push({row: i, tag: row.dataset.r29 || '', kind: el.tagName});
+            out.push({row: i, tag: row.dataset.r29 || '', kind: el.tagName,
+                      star: starred(el)});
         });
     });
     return out;
@@ -241,12 +262,15 @@ def _press(page, sel, row, label, key="Enter"):
     page.keyboard.press(key)
 
 
-def _names(page, sel):
+def _names(page, sel, starred=None):
     """Every control of every line, with the name Chromium's accessibility
-    tree gives it: [(line index, the line's tag, role, name)]."""
+    tree gives it: [(line index, the line's tag, role, name)]. The names of
+    the fields under a heading that marks its column required ("Account *")
+    are added to `starred`; each of them must say it is required."""
     controls = page.evaluate(CONTROLS, sel)
     cdp = page.context.new_cdp_session(page)
     out = []
+    starred = [] if starred is None else starred
     try:
         for i, c in enumerate(controls):
             found = cdp.send(
@@ -258,6 +282,15 @@ def _names(page, sel):
                 {"objectId": found["result"]["objectId"], "fetchRelatives": False},
             )["nodes"][0]
             name = " ".join(str((node.get("name") or {}).get("value", "")).split())
+            if c["star"] and c["kind"] != "BUTTON":
+                # a field under a heading that marks its column required
+                # says so itself, the way a screen reader hears it
+                said = {
+                    p["name"]: p["value"].get("value")
+                    for p in node.get("properties", [])
+                }
+                assert said.get("required") is True, (name, said)
+                starred.append(name)
             out.append((c["row"], c["tag"], node["role"]["value"], name))
     finally:
         cdp.detach()
@@ -269,8 +302,19 @@ def _named_by_place(page, sel, form, step, order):
     every field of line k reads "line k", no two fields read the same, and a
     button that says a line's number says the line it is on."""
     _pickers_settled(page)
-    got = _names(page, sel)
+    starred = []
+    got = _names(page, sel, starred)
     where = f"{form}, after {step}"
+    # a name is the heading's words and the line: never the heading's
+    # required-field mark ("Account *, line 2")
+    for _row, _tag, _role, name in got:
+        assert "*" not in name, (where, name)
+    if form == "expense":
+        rows = len({row for row, _t, _r, _n in got})
+        assert starred == [f"Account, line {k + 1}" for k in range(rows)], (
+            where,
+            starred,
+        )
     tags = []
     for row, tag, _role, _name in got:
         if len(tags) == row:
@@ -672,5 +716,166 @@ def test_pay_application_lines_are_named_by_place_when_item_numbers_repeat(
             "Stored, line 4",
         ]
         assert errors == [], errors
+    finally:
+        page.close()
+
+
+# ---- a line's controls are the mouse's too: each sits in its own cell ----
+
+# Every control of every line, brought into view: is it inside the cell it
+# was drawn in, and is it what the mouse finds across the width that shows?
+COVERED = """(sel) => {
+    const out = [];
+    [...document.querySelector(sel).querySelectorAll(':scope > tr')].forEach((row, i) => {
+        row.querySelectorAll('input:not([type=hidden]), select:not(.cbx-select), textarea, button').forEach(el => {
+            if (el.closest('[aria-hidden="true"]') || el.offsetParent === null) return;
+            el.scrollIntoView({block: 'center', inline: 'center'});
+            const r = el.getBoundingClientRect();
+            const td = el.closest('td').getBoundingClientRect();
+            const what = (el.getAttribute('aria-label') || el.textContent.trim() || el.className) + `, row ${i + 1}`;
+            if (r.left < td.left - 1 || r.right > td.right + 1) {
+                out.push(`${what}: spills out of its cell (${Math.round(r.left)}-${Math.round(r.right)} in ${Math.round(td.left)}-${Math.round(td.right)})`);
+            }
+            // what of it shows: a field wider than the table's scrolling
+            // box shows only the part inside the box
+            let lo = Math.max(r.left, 0), hi = Math.min(r.right, window.innerWidth);
+            for (let box = el.parentElement; box; box = box.parentElement) {
+                if (getComputedStyle(box).overflowX === 'visible') continue;
+                const b = box.getBoundingClientRect();
+                lo = Math.max(lo, b.left);
+                hi = Math.min(hi, b.right);
+            }
+            if (hi - lo < 4) out.push(`${what}: out of sight`);
+            for (let x = lo + 1; x < hi; x += 3) {
+                const hit = document.elementFromPoint(x, r.top + r.height / 2);
+                if (hit !== el && !el.contains(hit)) {
+                    out.push(`${what}: under ${hit ? (hit.className || hit.tagName) : 'nothing'} at ${Math.round(x)}`);
+                    break;
+                }
+            }
+        });
+    });
+    return out;
+}"""
+
+
+def test_a_split_button_sits_in_its_own_cell_and_takes_a_click(browser, company):
+    r = company.put("/api/settings", json={"company_type": "nonprofit"})
+    assert r.status_code == 200, r.text
+    r = company.post(
+        "/api/nonprofit/allocation-rules",
+        json={
+            "name": "Rent split",
+            "basis": "percent",
+            "targets": [
+                {"function": "program", "weight": 70},
+                {"function": "management", "weight": 30},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    for width in (1280, 1500, 1920):
+        for form in FORMS:
+            name, route, opener, sel = form[:4]
+            if name not in ("bill", "journal entry"):
+                continue
+            where = f"{name} at {width}px"
+            page, handled = _open_at(browser, company, route, width=width, height=900)
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            try:
+                page.evaluate(f"async () => {{ await {opener}; }}")
+                page.wait_for_function(MODAL_SHOWN)
+                page.locator(sel).wait_for(state="attached")
+                settle(page, handled)
+                while page.evaluate(ROW_COUNT, sel) < 2:
+                    _add_line(page, sel)
+                _pickers_settled(page)
+                assert page.locator(f"{sel} .np-split").count() == 2, where
+                assert page.evaluate(COVERED, sel) == [], where
+
+                # a real click on the middle of Split opens the chooser
+                # under its line and touches nothing beside it
+                ticks = "(sel) => [...document.querySelectorAll(sel + ' input[type=checkbox]')].map(b => b.checked)"
+                before = page.evaluate(ticks, sel)
+                split = page.locator(f"{sel} > tr").nth(0).locator(".np-split")
+                split.scroll_into_view_if_needed()
+                box = split.bounding_box()
+                page.mouse.click(
+                    box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+                )
+                page.wait_for_function(
+                    "(sel) => document.querySelectorAll(sel + ' > tr.np-split-row').length === 1",
+                    arg=sel,
+                )
+                rows = page.evaluate(SPLIT_ROWS, sel)
+                assert [r["chooser"] for r in rows] == [False, True, False], where
+                assert page.evaluate(ticks, sel) == before, where
+                # with the chooser open, still each in its own cell
+                assert page.evaluate(COVERED, sel) == [], where
+                assert errors == [], (where, errors)
+            finally:
+                page.close()
+
+
+# ---- an estimate line that keeps its own markup (the commercial bid) ----
+
+
+def test_a_kept_markup_is_named_by_its_line_on_a_commercial_bid(browser, company):
+    _construction_job(company)
+    customer = company.get("/api/customers").json()[0]["id"]
+    r = company.post(
+        "/api/estimates",
+        json={
+            "customer_id": customer,
+            "date": "2026-09-21",
+            "tax_rate": 0,
+            "gc_pct": 5,
+            "lines": [
+                {
+                    "description": words,
+                    "quantity": 1,
+                    "unit_cost": cost,
+                    "markup_pct": 10,
+                    "rate": cost * 1.1,
+                }
+                for words, cost in (("Alpha", 100), ("Bravo", 60), ("Charlie", 25))
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    sel, name = "#est-lines", "estimate (commercial bid, kept markups)"
+    page, handled = _open_at(browser, company, "#/estimates", height=900)
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.evaluate(
+            f"async () => {{ await EstimatesPage.showForm({r.json()['id']}); }}"
+        )
+        page.wait_for_function(MODAL_SHOWN)
+        page.locator(sel).wait_for(state="attached")
+        settle(page, handled)
+        assert page.evaluate(ROW_COUNT, sel) == 3, name
+        assert page.locator(f"{sel} input.line-markup[type=number]").count() == 3
+        page.evaluate(MARK, sel)
+
+        def markups(step, order):
+            got = _named_by_place(page, sel, name, step, order)
+            said = [n for _row, _t, _role, n in got if n.startswith("Markup percent")]
+            want = [
+                f"Markup percent, line {i + 1}" for i, t in enumerate(order) if t != "+"
+            ]
+            assert said == want, (name, step, said)
+
+        markups("opening", "ABC")
+        _press(page, sel, 0, "Move line down")
+        markups("Move line down on line 1", "BAC")
+        _press(page, sel, 0, "Insert line below")
+        page.wait_for_function(f"(sel) => ({ROW_COUNT})(sel) === 4", arg=sel)
+        markups("Insert line below on line 1", "B+AC")
+        _press(page, sel, 0, "Remove line")
+        markups("Remove line on line 1", "+AC")
+        _on_remove_of(page, sel, name, "Remove line on line 1", "", 0)
+        assert errors == [], (name, errors)
     finally:
         page.close()
