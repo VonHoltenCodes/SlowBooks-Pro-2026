@@ -299,6 +299,38 @@ def test_a_token_is_told_only_of_the_company_it_opens(three):
     assert "usernames" not in r.json()
 
 
+def test_the_sign_in_status_refuses_a_token_as_the_gate_does(three):
+    """The sign-in status is the first thing a program reads; its 401 for a
+    token this company turns away carries the gate's header and sentence,
+    so the program can tell its token was refused from a route that failed."""
+    _id, secret = _hand_token("harbor.db", "office script")
+    r = _bot(secret, "lake.db").get("/api/auth/status")
+    assert r.status_code == 401, r.text
+    assert r.headers.get(REFUSED_HEADER) == "1"
+    with link._in_company("harbor.db") as db:
+        from app.models.api_tokens import ApiToken
+
+        db.get(ApiToken, _id).is_active = False
+        db.commit()
+    r = _bot(secret, "harbor.db").get("/api/auth/status")
+    assert r.status_code == 401, r.text
+    assert r.headers.get(REFUSED_HEADER) == "1"
+    assert r.json()["detail"] == (
+        'The API token "office script" was revoked. Ask an administrator for a '
+        "new one under Settings, API Tokens."
+    )
+    _id, secret = _hand_token("harbor.db", "AI assistant (Switchboard)")
+    _set_role(three, "harbor.db", "jdoe", "bookkeeper")
+    _set_role(three, "harbor.db", "bkpr", "admin")
+    r = _bot(secret, "harbor.db").get("/api/auth/status")
+    assert r.status_code == 401, r.text
+    assert r.headers.get(REFUSED_HEADER) == "1"
+    assert r.json()["detail"].startswith(
+        'The API token "AI assistant (Switchboard)" stopped working because the '
+        "administrator who made it is no longer an administrator of this company."
+    )
+
+
 # -- an AI assistant's token whose maker is no longer an administrator --------------
 
 

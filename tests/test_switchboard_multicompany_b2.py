@@ -911,7 +911,7 @@ def test_postgresql_serves_one_company_so_add_is_refused(relay, client, monkeypa
     assert refused.value.status == 409
     assert refused.value.sentence == (
         "On PostgreSQL this server serves one company, so the connection reaches "
-        "only this one."
+        "only this one. Nothing was done."
     )
 
 

@@ -653,8 +653,8 @@ def test_another_company_is_offered_add_and_hears_no_name(relay, client):
     assert "Larkspur Supply" not in st.text and "another-company" not in st.text
     r = client.post("/api/switchboard/connect")
     assert r.status_code == 409 and r.json()["detail"] == (
-        "An AI assistant connection already exists on this computer. Use Add "
-        "instead."
+        "An AI assistant connection already exists on this computer. Nothing was "
+        "done. Use Add instead."
     )
     for what in ("code", "disconnect"):
         r = client.post(f"/api/switchboard/{what}")

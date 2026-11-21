@@ -208,6 +208,10 @@ MAKER_GONE_REFUSAL = (
     "it is no longer an administrator of this company. Nothing was done. An "
     "administrator can make a new one under Settings, API Tokens."
 )
+REVOKED_REFUSAL = (
+    'The API token "{label}" was revoked. '
+    "Ask an administrator for a new one under Settings, API Tokens."
+)
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 # A 401 the gate gives a request's token (it matches nothing here, or it
 # was turned off) carries this, so a program holding the token can tell it
@@ -1541,10 +1545,7 @@ async def _require_session(request: Request, call_next):
             return JSONResponse(
                 status_code=401,
                 content={
-                    "detail": (
-                        f"The API token \"{token_principal['label']}\" was revoked. "
-                        "Ask an administrator for a new one under Settings, API Tokens."
-                    )
+                    "detail": REVOKED_REFUSAL.format(label=token_principal["label"])
                 },
                 headers={_TOKEN_REFUSED_HEADER: "1"},
             )

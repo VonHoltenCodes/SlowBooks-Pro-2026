@@ -1190,7 +1190,7 @@ def test_disconnect_revokes_the_token_whatever_it_was_renamed_to(
     assert r.status_code == 400
     assert r.json()["detail"] == (
         "This token belongs to the AI assistant connection; its name can't be "
-        "changed."
+        "changed. Nothing was changed."
     )
     db_session.query(ApiToken).filter(ApiToken.id == record["token_id"]).update(
         {"label": renamed}

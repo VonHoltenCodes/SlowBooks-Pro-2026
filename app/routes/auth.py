@@ -187,11 +187,17 @@ def auth_status(request: Request):
     import app.database as db_module
 
     try:
-        if _a_program(request) and not _token_works_here(request):
-            # a program is told only of the company its own token opens
+        refused = _a_program(request) and _token_refusal(request)
+        if refused:
+            # a program is told only of the company its own token opens,
+            # refused as the gate refuses it: the header tells the program
+            # its token was turned away, not that the route failed
+            from app.main import _TOKEN_REFUSED_HEADER
+
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=TOKEN_NOT_HERE_MESSAGE,
+                detail=refused,
+                headers={_TOKEN_REFUSED_HEADER: "1"},
             )
         db = db_module.SessionLocal()
     except served_companies.CompanyUnavailable as exc:
@@ -227,18 +233,22 @@ TOKEN_NOT_HERE_MESSAGE = (
 )
 
 
-def _token_works_here(request: Request) -> bool:
-    """The request's API token is an active one of the company the request
-    works in (the one its company header names), as the gate would let in."""
+def _token_refusal(request: Request) -> str | None:
+    """None when the request's API token is an active one of the company the
+    request works in (the one its company header names), as the gate would
+    let in; else the sentence the gate would refuse it with."""
+    from app.main import MAKER_GONE_REFUSAL, REVOKED_REFUSAL
     from app.services.api_token_service import resolve
 
     header = request.headers.get("authorization") or ""
     principal = resolve(header[7:].strip())
-    return (
-        principal is not None
-        and not principal.get("revoked")
-        and not principal.get("maker_gone")
-    )
+    if principal is None:
+        return TOKEN_NOT_HERE_MESSAGE
+    if principal.get("revoked"):
+        return REVOKED_REFUSAL.format(label=principal["label"])
+    if principal.get("maker_gone"):
+        return MAKER_GONE_REFUSAL.format(label=principal["label"])
+    return None
 
 
 def _a_program(request: Request) -> bool:

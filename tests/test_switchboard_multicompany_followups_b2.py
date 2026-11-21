@@ -330,14 +330,26 @@ def test_the_manager_rule_holds_with_one_company_listed(three, relay):
     _set_role(three, "harbor.db", "bkpr", "admin")
     _serve(three, ["harbor.db"])
     bkpr = _signed_in(three, "bkpr")
-    st = bkpr.get("/api/switchboard/status").json()
-    # Disconnect stays hers (an administrator of every company that can be
-    # opened now), and a code, which would reach Smith when it is listed
-    # again, does not
+    r = bkpr.get("/api/switchboard/status")
+    st = r.json()
+    # Smith, which cannot be opened now, is skipped only for jdoe, who added
+    # it: bkpr, an administrator of Harbor alone, gets no Disconnect and no
+    # code, and is told nothing of Smith
+    assert st["can_code"] is False and st["can_disconnect"] is False
+    assert "companies" not in st and "code_needs" not in st
+    assert "Smith" not in r.text
+    assert bkpr.post("/api/switchboard/code").status_code == 403
+    assert bkpr.post("/api/switchboard/disconnect").status_code == 403
+    assert relay.codes == []
+    # jdoe keeps the way out: Disconnect stays his, and a code, which would
+    # reach Smith when it is listed again, does not
+    jdoe = _signed_in(three, "jdoe")
+    st = jdoe.get("/api/switchboard/status").json()
     assert st["can_code"] is False and st["code_needs"] == ["Smith Plumbing"]
     assert st["can_disconnect"] is True
-    assert bkpr.post("/api/switchboard/code").status_code == 403
+    assert jdoe.post("/api/switchboard/code").status_code == 403
     assert relay.codes == []
+    assert _record()["companies"][1]["file"] == "smith.db"
 
 
 # -- the connection's tokens, known by their hash -----------------------------------------------
@@ -356,7 +368,8 @@ def test_a_renamed_connection_token_is_still_the_connections(three, relay):
     r = _bot(harbor["token"], "harbor.db", client=LAN).get("/api/whoami")
     assert r.status_code == 401
     assert r.json()["detail"] == (
-        "This token works only for the AI assistant connection on this computer."
+        "This token works only for the AI assistant connection on this computer. "
+        "Nothing was done."
     )
     assert _bot(harbor["token"], "harbor.db").get("/api/whoami").status_code == 200
     _set_role(three, "harbor.db", "bkpr", "admin")

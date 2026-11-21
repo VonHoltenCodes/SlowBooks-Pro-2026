@@ -39,7 +39,10 @@ from tests.test_served_companies import (  # noqa: F401  (the fixture and helper
 )
 
 UNSERVED = "This server does not serve that company for this request. Nothing was done."
-LAN_ONLY = "This token works only for the AI assistant connection on this computer."
+LAN_ONLY = (
+    "This token works only for the AI assistant connection on this computer. "
+    "Nothing was done."
+)
 LINK = api_token_service.LINK_TOKEN_LABEL
 LOOPBACK = ("127.0.0.1", 50000)
 LAN = ("192.168.1.50", 50000)
@@ -350,7 +353,7 @@ def test_no_token_takes_the_connections_name_and_its_own_keep_theirs(served):
     assert _sign_in(admin, "pat", A_PW).status_code == 200
     taken = (
         "That name belongs to the AI assistant connection's tokens. Choose another "
-        "name."
+        "name. Nothing was changed."
     )
     for label in (LINK, LINK + " 2", "ai assistant (relay) mine", "  " + LINK):
         r = admin.post("/api/tokens", json={"label": label, "role": "bookkeeper"})
@@ -368,7 +371,7 @@ def test_no_token_takes_the_connections_name_and_its_own_keep_theirs(served):
         assert r.status_code == 400
         assert r.json()["detail"] == (
             "This token belongs to the AI assistant connection; its name can't be "
-            "changed."
+            "changed. Nothing was changed."
         )
     # its own name again changes nothing and is fine; turning it off still is
     r = admin.put(f"/api/tokens/{row['id']}", json={"label": LINK})
