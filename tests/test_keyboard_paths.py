@@ -392,7 +392,7 @@ def test_an_unchecked_radio_group_is_one_stop_its_first_radio():
 
 def test_the_shortcut_list_follows_the_screen_reader_bullets():
     docs = (ROOT / "docs/accessibility.md").read_text(encoding="utf-8")
-    bullets_end = docs.index("State is never conveyed by colour alone")
+    bullets_end = docs.index("State is never conveyed by color alone")
     assert docs.index("### Keyboard shortcuts") > bullets_end
     assert docs.index("### Keyboard shortcuts") < docs.index(
         "## What we know is still open"
