@@ -851,10 +851,12 @@ _record_held = {"fd": None, "depth": 0}
 
 
 @contextmanager
-def _record_lock(wait: float | None = None):
+def _record_lock(wait: float | None = None, pay: bool = True):
     """The record lock (rule 5): waits up to the press deadline, then
     refuses with EDIT_BUSY. A data folder where the lock file cannot be made
-    cannot keep a record either: the change goes on and its write fails."""
+    cannot keep a record either: the change goes on and its write fails.
+    Its first holder in this process makes the owed drops first, unless
+    pay is False (a holder that makes them itself)."""
     wait = PRESS_TIMEOUT if wait is None else wait
     end = time.monotonic() + max(wait, 0.0)
     got = (
@@ -880,6 +882,8 @@ def _record_lock(wait: float | None = None):
             _record_held["fd"] = fd
         _record_held["depth"] += 1
         try:
+            if pay and _record_held["depth"] == 1:
+                _pay_owed_drops()
             yield
         finally:
             _record_held["depth"] -= 1
@@ -1663,6 +1667,11 @@ class LinkBooks:
             "why": "",
             "file": entry["file"],
         }
+        if _drop_owed(entry["books"]):
+            # no 401 can come while the books answer as lost, so the call
+            # refused here is the one to try the drop again
+            _pay_owed_now(OWED_PAY_WAIT)
+            raise Refused(403, BOOKS_LOST.format(name=name))
         if entry["off"] or not entry["token"]:
             raise Refused(403, BOOKS_LOST.format(name=name))
         if not _company_open(entry["file"]):
@@ -1699,34 +1708,177 @@ class LinkBooks:
         return BOOKS_LOST.format(name=entry.get("name") or entry.get("file") or "")
 
 
+# Books whose token was refused and whose secret is not deleted yet: from
+# the moment drop_secret hears the 401 until the secret is really gone,
+# those books answer as lost. A drop the record lock is not free for in
+# time stays owed and is made by whichever comes first: the next holder of
+# the record lock in this process (it makes the owed drops as it takes the
+# lock), the next call to those books (refused as lost, it tries for the
+# lock a moment first), or one retry a moment later on a thread of its own.
+# The marks live in this process only: when the app ends with a drop still
+# owed, the secret stays on disk and the company is not yet marked refused,
+# as before owed drops existed; after the next start the first call to
+# those books reaches the company, hears the 401 again, and that deletes it.
+_owed_drops: set = set()
+_owed_lock = threading.Lock()
+OWED_PAY_WAIT = 0.25  # how long a call refused as owed tries for the lock
+OWED_RETRY = 2.0  # how long after a drop becomes owed its retry runs
+OWED_RETRY_WAIT = PRESS_TIMEOUT  # how long that retry waits for the lock
+_owed_retry = {"thread": None, "stop": None}  # under _owed_lock
+
+
+def _drop_owed(books: str) -> bool:
+    with _owed_lock:
+        return books in _owed_drops
+
+
+def _drop_held(books: str) -> bool:
+    """Under _record_lock: delete the secret of the books' token and mark
+    the company refused. False when there is no record, or no token of
+    those books with a secret left."""
+    record = _load()
+    if record is None:
+        return False
+    entries = _entries(record)
+    for entry in entries:
+        if entry["books"] == books and entry["token"]:
+            entry["token"] = ""
+            entry["off"] = OFF_REFUSED
+            break
+    else:
+        return False
+    _save(_format2(record, _with_adders(entries)))
+    logger.warning(
+        "an AI assistant connection token was refused by its company; its "
+        "secret is deleted from this computer"
+    )
+    return True
+
+
+def _pay_drop(books: str) -> bool:
+    """Under _record_lock: make one owed drop. Its mark is cleared once no
+    secret of those books is left (deleted now, or already gone); a drop
+    that fails is logged and stays owed. Whether it was deleted now."""
+    try:
+        done = _drop_held(books)
+    except Exception as exc:
+        logger.warning(
+            "a refused AI assistant connection token's secret is still "
+            "not deleted: %s",
+            exc,
+        )
+        return False
+    with _owed_lock:
+        _owed_drops.discard(books)
+    return done
+
+
+def _pay_owed_drops() -> None:
+    """Under _record_lock: the drops owed. Nothing here fails the holder's
+    own change."""
+    with _owed_lock:
+        owed = sorted(_owed_drops)
+    for books in owed:
+        _pay_drop(books)
+
+
+def _pay_owed_now(wait: float) -> None:
+    """Take the record lock for up to wait seconds, which makes the owed
+    drops; when it stays busy, the retry is armed. Never raises."""
+    try:
+        with _record_lock(wait=wait):
+            pass
+    except SwitchboardError:
+        pass
+    except Exception:
+        logger.exception("an owed AI assistant connection drop was not tried")
+    _arm_owed_retry()
+
+
+def _owed_retry_run(stop_event: threading.Event) -> None:
+    """One retry: wait OWED_RETRY, then take the record lock for up to
+    OWED_RETRY_WAIT to make the owed drops. It runs once and ends; a drop
+    still owed after it is retried by the next call to those books."""
+    try:
+        if stop_event.wait(OWED_RETRY):
+            return
+        with _record_lock(wait=OWED_RETRY_WAIT, pay=False):
+            if not stop_event.is_set():
+                _pay_owed_drops()
+    except SwitchboardError:
+        pass
+    except Exception:
+        logger.exception("an owed AI assistant connection drop was not retried")
+    finally:
+        with _owed_lock:
+            if _owed_retry["stop"] is stop_event:
+                _owed_retry["thread"] = _owed_retry["stop"] = None
+
+
+def _arm_owed_retry() -> None:
+    """When a drop is owed and no retry is waiting, start one."""
+    with _owed_lock:
+        if not _owed_drops or _owed_retry["thread"] is not None:
+            return
+        stop_event = threading.Event()
+        made = threading.Thread(
+            target=_owed_retry_run,
+            args=(stop_event,),
+            name="claude-relay-owed-drop",
+            daemon=True,
+        )
+        _owed_retry["thread"], _owed_retry["stop"] = made, stop_event
+        # Started under the lock, so a stop never finds a thread that has
+        # not begun. The thread takes this lock only as it ends.
+        try:
+            made.start()
+        except RuntimeError:
+            _owed_retry["thread"] = _owed_retry["stop"] = None
+            logger.warning("the retry of an owed AI assistant drop did not start")
+
+
+def stop_owed_retry(timeout: float = 0.0) -> None:
+    """End the waiting retry of owed drops (the line's stop, the app's
+    shutdown, the tests); waits up to timeout for its thread. The marks
+    stay: a call to those books still answers as lost and tries again."""
+    with _owed_lock:
+        made, stop_event = _owed_retry["thread"], _owed_retry["stop"]
+        _owed_retry["thread"] = _owed_retry["stop"] = None
+    if stop_event is not None:
+        stop_event.set()
+    if made is not None and timeout > 0 and made.ident is not None:
+        made.join(timeout)
+
+
 def drop_secret(books: str | None) -> bool:
     """A company's token answered 401: its secret is deleted from the record
     and the company is marked refused (its hash and id stay, so a restore
     that revives the token row cannot revive access through this computer).
-    Never waits for the lock: when it is busy, the next 401 tries again."""
+    The books answer as lost from the moment this is called. Another change,
+    the start's sweep or another window may hold the record lock for a
+    moment, so this waits for it up to the press deadline. When it is still
+    busy the drop stays owed (see _owed_drops). Returns whether the secret
+    was deleted now."""
     if not books:
         return False
+    with _owed_lock:
+        _owed_drops.add(books)
     try:
-        with _record_lock(wait=0):
-            record = _load()
-            if record is None:
-                return False
-            entries = _entries(record)
-            for entry in entries:
-                if entry["books"] == books and entry["token"]:
-                    entry["token"] = ""
-                    entry["off"] = OFF_REFUSED
-                    break
-            else:
-                return False
-            _save(_format2(record, _with_adders(entries)))
+        with _record_lock(pay=False):
+            done = _pay_drop(books)
+            _pay_owed_drops()
+            return done
+    except SwitchboardError as exc:
+        if exc.sentence == EDIT_BUSY:
             logger.warning(
-                "an AI assistant connection token was refused by its company; its "
-                "secret is deleted from this computer"
+                "a refused AI assistant connection token's secret is not "
+                "deleted yet: the connection is busy; it is retried in a moment"
             )
-            return True
-    except (SwitchboardError, OSError):
         return False
+    except OSError:
+        return False
+    finally:
+        _arm_owed_retry()
 
 
 def _make_line(record: dict):
@@ -1907,6 +2059,16 @@ def stop() -> None:
             old.stop()
         except Exception:
             logger.exception("closing the Claude relay line failed")
+    # an owed drop gets one last try, never waiting for the lock
+    with _owed_lock:
+        owed = bool(_owed_drops)
+    if owed:
+        try:
+            with _record_lock(wait=0):
+                pass
+        except Exception:
+            pass
+    stop_owed_retry()
 
 
 def start_in_background() -> None:

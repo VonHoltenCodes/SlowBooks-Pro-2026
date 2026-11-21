@@ -37,6 +37,7 @@ from app.services import auth as auth_service
 from app.services import served_companies
 from app.services import switchboard_link as link
 from app.switchboard import line as line_client
+from app.switchboard.client import Refused
 from app.switchboard.server import build_registry
 from tests.test_served_companies import _make_company
 from tests.test_switchboard_connect_1087 import (
@@ -86,6 +87,7 @@ def relay(monkeypatch, tmp_path):
     finally:
         link.stop()
         link.stop_retry()
+        link.stop_owed_retry(timeout=15)
         fake.close()
 
 
@@ -830,6 +832,223 @@ def test_a_connection_made_before_this_change_keeps_working(relay, client):
     assert link._whole2(record)
 
 
+def _hold_the_record_lock(let_go: threading.Event):
+    """Another holder of the record lock (the start's sweep, a change, or
+    another window) in a thread; returns it once it holds the lock."""
+    held = threading.Event()
+
+    def hold():
+        with link._record_lock():
+            held.set()
+            let_go.wait(30)
+
+    holder = threading.Thread(target=hold, daemon=True)
+    holder.start()
+    assert held.wait(10)
+    return holder
+
+
+def test_a_refused_tokens_secret_is_dropped_while_the_record_is_held_a_moment(
+    relay, client, monkeypatch
+):
+    """The line's start sweeps the leftovers under the record lock just after
+    the line opens: a 401 heard then still deletes the token's secret."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    threading.Timer(0.5, let_go.set).start()
+    assert link.drop_secret(books) is True
+    holder.join(10)
+    entry = _record()["companies"][0]
+    assert entry["books"] == books and entry["token"] == ""
+    assert entry["off"] == link.OFF_REFUSED
+    assert not link._owed_drops
+
+
+def test_a_drop_the_lock_is_not_free_for_in_time_is_made_by_its_next_holder(
+    relay, client, monkeypatch
+):
+    """Held past the press deadline: the books answer as lost at once and
+    the next change to the connection in this window deletes the secret."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.2)
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    try:
+        assert link.drop_secret(books) is False
+        assert _record()["companies"][0]["token"] != ""
+        with pytest.raises(Refused) as refused:
+            link.LinkBooks().pick(books, "context")
+        assert refused.value.status == 403
+        assert "no longer accepts this connection" in refused.value.detail
+    finally:
+        let_go.set()
+        holder.join(10)
+    with link._record_lock():
+        pass
+    entry = _record()["companies"][0]
+    assert entry["books"] == books and entry["token"] == ""
+    assert entry["off"] == link.OFF_REFUSED
+    assert not link._owed_drops
+
+
+def _wait_until(check, seconds: float = 15.0) -> bool:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if check():
+            return True
+        time.sleep(0.02)
+    return check()
+
+
+def test_an_owed_drop_is_made_soon_after_the_lock_frees_with_nothing_else_happening(
+    relay, client, monkeypatch
+):
+    """A drop owed in a quiet window: no change, no further call and no
+    further refusal; its own retry deletes the secret once the lock frees."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.2)
+    monkeypatch.setattr(link, "OWED_RETRY", 0.05)
+    # the retry waits for the lock longer than the holder below keeps it
+    monkeypatch.setattr(link, "OWED_RETRY_WAIT", 30.0)
+    tried = threading.Event()
+    real_lock = link._record_lock
+
+    def watched(wait=None, pay=True):
+        if wait == 30.0:
+            tried.set()
+        return real_lock(wait=wait, pay=pay)
+
+    monkeypatch.setattr(link, "_record_lock", watched)
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    try:
+        assert link.drop_secret(books) is False
+        assert link._drop_owed(books)
+        # the retry is waiting for the lock while it is still held
+        assert tried.wait(10)
+        assert _record()["companies"][0]["token"] != ""
+    finally:
+        let_go.set()
+        holder.join(10)
+    assert _wait_until(lambda: _record()["companies"][0]["token"] == "")
+    entry = _record()["companies"][0]
+    assert entry["books"] == books and entry["off"] == link.OFF_REFUSED
+    assert not link._owed_drops
+    assert _wait_until(lambda: link._owed_retry["thread"] is None)
+
+
+def test_a_call_refused_as_owed_makes_the_drop_itself(relay, client, monkeypatch):
+    """The call that is refused because the books are owed tries for the
+    lock a moment and deletes the secret, without waiting for the retry."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.2)
+    monkeypatch.setattr(link, "OWED_RETRY", 600.0)  # the retry never runs here
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    try:
+        assert link.drop_secret(books) is False
+    finally:
+        let_go.set()
+        holder.join(10)
+    assert _record()["companies"][0]["token"] != ""
+    with pytest.raises(Refused) as refused:
+        link.LinkBooks().pick(books, "context")
+    assert refused.value.status == 403
+    assert "no longer accepts this connection" in refused.value.detail
+    entry = _record()["companies"][0]
+    assert entry["token"] == "" and entry["off"] == link.OFF_REFUSED
+    assert not link._owed_drops
+
+
+def test_a_call_made_while_the_drop_waits_for_the_lock_is_answered_as_lost(
+    relay, client, monkeypatch
+):
+    """From the 401 on, the books answer as lost, also while drop_secret is
+    still waiting for the record lock; the mark is cleared only once the
+    secret is deleted."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    monkeypatch.setattr(link, "PRESS_TIMEOUT", 30.0)
+    monkeypatch.setattr(link, "OWED_RETRY", 600.0)
+    monkeypatch.setattr(link, "OWED_PAY_WAIT", 0.05)
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    result = {}
+    dropping = threading.Thread(
+        target=lambda: result.setdefault("done", link.drop_secret(books)),
+        daemon=True,
+    )
+    try:
+        dropping.start()
+        assert _wait_until(lambda: link._drop_owed(books))
+        assert dropping.is_alive()  # still waiting for the lock
+        with pytest.raises(Refused) as refused:
+            link.LinkBooks().pick(books, "context")
+        assert refused.value.status == 403
+        assert "no longer accepts this connection" in refused.value.detail
+        assert dropping.is_alive() and link._drop_owed(books)
+        assert _record()["companies"][0]["token"] != ""
+    finally:
+        let_go.set()
+        holder.join(10)
+    dropping.join(10)
+    assert result["done"] is True
+    entry = _record()["companies"][0]
+    assert entry["token"] == "" and entry["off"] == link.OFF_REFUSED
+    assert not link._owed_drops
+
+
+def test_a_drop_still_owed_when_the_app_ends_is_made_by_the_next_refusal(
+    relay, client, monkeypatch
+):
+    """The marks live in this process only: after a restart the books' first
+    call reaches the company again, and its 401 deletes the secret."""
+    monkeypatch.setattr(link, "_owed_drops", set(), raising=False)
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 200, r.text
+    relay.next_line()
+    books = link._entries(link._load())[0]["books"]
+    monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.2)
+    monkeypatch.setattr(link, "OWED_RETRY", 600.0)
+    let_go = threading.Event()
+    holder = _hold_the_record_lock(let_go)
+    try:
+        assert link.drop_secret(books) is False
+        # the app ends here: its retry stops and its marks are gone
+        link.stop_owed_retry(timeout=5)
+        link._owed_drops.clear()
+    finally:
+        let_go.set()
+        holder.join(10)
+    entry = _record()["companies"][0]
+    assert entry["token"] != "" and entry["off"] == ""
+    _client, public = link.LinkBooks().pick(books, "context")
+    assert public["books"] == books
+    assert link.drop_secret(books) is True
+    entry = _record()["companies"][0]
+    assert entry["token"] == "" and entry["off"] == link.OFF_REFUSED
+
+
 def test_a_record_of_several_companies_still_reads_as_one_to_beta1(three, relay):
     _connected_with(three, relay, "smith.db", "lake.db")
     record = _record()
@@ -947,3 +1166,15 @@ def test_no_secret_in_an_answer_a_log_or_the_leftovers(three, relay, caplog):
             assert secret not in r.text
     for r in answers:
         assert "sbp_" not in r.text and "sbd_" not in r.text
+
+
+def test_stopping_the_retry_never_waits_on_a_thread_that_has_not_begun():
+    """The stop at shutdown runs beside whatever arms the retry. A thread
+    that was made and not yet started is signaled, never joined."""
+    stop_event = threading.Event()
+    unstarted = threading.Thread(target=lambda: None, daemon=True)
+    with link._owed_lock:
+        link._owed_retry["thread"], link._owed_retry["stop"] = unstarted, stop_event
+    link.stop_owed_retry(timeout=0.1)
+    assert stop_event.is_set()
+    assert link._owed_retry["thread"] is None and link._owed_retry["stop"] is None
