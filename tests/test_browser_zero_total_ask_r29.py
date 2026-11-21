@@ -483,7 +483,9 @@ def _note(page, handled, form):
     return page.evaluate(NOTE, form)
 
 
-def test_a_sales_form_warns_about_a_missing_or_expired_certificate(browser, company):
+def test_a_sales_form_warns_about_a_missing_or_expired_certificate(
+    browser, company, db_session
+):
     """Every sales form, in one pass: choosing a tax-exempt customer with
     no certificate on file says so under the customer, in the open and
     announced; a taxable customer takes it away; with an expired one on
@@ -570,6 +572,58 @@ def test_a_sales_form_warns_about_a_missing_or_expired_certificate(browser, comp
             finally:
                 page.close()
     assert permit is not None
+
+    # A saved recurring invoice is judged as of its next invoice, as the
+    # API's tax_note is, not as of the day it started: one begun while the
+    # certificate ran and due again after it expired says so when opened.
+    from datetime import date
+
+    from app.models.recurring import RecurringInvoice
+
+    schedule = {
+        "customer_id": exempt,
+        "start_date": "2026-06-01",
+        "frequency": "monthly",
+        "tax_rate": 0,
+        "lines": [{"description": "Benches", "quantity": 2, "rate": 150}],
+    }
+    rec = _made(company, "/api/recurring", schedule)
+    assert rec["tax_note"] is None
+    row = db_session.get(RecurringInvoice, rec["id"])
+    row.next_due = date(2026, 12, 1)  # as its runs would have left it
+    db_session.commit()
+    r = company.put(f"/api/recurring/{rec['id']}", json={"notes": "Monthly"})
+    assert r.status_code == 200 and r.json()["tax_note"] == EXPIRED, r.text
+    # and one on a job with its own current certificate is quiet, as the
+    # API is: the form has no job box, so it goes by the job the schedule has
+    job = _made(
+        company,
+        "/api/jobs",
+        {
+            "customer_id": exempt,
+            "name": "Gym floor",
+            "is_taxable": False,
+            "exempt_certificate_number": "EX-4410",
+            "exempt_certificate_state": "IL",
+            "exempt_certificate_kind": "public_entity",
+            "exempt_certificate_expires": "2027-12-31",
+        },
+    )
+    on_job = _made(
+        company,
+        "/api/recurring",
+        {**schedule, "start_date": "2026-09-21", "job_id": job["id"]},
+    )
+    assert on_job["tax_note"] is None
+    for rec_id, expected in ((rec["id"], EXPIRED), (on_job["id"], "")):
+        page, handled = _open_at(browser, company, "#/recurring")
+        try:
+            page.evaluate(f"async () => {{ await RecurringPage.showForm({rec_id}); }}")
+            page.wait_for_function(MODAL_SHOWN)
+            note = _note(page, handled, "#modal-body form")
+            assert (note["text"] if note else "") == expected, rec_id
+        finally:
+            page.close()
 
     # the customer's own page, beside Tax exempt
     page, handled = _open_at(browser, company, "#/customers")

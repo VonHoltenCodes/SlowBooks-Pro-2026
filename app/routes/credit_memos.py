@@ -309,7 +309,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     db.refresh(cm)
     resp = CreditMemoResponse.model_validate(cm)
     resp.customer_name = customer.name
-    resp.tax_note = certificate_warning(db, customer, cm.date)
+    resp.tax_note = certificate_warning(db, customer, cm.date, cm.job_id)
     return resp
 
 

@@ -2018,7 +2018,12 @@ const TaxExempt = {
         note._customer = customer;
         const day = form.querySelector('[name="date"]') || form.querySelector('[name="start_date"]');
         const job = form.querySelector('select[name="job_id"]');
-        const key = customer ? [customer.id, (day && day.value) || '', (job && job.value) || ''].join('|') : '';
+        // a saved recurring invoice is judged as the API judges it: as of
+        // its next invoice's date, not the day it started, and by the job
+        // it carries (its form shows neither as a box to read)
+        const asOf = form.dataset.exemptAsOf || (day && day.value) || '';
+        const jobId = (job ? job.value : form.dataset.exemptJob) || '';
+        const key = customer ? [customer.id, asOf, jobId].join('|') : '';
         if (note.dataset.key === key) return;
         note.dataset.key = key;
         // another customer's sentence never stands under this one's name
@@ -2026,8 +2031,8 @@ const TaxExempt = {
         note.dataset.customer = customer ? String(customer.id) : '';
         if (!customer) return;
         const query = [];
-        if (day && day.value) query.push(`as_of=${encodeURIComponent(day.value)}`);
-        if (job && job.value) query.push(`job_id=${encodeURIComponent(job.value)}`);
+        if (asOf) query.push(`as_of=${encodeURIComponent(asOf)}`);
+        if (jobId) query.push(`job_id=${encodeURIComponent(jobId)}`);
         API.get(`/customers/${customer.id}/exemption-warning${query.length ? '?' + query.join('&') : ''}`)
             .then(answer => { if (note.dataset.key === key) note.textContent = (answer && answer.warning) || ''; })
             .catch(() => { if (note.dataset.key === key) note.textContent = ''; });
