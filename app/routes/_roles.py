@@ -25,6 +25,16 @@ def is_admin(request: Request) -> bool:
     return current_role(request) == ROLE_ADMIN
 
 
+def reads_mail_server_words(request: Request) -> bool:
+    """Whether this reader may be given a mail server's own reply to a
+    failed send: an administrator signed in themselves. An API token is
+    never one, whatever role it carries, so an assistant connected to the
+    books never reads a reply (see app/services/email_errors.py)."""
+    if getattr(getattr(request, "state", None), "token_principal", None):
+        return False
+    return is_admin(request)
+
+
 def require_admin(request: Request) -> None:
     if not is_admin(request):
         raise HTTPException(status_code=403, detail="Admin role required")

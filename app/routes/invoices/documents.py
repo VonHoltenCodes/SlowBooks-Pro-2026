@@ -202,14 +202,19 @@ def email_invoice(
         # It returns False rather than raising when SMTP is unconfigured or
         # the send fails; reporting "sent" regardless would be a lie.
         if not sent:
-            from app.routes._roles import is_admin
+            from app.routes._roles import reads_mail_server_words
             from app.services.email_errors import send_failed_detail
 
             raise HTTPException(
                 status_code=502,
-                detail=send_failed_detail(db, "invoice", inv.id, is_admin(request)),
+                detail=send_failed_detail(
+                    db, "invoice", inv.id, reads_mail_server_words(request)
+                ),
             )
-        return {"status": "sent"}
+        from app.services.email_errors import sent_answer
+
+        # with a note when the server refused a copy
+        return sent_answer(db, "invoice", inv.id)
     except HTTPException:
         raise
     except Exception as e:
@@ -217,6 +222,7 @@ def email_invoice(
         # has no EmailLog row yet; write one, with the same sanitised text
         # the response gets — SMTP and provider errors carry hostnames.
         from app.models.email_log import EmailLog
+        from app.services.email_errors import stored_text
         from app.services.safe_errors import safe_message
 
         message = safe_message(e, "invoice email")
@@ -228,7 +234,7 @@ def email_invoice(
             bcc=", ".join(clean_addresses(data.bcc)) or None,
             subject=subject,
             status="failed",
-            error_message=message,
+            error_message=stored_text(message),
         )
         db.add(log)
         db.commit()

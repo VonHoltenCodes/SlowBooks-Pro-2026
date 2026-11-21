@@ -141,16 +141,26 @@ def acknowledgment_email(
     if not sent:
         # what the server said, in a sentence, the way the invoice's Email
         # button answers (#811); the raw text stays in the email log
-        from app.routes._roles import is_admin
+        from app.routes._roles import reads_mail_server_words
         from app.services.email_errors import send_failed_detail
 
         raise HTTPException(
             status_code=502,
             detail=send_failed_detail(
-                db, f"acknowledgment_{kind}", gift_id, is_admin(request)
+                db,
+                f"acknowledgment_{kind}",
+                gift_id,
+                reads_mail_server_words(request),
             ),
         )
-    return {"sent": True, "recipient": recipient}
+    from app.services.email_errors import note_for_last_send
+
+    answer = {"sent": True, "recipient": recipient}
+    # a copy the server refused (an Always CC address, say)
+    note = note_for_last_send(db, f"acknowledgment_{kind}", gift_id)
+    if note:
+        answer["note"] = note
+    return answer
 
 
 # ── Year-end giving statements ───────────────────────────────────────────
@@ -294,14 +304,18 @@ def giving_statement_preview(year: Optional[int] = None, db: Session = Depends(g
 
 @router.post("/giving-statements/batch-email")
 def giving_statements_batch_email(
-    data: GivingStatementBatch, db: Session = Depends(get_db)
+    data: GivingStatementBatch, request: Request, db: Session = Depends(get_db)
 ):
     """Email each donor their statement (skipping those who opted out)."""
+    from app.routes._roles import reads_mail_server_words
+
+    admin = reads_mail_server_words(request)
     company = get_all_settings(db)
     # the donor's email names the display name when one is set (#679)
     org = (company.get("display_name") or "").strip() or company.get("company_name", "")
     sent = failed = skipped = 0
     errors: list[str] = []
+    notes: list[str] = []
     for customer in _donors_with_gifts(db, data.year, data.customer_ids):
         if not customer.send_year_end_statement:
             skipped += 1
@@ -330,12 +344,17 @@ def giving_statements_batch_email(
             )
             if ok:
                 sent += 1
+                from app.services.email_errors import note_for_last_send
+
+                note = note_for_last_send(db, "giving_statement", customer.id)
+                if note:
+                    notes.append(f"{customer.name}: {note}")
             else:
                 failed += 1
                 # the reply's sentence when the server said why (#811)
                 from app.services.email_errors import sentence_for_last_send
 
-                why = sentence_for_last_send(db, "giving_statement", customer.id)
+                why = sentence_for_last_send(db, "giving_statement", customer.id, admin)
                 errors.append(
                     f"{customer.name}: the giving statement could not be sent. {why}"
                     if why
@@ -345,4 +364,8 @@ def giving_statements_batch_email(
             logger.exception("giving statement failed for customer %s", customer.id)
             failed += 1
             errors.append(f"{customer.name}: unable to send")
-    return {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}
+    from app.services.email_errors import with_notes
+
+    return with_notes(
+        {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}, notes
+    )

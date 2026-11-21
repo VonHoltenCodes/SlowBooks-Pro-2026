@@ -112,7 +112,10 @@ def test_an_administrator_sees_the_whole_row_with_the_raw_error(client, db_sessi
         "status",
         "error_message",
         "failure",
+        # a sent row's refused copy, in our own words (null here)
+        "note",
     }
+    assert failed["note"] is None
 
 
 @pytest.mark.parametrize("how", NON_ADMIN)

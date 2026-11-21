@@ -158,7 +158,9 @@ const CollectionsPage = {
         if (btn) btn.disabled = true;
         try {
             const res = await API.post(`/collections/invoices/${invoiceId}/remind`);
-            toast(`Reminder sent: ${res.label}`);
+            // a copy the mail server refused is said with it
+            toast(res.note ? `Reminder sent: ${res.label}. ${res.note}` : `Reminder sent: ${res.label}`,
+                res.note ? 'warning' : 'success');
         } catch (err) {
             toast(err.message, 'error'); // the API's sentence is meant for the screen
         }
@@ -204,10 +206,13 @@ const CollectionsPage = {
         let headline = `Sent ${res.sent}, failed ${res.failed}, skipped ${res.skipped}`;
         if (res.taken) headline += ` (${res.taken} sent by another window)`;
         const errors = res.errors || [];
-        if (errors.length && typeof ReportsPage !== 'undefined' && ReportsPage._sendResult) {
-            ReportsPage._sendResult(title, headline + '.', errors);
+        // sent, though the mail server refused a copy
+        const notes = res.notes || [];
+        if ((errors.length || notes.length) && typeof ReportsPage !== 'undefined' && ReportsPage._sendResult) {
+            ReportsPage._sendResult(title, headline + '.', errors, notes);
         } else {
-            toast(errors.length ? `${headline}. ${errors.join(' ')}` : headline, res.failed ? 'warning' : 'success');
+            const said = errors.concat(notes);
+            toast(said.length ? `${headline}. ${said.join(' ')}` : headline, (res.failed || notes.length) ? 'warning' : 'success');
         }
         CollectionsPage.reload();
     },

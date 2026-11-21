@@ -1467,6 +1467,8 @@ const SettingsPage = {
     _emailSourceLabel(entityType) {
         const map = {
             invoice: T('Invoice'),
+            estimate: 'Estimate',
+            reminder: 'Payment reminder',
             statement: 'Statement',
             giving_statement: 'Giving statement',
             collection: 'Collection letter',
@@ -1479,17 +1481,18 @@ const SettingsPage = {
         return entityType || '—';
     },
 
-    // A failed row's two lines: a sentence a person can act on, and the raw
-    // SMTP error under it. The sentence is the one the API returns
-    // (`failure`, from app/services/email_errors.py — the single mapping, so
-    // the list and the test-email message never word an error two ways). The
-    // server's words (plain text from the API, one refused address per line)
-    // are shown under it, unless the sentence already says them.
+    // A failed row's two lines: a sentence a person can act on, and the mail
+    // server's own reply under it. The sentence is the one the API returns
+    // (`failure`, from app/services/email_errors.py: the single mapping, so
+    // the list and the test-email message never word an error two ways); it
+    // never holds anything the server said. The server's reply
+    // (`error_message`: plain text as it was received, one refused address
+    // per line) comes only to an administrator, whose section this is.
     _emailLogFailure(row) {
-        let raw = (row.error_message || '').trim();
+        const raw = (row.error_message || '').trim();
         const sentence = (row.failure || '').trim() || 'The email could not be sent.';
-        if (raw && sentence.includes(raw.replace(/\s+/g, ' ').replace(/[.]$/, ''))) raw = '';
-        return { sentence, raw };
+        // a reader given the sentence in both fields sees it once
+        return { sentence, raw: raw.startsWith(sentence) ? raw.slice(sentence.length).trim() : raw };
     },
 
     // A stored send time in the operator's local zone. The server sends ISO
@@ -1518,6 +1521,12 @@ const SettingsPage = {
                     const f = SettingsPage._emailLogFailure(r);
                     detail = `<div style="color:var(--danger, #b00); margin-top:2px;">${escapeHtml(f.sentence)}</div>` +
                         (f.raw ? `<div style="color:var(--text-muted); font-family:var(--font-mono); word-break:break-word; white-space:pre-line;">${escapeHtml(f.raw)}</div>` : '');
+                } else if (r.note) {
+                    // sent, though the server refused a copy: who was refused,
+                    // and the server's reply to each under it
+                    const raw = (r.error_message || '').trim();
+                    detail = `<div style="color:var(--danger, #b00); margin-top:2px;">${escapeHtml(r.note)}</div>` +
+                        (raw ? `<div style="color:var(--text-muted); font-family:var(--font-mono); word-break:break-word; white-space:pre-line;">${escapeHtml(raw)}</div>` : '');
                 }
                 return `<tr>
                     <td style="white-space:nowrap;">${escapeHtml(SettingsPage._emailLogWhen(r.sent_at))}</td>
@@ -2497,8 +2506,10 @@ const SettingsPage = {
 
     async testEmail() {
         try {
-            await API.post('/settings/test-email');
-            toast('Test email sent');
+            const res = await API.post('/settings/test-email');
+            // an Always CC or Always BCC address the server refused is said
+            toast(res && res.note ? `Test email sent. ${res.note}` : 'Test email sent',
+                res && res.note ? 'warning' : 'success');
         } catch (err) {
             // The failure now carries the reason; the full history is just
             // below, so point there and refresh it (#447).

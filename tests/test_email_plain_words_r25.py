@@ -12,6 +12,11 @@ server."; it now says to turn on Use TLS, and nothing is sent.
 
 W-218: a failed collection letter reads "could not be sent" like the other
 four batch sends (tests/test_batch_send_reason_w211.py).
+
+Since then the rule for the mail server's own words: they are in no
+sentence. Test Email, an administrator's, answers with the sentence and
+then the server's reply as plain text; every other answer is the sentence
+alone, ending with where the reason can be read when it does not say why.
 """
 
 import secrets
@@ -42,13 +47,24 @@ FAILURES = {
 
 # Python's wrapping, any piece of which in an answer is W-216
 RAW = ("b'", 'b"', "', '", "{'", "('", "(5", "(4", "\\n")
-# a refusal with no sentence of its own gives the server's words, as plain
-# text, after the stage (round 26, NEW-276); every other answer is the
-# sentence alone
-WORDS = {
-    "response-554": "The mail server refused the message: 554 5.7.1 Message rejected.",
-    "data-550": "The mail server refused the message: 550 5.7.1 Content refused.",
+# each failure's reply as the plain text the row keeps: what Test Email
+# gives an administrator after the sentence, and no other answer gives
+REPLIES = {
+    "sender-530": (
+        "530 5.7.0 Authentication Required. Learn more at 5.7.0 "
+        "https://support.example.invalid/auth"
+    ),
+    "sender-553": "553 5.7.1 Sender rejected",
+    "recipients": "a@b.com: 550 5.1.1 No such user",
+    "response-554": "554 5.7.1 Message rejected",
+    "response-421": "421 4.7.0 Try later",
+    "auth-535": "535 5.7.8 Bad credentials",
+    "data-550": "550 5.7.1 Content refused",
 }
+# a refusal with no sentence of its own is the stage and nothing after it
+REFUSED = "The mail server refused the message."
+NO_SENTENCE_OF_ITS_OWN = ("response-554", "data-550")
+SEE_WHY = "The reason is under Settings → Email (SMTP) → Recent sends."
 
 
 def _fake_smtp(error):
@@ -89,12 +105,15 @@ def _settings(db):
 
 
 def _plain(text, name=None):
+    """No piece of Python's wrapping and, for a failure by name, nothing of
+    the server's reply: the sentence alone."""
     for piece in RAW:
         assert piece not in text, (piece, text)
-    if name in WORDS:
-        assert WORDS[name] in text, text
-    elif name is not None:
+    if name is not None:
         assert "5.7." not in text and "5.1.1" not in text, text
+        assert REPLIES[name] not in text, text
+        if name in NO_SENTENCE_OF_ITS_OWN:
+            assert f"{REFUSED} {SEE_WHY}" in text, text
 
 
 @pytest.mark.parametrize("name", sorted(FAILURES))
@@ -105,14 +124,23 @@ def test_test_email_says_one_plain_sentence(client, db_session, monkeypatch, nam
     assert r.status_code == 502, r.text
     detail = r.json()["detail"]
     assert detail.startswith("Test email failed to send. The ")
-    _plain(detail, name)
+    # the sentence, then the server's reply as plain text, then the pointer
+    _plain(detail)
+    assert detail.endswith(
+        f" The mail server's reply: {REPLIES[name]}. The full list is under "
+        "Settings → Email (SMTP) → Recent sends."
+    ), detail
+    assert detail.count(REPLIES[name]) == 1
     if name == "sender-530":
         assert detail == (
             "Test email failed to send. The mail server wants a sign-in, and "
             "none is set. Enter the username and password under Settings → "
-            "Email (SMTP). The full list is under Settings → Email (SMTP) → "
-            "Recent sends."
+            "Email (SMTP). The mail server's reply: 530 5.7.0 Authentication "
+            "Required. Learn more at 5.7.0 https://support.example.invalid/auth. "
+            "The full list is under Settings → Email (SMTP) → Recent sends."
         )
+    if name in NO_SENTENCE_OF_ITS_OWN:
+        assert detail.startswith(f"Test email failed to send. {REFUSED} The mail ")
 
 
 @pytest.mark.parametrize("name", sorted(FAILURES))
@@ -161,23 +189,31 @@ def test_batch_sends_say_one_plain_sentence(
     assert letter.startswith("Probe Co: the letter could not be sent")
     for text in (statement, letter):
         _plain(text, name)
-    # and the list's sentence for every row
+    if name in NO_SENTENCE_OF_ITS_OWN:
+        assert statement == (
+            f"Probe Co: the statement could not be sent. {REFUSED} {SEE_WHY}"
+        )
+        assert letter == f"Probe Co: the letter could not be sent. {REFUSED} {SEE_WHY}"
+    # and the list's sentence for every row, which never holds the
+    # server's reply: that is the row's other field, an administrator's
     for row in client.get("/api/email-log?status=failed").json()["rows"]:
-        _plain(row["failure"], name)
+        _plain(row["failure"])
+        assert "5.7." not in row["failure"] and "5.1.1" not in row["failure"]
+        assert row["error_message"] == REPLIES[name]
+        if name in NO_SENTENCE_OF_ITS_OWN:
+            assert row["failure"] == REFUSED
 
 
 def test_the_server_reply_is_read_back_without_python_wrapping():
-    from app.services.email_errors import _clean_reason
+    """A row of a release before 2.32 holds str() of the exception; an
+    administrator reads the reply it held, and the same reply from a row
+    stored now."""
+    from app.services.email_errors import server_words, stored_text
 
     for name, error in FAILURES.items():
-        _plain(_clean_reason(str(error)).replace("5.7.", "").replace("5.1.1", ""))
-    assert _clean_reason(str(FAILURES["sender-530"])) == (
-        "530 5.7.0 Authentication Required. Learn more at 5.7.0 "
-        "https://support.example.invalid/auth"
-    )
-    assert _clean_reason(str(FAILURES["recipients"])) == (
-        "a@b.com: 550 5.1.1 No such user"
-    )
+        _plain(server_words(str(error)))
+        assert server_words(str(error)) == REPLIES[name]
+        assert server_words(stored_text(error)) == REPLIES[name]
 
 
 TLS_SENTENCE = (

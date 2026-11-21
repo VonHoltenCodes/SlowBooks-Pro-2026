@@ -3267,12 +3267,14 @@ const ReportsPage = {
             // Only what actually went out is "sent"; a customer who didn't
             // get one is named, with the reason (explore 2.17.3, W-H7).
             ReportsPage._sendResult('Statements',
-                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || []);
+                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || [], result.notes || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    _sendResult(title, headline, errors) {
-        if (!errors.length) { toast(headline); return; }
+    // `notes`: sends that went out though the mail server refused a copy
+    // (each "Name: The mail server refused a copy to: …")
+    _sendResult(title, headline, errors, notes = []) {
+        if (!errors.length && !notes.length) { toast(headline); return; }
         // Each failed send is in the email_log; the Recent sends section under
         // Settings → Email (SMTP) shows the reason (#447). It is an
         // administrator's section, so only an administrator gets the link;
@@ -3281,8 +3283,10 @@ const ReportsPage = {
             ? `<a href="#/settings" class="btn btn-secondary" onclick="closeModal(); try { sessionStorage.setItem('settings_focus', 'settings-h-email-recent-sends'); } catch (e) {}">Recent sends</a>`
             : '';
         openModal(title, `
-            <p>${escapeHtml(headline)} ${errors.length} could not be sent:</p>
-            <ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+            <p>${escapeHtml(headline)}${errors.length ? ` ${errors.length} could not be sent:` : ''}</p>
+            ${errors.length ? `<ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : ''}
+            ${notes.length ? `<p>Sent, with a copy the mail server refused:</p>
+            <ul style="margin:8px 0 12px 20px;">${notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : ''}
             <div class="form-actions">
                 ${recentSends}
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
@@ -3297,7 +3301,7 @@ const ReportsPage = {
                 send_email: true,
             });
             ReportsPage._sendResult('Collection Letters',
-                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || []);
+                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || [], result.notes || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 };
@@ -4519,7 +4523,8 @@ ReportsPage.emailGivingStatements = async function () {
     box.textContent = 'Sending…';
     try {
         const r = await API.post('/donors/giving-statements/batch-email', { year });
-        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? `<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '');
+        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? `<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '') +
+            ((r.notes || []).length ? `<ul>${r.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '');
     } catch (err) { box.textContent = err.message; }
 };
 

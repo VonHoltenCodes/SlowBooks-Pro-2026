@@ -1,76 +1,41 @@
 # ============================================================================
-# Email send failures, in words the operator can act on (#447).
+# Email send failures: what is stored, and who is told what.
 #
-# send_email() stores the raw SMTP error on the EmailLog row. That text is
-# accurate but unfriendly — a Gmail rejection reads
-# "(535, b'5.7.8 Username and Password not accepted. For more information...')".
-# One function turns a stored error into a plain reason and, for the handful
-# of mistakes new users actually hit, a short hint. Kept small on purpose:
-# three cases, matched on the error text (and the host, so Gmail is named).
+# The sentence. Every failed send has one fixed sentence of ours, chosen by
+# where the send failed and the reply code (and its enhanced status code).
+# It may name our own data (the host from Settings, addresses from our own
+# record of the send); it never holds text that came from the mail server.
+# It is what everyone reads, everywhere: GET /api/email-log's `failure`,
+# Recent sends, a document's Activity, the answer to a send and each batch
+# result. Where the sentence does not say why, it ends with where the
+# reason can be read (where_to_see_why).
 #
-# Since round 26 (NEW-275, NEW-276) the log row keeps the server's words
-# as plain text with a tag for the stage it refused at (stored_text), and a
-# refusal with no sentence of its own is said as that stage in the server's
-# words ("The mail server refused the message: 554 5.7.1 …").
+# The server's reply. What the mail server answered is kept on the email
+# log row as readable text and shown, as it was received, in two places,
+# both an administrator's: the line under the sentence in Recent sends
+# (GET /api/email-log's `error_message` for an administrator), and the
+# answer to Test Email. Nowhere else, and to nobody else: no other role
+# and no API token.
 #
-# The sentence (#811) reads the SMTP reply first: the exception's type and
-# code, or the same thing parsed back out of the stored text (str() of an
-# smtplib exception is its tuple or dict). A 550 for the recipient is "the
-# address was refused", a 4xx is "try again later", only a socket error or a
-# dropped connection is "could not be reached". The words of the error are
-# the fallback for an error that carries no code.
+# Nothing in the reply is changed or hidden. If a mail server repeats the
+# sign-in it was given, the administrator, who set it, sees it there.
+#
+# FailureReader is the one place the stored text leaves storage, and
+# stored_text the one place it is made; tests hold the app to both.
 # ============================================================================
 
 import ast
 import re
 import smtplib
 import ssl
-from typing import NamedTuple
-
-
-def _clean_reason(error_text: str) -> str:
-    """The SMTP error with Python's tuple/bytes wrapping stripped off.
-
-    `str(SMTPAuthenticationError)` is "(535, b'5.7.8 ...')"; the bit a person
-    reads is "535 5.7.8 ...". A refused sender is "(530, b'...', 'from@x')"
-    and refused recipients a dict "{'to@x': (550, b'...')}"; each is read
-    back as a value (W-216), so no quote, comma or b'' of Python's is left
-    in the reply. A row stored since round 26 carries a stage tag in front
-    of the plain words (see stored_text), which is ours and not shown.
-    Leave anything we don't recognize untouched, but for a socket failure's
-    plain cause (_plain_cause)."""
-    text = (error_text or "").strip()
-    if not text:
-        return ""
-    tagged = _TAGGED.match(text)
-    if tagged:
-        words = tagged.group(3).strip()
-        if tagged.group(1) in ("disconnected", "socket"):
-            words = _plain_cause(words)
-        return words
-    if text[0] in "({" and len(text) <= 5000:
-        try:
-            value = ast.literal_eval(text)
-        except (ValueError, SyntaxError, MemoryError, RecursionError):
-            value = None
-        if isinstance(value, dict) and value:
-            parts = [
-                f"{addr}: {_reply_words(reply)}".rstrip(": ")
-                for addr, reply in value.items()
-            ]
-            # one refused address per line (NEW-275)
-            return "\n".join(parts)
-        if _code(value) is not None:
-            return _reply_words(value)
-    return _plain_cause(text)
-
 
 _CLOSED_BECAUSE = re.compile(r"^Connection unexpectedly closed: (.+)$", re.S)
 _ERRNO = re.compile(r"^\[(?:Errno|WinError) -?\d+\] ")
+_SYSTEM_ERROR = re.compile(r"^\[(?:(?:Errno|WinError) -?\d+|SSL: [A-Z0-9_]+)\] ")
 
 
 def _plain_cause(words: str) -> str:
-    """A socket failure as its plain cause (W-232): smtplib's "Connection
+    """A socket failure as its plain cause: smtplib's "Connection
     unexpectedly closed: timed out" is "timed out" (nothing closed; the
     server never answered), and Python's "[Errno 104] " is dropped from
     "Connection reset by peer". A real close ("Connection unexpectedly
@@ -82,13 +47,20 @@ def _plain_cause(words: str) -> str:
     return _ERRNO.sub("", words)
 
 
-def server_words(stored: str) -> str:
-    """The mail server's reply as plain text, for Recent sends' second line
-    (NEW-275): "530 5.7.0 Authentication Required", one "who@x: 550 ..."
-    line per refused recipient, bytes read as UTF-8. Works on the plain
-    words stored since round 26 and on the Python text rows stored before
-    it (read back as a value, never run)."""
-    return _clean_reason(stored)
+def _text(message) -> str:
+    """A reply as text (bytes read as UTF-8, what cannot be read replaced)."""
+    if isinstance(message, (bytes, bytearray)):
+        message = bytes(message).decode("utf-8", "replace")
+    return str(message or "")
+
+
+def _decoded(message) -> str:
+    """A reply as one line of text."""
+    return " ".join(_text(message).split())
+
+
+def _code_words(code, message) -> str:
+    return f"{code} {_decoded(message)}".strip()
 
 
 def _reply_words(reply) -> str:
@@ -98,130 +70,217 @@ def _reply_words(reply) -> str:
     return _code_words(reply[0], reply[1] if len(reply) > 1 else "")
 
 
-def _decoded(message) -> str:
-    if isinstance(message, (bytes, bytearray)):
-        message = bytes(message).decode("utf-8", "replace")
-    return " ".join(str(message or "").split())
+def _as_value(text: str):
+    """A row stored as Python's str() of an smtplib exception (releases
+    before 2.32), read back as the tuple or dict it was (never run), or
+    None."""
+    if not text or text[0] not in "({" or len(text) > 20000:
+        return None
+    try:
+        return ast.literal_eval(text)
+    except (ValueError, SyntaxError, MemoryError, RecursionError):
+        return None
 
 
-def _code_words(code, message) -> str:
-    return f"{code} {_decoded(message)}".strip()
+def _code(value):
+    """The reply code of a (code, message) pair, or None."""
+    if isinstance(value, tuple) and value and isinstance(value[0], int):
+        return value[0]
+    return None
 
 
-# A row's stored text since round 26 (NEW-275, NEW-276): a short tag naming
-# where in the conversation the server refused, then its own words as plain
-# text. "[data] 554 5.7.1 Message rejected as spam",
-# "[sender books@example.com] 530 5.7.0 Authentication Required",
-# "[recipients] a@x: 550 5.1.1 User unknown" (one address per line). The
-# tag is read by failure_sentence and never shown.
+# an enhanced status code ("5.7.1") at the start of a reply's words
+_ENHANCED = re.compile(r"[245]\.\d{1,3}\.\d{1,3}")
+_ENHANCED_FIRST = re.compile(r"\s*([245]\.\d{1,3}\.\d{1,3})(?=\s|$)")
+
+
+def _enhanced(message) -> str:
+    """The enhanced status code a reply's words start with, or ""."""
+    found = _ENHANCED_FIRST.match(_text(message))
+    return found.group(1) if found else ""
+
+
+# -- failures on our own side of the conversation --------------------------------
+
+
+class MailTLSError(Exception):
+    """The secure connection was asked for and could not be set up or
+    verified; str() is the text stored on the email log row. When the
+    server itself refused STARTTLS, `refusal` is (host, code, words) and
+    the row keeps that reply instead (starttls_refused)."""
+
+    refusal = None
+
+
+class MailLocalError(Exception):
+    """A send that failed for a reason of our own, before the server was
+    asked anything it could refuse: str() is words of ours for the email
+    log row, `stage` and `kind` choose the sentence."""
+
+    def __init__(self, stage: str, kind: str, words: str):
+        super().__init__(words)
+        self.stage, self.kind = stage, kind
+
+
+def sign_in_letters_error() -> MailLocalError:
+    """The username or password holds a character SMTP sign-in (ASCII)
+    cannot carry. Says nothing of which character or where."""
+    return MailLocalError(
+        "auth",
+        "letters",
+        "The username or password has a character the sign-in cannot carry",
+    )
+
+
+def host_name_error() -> MailLocalError:
+    """The host in Settings is not a name a connection can be made to (an
+    empty or over-long label)."""
+    return MailLocalError("socket", "", "Host name is not valid")
+
+
+class RecipientsPartlyRefused(Exception):
+    """The server took the message for some of its recipients and refused
+    the others. `recipients` is smtplib's {address: (code, words)} of the
+    refused; `delivered` the addresses of ours it took the message for."""
+
+    def __init__(self, recipients: dict, delivered=()):
+        super().__init__("some recipients were refused")
+        self.recipients = dict(recipients or {})
+        self.delivered = list(delivered or ())
+
+
+# smtplib's own words (not a server's) for a server that offers no sign-in
+# we can use
+_NO_SIGN_IN_OFFERED = (
+    "SMTP AUTH extension not supported by server.",
+    "No suitable authentication method found.",
+)
+_LAST_RESPONSE = re.compile(r"Last response: (\(.*\))\s*$", re.S)
+
+
+# -- what a row stores ---------------------------------------------------------
+#
+# "[data] 554 5.7.1 Message rejected as spam": our tag, then readable text.
+# The tag is ours and never shown: the stage of the conversation the
+# failure came at and what the sentence needs of our own record of the
+# send. What follows it is the server's reply as it was received (the code
+# and the decoded words, on one line), or the plain cause of a failure
+# that was not a reply.
+#   [recipients a@x 550 5.1.1, b@y 451; sent c@z] a@x: 550 5.1.1 User unknown
+#       (the refused, each with its reply code; then who the message still
+#        went to; the server's reply to each refused address on a line)
+#   [sender books@x] 553 5.1.8 Sender rejected
+#   [starttls mail.x] 454 4.7.0 TLS not available   (the host from Settings)
+#   [socket] timed out                      [disconnected] Connection unexpectedly closed
+#   [disconnected after-body] timed out    (lost once the whole message had
+#       been handed over: the server may have taken it)
+#   [local] words of our own (a fault before anything was sent)
+# Two failures of our own keep the fixed text every release has stored for
+# them, with no tag: "SMTP not configured", and the secure-connection
+# texts below ("Certificate not verified (host): certificate is
+# self-signed").
+# Rows of releases before 2.32 hold str() of the exception: Python's tuple
+# "(554, b'5.7.1 …')" or dict of refused recipients, or the system's
+# "[Errno 111] Connection refused". They are read as well as that allows.
 _TAGGED = re.compile(
-    r"^\[(recipients|sender|connect|helo|auth|data|response|disconnected|socket)"
+    r"^\[(recipients|sender|connect|helo|starttls|auth|data|response"
+    r"|disconnected|socket|local|other)"
     r"(?: ([^\]\n]*))?\] ?(.*)$",
     re.S,
 )
 _STORED_LIMIT = 2000
-
-
-_MASK = "••••"
-# A server that repeats the conversation back (W-228): the token after an
-# AUTH PLAIN / AUTH LOGIN, or a 334 continuation, is a credential whatever
-# it decodes to, including a password that has since been changed.
-_AUTH_TOKEN = re.compile(
-    r"(\bAUTH[ \t]+(?:PLAIN|LOGIN)|(?<![\w.])334)([ \t]+)[A-Za-z0-9+/]{4,}={0,2}",
-    re.I,
+# what our tag may take of that, so a long list of addresses can never push
+# its end (or all of the server's words) off the row
+_ADDRESS_LIMIT = 320
+_TAG_REFUSED = 900
+_TAG_SENT = 400
+# the stages whose stored words are a mail server's reply
+_REPLY_STAGES = (
+    "recipients",
+    "sender",
+    "connect",
+    "helo",
+    "starttls",
+    "auth",
+    "data",
+    "response",
 )
+# ... but for these, which are words of our own (or smtplib's)
+_OUR_AUTH = ("letters", "none-offered")
 
 
-def _credential_forms(password: str, user: str = "") -> list[str]:
-    """Every form a server could echo of the sign-in it was given: the
-    password as typed, URL-quoted and quoted-printable; its base64; the
-    base64 of an AUTH PLAIN argument ("\\0user\\0password", with or
-    without the user again in front); the base64 of the user alone (an AUTH
-    LOGIN step). Base64 forms are kept without their "=" padding, which
-    the mask takes too."""
-    import base64
-    import quopri
-    from urllib.parse import quote, quote_plus
-
-    def b64(raw: str) -> str:
-        data = raw.encode("utf-8", "replace")
-        return base64.b64encode(data).decode("ascii").rstrip("=")
-
-    forms = set()
-    if user:
-        forms.add(b64(user))
-    if password:
-        forms.update({password, quote(password, safe=""), quote_plus(password)})
-        qp = quopri.encodestring(password.encode("utf-8", "replace"))
-        forms.add(qp.decode("ascii", "replace").replace("=\n", "").strip())
-        forms.add(b64(password))
-        if user:
-            forms.add(b64(f"\0{user}\0{password}"))
-            forms.add(b64(f"{user}\0{user}\0{password}"))
-    # under 3 characters a form is too common to mask without garbling
-    return [f for f in forms if len(f) >= 3]
+# What answered was not an SMTP server. smtplib keeps its line without the
+# first four characters (where a reply code would stand), so the line is
+# shown as the remainder it is, in words of ours.
+_NOT_SMTP = "The answer was not an SMTP reply"
 
 
-def _echoed_sign_ins(text: str) -> list[str]:
-    """What the tokens after AUTH PLAIN / AUTH LOGIN / 334 in `text` decode
-    to: the password of an AUTH PLAIN argument, or an AUTH LOGIN step's
-    value, so the same password echoed as typed beside it is masked too,
-    even when it is no longer the one in Settings (W-228). A server's own
-    prompt ("Username:") is not one."""
-    import base64
-    import binascii
-
-    found = []
-    for m in _AUTH_TOKEN.finditer(text or ""):
-        token = m.group(0)[len(m.group(1)) + len(m.group(2)) :]
-        try:
-            raw = base64.b64decode(token + "=" * (-len(token) % 4), validate=True)
-            value = raw.decode("utf-8")
-        except (binascii.Error, ValueError):
-            continue
-        parts = [p for p in value.split("\0") if p]
-        if "\0" in value and parts:
-            found.append(parts[-1])
-        elif value and not value.endswith(":") and value.isprintable():
-            found.append(value)
-    return found
+def _not_smtp_words(rest) -> str:
+    rest = _decoded(rest)
+    return f"{_NOT_SMTP}: …{rest}" if rest else _NOT_SMTP
 
 
-def scrub_secrets(text: str, hidden=(), user: str = "") -> str:
-    """`text` with every echo of a credential masked (W-228): each password
-    in `hidden` and its sign-in forms with `user` (_credential_forms), and
-    any token following AUTH PLAIN, AUTH LOGIN or a 334. The one scrubbing
-    function: send_email() applies it before a row is stored, and
-    FailureReader applies it again whenever stored text is read."""
-    if not text:
-        return text
-    forms = set()
-    for secret in [*(hidden or ()), *_echoed_sign_ins(text)]:
-        forms.update(_credential_forms(secret or "", user))
-    if user and not forms:
-        forms.update(_credential_forms("", user))
-    if forms:
-        # the longest first, so a form inside another is not left half-replaced
-        pattern = "|".join(
-            re.escape(f) + "={0,2}" for f in sorted(forms, key=len, reverse=True)
-        )
-        text = re.sub(pattern, _MASK, text)
-    return _AUTH_TOKEN.sub(lambda m: m.group(1) + m.group(2) + _MASK, text)
+def _address(value) -> str:
+    """One of our own addresses, fit for the tag."""
+    return re.sub(r"[\s\],;]", "", str(value or ""))[:_ADDRESS_LIMIT]
 
 
-def stored_text(error: BaseException, hidden=(), user: str = "") -> str:
-    """The text send_email() keeps on the log row for a failed send: plain
-    words, never str() of the exception (which is a Python tuple or dict).
-    `hidden` are secrets scrubbed out of whatever the server said."""
-    if isinstance(error, smtplib.SMTPRecipientsRefused):
-        lines = [
-            f"{addr}: {_reply_words(reply)}".rstrip(": ")
-            for addr, reply in (error.recipients or {}).items()
-        ]
-        text = "[recipients] " + "\n".join(lines)
+def _fitting(items, limit: int) -> list[str]:
+    """The leading items that fit in `limit` characters when joined (the
+    first always does)."""
+    kept, used = [], 0
+    for item in items:
+        used += len(item) + (2 if kept else 0)
+        if kept and used > limit:
+            break
+        kept.append(item)
+    return kept
+
+
+def stored_text(error, stage: str = "local", after_body: bool = False) -> str:
+    """The text an email log row keeps for a failed send, and the only way
+    one is made: our tag, then readable text (never str() of an exception,
+    which is a Python tuple or dict, an "[Errno …]" or a codec's
+    complaint). The server's reply is kept as it was received. `error` is
+    the exception, or words of our own for a send that never reached a
+    server (`stage` "setup" for "SMTP not configured")."""
+    arg = ""
+    if isinstance(error, MailTLSError) and error.refusal:
+        # the server answered STARTTLS with a refusal: its reply is kept
+        host, code, said = error.refusal
+        stage, arg, words = "starttls", _address(host), _code_words(code, said)
+    elif isinstance(error, MailTLSError) or (
+        isinstance(error, str) and stage == "setup"
+    ):
+        # our own fixed text, as every release has stored it
+        return _decoded(str(error))[:_STORED_LIMIT]
+    elif isinstance(error, str):
+        stage, words = "local", _decoded(error)
+    elif isinstance(error, MailLocalError):
+        stage, arg, words = error.stage, error.kind, _decoded(str(error))
+    elif isinstance(error, (smtplib.SMTPRecipientsRefused, RecipientsPartlyRefused)):
+        stage = "recipients"
+        entries, lines = [], []
+        for addr, reply in (error.recipients or {}).items():
+            code = _code(reply)
+            said = reply[1] if isinstance(reply, tuple) and len(reply) > 1 else ""
+            name = _address(addr)
+            answered = _reply_words(reply)
+            lines.append(f"{name}: {answered}" if answered else name)
+            if name:
+                found = [name]
+                if code is not None:
+                    found += [str(code), _enhanced(said)]
+                entries.append(" ".join(p for p in found if p))
+        arg = ", ".join(_fitting(entries, _TAG_REFUSED))
+        delivered = [_address(a) for a in getattr(error, "delivered", ())]
+        delivered = _fitting([a for a in delivered if a], _TAG_SENT)
+        if arg and delivered:
+            arg += "; sent " + ", ".join(delivered)
+        words = "\n".join(lines)
     elif isinstance(error, smtplib.SMTPSenderRefused):
-        sender = " ".join(str(error.sender or "").split()).replace("]", "")
-        text = f"[sender {sender}] " + _code_words(error.smtp_code, error.smtp_error)
+        stage, arg = "sender", _address(error.sender)
+        words = _code_words(error.smtp_code, error.smtp_error)
     elif isinstance(error, smtplib.SMTPResponseException):
         stage = "response"
         if isinstance(error, smtplib.SMTPConnectError):
@@ -232,40 +291,137 @@ def stored_text(error: BaseException, hidden=(), user: str = "") -> str:
             stage = "auth"
         elif isinstance(error, smtplib.SMTPDataError):
             stage = "data"
-        text = f"[{stage}] " + _code_words(error.smtp_code, error.smtp_error)
+        code = error.smtp_code
+        if isinstance(code, int) and 200 <= code <= 599:
+            words = _code_words(code, error.smtp_error)
+        else:
+            # smtplib's -1: what answered did not speak SMTP (a web
+            # server's port, say). Its line is kept, the "-1" is not.
+            arg, words = "not-smtp", _not_smtp_words(error.smtp_error)
     elif isinstance(error, smtplib.SMTPServerDisconnected):
         # "Connection unexpectedly closed: timed out" is a read that timed
-        # out, and nothing closed: the plain cause (W-232)
-        text = "[disconnected] " + (
-            _plain_cause(_decoded(str(error))) or "Connection closed"
-        )
+        # out, and nothing closed: the plain cause
+        stage = "disconnected"
+        words = _plain_cause(_decoded(str(error))) or "Connection closed"
+        if after_body:
+            arg = "after-body"
     elif isinstance(error, OSError) and not isinstance(error, smtplib.SMTPException):
         # "Connection refused", "timed out", "Name or service not known":
         # the system's message, without Python's "[Errno 111]" in front
-        words = getattr(error, "strerror", None) or str(error)
-        if not words and isinstance(error, TimeoutError):
-            words = "timed out"
-        text = "[socket] " + (_plain_cause(_decoded(words)) or type(error).__name__)
+        said = getattr(error, "strerror", None) or str(error)
+        if not said and isinstance(error, TimeoutError):
+            said = "timed out"
+        stage = "socket"
+        words = _plain_cause(_decoded(said)) or "Connection failed"
+        if after_body:
+            arg = "after-body"
+    elif isinstance(error, smtplib.SMTPException):
+        said = str(error)
+        last = _LAST_RESPONSE.search(said)
+        value = _as_value(last.group(1)) if last else None
+        if said in _NO_SIGN_IN_OFFERED:
+            # smtplib's own sentence: the server offers no sign-in we can use
+            stage, arg, words = "auth", "none-offered", said
+        elif _code(value) is not None:
+            # "Server AUTH mechanism infinite loop. Last response: (334,
+            # b'…')": the reply it gave up on, as readable text
+            stage, arg, words = "auth", "loop", _reply_words(value)
+        else:
+            stage, words = "other", _decoded(said)
     else:
-        text = str(error)
-    text = scrub_secrets(text, hidden, user)
+        # anything else is a fault of ours. Python's text for it is not
+        # for a person (a codec error names a character of what it could
+        # not encode), so the row says only that much.
+        stage, words = "local", "Unexpected error"
+    text = f"[{stage}{' ' + arg if arg else ''}] {words}"
     if len(text) > _STORED_LIMIT:
         text = text[: _STORED_LIMIT - 1] + "…"
     return text
 
 
-def explain_send_failure(error_text: str, host: str = "") -> tuple[str, str]:
-    """(reason, hint) for a failed send.
+def _tag_recipients(arg: str):
+    """A recipients tag as ([(address, code, enhanced)] of the refused,
+    [addresses the message still went to])."""
+    refused_part, _, sent_part = (arg or "").partition("; sent ")
+    refused = []
+    for entry in refused_part.split(", "):
+        tokens = entry.split(" ")
+        name = tokens[0]
+        code, enhanced = None, ""
+        if len(tokens) > 1 and re.fullmatch(r"\d{3}", tokens[1]):
+            code = int(tokens[1])
+            if len(tokens) > 2 and _ENHANCED.fullmatch(tokens[2]):
+                enhanced = tokens[2]
+        if name:
+            refused.append((name, code, enhanced))
+    return refused, [a for a in sent_part.split(", ") if a]
 
-    `reason` is the SMTP error cleaned up for reading; `hint` is one sentence
-    of advice for a common case, or "" when we have nothing useful to add.
-    The mapping is deliberately tiny: username/password (535/534), a server
-    we couldn't reach (refused/timed out/unknown host), and Gmail or Google
-    Workspace, which reject an ordinary password and need an app password."""
-    reason = _clean_reason(error_text)
+
+def server_words(stored: str) -> str:
+    """A stored row as the readable text an administrator is shown, with
+    nothing changed in it: the server's reply ("530 5.7.0 Authentication
+    Required", one "who@x: 550 ..." line per refused recipient) or the
+    plain cause ("timed out"), our tag left off. A row of a release before
+    2.32 is tidied where that is simple (Python's tuple, dict and b'' read
+    back as the reply they held, "[Errno 111] " dropped), and is otherwise
+    given as it is stored."""
+    text = (stored or "").strip()
+    if not text:
+        return ""
+    tagged = _TAGGED.match(text)
+    if tagged:
+        stage, _arg, words = tagged.groups()
+        words = words.strip()
+        if stage in ("disconnected", "socket"):
+            words = _plain_cause(words)
+        return words
+    value = _as_value(text)
+    if isinstance(value, dict) and value:
+        lines = []
+        for addr, reply in value.items():
+            answered = _reply_words(reply)
+            lines.append(f"{addr}: {answered}" if answered else str(addr))
+        return "\n".join(lines)
+    if _code(value) is not None:
+        if not 200 <= _code(value) <= 599:
+            return _not_smtp_words(value[1] if len(value) > 1 else "")
+        return _reply_words(value)
+    return _plain_cause(text)
+
+
+def _holds_reply(stored: str) -> bool:
+    """Whether a stored row's words are a mail server's reply (not the
+    cause of a connection that failed, nor words of our own)."""
+    text = (stored or "").strip()
+    tagged = _TAGGED.match(text)
+    if tagged:
+        stage, arg, _words = tagged.groups()
+        if arg == "not-smtp" or (stage == "auth" and arg in _OUR_AUTH):
+            return False
+        return stage in _REPLY_STAGES
+    value = _as_value(text)
+    if isinstance(value, dict):
+        return bool(value)
+    return _code(value) is not None and 200 <= _code(value) <= 599
+
+
+def explain_send_failure(error_text: str, host: str = "") -> tuple[str, str]:
+    """(reason, hint) for a failed send whose stored text carries no code:
+    a row of a release before 2.32 that is not a reply.
+
+    `reason` is the stored text made readable (server_words: an
+    administrator's); `hint` is one sentence of ours for a common case, or
+    "". The mapping is deliberately tiny: username/password (535), a server
+    we couldn't reach (refused/timed out/reset/unknown host), and Gmail or
+    Google Workspace, which reject an ordinary password and need an app
+    password. The words only choose among our own sentences; none of them
+    is repeated."""
+    reason = server_words(error_text)
     text = (error_text or "").lower()
     hint = ""
-    if "535" in text or "534" in text:
+    if "535" in text or ("534" in text and _is_google(host, text)):
+        # only a 535 says the username or password is wrong; a 534 is
+        # Google's way of asking for an app password
         hint = _credentials_sentence(host, text)
     elif any(
         s in text
@@ -278,8 +434,14 @@ def explain_send_failure(error_text: str, host: str = "") -> tuple[str, str]:
             "no route to host",
             "network is unreachable",
             "connection unexpectedly closed",
+            "connection reset",
+            "connection aborted",
+            "forcibly closed",
+            "broken pipe",
         )
-    ):
+    ) or _SYSTEM_ERROR.match((error_text or "").strip()):
+        # the system's own error for a connection ("[Errno -3] Temporary
+        # failure in name resolution", "[SSL: WRONG_VERSION_NUMBER] …")
         hint = _UNREACHABLE_SENTENCE
 
     return reason, hint
@@ -298,6 +460,13 @@ _NOT_CONFIGURED_SENTENCE = (
 _REFUSED_SENTENCE = (
     "The address was refused by the mail server: {}. Check it and send again."
 )
+# a refusal about permission (5.7.x: "Relay access denied"), which a server
+# gives for a missing sign-in as often as for the address
+_NOT_ALLOWED_SENTENCE = (
+    "The mail server would not take mail for: {}. If the address is right, "
+    "the server may want a sign-in (Settings → Email (SMTP)) or may not allow "
+    "mail to it."
+)
 _SENDER_REFUSED_SENTENCE = (
     "The mail server refused the sender address: {}. Check the From address "
     "under Settings → Email (SMTP)."
@@ -310,8 +479,8 @@ _SIGN_IN_SENTENCE = (
     "The mail server wants a sign-in, and none is set. Enter the username and "
     "password under Settings → Email (SMTP)."
 )
-# 530 asking for STARTTLS first: the server takes mail only over a secure
-# connection
+# 530 asking for STARTTLS first, or 538: the server takes mail (or this
+# sign-in) only over a secure connection
 _STARTTLS_FIRST_SENTENCE = (
     "The mail server takes mail only over a secure connection. Turn on Use "
     "TLS under Settings → Email (SMTP)."
@@ -324,171 +493,272 @@ _SIGN_IN_NEEDS_TLS_SENTENCE = (
     "was sent and your password was not given to it. Turn on Use TLS under "
     "Settings → Email (SMTP). ({host})"
 )
-# A refusal we have no sentence of its own for (NEW-276): the stage it came
-# at, then the server's own words as plain text
-_CONNECTION_REFUSED_SENTENCE = "The mail server refused the connection: {}"
-_MESSAGE_REFUSED_SENTENCE = "The mail server refused the message: {}"
-# the same from a row stored the old way, which says neither stage nor words
+# a sign-in the server did not take for a reason other than a wrong
+# username or password (only a 535 says that): a mechanism it finds too
+# weak, a password it wants changed first, a reply we have no words for
+_SIGN_IN_FAILED = "The mail server did not accept the sign-in."
+_NO_SIGN_IN_OFFERED_SENTENCE = (
+    "The mail server does not offer a sign-in by username and password. "
+    "Clear the username under Settings → Email (SMTP) if the server needs "
+    "none, or ask your mail provider."
+)
+_SIGN_IN_LETTERS_SENTENCE = (
+    "The SMTP username or password has a character that cannot be sent to "
+    "the mail server (a letter with an accent, for example), so nothing was "
+    "sent. Change it under Settings → Email (SMTP), or use an app password "
+    "from your mail provider."
+)
+# 552 at MAIL FROM, or 5.3.4 / 5.2.3 at any stage that takes mail: the
+# message is over the server's size limit (not a refused From address)
+_TOO_BIG_SENTENCE = (
+    "The mail server refused the message because it is too large. Send a "
+    "smaller attachment, or ask your mail provider about its size limit."
+)
+# A refusal we have no sentence of its own for: the stage it came at, and
+# nothing after it. The server's own words are not part of any sentence.
+_CONNECTION_REFUSED = "The mail server refused the connection."
+_MESSAGE_REFUSED = "The mail server refused the message."
+# the same from a row that does not say which stage (a release before 2.32)
 _OLD_REFUSED_SENTENCE = "The mail server refused the email."
 _UNREACHABLE_SENTENCE = (
     "The server could not be reached — check the host, port, and the "
     "Use TLS setting."
 )
+# the whole message was handed to a server we had reached, and the
+# connection was lost (or the server went silent) before it answered: it
+# may have taken the message, so "could not be reached" would be untrue
+# and a second send might be a duplicate
+_LOST_AFTER_BODY_SENTENCE = (
+    "The connection to the mail server was lost after the message was handed "
+    "to it, before it answered, so the email may or may not have gone out. "
+    "Check with the recipient before sending it again."
+)
+_GOOGLE_SENTENCE = (
+    "Google will not accept a normal password here. Turn on "
+    "2-Step Verification on the account and use a 16-character "
+    "app password as the SMTP password."
+)
+# the row does not say which address
+_REFUSED_NO_NAME = (
+    "An address was refused by the mail server. Check the addresses and send again."
+)
+_SENDER_REFUSED_NO_NAME = (
+    "The mail server refused the sender address. Check the From address "
+    "under Settings → Email (SMTP)."
+)
+# the To address was refused and a Cc or Bcc was not: the send failed, and
+# the copy is said, so nobody reads the log as "nothing went out"
+_COPY_WENT_SENTENCE = " A copy still went to: {}."
+# the To address took the message and a Cc or Bcc was refused: a sent row's
+# note
+_COPY_REFUSED_NOTE = "The mail server refused a copy to: {}."
+# sentences that do not say why: they end with where the reason can be read
+_UNEXPLAINED = (
+    _FALLBACK_SENTENCE,
+    _OLD_REFUSED_SENTENCE,
+    _CONNECTION_REFUSED,
+    _MESSAGE_REFUSED,
+    _SIGN_IN_FAILED,
+)
+
+
+def _is_google(host: str, text: str) -> bool:
+    return any(s in (host or "").lower() for s in ("gmail", "google")) or any(
+        s in (text or "").lower() for s in ("gmail", "google")
+    )
 
 
 def _credentials_sentence(host: str, text: str) -> str:
-    is_google = any(s in (host or "").lower() for s in ("gmail", "google")) or any(
-        s in (text or "").lower() for s in ("gmail", "google")
-    )
-    if is_google:
-        return (
-            "Google will not accept a normal password here. Turn on "
-            "2-Step Verification on the account and use a 16-character "
-            "app password as the SMTP password."
-        )
+    if _is_google(host, text):
+        return _GOOGLE_SENTENCE
     return "The server rejected the username or password — check both."
 
 
-def _code(value):
-    """The reply code of a (code, message) pair, or None."""
-    if isinstance(value, tuple) and value and isinstance(value[0], int):
-        return value[0]
-    return None
+# -- which sentence --------------------------------------------------------------
+#
+# A failure is classified by the stage it came at and its reply code (and
+# enhanced status code). The server's prose is read in two places only, to
+# choose between two fixed sentences: a 530 that asks for STARTTLS, and a
+# Google server's refusal of an ordinary password. One function serves the
+# exception of a send just made and every stored format, so the two cannot
+# drift apart.
+
+_TOO_BIG_CODES = ("5.3.4", "5.2.3")
 
 
-def _refused(recipients: dict):
-    """(kind, detail) for a recipients-refused mapping {address: (code, msg)}:
-    the 5xx addresses are refused; only 4xx ones mean try again later."""
-    codes = {addr: _code(reply) for addr, reply in recipients.items()}
-    hard = [str(a) for a, c in codes.items() if c is not None and c >= 500]
-    if hard:
-        return "refused", ", ".join(hard)
-    if any(c is not None and 400 <= c < 500 for c in codes.values()):
-        return "later", ""
-    return None, ""
-
-
-def _by_code(code: int, message="") -> tuple:
-    if code == 530:
-        return _sign_in_kind(message)
-    if code in (534, 535):
-        return "auth", ""
-    if 400 <= code < 500:
-        return "later", ""
-    # a refusal with no sentence of its own: say so, in the server's words
-    # (NEW-276)
-    return "message", ""
-
-
-def _sign_in_kind(message) -> tuple:
+def _sign_in_kind(words) -> str:
     """A 530: the server wants a sign-in, or STARTTLS first."""
-    if isinstance(message, bytes):
-        message = message.decode("utf-8", "replace")
-    if "starttls" in str(message or "").lower():
-        return "starttls", ""
-    return "sign-in", ""
+    if "starttls" in _text(words).lower():
+        return "starttls"
+    return "sign-in"
 
 
-def _classify_exception(error: BaseException):
-    if isinstance(error, smtplib.SMTPRecipientsRefused):
-        return _refused(error.recipients or {})
-    if isinstance(error, smtplib.SMTPAuthenticationError):
-        return "auth", ""
-    if isinstance(error, (smtplib.SMTPConnectError, smtplib.SMTPHeloError)):
-        # the greeting or EHLO answered with a refusal (a 554 "no SMTP
-        # service here"): the server was reached and said no (NEW-276)
-        if 400 <= error.smtp_code < 500:
-            return "later", ""
-        return "connection", ""
-    if isinstance(error, smtplib.SMTPSenderRefused):
-        if 400 <= error.smtp_code < 500:
-            return "later", ""
-        if error.smtp_code == 530:
-            return _sign_in_kind(error.smtp_error)
-        return "sender", str(error.sender)
-    if isinstance(error, smtplib.SMTPDataError):
-        # DATA refused, or the message refused after its body was sent
-        if 400 <= error.smtp_code < 500:
-            return "later", ""
-        return "message", ""
-    if isinstance(error, smtplib.SMTPResponseException):
-        return _by_code(error.smtp_code, error.smtp_error)
-    if isinstance(error, smtplib.SMTPServerDisconnected):
-        return "unreachable", ""
-    if isinstance(error, OSError) and not isinstance(error, smtplib.SMTPException):
-        # refused, timed out, unknown host, no route: the socket never got
-        # (or lost) a conversation with the server
-        return "unreachable", ""
-    return None, ""
+def _stage_kind(stage: str, code, enhanced: str = "", words="") -> str:
+    """The kind of failure a reply of `code` at `stage` is."""
+    if code is None:
+        return "other"
+    if not 200 <= code <= 599:
+        # not an SMTP reply at all
+        return "unreachable"
+    later = 400 <= code < 500
+    if stage == "auth":
+        # only a 535 says the username or password is wrong
+        if code == 535 or enhanced == "5.7.8":
+            return "auth"
+        if code == 432 or enhanced == "4.7.12":
+            return "sign-in-failed"  # a password the server wants changed
+        if later:
+            return "later"
+        if code == 538 or enhanced == "5.7.11":
+            return "starttls"
+        if code == 530 and _sign_in_kind(words) == "starttls":
+            return "starttls"
+        if code == 534:
+            return "auth-534"
+        return "sign-in-failed"
+    if stage in ("connect", "helo"):
+        return "later" if later else "connection"
+    if later:
+        return "later"
+    if code == 530:
+        return _sign_in_kind(words)
+    if code == 538 or enhanced == "5.7.11":
+        return "starttls"
+    if enhanced in _TOO_BIG_CODES:
+        return "too-big"
+    if code == 552 and stage == "sender":
+        # the answer to the size given with MAIL FROM: the message is over
+        # the limit. A 552 with another status code says something else,
+        # which is still not about the From address.
+        return "too-big" if not enhanced else "message"
+    if stage == "sender":
+        return "sender"
+    if stage == "data":
+        return "message"
+    if code == 535 or enhanced == "5.7.8":
+        return "auth"
+    if code == 534:
+        return "auth-534"
+    return "message"
 
 
-def _classify_text(text: str):
-    """The same reading from a stored error: the tagged plain words stored
-    since round 26 (stored_text), or, on an older row, str() of an smtplib
-    exception: a tuple "(550, b'...')", "(553, b'...', 'from@x')" for a
-    refused sender, or a dict "{'to@x': (550, b'...')}" for refused
-    recipients."""
+def _refused_kind(refused, words="") -> tuple[str, list[str]]:
+    """(kind, addresses) for the refused recipients [(address, code,
+    enhanced)]: the 5xx addresses are refused; only 4xx ones mean try again
+    later."""
+    hard = [(n, c, e) for n, c, e in refused if c is not None and c >= 500]
+    if hard:
+        names = [str(n) for n, _, _ in hard]
+        if all(c == 530 for _, c, _ in hard):
+            # the server wants a sign-in before it takes a recipient
+            return _sign_in_kind(words), []
+        if all(e in _TOO_BIG_CODES for _, _, e in hard):
+            # over the size limit (some servers say so at RCPT, from the
+            # SIZE the message was announced with): not a bad address
+            return "too-big", []
+        if all(e.startswith("5.7.") for _, _, e in hard):
+            return "not-allowed", names
+        return "refused", names
+    if any(c is not None and 400 <= c < 500 for _, c, _ in refused):
+        return "later", []
+    return "other", []
+
+
+class _Read:
+    """How a stored failure classifies: its kind, the addresses of ours it
+    is about (the refused recipients, or the From address), and the
+    addresses the message still went to."""
+
+    __slots__ = ("kind", "names", "delivered")
+
+    def __init__(self, kind, names=(), delivered=()):
+        self.kind = kind
+        self.names = [str(n) for n in names if n]
+        self.delivered = list(delivered)
+
+
+_RECIPIENT_LINE = re.compile(r"^(.*?): (\d{3})\b(?:[ -]([245]\.\d{1,3}\.\d{1,3}))?")
+_CODE_FIRST = re.compile(r"(\d{3})(?:[ -]([245]\.\d{1,3}\.\d{1,3}))?(?=\s|$)")
+
+
+def _classify_text(text: str) -> _Read:
     text = (text or "").strip()
     tagged = _TAGGED.match(text)
     if tagged:
-        return _classify_tagged(*tagged.groups())
-    if not text or len(text) > 5000 or text[0] not in "({":
-        return None, ""
-    try:
-        value = ast.literal_eval(text)
-    except (ValueError, SyntaxError, MemoryError, RecursionError):
-        return None, ""
+        stage, arg, words = tagged.groups()
+        return _classify_tagged(stage, arg or "", words)
+    # a release before 2.32: str() of the exception
+    value = _as_value(text)
     if isinstance(value, dict) and value:
-        return _refused(value)
+        refused = []
+        said = []
+        for addr, reply in value.items():
+            words = reply[1] if isinstance(reply, tuple) and len(reply) > 1 else ""
+            refused.append((str(addr), _code(reply), _enhanced(words)))
+            said.append(_text(words))
+        kind, names = _refused_kind(refused, " ".join(said))
+        return _Read(kind if kind != "other" else None, names)
     code = _code(value)
     if code is None:
-        return None, ""
+        if text in _NO_SIGN_IN_OFFERED:
+            return _Read("none-offered")
+        return _Read(None)
     message = value[1] if len(value) > 1 else ""
-    if code == 530:
-        return _sign_in_kind(message)
-    if len(value) == 3 and isinstance(value[2], str) and code >= 500:
-        return "sender", value[2]
-    kind = _by_code(code, message)
-    if kind[0] == "message":
-        # a row stored before round 27 kept a refusal as Python wrote it:
-        # the stage is lost (a refused greeting and a refused message were
-        # the same tuple, W-231), and the words may echo a password since
-        # changed (W-228), so the sentence says neither
-        return "old-refusal", ""
-    return kind
+    if len(value) == 3 and isinstance(value[2], str):
+        # Python's (code, words, sender) of a refused MAIL FROM
+        kind = _stage_kind("sender", code, _enhanced(message), message)
+        return _Read(kind, [value[2]] if kind == "sender" else [])
+    kind = _stage_kind("response", code, _enhanced(message), message)
+    if kind == "message":
+        # Python's tuple was the same for a refused greeting and a refused
+        # message: the stage is lost, so the sentence names neither
+        kind = "old-refusal"
+    return _Read(kind)
 
 
-_LEADING_CODE = re.compile(r"^(\d{3})\b")
-_RECIPIENT_LINE = re.compile(r"^(.*?): (\d{3})\b")
-
-
-def _classify_tagged(stage: str, arg, words: str):
+def _classify_tagged(stage: str, arg: str, words: str) -> _Read:
     if stage == "recipients":
-        refused = {}
+        if arg:
+            # the addresses and codes stand in our tag, not read from the lines
+            refused, delivered = _tag_recipients(arg)
+            kind, names = _refused_kind(refused, words)
+            return _Read(kind, names, delivered)
+        refused = []
         for line in words.splitlines():
             found = _RECIPIENT_LINE.match(line.strip())
             if found:
-                refused[found.group(1)] = (int(found.group(2)), "")
-        return _refused(refused) if refused else ("other", "")
-    if stage == "disconnected" or stage == "socket":
-        return "unreachable", ""
-    found = _LEADING_CODE.match(words.strip())
+                refused.append(
+                    (found.group(1), int(found.group(2)), found.group(3) or "")
+                )
+        kind, names = _refused_kind(refused, words) if refused else ("other", [])
+        return _Read(kind, names)
+    if stage in ("disconnected", "socket"):
+        if arg == "after-body":
+            return _Read("lost-after-body")
+        return _Read("unreachable")
+    if stage in ("local", "other"):
+        return _Read("other")
+    if stage == "starttls":
+        # whatever the code: no secure connection, so nothing was sent. A
+        # 4xx is the server's "not now", not a setting to change.
+        found = _CODE_FIRST.match(words.strip())
+        if found and found.group(1)[0] == "4":
+            return _Read("starttls-later", [arg])
+        return _Read("starttls-refused", [arg])
+    if stage == "auth" and arg == "letters":
+        return _Read("letters")
+    if stage == "auth" and arg == "none-offered":
+        return _Read("none-offered")
+    if arg == "not-smtp":
+        return _Read("unreachable")
+    found = _CODE_FIRST.match(words.strip())
     code = int(found.group(1)) if found else None
-    if stage == "sender":
-        if code is not None and 400 <= code < 500:
-            return "later", ""
-        if code == 530:
-            return _sign_in_kind(words)
-        return "sender", arg or ""
-    if stage == "auth":
-        return "auth", ""
-    if code is None:
-        return "other", ""
-    if stage in ("connect", "helo"):
-        return ("later", "") if 400 <= code < 500 else ("connection", "")
-    if stage == "data":
-        return ("later", "") if 400 <= code < 500 else ("message", "")
-    return _by_code(code, words)
+    enhanced = (found.group(2) or "") if found else ""
+    kind = _stage_kind(stage, code, enhanced, words)
+    if stage == "sender" and kind == "sender":
+        # the address in a sender tag is the From address we sent with
+        return _Read(kind, [arg])
+    return _Read(kind)
 
 
 # -- the secure connection to the mail server ---------------------------------
@@ -498,11 +768,6 @@ def _classify_tagged(stage: str, arg, words: str):
 # the short texts below — never OpenSSL's own words — and read back into
 # the sentence a bookkeeper sees. Each says nothing was sent and the
 # password was not given: the check runs before LOGIN, so both are true.
-
-
-class MailTLSError(Exception):
-    """The secure connection was asked for and could not be set up or
-    verified; str() is the text stored on the email log row."""
 
 
 _CERT_TEXT = "Certificate not verified ({host}): {reason}"
@@ -543,6 +808,12 @@ _TLS_SENTENCE = (
     "port and the Use TLS setting under Settings → Email (SMTP), or ask your "
     "mail provider. ({host})"
 )
+# the server answered STARTTLS with a 4xx: it cannot set one up just now
+_TLS_LATER_SENTENCE = (
+    "The mail server could not set up a secure connection just now, so "
+    "nothing was sent and your password was not given to it. Try again "
+    "later. ({host})"
+)
 _NO_STARTTLS_SENTENCE = (
     "The mail server did not offer a secure connection, so nothing was sent "
     "and your password was not given to it. Check the port and the Use TLS "
@@ -577,6 +848,15 @@ def tls_failure_text(error: BaseException, host: str) -> str:
     return _TLS_TEXT.format(host=host)
 
 
+def starttls_refused(error: smtplib.SMTPResponseException, host: str) -> MailTLSError:
+    """The failure for a server that answered STARTTLS with a refusal: the
+    same sentence as any secure connection that could not be set up, and
+    the server's reply kept on the row."""
+    failure = MailTLSError(tls_failure_text(error, host))
+    failure.refusal = (host, error.smtp_code, error.smtp_error)
+    return failure
+
+
 def no_starttls_text(host: str) -> str:
     return _NO_STARTTLS_TEXT.format(host=host)
 
@@ -585,14 +865,31 @@ def sign_in_needs_tls_text(host: str) -> str:
     return _SIGN_IN_NEEDS_TLS_TEXT.format(host=host)
 
 
+_HOST = re.compile(r"^[\w.:\[\]-]{1,255}$")
+_KNOWN_REASONS = frozenset(_CERT_REASONS.values()) | {_CERT_UNVERIFIED}
+
+
+def _shown_host(names) -> str:
+    """The host a secure-connection sentence names: the one from Settings
+    that we wrote on the row, when it reads as a host."""
+    host = names[0] if names else ""
+    return host if _HOST.match(host or "") else "the mail server"
+
+
 def tls_sentence(text: str) -> str:
-    """The sentence for a stored TLS failure, or "" when it is not one."""
+    """The sentence for a stored TLS failure, or "" when it is not one.
+    The host is the one from Settings we wrote on the row, and the reason
+    one of our own phrases (certificate_reason): nothing a certificate or
+    a server supplied is repeated."""
     found = _TLS_STORED.match((text or "").strip())
     if not found:
         return ""
     kind, host, reason = found.groups()
+    host = _shown_host([host])
     if kind == "Certificate not verified":
-        return _CERT_SENTENCE.format(host=host, reason=reason or _CERT_UNVERIFIED)
+        if reason not in _KNOWN_REASONS:
+            reason = _CERT_UNVERIFIED
+        return _CERT_SENTENCE.format(host=host, reason=reason)
     if kind == "No secure connection offered":
         return _NO_STARTTLS_SENTENCE.format(host=host)
     if kind == "Sign-in offered only over a secure connection":
@@ -600,138 +897,198 @@ def tls_sentence(text: str) -> str:
     return _TLS_SENTENCE.format(host=host)
 
 
-def failure_sentence(error, host: str = "", hidden=(), user: str = "") -> str:
-    """One sentence a person can act on for a failed send. `error` is the
-    exception itself or the text stored on the email log row (read it with
-    FailureReader, never directly). The reply code decides first (#811);
-    only an error with none falls back to the words: the hint for a common
-    mistake, else "not configured", else a plain fallback. Server words in
-    the sentence are scrubbed of `hidden` (with `user`, see scrub_secrets)."""
+# -- the sentence ---------------------------------------------------------------
+
+
+def _reading(error, host: str = ""):
+    """(kind, sentence) for a failed send: the exception itself, or the
+    text stored on its email log row. The sentence is ours alone: fixed
+    words chosen by the stage and the reply code, naming at most the host
+    from Settings and the addresses we sent to or from. Those stand in our
+    own tag; on a row of a release before 2.32 they are the keys of the
+    refused-recipients dict and the sender smtplib was given, read back as
+    the values they were. Nothing the server said is ever part of it."""
     if isinstance(error, ssl.SSLCertVerificationError):
         # a certificate is only checked in the handshake, before any login
         error = MailTLSError(tls_failure_text(error, host))
-    tls = tls_sentence(str(error) if isinstance(error, BaseException) else error)
-    if tls:
-        return tls
     if isinstance(error, BaseException):
-        kind, detail = _classify_exception(error)
-        text = stored_text(error)
-    else:
-        text = error or ""
-        kind, detail = _classify_text(text)
-    if kind == "refused":
-        return _REFUSED_SENTENCE.format(detail)
+        # an exception reads as the row it would be stored as: one path
+        error = stored_text(error)
+    text = error or ""
+    tls = tls_sentence(text)
+    if tls:
+        return "tls", tls
+    read = _classify_text(text)
+    kind = read.kind
+    if kind in ("refused", "not-allowed"):
+        if not read.names:
+            return kind, _REFUSED_NO_NAME
+        form = _REFUSED_SENTENCE if kind == "refused" else _NOT_ALLOWED_SENTENCE
+        sentence = form.format(", ".join(read.names))
+        if read.delivered:
+            sentence += _COPY_WENT_SENTENCE.format(", ".join(read.delivered))
+        return kind, sentence
     if kind == "sender":
-        return _SENDER_REFUSED_SENTENCE.format(detail)
-    if kind == "later":
-        return _TRY_LATER_SENTENCE
+        if read.names:
+            return kind, _SENDER_REFUSED_SENTENCE.format(read.names[0])
+        return kind, _SENDER_REFUSED_NO_NAME
+    if kind == "starttls-refused":
+        return "tls", _TLS_SENTENCE.format(host=_shown_host(read.names))
+    if kind == "starttls-later":
+        return "tls", _TLS_LATER_SENTENCE.format(host=_shown_host(read.names))
+    fixed = {
+        "later": _TRY_LATER_SENTENCE,
+        "sign-in": _SIGN_IN_SENTENCE,
+        "starttls": _STARTTLS_FIRST_SENTENCE,
+        "unreachable": _UNREACHABLE_SENTENCE,
+        "old-refusal": _OLD_REFUSED_SENTENCE,
+        "connection": _CONNECTION_REFUSED,
+        "message": _MESSAGE_REFUSED,
+        "setup": _NOT_CONFIGURED_SENTENCE,
+        "other": _FALLBACK_SENTENCE,
+        "sign-in-failed": _SIGN_IN_FAILED,
+        "none-offered": _NO_SIGN_IN_OFFERED_SENTENCE,
+        "letters": _SIGN_IN_LETTERS_SENTENCE,
+        "too-big": _TOO_BIG_SENTENCE,
+        "lost-after-body": _LOST_AFTER_BODY_SENTENCE,
+    }
+    if kind in fixed:
+        sentence = fixed[kind]
+        if kind in ("later", "too-big") and read.delivered:
+            sentence += _COPY_WENT_SENTENCE.format(", ".join(read.delivered))
+        return kind, sentence
     if kind == "auth":
-        return _credentials_sentence(host, text)
-    if kind == "sign-in":
-        return _SIGN_IN_SENTENCE
-    if kind == "starttls":
-        return _STARTTLS_FIRST_SENTENCE
-    if kind == "unreachable":
-        return _UNREACHABLE_SENTENCE
-    if kind == "old-refusal":
-        return _OLD_REFUSED_SENTENCE
-    if kind in ("connection", "message"):
-        words = _sentence_words(text, hidden, user)
-        if words:
-            template = (
-                _CONNECTION_REFUSED_SENTENCE
-                if kind == "connection"
-                else _MESSAGE_REFUSED_SENTENCE
-            )
-            return template.format(words)
-        return _FALLBACK_SENTENCE
-    if kind == "other":
-        return _FALLBACK_SENTENCE
+        return kind, _credentials_sentence(host, text)
+    if kind == "auth-534":
+        # Google's 534 asks for an app password; anyone else's says only
+        # that this sign-in will not do
+        if _is_google(host, text):
+            return kind, _GOOGLE_SENTENCE
+        return "sign-in-failed", _SIGN_IN_FAILED
+    # a row of a release before 2.32 with no reply code to go by: its
+    # words pick one of our sentences
     _, hint = explain_send_failure(text, host)
     if hint:
-        return hint
+        return "hint", hint
     if "not configured" in text.lower():
-        return _NOT_CONFIGURED_SENTENCE
-    return _FALLBACK_SENTENCE
+        return "setup", _NOT_CONFIGURED_SENTENCE
+    return "other", _FALLBACK_SENTENCE
 
 
-def _sentence_words(text: str, hidden=(), user: str = "") -> str:
-    """The server's words for a sentence: scrubbed (before any cut, so no
-    half of a secret is left), on one line, ending in a full stop, never so
-    long the sentence is lost under them."""
-    words = " ".join(scrub_secrets(server_words(text), hidden, user).split())
-    if len(words) > 300:
-        words = words[:299].rstrip() + "…"
-    if words and words[-1] not in ".!?…":
-        words += "."
-    return words
+def failure_sentence(error, host: str = "") -> str:
+    """One sentence a person can act on for a failed send, with nothing of
+    the mail server's in it (see _reading). `error` is the exception, or
+    stored text handed over by FailureReader (never read a row directly)."""
+    return _reading(error, host)[1]
 
 
-# -- reading a stored failure (W-228) ------------------------------------------
+def _copy_note(stored: str) -> str:
+    """The note of a send that went out though the server refused a copy:
+    who, from our own tag. "" for anything else."""
+    tagged = _TAGGED.match((stored or "").strip())
+    if not tagged or tagged.group(1) != "recipients":
+        return ""
+    refused, _ = _tag_recipients(tagged.group(2) or "")
+    names = [name for name, _, _ in refused]
+    return _COPY_REFUSED_NOTE.format(", ".join(names)) if names else ""
+
+
+# -- reading a stored failure ---------------------------------------------------
 #
-# The email log's error text is the mail server's own words, and a server
-# may repeat the sign-in it was given. FailureReader is the one place that
-# text leaves storage, for every reader: Recent sends and GET
-# /api/email-log, a document's Activity, Test Email, a document's Email and
-# the batch results. Nothing else reads EmailLog.error_message (a test
-# holds the app to that), so a new reader cannot skip the scrubbing.
+# FailureReader is the one place the stored text leaves storage, for every
+# reader: Recent sends and GET /api/email-log, a document's Activity, Test
+# Email, a document's Email and the batch results. Nothing else reads
+# EmailLog.error_message (a test holds the app to that), so a new reader
+# cannot hand the server's reply to someone it is not for.
 
 
-class LoggedFailure(NamedTuple):
-    """A stored send failure as one reader may see it: `sentence` for
-    everyone (None for a send that went out); `words` the server's own
-    words for an administrator, scrubbed (None for anyone else)."""
+class LoggedFailure:
+    """A stored send failure as one reader may be told it.
 
-    sentence: str | None
-    words: str | None
+    `sentence`: ours alone, the same for every reader (None for a send
+    that went out). `note`: ours alone too, for a send that went out
+    though a copy was refused (else None). `reply`: what the row keeps as
+    readable text (the mail server's reply as it was received, or the
+    plain cause of a failure that was not a reply), for an administrator;
+    None for anyone else."""
+
+    __slots__ = ("sentence", "reply", "admin", "note", "_is_reply")
+
+    def __init__(self, sentence, reply, admin: bool, note=None, is_reply=False):
+        self.sentence = sentence
+        self.reply = reply
+        self.admin = admin
+        self.note = note
+        self._is_reply = is_reply
+
+    @property
+    def unexplained(self) -> bool:
+        """The sentence does not say why the send failed."""
+        return self.sentence in _UNEXPLAINED
+
+    def reason(self, pointer: bool = True) -> str:
+        """What a reader is told in a reply or a list: the sentence, ending
+        with where the reason can be read when it does not say why. Never
+        the server's reply, whoever reads."""
+        if self.sentence is None:
+            return ""
+        if pointer and self.unexplained:
+            return f"{self.sentence} {where_to_see_why(self.admin)}"
+        return self.sentence
+
+    def with_reply(self) -> str:
+        """Test Email's answer and nothing else's: the sentence, then the
+        mail server's reply as the row keeps it. The sentence alone when
+        the reader is not an administrator, or the row holds no reply (a
+        connection that failed, a failure of our own)."""
+        if self.sentence is None:
+            return ""
+        if not (self.admin and self._is_reply and (self.reply or "").strip()):
+            return self.sentence
+        reply = "; ".join(ln.strip() for ln in self.reply.splitlines() if ln.strip())
+        if reply[-1] not in ".!?…":
+            reply += "."
+        return f"{self.sentence} The mail server's reply: {reply}"
 
 
 class FailureReader:
-    """Reads email-log rows for showing, with the sign-in in Settings
-    today: each read scrubs every echo of the password and username it
-    knows (scrub_secrets), and a row stored the old way (Python's tuple,
-    before round 27) gives no server words in its sentence, because its
-    words may echo a password changed since."""
+    """Reads email-log rows for showing. The sentence is the same for
+    every reader and holds nothing of the server's. An administrator is
+    also given what the row keeps, as it is stored (server_words)."""
 
     def __init__(self, db):
         from app.services.settings_service import get_setting_raw
 
         self.host = get_setting_raw(db, "smtp_host") or ""
-        self._user = get_setting_raw(db, "smtp_user") or ""
-        self._hidden = [get_setting_raw(db, "smtp_password") or ""]
 
     def read(self, row, admin: bool) -> LoggedFailure:
-        stored = row.error_message
-        sentence = None
+        stored = row.error_message or ""
+        sentence = note = None
         if row.status == "failed":
-            sentence = failure_sentence(
-                stored or "", self.host, hidden=self._hidden, user=self._user
-            )
-        words = None
+            sentence = failure_sentence(stored, self.host)
+        elif stored:
+            note = _copy_note(stored) or None
+        reply = None
         if admin:
-            words = (
-                scrub_secrets(server_words(stored), self._hidden, self._user)
-                if stored
-                else stored
-            )
-        return LoggedFailure(sentence, words)
+            reply = server_words(stored) if stored else row.error_message
+        return LoggedFailure(sentence, reply, admin, note, _holds_reply(stored))
 
 
 def where_to_see_why(admin: bool) -> str:
     """Where a failed send's reason can be read. Recent sends is an
-    administrator's section (recipients and raw SMTP errors), so anyone else
-    is told who can read it rather than sent to a page they cannot open."""
+    administrator's section (recipients and the mail server's replies), so
+    anyone else is told who can read it rather than sent to a page they
+    cannot open."""
     if admin:
         return "The reason is under Settings → Email (SMTP) → Recent sends."
     return "An administrator can see why under Settings → Recent sends."
 
 
-def sentence_for_last_send(db, entity_type: str, entity_id) -> str:
-    """The sentence for the send just made for this document, read from the
-    log row send_email() wrote, or "" when there is nothing more to say than
-    that it failed (#811). Call it only after send_email() ran and returned
-    False: every run writes a row, so the newest one for the document is
-    that send's. The raw SMTP text stays on the row, for an administrator."""
+def last_send_failure(db, entity_type: str, entity_id, admin: bool):
+    """The failure of the send just made for this document as one reader
+    may be told it, or None when the newest row is not a failure. Call it
+    only after send_email() ran and returned False: every run writes a
+    row, so the newest one for the document is that send's."""
     from app.models.email_log import EmailLog
 
     row = (
@@ -744,20 +1101,88 @@ def sentence_for_last_send(db, entity_type: str, entity_id) -> str:
         .first()
     )
     if row is None or row.status != "failed":
+        return None
+    return FailureReader(db).read(row, admin)
+
+
+def note_for_last_send(db, entity_type: str, entity_id) -> str:
+    """ "The mail server refused a copy to: …" when the send just made for
+    this document went out though the server refused a Cc or Bcc, else "".
+    Call it only after send_email() ran and returned True. Ours alone
+    (addresses from our own record of the send), so it is for every
+    reader: the answer to a send must not read as if a refused copy
+    arrived."""
+    from app.models.email_log import EmailLog
+
+    row = (
+        db.query(EmailLog)
+        .filter(
+            EmailLog.entity_type == (entity_type or ""),
+            EmailLog.entity_id == (entity_id or 0),
+        )
+        .order_by(EmailLog.id.desc())
+        .first()
+    )
+    if row is None or row.status != "sent":
         return ""
-    sentence = FailureReader(db).read(row, admin=False).sentence
-    return "" if sentence == _FALLBACK_SENTENCE else sentence
+    return FailureReader(db).read(row, admin=False).note or ""
+
+
+def sent_answer(db, entity_type: str, entity_id, **more) -> dict:
+    """What a send that went out answers with: {"status": "sent", …}, and
+    `note` when the server refused a copy."""
+    answer = {"status": "sent", **more}
+    note = note_for_last_send(db, entity_type, entity_id)
+    if note:
+        answer["note"] = note
+    return answer
+
+
+def with_notes(result: dict, notes: list) -> dict:
+    """A batch result with `notes` added when any send went out though the
+    server refused a copy (one "Name: The mail server refused a copy to:
+    …" each). A run with none answers exactly as it always has."""
+    if notes:
+        result["notes"] = list(notes)
+    return result
+
+
+def sentence_for_last_send(db, entity_type: str, entity_id, admin: bool = False) -> str:
+    """The reason a batch result gives for the send just made for this
+    document, or "" when there is no failed row: the sentence, ending with
+    where the reason can be read (for this reader) when it does not say."""
+    failure = last_send_failure(db, entity_type, entity_id, admin)
+    if failure is None:
+        return ""
+    if failure.sentence == _FALLBACK_SENTENCE:
+        # "could not be sent" is already said in front of this
+        return where_to_see_why(admin)
+    return failure.reason()
 
 
 def send_failed_detail(db, entity_type: str, entity_id, admin: bool) -> str:
     """The 502 a document's Email button answers with when the send failed:
-    what went wrong in a sentence when the reply says (#811), else the
-    advice to check the SMTP settings (an administrator's), then where the
-    reason can be read."""
-    sentence = sentence_for_last_send(db, entity_type, entity_id)
+    what went wrong in a sentence, else the advice to check the SMTP
+    settings (an administrator's), then where the reason can be read."""
+    failure = last_send_failure(db, entity_type, entity_id, admin)
     detail = "Email could not be sent. "
-    if sentence:
-        detail += sentence + " "
+    if failure is not None and failure.sentence != _FALLBACK_SENTENCE:
+        detail += failure.reason(pointer=False) + " "
     elif admin:
         detail += "Check the SMTP settings under Settings → Email (SMTP). "
     return detail + where_to_see_why(admin)
+
+
+def failed_test_email_detail(db, admin: bool, host: str = "") -> str:
+    """What Test Email answers when the send failed: the sentence, then
+    (Test Email is an administrator's) the mail server's reply as it was
+    received, then where the list of sends is."""
+    failure = last_send_failure(db, "settings_test", None, admin)
+    if failure is None:
+        said = failure_sentence("", host)
+    else:
+        said = failure.with_reply()
+    detail = f"Test email failed to send. {said} "
+    if admin:
+        return detail + "The full list is under Settings → Email (SMTP) → Recent sends."
+    return detail + where_to_see_why(False)

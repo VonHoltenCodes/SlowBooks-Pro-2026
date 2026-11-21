@@ -2,18 +2,18 @@
 # Recent sends — a read-only view of the email_log table (#447).
 #
 # Every send writes an email_log row (app/services/email_service.py). Who
-# reads what (#781): an administrator gets every row whole, the mail
-# server's reply included, as plain words (NEW-275: never Python's tuple or
-# dict, from a row stored either way). Every other role that may read the books (bookkeeper,
-# read-only, accountant; a session or an API token) gets the same rows with
-# the raw error left out: `error_message` carries the bookkeeper's sentence
-# for the failure (email_errors.failure_sentence) instead, because the raw
-# text carries mail-server hostnames and banners. Recipients, copies,
-# subjects, times, sent/failed and the document a row was for (entity_type,
-# entity_id) are what an integration needs to confirm a send went out, and
-# every one of those roles can already read the customer and invoice they
-# came from. The Recent sends section in Settings
-# stays an administrator's; this is the API.
+# reads what (#781, and the rule in app/services/email_errors.py): `failure`
+# is our own sentence for a failed send, the same for every reader, with
+# nothing of the mail server's in it. An administrator signed in also gets
+# the server's reply, as it was received, in `error_message`. Every other
+# role that may read the books (bookkeeper, read-only, accountant) and
+# every API token gets the same rows with the sentence in `error_message`
+# in place of the reply. Recipients, copies, subjects, times, sent/failed
+# and the document a row was for (entity_type, entity_id) are what an
+# integration needs to confirm a send went out, and every one of those
+# roles can already read the customer and invoice they came from. The
+# Recent sends section in Settings stays an administrator's; this is the
+# API.
 # ============================================================================
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.email_log import EmailLog
-from app.routes._roles import is_admin
+from app.routes._roles import reads_mail_server_words
 from app.routes.api_tokens import _utc_iso
 from app.services.email_errors import FailureReader
 
@@ -38,9 +38,9 @@ def list_email_log(
 ):
     """The newest sends first, paged and bounded. `status` filters to one
     value ("sent" / "failed"); anything else is ignored rather than erroring,
-    so a stale value in the URL still returns the list. A role other than
-    administrator gets each row without the raw SMTP error (see the header)."""
-    admin = is_admin(request)
+    so a stale value in the URL still returns the list. Only an administrator
+    signed in gets the mail server's reply on a row (see the header)."""
+    admin = reads_mail_server_words(request)
     q = db.query(EmailLog)
     if status in ("sent", "failed"):
         q = q.filter(EmailLog.status == status)
@@ -51,8 +51,8 @@ def list_email_log(
         .limit(limit)
         .all()
     )
-    # the one reader of the stored text (W-228): scrubbed of any echo of
-    # the sign-in, the server's words an administrator's only
+    # the one reader of the stored text: the server's reply is an
+    # administrator's only
     reader = FailureReader(db)
     return {
         "total": total,
@@ -61,7 +61,7 @@ def list_email_log(
 
 
 def _row(r: EmailLog, admin: bool, reader: FailureReader) -> dict:
-    failure, words = reader.read(r, admin)
+    failure = reader.read(r, admin)
     return {
         "id": r.id,
         "sent_at": _utc_iso(r.sent_at),
@@ -74,12 +74,14 @@ def _row(r: EmailLog, admin: bool, reader: FailureReader) -> dict:
         # so a client can tie the row to its document (#781)
         "entity_id": r.entity_id,
         "status": r.status,
-        # the raw SMTP text is an administrator's (hostnames, banners);
-        # anyone else reads the sentence in its place
-        # — the server's own words as plain text (NEW-275), read the same
-        # from a row stored in the old Python form
-        "error_message": words if admin else failure,
-        # the one wording of a failure (email_errors), so the list and the
-        # test-email message agree
-        "failure": failure,
+        # the mail server's reply, as it was received, is an
+        # administrator's; anyone else reads the sentence in its place,
+        # ending with who can read the reason when it does not say why
+        "error_message": failure.reply if admin else failure.reason() or None,
+        # the sentence, the same for every reader, with nothing of the
+        # server's in it
+        "failure": failure.sentence,
+        # a send that went out though the server refused a copy: who was
+        # refused, in our own words (null otherwise)
+        "note": failure.note,
     }

@@ -23,7 +23,12 @@ from app.services.pdf_service import (
 from app.services.settings_service import get_all_settings as get_settings
 from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
-from app.services.email_errors import sentence_for_last_send
+from app.routes._roles import reads_mail_server_words
+from app.services.email_errors import (
+    note_for_last_send,
+    sentence_for_last_send,
+    with_notes,
+)
 from app.routes._helpers import refuse_unknown_filters
 
 logger = logging.getLogger(__name__)
@@ -984,7 +989,7 @@ def customer_statement_pdf(
 
 
 @router.post("/batch-email-statements")
-def batch_email_statements(db: Session = Depends(get_db)):
+def batch_email_statements(request: Request, db: Session = Depends(get_db)):
     """Email a statement to every customer with an overdue invoice.
 
     Reports what actually went out. send_email() returns False rather than
@@ -1024,6 +1029,7 @@ def batch_email_statements(db: Session = Depends(get_db)):
     sent = 0
     failed = 0
     errors = []
+    notes = []
     # the display name (DBA, #679) when one is set: the statement goes to
     # the customer, who knows the company by it
     company_name = settings.get("display_name") or settings.get("company_name") or ""
@@ -1066,18 +1072,27 @@ def batch_email_statements(db: Session = Depends(get_db)):
             logger.exception("Failed to send statement to customer %s", customer.id)
         if ok:
             sent += 1
+            note = note_for_last_send(db, "statement", cid)
+            if note:
+                notes.append(f"{customer.name}: {note}")
         else:
             failed += 1
             # the reply's sentence when the send ran and the server said
             # why (#811); the raw text stays in the email log
-            why = sentence_for_last_send(db, "statement", cid) if ran else ""
+            why = (
+                sentence_for_last_send(
+                    db, "statement", cid, reads_mail_server_words(request)
+                )
+                if ran
+                else ""
+            )
             errors.append(
                 f"{customer.name}: the statement could not be sent. {why}".rstrip()
                 if why
                 else f"{customer.name}: the statement could not be sent."
             )
 
-    return {"sent": sent, "failed": failed, "errors": errors}
+    return with_notes({"sent": sent, "failed": failed, "errors": errors}, notes)
 
 
 @router.post("/collection-letters")
@@ -1128,6 +1143,7 @@ def collection_letters(
     generated = 0
     emailed = 0
     errors = []
+    notes = []
 
     for cid, invs in by_customer.items():
         customer = db.query(Customer).filter(Customer.id == cid).first()
@@ -1167,8 +1183,13 @@ def collection_letters(
                     entity_id=cid,
                 ):
                     emailed += 1
+                    note = note_for_last_send(db, "collection", cid)
+                    if note:
+                        notes.append(f"{customer.name}: {note}")
                 else:
-                    why = sentence_for_last_send(db, "collection", cid)
+                    why = sentence_for_last_send(
+                        db, "collection", cid, reads_mail_server_words(request)
+                    )
                     # the same words as the other batch sends (W-218)
                     errors.append(
                         f"{customer.name}: the letter could not be sent. {why}"
@@ -1181,4 +1202,6 @@ def collection_letters(
             )
             errors.append(f"{customer.name}: unable to generate collection letter")
 
-    return {"generated": generated, "emailed": emailed, "errors": errors}
+    return with_notes(
+        {"generated": generated, "emailed": emailed, "errors": errors}, notes
+    )

@@ -2521,13 +2521,19 @@ def _email_events(words: _Words, dt: DocType, doc_id: int) -> list[_Event]:
             details = [f"Subject: {r.subject}"] if r.subject else []
             if r.cc:
                 details.append(f"Cc: {r.cc}")
+            # a copy the mail server refused, so the line above is not
+            # read as a copy that arrived
+            note = reader.read(r, admin=False).note
+            if note:
+                details.append(note)
         else:
             text = (
                 f"An email to {words.data(r.recipient)} by {words.data(who)}"
                 " could not be sent."
             )
-            # the one reader of the stored text, scrubbed (W-228)
-            details = [reader.read(r, admin=False).sentence]
+            # the sentence alone, for every reader of Activity: the mail
+            # server's words are never shown here
+            details = [reader.read(r, admin=False).reason()]
         out.append(
             _Event(
                 _utc(r.sent_at),
