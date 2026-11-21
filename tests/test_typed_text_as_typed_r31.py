@@ -170,3 +170,126 @@ def test_an_unknown_query_parameter_is_named_as_sent(client):
     r = client.post("/api/payments/1/discount?customer=1", json=body)
     assert r.status_code == 422, r.text
     assert r.json()["detail"] == "'customer' is not a parameter this accepts."
+
+
+# -- what the guard (test_typed_text_guard_r31) and a second sweep found --------
+
+
+def test_an_account_number_typed_as_words_is_said_as_typed(client, seed_accounts):
+    _company_type(client, "nonprofit")
+    body = {"name": "Mailing", "account_number": "Invoice", "account_type": "expense"}
+    r = client.post("/api/accounts", json=body)
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == (
+        '"Invoice" is not an account number. Use digits, like 6150; a '
+        "sub-account can use 6150.1 or 6150-01."
+    )
+
+
+def test_an_account_number_taken_names_the_account_as_written(client, seed_accounts):
+    _company_type(client, "nonprofit")
+    first = {"name": "Customer deposits", "account_number": "6157"}
+    r = client.post("/api/accounts", json={**first, "account_type": "expense"})
+    assert r.status_code in (200, 201), r.text
+    again = {"name": "Mailing", "account_number": "6157", "account_type": "expense"}
+    r = client.post("/api/accounts", json=again)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == (
+        "Account number 6157 is already used by 'Customer deposits'. "
+        "Account numbers must be unique."
+    )
+
+
+def test_a_duplicate_benefit_code_is_said_as_typed(client):
+    _company_type(client, "nonprofit")
+    body = {"code": "CUSTOMER", "name": "Mailing benefit"}
+    first = client.post("/api/benefits/codes", json=body)
+    assert first.status_code == 201, first.text
+    r = client.post("/api/benefits/codes", json=body)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Code CUSTOMER already exists"
+    # renaming another code onto it says the same
+    other = client.post("/api/benefits/codes", json={"code": "OTHER", "name": "Other"})
+    assert other.status_code == 201, other.text
+    r = client.put(
+        f"/api/benefits/codes/{other.json()['id']}", json={"code": "customer"}
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Code CUSTOMER already exists"
+
+
+def test_an_unknown_cost_type_is_said_as_typed(client):
+    _company_type(client, "nonprofit")
+    body = {"code": "01 9100", "name": "Mailing", "cost_type": "Customer"}
+    r = client.post("/api/cost-codes", json=body)
+    assert r.status_code == 422, r.text
+    # the type is kept as the form sends it on, in lower case
+    assert r.json()["detail"].startswith("Unknown cost type 'customer' — ")
+
+
+def _csv(name, text):
+    return ("files", (name, text.encode(), "text/csv"))
+
+
+def test_an_upload_with_other_columns_is_named_as_uploaded(client, seed_accounts):
+    _company_type(client, "nonprofit")
+    r = client.post(
+        "/api/migration/myob/dry-run",
+        files=[
+            _csv("Invoice journal.csv", "Date,Account,Debit\n"),
+            _csv("Customer journal.csv", "Date,Memo,Credit\n"),
+        ],
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"].startswith(
+        "Customer journal.csv has different columns than the other "
+    )
+
+
+def test_an_upload_not_placed_by_name_is_named_as_uploaded(client):
+    _company_type(client, "nonprofit")
+    r = client.post(
+        "/api/migration/myob/dry-run", files=[_csv("Customer photos.csv", "a,b\n")]
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"].startswith(
+        "Could not tell what Customer photos.csv is from its name"
+    )
+
+
+def test_an_upload_too_large_is_named_as_uploaded():
+    import asyncio
+    import io
+
+    from fastapi import HTTPException, UploadFile
+
+    from app.services.upload_limits import read_limited
+
+    upload = UploadFile(io.BytesIO(b"x" * 64), filename="Invoices.csv")
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(
+            read_limited(
+                upload, max_bytes=8, label=said("Migration file {}", upload.filename)
+            )
+        )
+    assert Terms("nonprofit").worded(refused.value.detail) == (
+        "Migration file Invoices.csv is too large (limit 0 MB)."
+    )
+
+
+@pytest.fixture
+def data_dir(tmp_path, monkeypatch):
+    d = tmp_path / "slowbooks-data"
+    monkeypatch.setenv("SLOWBOOKS_DATA_DIR", str(d))
+    return d
+
+
+def test_a_company_file_name_taken_is_said_as_typed(client, data_dir):
+    _company_type(client, "nonprofit")
+    r = client.post("/api/companies", json={"name": "Customer Invoices"})
+    assert r.status_code == 201, r.text
+    r = client.post("/api/companies", json={"name": "Customer Invoices"})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == (
+        "A company file named 'customer-invoices.db' already exists"
+    )

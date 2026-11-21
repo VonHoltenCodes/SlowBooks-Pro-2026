@@ -327,7 +327,10 @@ const FieldTickets = {
         // is read on the field a person tabs to
         const note = $('#ft-on-save-why');
         const anyPending = t.costPending || t.billPending;
-        if (note) note.textContent = anyPending ? FieldTickets.ON_SAVE_NOTE : '';
+        // set only when it changes: the note is a live region, and setting
+        // the same text again on every keystroke would have it read again
+        const reason = anyPending ? FieldTickets.ON_SAVE_NOTE : '';
+        if (note && note.textContent !== reason) note.textContent = reason;
         rows.forEach((tr, i) => {
             for (const [box, v] of [['.ft-cost', t.lines[i].cost], ['.ft-bill', t.lines[i].bill]]) {
                 const el = tr.querySelector(box);

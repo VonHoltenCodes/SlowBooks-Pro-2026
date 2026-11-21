@@ -59,7 +59,10 @@ def _check_type_exists(db: Session, cost_type: Optional[str]):
     if cost_type is not None and cost_type not in cost_type_map(db):
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown cost type '{cost_type}' — add it under Settings → Cost Types",
+            detail=said(
+                "Unknown cost type '{}' — add it under Settings → Cost Types",
+                cost_type,
+            ),
         )
 
 

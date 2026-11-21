@@ -56,6 +56,29 @@ DESCRIBED = """() => {
     return { cost: of(row.querySelector('.ft-cost')), bill: of(row.querySelector('.ft-bill')) };
 }"""
 
+# One keystroke in the quantity, counting what changes in the note and in
+# the footer (the footer is redrawn by every recalc, so a change there shows
+# the keystroke was handled).
+KEYSTROKE_CHANGES = """(qty) => {
+    const note = document.getElementById('ft-on-save-why');
+    const foot = document.getElementById('ft-line-foot');
+    const seen = { note: 0, foot: 0 };
+    const watch = (el, key) => {
+        const o = new MutationObserver(r => { seen[key] += r.length; });
+        o.observe(el, { childList: true, characterData: true, subtree: true });
+        return o;
+    };
+    const watchers = { note: watch(note, 'note'), foot: watch(foot, 'foot') };
+    const box = document.querySelector('#ft-line-body tr.ft-line .ft-qty');
+    box.value = qty;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    for (const [key, o] of Object.entries(watchers)) {
+        seen[key] += o.takeRecords().length;
+        o.disconnect();
+    }
+    return seen;
+}"""
+
 
 def test_the_reason_for_set_on_save_is_read_in_the_flow(browser, company):
     r = company.put("/api/settings", json={"company_type": "construction"})
@@ -89,6 +112,13 @@ def test_the_reason_for_set_on_save_is_read_in_the_flow(browser, company):
         assert note == {"text": REASON, "shown": True, "after": True, "live": "status"}
         # and a screen reader hears it on each blank rate a person tabs to
         assert page.evaluate(DESCRIBED) == {"cost": REASON, "bill": REASON}
+
+        # a keystroke that leaves the reason as it was does not touch the
+        # note, so a screen reader does not hear it again while one types
+        changes = page.evaluate(KEYSTROKE_CHANGES, "9")
+        assert changes["foot"] > 0, changes  # the keystroke was handled
+        assert changes["note"] == 0, changes
+        assert page.evaluate(NOTE)["text"] == REASON
 
         # the cost rate typed, the bill rate left for the save: only the
         # bill rate is described by the reason

@@ -38,6 +38,7 @@ from app.schemas.benefits import (
     ResolvedBenefit,
 )
 from app.services import benefits_engine as engine
+from app.services.terminology import said
 
 router = APIRouter(prefix="/api/benefits", tags=["benefits"])
 
@@ -78,7 +79,9 @@ def list_codes(
 def create_code(data: BenefitCodeCreate, db: Session = Depends(get_db)):
     code_str = data.code.strip().upper()
     if db.query(BenefitCode).filter(BenefitCode.code == code_str).first():
-        raise HTTPException(status_code=409, detail=f"Code {code_str} already exists")
+        raise HTTPException(
+            status_code=409, detail=said("Code {} already exists", code_str)
+        )
     payload = data.model_dump(exclude={"rate"})
     payload["code"] = code_str
     code = BenefitCode(**payload)
@@ -126,7 +129,9 @@ def update_code(code_id: int, data: BenefitCodeUpdate, db: Session = Depends(get
             .first()
         )
         if dup:
-            raise HTTPException(status_code=409, detail=f"Code {new} already exists")
+            raise HTTPException(
+                status_code=409, detail=said("Code {} already exists", new)
+            )
         changes["code"] = new
     for k, v in changes.items():
         setattr(code, k, v)

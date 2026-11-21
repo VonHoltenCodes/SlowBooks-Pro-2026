@@ -200,10 +200,14 @@ def _another_source_sentence(label: str) -> str:
 
 
 def _names_in_a_sentence(names: list[str]) -> str:
+    # the names are the upload's, said as they are (said())
     if len(names) == 1:
-        return f"Could not tell what {names[0]} is from its name"
-    listed = ", ".join(names[:-1]) + f" and {names[-1]}"
-    return f"Could not tell what {listed} are from their names"
+        return said("Could not tell what {} is from its name", names[0])
+    return said(
+        "Could not tell what {} and {} are from their names",
+        ", ".join(names[:-1]),
+        names[-1],
+    )
 
 
 def _unclassified_text(
@@ -217,18 +221,19 @@ def _unclassified_text(
     other = _looks_like(names, classify)
     if other:
         these = "it looks" if len(names) == 1 else "these look"
-        return (
-            f"{head}; {these} like a {_export_name(other)}. Choose {other} under "
+        # head + ...: an f-string would lose which pieces are the names
+        return head + (
+            f"; {these} like a {_export_name(other)}. Choose {other} under "
             f"Coming from, or leave {'it' if len(names) == 1 else 'them'} out."
         )
     whole = _looks_like(every_name, classify) if every_name else None
     if whole:
-        return f"{head}. {_another_source_sentence(whole)}"
-    return (
-        f"{head}. This source reads files whose names say what they hold: "
-        f"the chart of accounts ('chart' or 'accounts'), the ledger "
-        f"('ledger', 'journal' or 'transactions'), or the trial balance "
-        f"('trial')."
+        return head + f". {_another_source_sentence(whole)}"
+    return head + (
+        ". This source reads files whose names say what they hold: "
+        "the chart of accounts ('chart' or 'accounts'), the ledger "
+        "('ledger', 'journal' or 'transactions'), or the trial balance "
+        "('trial')."
     )
 
 
@@ -266,7 +271,9 @@ async def bundle_from_uploads(
     kept_names: dict[str, str] = {}
     set_aside: dict[str, list] = {}
     for file in files:
-        content = await read_limited(file, label=f"Migration file {file.filename}")
+        content = await read_limited(
+            file, label=said("Migration file {}", file.filename)
+        )
         zipped = (file.filename or "").lower().endswith(".zip")
         for name, data in _members(file.filename, content):
             names.append(name)
@@ -358,9 +365,11 @@ def _add_to_bundle(
             if header.strip() != first_header:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        f"{name} has different columns than the other "
-                        f"{kind} file(s); export them with the same settings"
+                    # the file's name is the upload's; the kind is ours
+                    detail=said("{}", name)
+                    + (
+                        f" has different columns than the other {kind} "
+                        "file(s); export them with the same settings"
                     ),
                 )
             bundle[kind] = bundle[kind].rstrip("\n") + "\n" + body
