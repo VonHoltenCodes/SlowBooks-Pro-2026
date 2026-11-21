@@ -30,6 +30,7 @@ const TERMS_NONPROFIT = {
     "Recent Invoices": "Recent Pledges & Invoices",
     "The last five invoices": "The last five pledges and invoices",
     "Total Invoiced": "Total Pledged",
+    "Invoices & Receipts": "Pledges, Invoices & Donations",
     "Sales Receipt": "Donation",
     "Sales Receipts": "Donations",
     "Enter Sales Receipts": "Enter Donations",

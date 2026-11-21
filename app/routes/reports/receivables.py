@@ -521,7 +521,12 @@ def income_by_customer_rule(basis: str, with_other: bool = True) -> dict:
     income + Sales Tax = Paid, and Balance, what is still owed today on
     the invoices listed less the money not yet applied, stands apart.
     `with_other`: the report has a Not income column (only when the
-    period has some), so the sentence names it."""
+    period has some), so the sentence names it.
+
+    The sentences say "the documents counted", the count column: it
+    counts invoices and sales receipts alike (on a nonprofit pledges,
+    program-fee invoices and donations), so no one kind's name is true of
+    every row, and "invoices" would read "pledges" on a nonprofit."""
     parts = "Sales + Not income + Sales Tax" if with_other else "Sales + Sales Tax"
     if basis == "cash":
         return {
@@ -529,16 +534,17 @@ def income_by_customer_rule(basis: str, with_other: bool = True) -> dict:
             "row_rule": (
                 f"Cash basis: on every row {parts} = Paid, the money received "
                 "in these dates. Balance owed now is what is still owed today "
-                "on the invoices listed, less money received and not yet "
+                "on the documents counted, less money received and not yet "
                 "applied; it is not part of that sum."
             ),
         }
     return {
         "balance_heading": "Balance",
         "row_rule": (
-            f"On every row {parts} − Paid = Balance: what the invoices and "
-            "credit memos in these dates billed and credited, less what has "
-            "been paid or credited on them and money not yet applied."
+            f"On every row {parts} − Paid = Balance: what the documents "
+            "counted and the credit memos in these dates billed and credited, "
+            "less what has been paid or credited on them and money not yet "
+            "applied."
         ),
     }
 

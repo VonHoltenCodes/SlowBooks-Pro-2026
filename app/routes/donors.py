@@ -80,12 +80,25 @@ def acknowledgment_preview(kind: str, gift_id: int, db: Session = Depends(get_db
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except NotAGift as exc:
-        return {"eligible": False, "amount": None, "reason": exc.reason}
-    return {
-        "eligible": True,
-        "amount": float(gift["amount"]) if gift["amount"] is not None else None,
-        "reason": None,
+        return _preview_answer(kind, None, exc.reason)
+    return _preview_answer(kind, gift, None)
+
+
+def _preview_answer(kind: str, gift, reason):
+    answer = {
+        "eligible": gift is not None,
+        "amount": (
+            float(gift["amount"]) if gift and gift["amount"] is not None else None
+        ),
+        "reason": reason,
     }
+    if gift and gift.get("document_paid") is not None:
+        # on a donation receipt that is a gift, what its payments that are
+        # not void paid on it, in the receipt's own currency: the receipt's
+        # window works its deductible portion from it (a credit applied to
+        # the receipt is not money received)
+        answer["document_paid"] = float(gift["document_paid"])
+    return answer
 
 
 @router.get("/gifts/{kind}/{gift_id}/acknowledgment/pdf")
