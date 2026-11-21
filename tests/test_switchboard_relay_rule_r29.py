@@ -913,6 +913,34 @@ def test_two_connects_at_once_make_one_record_and_one_token(
     assert r.status_code == 409 and r.json()["detail"] == link.ALREADY
 
 
+def test_a_connect_while_the_record_is_being_changed_waits_then_says_so(
+    raw, client, db_session
+):
+    """Every change to the kept record is made under the record lock: a
+    Connect while another change holds it waits up to the press's deadline,
+    then says so, and asks the relay for nothing."""
+    held, done = threading.Event(), threading.Event()
+
+    def hold():
+        with link._record_lock():
+            held.set()
+            done.wait(10)
+
+    other = threading.Thread(target=hold)
+    other.start()
+    try:
+        assert held.wait(5)
+        r = _plain(client.post("/api/switchboard/connect"))
+        assert r.status_code == 409 and r.json()["detail"] == link.EDIT_BUSY
+    finally:
+        done.set()
+        other.join(10)
+    assert raw.calls == [] and _tokens(db_session) == []
+    assert not link.link_path().exists()
+    assert client.post("/api/switchboard/connect").status_code == 200
+    assert _tokens(db_session) == [("AI assistant (relay)", True)]
+
+
 def test_a_connect_made_by_another_process_meanwhile_wins(raw, client, db_session):
     """Two server processes share the data folder and not the lock: the
     file is made only if it is not there, and the one that finds it there
@@ -1185,7 +1213,14 @@ def test_disconnect_revokes_by_the_secret_not_by_a_number_someone_edited(
         "/api/tokens", json={"label": "the receipt service", "role": "readonly"}
     ).json()
     record = _connect(client)
-    link._save(dict(record, token_id=made["id"], token_label="the receipt service"))
+    edited = {"token_id": made["id"], "token_label": "the receipt service"}
+    link._save(
+        dict(
+            record,
+            **edited,
+            companies=[dict(record["companies"][0], **edited)],
+        )
+    )
     assert client.post("/api/switchboard/disconnect").json()["revoked"] is True
     db_session.expire_all()
     rows = {t.label: t.is_active for t in db_session.query(ApiToken).all()}
@@ -1325,7 +1360,10 @@ def test_an_ended_file_is_never_taken_for_another_processs_link(raw, client):
     with pytest.raises(link._AlreadyKept):
         link._clear_ended()
     assert json.loads(link.link_path().read_text()) == record
-    assert [p.name for p in link.link_path().parent.iterdir()] == [link.LINK_FILE]
+    # beside it only the record lock's own file, which is never deleted
+    assert sorted(p.name for p in link.link_path().parent.iterdir()) == sorted(
+        [link.LINK_FILE, link.LOCK_FILE]
+    )
 
 
 def _part_link(**fields):

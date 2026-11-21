@@ -1,10 +1,19 @@
 # ============================================================================
 # Connect to AI assistant (#1087): Settings, Connections, AI assistants.
 #
-#   GET  /api/switchboard/status      any signed-in person: the state
+#   GET  /api/switchboard/status      any signed-in person: the state, as
+#                                     that person may see it
 #   POST /api/switchboard/connect     an administrator: link, token, line
-#   POST /api/switchboard/code        an administrator: a one-time sign-in code
-#   POST /api/switchboard/disconnect  an administrator: line, link and token gone
+#   POST /api/switchboard/add         an administrator of this company and of
+#                                     every company on the connection: this
+#                                     company on it, with a token of its own
+#   POST /api/switchboard/take-off    an administrator of that company: its
+#                                     token off, the others stay connected
+#   POST /api/switchboard/code        an administrator of every company on the
+#                                     connection: a one-time sign-in code
+#   POST /api/switchboard/disconnect  an administrator of every company on it
+#                                     that can be opened now: line, link and
+#                                     every token gone
 #   POST /api/switchboard/dismiss     an administrator: hide a relay name the
 #                                     relay has not deleted yet (NEW-269; the
 #                                     quiet retry goes on)
@@ -59,7 +68,7 @@ def _answer(fn, *args):
 @router.get("/status")
 def switchboard_status(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
-    out = _answer(link.status)
+    out = _answer(link.status, request.session)
     out["can_manage"] = _is_admin(request)
     return out
 
@@ -70,7 +79,46 @@ def switchboard_connect(
 ):
     _require_admin(request)
     response.headers["Cache-Control"] = "no-store"
-    out = _answer(link.connect, db, request.session.get("username") or "operator")
+    out = _answer(
+        link.connect,
+        db,
+        request.session.get("username") or "operator",
+        request.session,
+    )
+    out["can_manage"] = True
+    return out
+
+
+@router.post("/add")
+def switchboard_add(
+    request: Request, response: Response, db: Session = Depends(get_db)
+):
+    _require_admin(request)
+    response.headers["Cache-Control"] = "no-store"
+    out = _answer(
+        link.add_here,
+        db,
+        request.session.get("username") or "operator",
+        request.session,
+    )
+    out["can_manage"] = True
+    return out
+
+
+class TakeOff(StrictModel):
+    file: str = Field(..., max_length=255)
+
+
+@router.post("/take-off")
+def switchboard_take_off(
+    request: Request,
+    response: Response,
+    data: TakeOff,
+    db: Session = Depends(get_db),
+):
+    _require_admin(request)
+    response.headers["Cache-Control"] = "no-store"
+    out = _answer(link.take_off, db, data.file, request.session)
     out["can_manage"] = True
     return out
 
@@ -79,13 +127,13 @@ def switchboard_connect(
 def switchboard_code(request: Request, response: Response):
     _require_admin(request)
     response.headers["Cache-Control"] = "no-store"
-    return _answer(link.new_code)
+    return _answer(link.new_code, request.session)
 
 
 @router.post("/disconnect")
 def switchboard_disconnect(request: Request, db: Session = Depends(get_db)):
     _require_admin(request)
-    return _answer(link.disconnect, db)
+    return _answer(link.disconnect, db, request.session)
 
 
 class DismissPending(StrictModel):

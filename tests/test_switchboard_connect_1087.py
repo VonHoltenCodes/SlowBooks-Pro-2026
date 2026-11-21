@@ -286,8 +286,8 @@ def relay(monkeypatch, tmp_path):
         "TIMINGS",
         line_client.Timings(backoff_first=0.05, backoff_max=0.2, welcome_wait=5),
     )
-    # The token's requests go to the app in-process, not to a port.
-    monkeypatch.setattr(link, "_transport", _in_process_transport)
+    # Each company's token's requests go to the app in-process, not to a port.
+    monkeypatch.setattr(link, "_books_transport", _in_process_transport)
     try:
         yield fake
     finally:
@@ -301,19 +301,28 @@ def relay(monkeypatch, tmp_path):
 _THIS_COMPUTER = ("127.0.0.1", 50000)
 
 
-def _in_process_transport(record):
+def _in_process_transport(entry):
+    """One company's requests, as _books_transport makes them: its own
+    token, its own company's header, and the answer's headers handed back
+    so the client can check which company answered."""
     api = TestClient(app, client=_THIS_COMPUTER)
-    company = record.get("company_file") or ""
+    company = entry.get("file") or ""
 
     def send(method, path, params, body, headers):
-        hdrs = {"Authorization": f"Bearer {record['token']}", **(headers or {})}
+        hdrs = {
+            k: v
+            for k, v in (headers or {}).items()
+            if k.lower() != "x-slowbooks-company"
+        }
+        hdrs["Authorization"] = f"Bearer {entry['token']}"
         if company:
             hdrs["X-SlowBooks-Company"] = company
         r = api.request(method, path, params=params or None, json=body, headers=hdrs)
         try:
-            return r.status_code, r.json()
+            payload = r.json()
         except ValueError:
-            return r.status_code, r.text
+            payload = r.text
+        return r.status_code, payload, dict(r.headers)
 
     return send
 
@@ -503,8 +512,12 @@ def test_the_relay_down_at_start_holds_nothing_and_the_panel_says_so(
     assert client.get("/api/accounts").status_code == 200
 
 
-def test_the_app_starts_with_the_relay_down(monkeypatch, tmp_path, lifespan_client):
-    """The lifespan's own start, with a kept link whose relay is gone."""
+@pytest.mark.parametrize("shape", ["one company (beta.1)", "format 2"])
+def test_the_app_starts_with_the_relay_down(
+    monkeypatch, tmp_path, lifespan_client, shape
+):
+    """The lifespan's own start, with a kept link whose relay is gone: a
+    link kept as beta.1 kept it, and one kept as this build keeps it."""
     # (lifespan_client has already started; start it again as a restart would)
     monkeypatch.setattr(link, "link_path", lambda: tmp_path / link.LINK_FILE)
     monkeypatch.setattr(
@@ -512,23 +525,25 @@ def test_the_app_starts_with_the_relay_down(monkeypatch, tmp_path, lifespan_clie
     )
     from app.services import served_companies
 
-    link._save(
-        {
-            "v": 1,
-            "on": True,
-            "relay": f"http://127.0.0.1:{_free_port()}",
-            "device": "dev_" + secrets.token_hex(4),
-            "account": "acct_" + secrets.token_hex(4),
-            "slug": "abcdefghjk",
-            "credential": "sbd_" + secrets.token_urlsafe(32),
-            "token": "sbp_" + secrets.token_urlsafe(32),
-            "token_id": 1,
-            "token_label": "Claude (relay)",
-            "company_file": served_companies.started_file() or "",
-            "company_name": "Test",
-            "linked_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+    kept = {
+        "v": 1,
+        "on": True,
+        "relay": f"http://127.0.0.1:{_free_port()}",
+        "device": "dev_" + secrets.token_hex(4),
+        "account": "acct_" + secrets.token_hex(4),
+        "slug": "abcdefghjk",
+        "credential": "sbd_" + secrets.token_urlsafe(32),
+        "token": "sbp_" + secrets.token_urlsafe(32),
+        "token_id": 1,
+        "token_label": "Claude (relay)",
+        "company_file": served_companies.started_file() or "",
+        "company_name": "Test",
+        "linked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if shape == "format 2":
+        kept = link._format2(kept, link._entries(kept))
+        assert kept["companies"] and link._whole2(kept)
+    link._save(kept)
     try:
         started = time.monotonic()
         with TestClient(app) as again:
@@ -609,20 +624,46 @@ def test_no_api_token_reaches_the_connection(relay, client):
     assert relay.codes == [] and link.link_path().exists()
 
 
-def test_another_company_sees_whose_it_is_and_cannot_use_it(relay, client):
+def _elsewhere(record, company_file, name):
+    """The kept record as if its one company were another one."""
+    entry = dict(record["companies"][0], file=company_file, name=name)
+    return dict(
+        record,
+        company_file=company_file,
+        company_name=name,
+        companies=[entry],
+    )
+
+
+def test_another_company_is_offered_add_and_hears_no_name(relay, client):
+    """A connection whose companies do not include this one: an
+    administrator here may Add it (on the desktop the open company's
+    administrator holds the connection), a person who is not one gets
+    nothing, and nobody here learns the other company's name or how many
+    there are until this one is on it."""
     _connected(relay, client)
     record = json.loads(link.link_path().read_text())
-    record["company_file"] = "another-company.db"
-    record["company_name"] = "Larkspur Supply"
-    link._save(record)
-    st = client.get("/api/switchboard/status").json()
-    assert st["this_company"] is False and st["state"] == "not_connected"
-    assert st["address"] == ""
-    assert "Larkspur Supply" in st["sentence"]
-    for what in ("connect", "code", "disconnect"):
+    link._save(_elsewhere(record, "another-company.db", "Larkspur Supply"))
+    st = client.get("/api/switchboard/status")
+    got = st.json()
+    assert got["on_link"] is False and got["this_company"] is False
+    assert got["state"] == "not_connected" and got["address"] == ""
+    assert got["can_add"] is True and got["can_code"] is False
+    assert "companies" not in got and "count_others" not in got
+    assert "Larkspur Supply" not in st.text and "another-company" not in st.text
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 409 and r.json()["detail"] == (
+        "An AI assistant connection already exists on this computer. Use Add "
+        "instead."
+    )
+    for what in ("code", "disconnect"):
         r = client.post(f"/api/switchboard/{what}")
-        assert r.status_code == 409 and "Larkspur Supply" in r.json()["detail"]
-    # and a start for a company that is not open opens no line
+        assert r.status_code == 403 and "Larkspur" not in r.text, what
+    person = _sign_in("bookkeeper", client)
+    st = person.get("/api/switchboard/status")
+    assert st.json()["sentence"] == "Only an administrator can connect an AI assistant."
+    assert st.json()["can_add"] is False and "Larkspur" not in st.text
+    # and a start where no company on it is open opens no line
     link.stop()
     link.start_in_background()
     time.sleep(0.3)
