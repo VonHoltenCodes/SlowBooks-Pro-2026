@@ -391,6 +391,108 @@ def test_what_the_relay_says_is_shown_as_text_never_as_markup(relay, client, eng
         page.close()
 
 
+# -- the panel's own rule: the keyboard never falls to the page, and a press ---------
+# -- being worked on keeps its button through a refresh ------------------------------
+
+_FOCUS = "document.activeElement && (document.activeElement.id || document.activeElement.tagName)"
+
+
+@pytest.mark.parametrize(
+    "on", ["claude-relay-fallback-dismiss", "claude-relay-fallback-copy"]
+)
+def test_a_notice_going_under_the_keyboard_hands_it_to_its_neighbor(
+    relay, client, engine, on
+):
+    """The quiet retry deleted the record while the keyboard was on the
+    notice's own button: the notice goes on the timed refresh and the
+    keyboard goes to the next control of the panel, not to the page's body
+    (where Tab would start again from the top of the page)."""
+    _connected(relay, client)
+    record = json.loads(link.link_path().read_text())
+    link._save(dict(record, relay=f"http://127.0.0.1:{_free_port()}"))
+    assert client.post("/api/switchboard/disconnect").json()["unlinked"] is False
+    try:
+        page, errors = _page(client, engine)
+        try:
+            _connections(page)
+            page.wait_for_selector("#claude-relay-fallback")
+            page.focus(f"#{on}")
+            assert page.evaluate(_FOCUS) == on
+            with link._pending_lock:
+                link._save_pending([])  # what a retry that deleted it does
+            page.evaluate("SettingsPage.loadSwitchboard()")  # what the timer does
+            page.wait_for_function(
+                "() => !document.getElementById('claude-relay-fallback')"
+            )
+            assert page.evaluate(_FOCUS) == "claude-connect"
+            assert not errors, errors
+        finally:
+            page.close()
+    finally:
+        link.stop_retry()
+
+
+_HOLD_CONNECT = """() => {
+    const real = API.post.bind(API);
+    window.__presses = 0;
+    API.post = (path, ...rest) => {
+        if (path !== '/switchboard/connect') return real(path, ...rest);
+        window.__presses += 1;
+        // the relay is slow to link: the answer comes when the test says
+        return new Promise((resolve, reject) => {
+            window.__answer = () => real(path, ...rest).then(resolve, reject);
+        });
+    };
+}"""
+_CONNECT_BUTTON = """() => {
+    const b = document.getElementById('claude-connect');
+    return b ? [b.disabled, b.textContent.trim()] : null;
+}"""
+
+
+def test_a_refresh_while_connect_is_worked_on_does_not_give_the_button_back(
+    relay, client, engine
+):
+    """A removal notice is up (so the panel refreshes on a timer) and the
+    relay is slow to link: the refresh that lands during the press leaves
+    Connect off, a second press asks for nothing, and the connected panel
+    says nothing about a press still being worked on."""
+    _connected(relay, client)
+    record = json.loads(link.link_path().read_text())
+    link._save(dict(record, relay=f"http://127.0.0.1:{_free_port()}"))
+    assert client.post("/api/switchboard/disconnect").json()["unlinked"] is False
+    try:
+        links = sum(1 for c in relay.calls if c[1] == "/v1/link")
+        page, errors = _page(client, engine)
+        try:
+            _connections(page)
+            page.wait_for_selector("#claude-relay-fallback")
+            page.evaluate(_HOLD_CONNECT)
+            page.focus("#claude-connect")
+            page.keyboard.press("Enter")
+            page.wait_for_function("() => window.__presses === 1")
+            assert page.evaluate(_CONNECT_BUTTON) == [True, "Connecting…"]
+            for _ in range(2):  # what the timer does, with the press in flight
+                page.evaluate("SettingsPage.loadSwitchboard()")
+                page.wait_for_timeout(150)
+                assert page.evaluate(_CONNECT_BUTTON) == [True, "Connecting…"]
+            # a second press, however it is made, is not sent
+            page.evaluate("SettingsPage.connectClaude()")
+            assert page.evaluate("window.__presses") == 1
+            page.evaluate("window.__answer()")
+            page.wait_for_selector("#claude-relay-address")
+            assert page.locator("#claude-relay-error").count() == 0
+            assert "being worked on" not in page.inner_text("#switchboard-relay")
+            # the keyboard is on the panel's next control, not on the page
+            assert page.evaluate(_FOCUS) == "claude-code"
+            assert sum(1 for c in relay.calls if c[1] == "/v1/link") == links + 1
+            assert not errors, errors
+        finally:
+            page.close()
+    finally:
+        link.stop_retry()
+
+
 # -- W-209 -------------------------------------------------------------------------
 
 

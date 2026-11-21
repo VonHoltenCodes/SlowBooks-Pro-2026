@@ -2662,7 +2662,15 @@ const SettingsPage = {
     // error: a press's failure in the server's sentence, kept on the panel
     // until Dismiss or the next press (W-208: the 3-second refresh dropped
     // it); readError: the panel's own read failing, which a refresh clears
-    _claude: { status: null, code: null, error: '', readError: '', timer: null, fallback: null },
+    // busy: the press being worked on ('connect', 'code', 'disconnect'): its
+    // buttons stay off through every draw until it answers, so a timed
+    // refresh never gives back a button whose press is still in flight
+    // asked: counts the reads and the presses, so a read that was asked
+    // before a press answered never draws over what the press made
+    // goes: a refusal that says another press or a connection is in the way
+    // ('linked' / 'unlinked': what the panel shows once that is over); the
+    // sentence goes when the panel itself shows it, looked for a few times
+    _claude: { status: null, code: null, error: '', readError: '', timer: null, fallback: null, busy: '', asked: 0, goes: '', looks: 0 },
 
     // The state in words: what the panel says, for any role.
     claudeStateWords(st) {
@@ -2685,9 +2693,11 @@ const SettingsPage = {
     // The panel: words for everyone, an administrator's buttons (data-admin,
     // so the bookkeeper sweep knows them as the administrator's). `error` is
     // a refusal or failure to show (the server's own sentence).
-    switchboardHtml(st, code, error, fallback) {
+    switchboardHtml(st, code, error, fallback, busy) {
         st = st || {};
         const admin = !!st.can_manage;
+        // a press is being worked on: no second one until it answers
+        const off = busy ? ' disabled' : '';
         const words = SettingsPage.claudeStateWords(st);
         const colour = st.state === 'connected' ? 'var(--text-success)'
             : (st.state === 'unreachable' ? 'var(--text-warning)' : 'var(--text-muted)');
@@ -2727,7 +2737,7 @@ const SettingsPage = {
         }
         if (!admin) return html;
         if (!st.linked) {
-            html += '<div id="claude-relay-connect-row" style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin onclick="SettingsPage.connectClaude()">Connect to AI assistant</button></div>';
+            html += `<div id="claude-relay-connect-row" style="margin-top:8px;"><button type="button" class="btn btn-primary btn-sm" id="claude-connect" data-admin${off} onclick="SettingsPage.connectClaude()">${busy === 'connect' ? 'Connecting…' : 'Connect to AI assistant'}</button></div>`;
             return html;
         }
         if (!st.this_company && st.state !== 'damaged') return html;
@@ -2743,8 +2753,8 @@ const SettingsPage = {
                 + `<div style="margin-top:2px;">${escapeHtml(SettingsPage.claudeCodeLife(code.expires))}</div></div>`;
         }
         html += '<div id="claude-relay-buttons" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">';
-        if (st.this_company) html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin onclick="SettingsPage.claudeCode()">Show a sign-in code</button>';
-        html += '<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>';
+        if (st.this_company) html += `<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin${off} onclick="SettingsPage.claudeCode()">Show a sign-in code</button>`;
+        html += `<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin${off} onclick="SettingsPage.disconnectClaude()">Disconnect</button></div>`;
         return html;
     },
 
@@ -2775,10 +2785,17 @@ const SettingsPage = {
     // What the person holds in the panel: the control with the keyboard and
     // the text selected.
     _claudeHeld(el) {
-        const held = { focus: null, range: null };
+        const held = { focus: null, range: null, order: [] };
         if (typeof el.contains !== 'function') return held;
         const active = document.activeElement;
-        if (active && active !== el && el.contains(active) && active.id) held.focus = active.id;
+        if (active && active !== el && el.contains(active) && active.id) {
+            held.focus = active.id;
+            // the panel's controls in their order, to find a neighbor by
+            // if this one is gone after the draw
+            if (typeof el.querySelectorAll === 'function') {
+                held.order = Array.from(el.querySelectorAll('button[id], a[href][id]')).map(n => n.id);
+            }
+        }
         const sel = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
         if (sel && sel.rangeCount && !sel.isCollapsed
             && el.contains(sel.anchorNode) && el.contains(sel.focusNode)) {
@@ -2790,14 +2807,59 @@ const SettingsPage = {
         return held;
     },
 
+    // Whether nothing on the page has the keyboard (a control that goes
+    // while it has it leaves the keyboard on the page's body).
+    _claudeAdrift() {
+        const active = document.activeElement;
+        return !active || active === document.body || active === document.documentElement
+            || (typeof active.isConnected === 'boolean' && !active.isConnected);
+    },
+
+    // Put the keyboard on the control `id` or, when it is gone or off, on
+    // its neighbor in the panel: the next control in the order they stood
+    // in (`order`), else the one before, else one of the panel's own three
+    // (Connect, Show a sign-in code, Disconnect), else any control it has,
+    // else the panel itself. Never left on the page's body, where a
+    // keyboard user would start again from the top of the page.
+    _claudeFocusNear(el, id, order) {
+        if (!el || typeof el.contains !== 'function') return;
+        const usable = other => {
+            const n = other ? document.getElementById(other) : null;
+            return n && el.contains(n) && !n.disabled ? n : null;
+        };
+        const at = (order || []).indexOf(id);
+        const after = at < 0 ? [] : order.slice(at + 1);
+        const before = at < 0 ? [] : order.slice(0, at).reverse();
+        let to = usable(id);
+        for (const other of [...after, ...before, 'claude-connect', 'claude-code', 'claude-disconnect']) {
+            if (to) break;
+            to = usable(other);
+        }
+        if (!to && typeof el.querySelector === 'function') {
+            to = el.querySelector('button:not([disabled]), a[href]');
+        }
+        if (!to) {
+            // nothing to press is left (a person who is not an
+            // administrator): the panel itself, so Tab goes on from here
+            el.setAttribute('tabindex', '-1');
+            to = el;
+        }
+        try { to.focus({ preventScroll: true }); } catch (e) { to.focus(); }
+    },
+
     // Give back what a redraw took: the keyboard to the control with the
-    // same id, and the selection where the same words are still there.
-    // What the redraw left alone is left alone here too.
+    // same id (to its neighbor when that control is gone), and the
+    // selection where the same words are still there. What the redraw left
+    // alone is left alone here too.
     _claudeGiveBack(el, held) {
-        if (held.focus && !(document.activeElement && document.activeElement.id === held.focus)) {
+        if (held.focus && !(document.activeElement && document.activeElement.id === held.focus)
+            && SettingsPage._claudeAdrift()) {
+            // a button that is there but off is the one whose press is being
+            // worked on: the keyboard is not sent elsewhere meanwhile, the
+            // press hands it back when it answers (_claudePress)
             const again = document.getElementById(held.focus);
-            if (again && el.contains(again) && !again.disabled) {
-                try { again.focus({ preventScroll: true }); } catch (e) { again.focus(); }
+            if (!(again && el.contains(again) && again.disabled)) {
+                SettingsPage._claudeFocusNear(el, held.focus, held.order);
             }
         }
         if (held.range) {
@@ -2850,7 +2912,12 @@ const SettingsPage = {
         const el = $('#switchboard-relay');
         if (!el) return;
         const c = SettingsPage._claude;
-        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback);
+        // a refusal that said something was in the way goes once the panel
+        // shows it (connected, or no longer connected): it is no longer news
+        if (c.goes && c.error && c.status
+            && (c.goes === 'linked') === !!c.status.linked) { c.error = ''; }
+        if (!c.error) { c.goes = ''; c.looks = 0; }
+        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback, c.busy);
         // A refresh that changes nothing draws nothing: the keyboard focus, a
         // selection (the relay name being copied) and the screen reader's
         // place stay where they are, and an alert is not announced again.
@@ -2868,59 +2935,106 @@ const SettingsPage = {
         // and while a relay name waits on the quiet retry, now and then, so
         // the notice goes when the relay has deleted the record (NEW-269)
         const waiting = ((c.status && c.status.pending) || []).some(p => p && !p.dismissed);
-        if ((state === 'connecting' || state === 'unreachable' || waiting) && !c.timer) {
+        // while another press is in the way, the panel looks again for a
+        // little longer than a press can take, so its sentence goes when
+        // the other press is over
+        const looking = !!(c.goes && c.error && c.looks < 6);
+        if ((state === 'connecting' || state === 'unreachable' || waiting || looking) && !c.timer) {
             c.timer = setTimeout(() => {
                 c.timer = null;
+                if (looking) c.looks += 1;
                 if (document.getElementById('switchboard-relay')) SettingsPage.loadSwitchboard();
-            }, waiting && state !== 'connecting' && state !== 'unreachable' ? 15000 : 3000);
+            }, waiting && !looking && state !== 'connecting' && state !== 'unreachable' ? 15000 : 3000);
         }
     },
 
     async loadSwitchboard() {
         const el = $('#switchboard-relay');
         if (!el) return;
+        const c = SettingsPage._claude;
+        const asked = c.asked = (c.asked || 0) + 1;
+        let status = null;
+        let readError = '';
         try {
-            SettingsPage._claude.status = await API.get('/switchboard/status');
-            SettingsPage._claude.readError = '';
+            status = await API.get('/switchboard/status');
         } catch (e) {
-            SettingsPage._claude.status = null;
-            SettingsPage._claude.readError = 'Could not read the AI assistant connection.';
+            readError = 'Could not read the AI assistant connection.';
         }
+        // a press answered, or a later read was asked, meanwhile: this
+        // answer is older than what the panel shows
+        if (asked !== c.asked) return;
+        c.status = status;
+        c.readError = readError;
         SettingsPage._drawSwitchboard();
+    },
+
+    // One press of the panel at a time (the server's rule too): `kind` is
+    // 'connect', 'code' or 'disconnect', `id` the button pressed. While it
+    // is worked on the panel's three buttons are off, through every refresh;
+    // a second press does nothing. `work` sets what the panel shows next;
+    // true from it has the panel read again. The keyboard comes back to the
+    // button pressed, or to its neighbor when that button is gone.
+    async _claudePress(kind, id, work) {
+        const c = SettingsPage._claude;
+        if (c.busy) return;
+        c.busy = kind;
+        // the next press clears the last one's sentence
+        c.error = '';
+        c.goes = '';
+        c.looks = 0;
+        const panel = $('#switchboard-relay');
+        const had = !!(panel && typeof panel.contains === 'function'
+            && document.activeElement && panel.contains(document.activeElement));
+        SettingsPage._drawSwitchboard();
+        let read = false;
+        try {
+            read = await work(c);
+        } finally {
+            c.busy = '';
+        }
+        // what a read asked before this answered is older than it
+        c.asked = (c.asked || 0) + 1;
+        if (read) await SettingsPage.loadSwitchboard();
+        else SettingsPage._drawSwitchboard();
+        if (had && SettingsPage._claudeAdrift()) SettingsPage._claudeFocusNear($('#switchboard-relay'), id, []);
+    },
+
+    // A refusal's sentence, kept on the panel. A 409 says something is in
+    // the way of the press (another press, a connection already there):
+    // `goes` is what the panel shows once that is so, and the sentence goes
+    // with it.
+    _claudeRefused(c, err, goes) {
+        c.error = err.message;
+        c.goes = err && err.status === 409 ? goes : '';
+        c.looks = 0;
     },
 
     async connectClaude() {
-        const button = $('#claude-connect');
-        if (button) { button.disabled = true; button.textContent = 'Connecting…'; }
-        // the next press clears the last one's sentence
-        SettingsPage._claude.error = '';
-        $('#claude-relay-error')?.remove();
-        // the panel was changed by hand here: the next draw is a real one
-        const panel = $('#switchboard-relay');
-        if (panel) panel._claudeDrawn = null;
-        try {
-            SettingsPage._claude.status = await API.post('/switchboard/connect');
-            SettingsPage._claude.code = null;
-            toast('The AI assistant is connected. Add the address in Claude or Grok, then show a sign-in code.');
-            SettingsPage._drawSwitchboard();
-        } catch (err) {
-            // nothing was made: the sentence stays, with Connect offered
-            // again (the panel read again, so it says what is really there)
-            SettingsPage._claude.error = err.message;
-            await SettingsPage.loadSwitchboard();
-        }
+        await SettingsPage._claudePress('connect', 'claude-connect', async c => {
+            try {
+                c.status = await API.post('/switchboard/connect');
+                c.code = null;
+                toast('The AI assistant is connected. Add the address in Claude or Grok, then show a sign-in code.');
+                return false;
+            } catch (err) {
+                // nothing was made: the sentence stays, with Connect offered
+                // again (the panel read again, so it says what is really there)
+                SettingsPage._claudeRefused(c, err, 'linked');
+                return true;
+            }
+        });
     },
 
     async claudeCode() {
-        SettingsPage._claude.error = '';
-        try {
-            SettingsPage._claude.code = await API.post('/switchboard/code');
-            SettingsPage._claude.error = '';
-        } catch (err) {
-            SettingsPage._claude.code = null;
-            SettingsPage._claude.error = err.message;
-        }
-        SettingsPage._drawSwitchboard();
+        await SettingsPage._claudePress('code', 'claude-code', async c => {
+            try {
+                c.code = await API.post('/switchboard/code');
+            } catch (err) {
+                c.code = null;
+                c.error = err.message;
+            }
+            return false;
+        });
     },
 
     async copyClaudeAddress() {
@@ -2947,7 +3061,7 @@ const SettingsPage = {
     dismissClaudeError() {
         SettingsPage._claude.error = '';
         SettingsPage._drawSwitchboard();
-        $('#claude-connect, #claude-code, #claude-disconnect')?.focus();
+        SettingsPage._claudeFocusNear($('#switchboard-relay'), '', []);
     },
 
     async dismissClaudeFallback() {
@@ -2963,7 +3077,13 @@ const SettingsPage = {
     async disconnectClaude() {
         if (!confirm('Disconnect the AI assistant? The connection ends, the relay deletes its record of these books, and the token "'
             + ((SettingsPage._claude.status || {}).token_label || 'AI assistant (relay)') + '" is revoked.')) return;
-        SettingsPage._claude.error = '';
+        await SettingsPage._claudePress('disconnect', 'claude-disconnect', async c => {
+            await SettingsPage._claudeDisconnect(c);
+            return true;
+        });
+    },
+
+    async _claudeDisconnect(c) {
         try {
             const r = await API.post('/switchboard/disconnect');
             SettingsPage._claude.fallback = null;
@@ -2989,9 +3109,8 @@ const SettingsPage = {
             }
             SettingsPage._claude.code = null;
         } catch (err) {
-            SettingsPage._claude.error = err.message;
+            SettingsPage._claudeRefused(c, err, 'unlinked');
         }
-        await SettingsPage.loadSwitchboard();
     },
 
     async loadOcrStatus() {

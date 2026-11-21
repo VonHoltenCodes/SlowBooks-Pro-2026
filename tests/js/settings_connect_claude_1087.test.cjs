@@ -229,3 +229,100 @@ test('a refresh that changes nothing draws nothing', async () => {
     f.page._drawSwitchboard();
     assert.equal(draws, 1);
 });
+
+// One press at a time, through every refresh: the panel's rule, point 6
+// (app/services/switchboard_link.py).
+function later() {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+}
+const tick = () => new Promise(r => setImmediate(r));
+const NOT_LINKED = { state: 'not_connected', linked: false, can_manage: true, pending: [{ slug: 'older-name', sentence: 'A record is still held.', dismissed: false }] };
+const connectButton = html => (html.match(/<button[^>]*id="claude-connect"[^>]*>[^<]*<\/button>/) || [''])[0];
+
+test('a refresh while Connect is being worked on does not give the button back', async () => {
+    const answer = later();
+    const f = fixture({ '/switchboard/status': NOT_LINKED, 'POST /switchboard/connect': answer.promise });
+    await f.page.loadSwitchboard();
+    assert.ok(!connectButton(f.panel.innerHTML).includes(' disabled'));
+    const press = f.page.connectClaude();
+    await tick();
+    assert.match(connectButton(f.panel.innerHTML), / disabled[^>]*>Connecting…</);
+    // what the timer does, while the press is still in flight
+    await f.page.loadSwitchboard();
+    await f.page.loadSwitchboard();
+    assert.match(connectButton(f.panel.innerHTML), / disabled[^>]*>Connecting…</);
+    // a second press meanwhile asks the server for nothing
+    await f.page.connectClaude();
+    assert.equal(f.sent.filter(s => s[0] === 'POST').length, 1);
+    answer.resolve({ ...CONNECTED, pending: NOT_LINKED.pending });
+    await press;
+    assert.equal(state(f.panel.innerHTML), 'Connected');
+    assert.ok(!f.panel.innerHTML.includes('claude-relay-error'));
+    assert.ok(!f.panel.innerHTML.includes(' disabled'));
+});
+
+test('while a sign-in code or Disconnect is being worked on, the panel takes no other press', async () => {
+    for (const [press, path] of [['claudeCode', '/switchboard/code'], ['disconnectClaude', '/switchboard/disconnect']]) {
+        const answer = later();
+        const f = fixture({ '/switchboard/status': CONNECTED, ['POST ' + path]: answer.promise });
+        await f.page.loadSwitchboard();
+        const going = f.page[press]();
+        await tick();
+        const off = [...f.panel.innerHTML.matchAll(/<button[^>]*id="claude-(?:code|disconnect)"[^>]*>/g)].map(m => m[0]);
+        assert.equal(off.length, 2);
+        assert.ok(off.every(b => b.includes(' disabled')), press);
+        await f.page.loadSwitchboard();
+        await f.page.claudeCode();
+        await f.page.disconnectClaude();
+        assert.equal(f.sent.filter(s => s[0] === 'POST').length, 1, press);
+        answer.resolve(press === 'claudeCode' ? { code: 'shown', expires: null } : { unlinked: true, revoked: true, deleted: true });
+        await going;
+        assert.ok(!f.panel.innerHTML.includes(' disabled'), press);
+    }
+});
+
+test('"another press is working on it" goes when the panel shows the connection', async () => {
+    const busy = Object.assign(new Error('The AI assistant connection is still being worked on from another press. Try again in a moment.'), { status: 409 });
+    const answers = { '/switchboard/status': NOT_LINKED, 'POST /switchboard/connect': busy };
+    const f = fixture(answers);
+    await f.page.loadSwitchboard();
+    await f.page.connectClaude();
+    assert.ok(f.panel.innerHTML.includes('still being worked on'));
+    // still not connected: the sentence stays
+    await f.page.loadSwitchboard();
+    assert.ok(f.panel.innerHTML.includes('still being worked on'));
+    // the other press connected: a connected panel does not say a press is being worked on
+    answers['/switchboard/status'] = CONNECTED;
+    await f.page.loadSwitchboard();
+    assert.equal(state(f.panel.innerHTML), 'Connected');
+    assert.ok(!f.panel.innerHTML.includes('still being worked on'));
+    assert.ok(!f.panel.innerHTML.includes('claude-relay-error'));
+});
+
+test('a failure that is not about another press stays until dismissed', async () => {
+    const away = Object.assign(new Error('The relay could not be reached.'), { status: 503 });
+    const answers = { '/switchboard/status': NOT_LINKED, 'POST /switchboard/connect': away };
+    const f = fixture(answers);
+    await f.page.loadSwitchboard();
+    await f.page.connectClaude();
+    answers['/switchboard/status'] = CONNECTED;
+    await f.page.loadSwitchboard();
+    assert.ok(f.panel.innerHTML.includes('The relay could not be reached.'));
+});
+
+test('a read asked before a press answered does not draw over what the press made', async () => {
+    const stale = later();
+    const answers = { '/switchboard/status': NOT_LINKED, 'POST /switchboard/connect': CONNECTED };
+    const f = fixture(answers);
+    await f.page.loadSwitchboard();
+    answers['/switchboard/status'] = stale.promise;
+    const read = f.page.loadSwitchboard();   // the timer's read, slow to come back
+    await f.page.connectClaude();
+    assert.equal(state(f.panel.innerHTML), 'Connected');
+    stale.resolve(NOT_LINKED);               // it says what was true before the press
+    await read;
+    assert.equal(state(f.panel.innerHTML), 'Connected');
+    assert.deepEqual(buttons(f.panel.innerHTML).slice(-2), ['Show a sign-in code', 'Disconnect']);
+});

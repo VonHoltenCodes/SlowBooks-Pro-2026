@@ -8,6 +8,12 @@ Show a sign-in code answered after about 41 s on the Mac, not about 10 s.
 The product's relay calls (Connect, a sign-in code, Disconnect, the key,
 the quiet retry of a pending deletion: all through _relay_call) now have
 one deadline for the whole attempt; each address gets what is left.
+
+The seconds here are counted on the press's own clock (``_Clock``): an
+address that drops its packets moves it by the whole of the timeout it was
+given, a refusal by REFUSAL, and nothing else moves it. So each figure is
+exact whatever else the machine is doing; a press against real sockets is
+timed in tests/test_switchboard_relay_rule_r29.py.
 """
 
 import time
@@ -26,12 +32,34 @@ ADDRESSES = [
 ]
 
 
+LIMIT = 0.6  # the press's deadline in these tests
+REFUSAL = 0.05  # what an address that refuses costs
+
+
+class _Clock:
+    """The service's clock: waiting moves it and nothing else does."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
 class _Dropped:
     """A socket whose connect waits out its timeout, as an address whose
-    packets a firewall drops looks; ``refused`` addresses fail at once."""
+    packets a firewall drops looks; ``refused`` addresses fail after
+    REFUSAL."""
 
     tried: list = []
     refused: set = set()
+    clock = None
 
     def __init__(self, family, kind, proto):
         self.timeout = None
@@ -45,8 +73,9 @@ class _Dropped:
     def connect(self, where):
         type(self).tried.append((where[0], self.timeout))
         if where[0] in type(self).refused:
+            type(self).clock.sleep(REFUSAL)
             raise ConnectionRefusedError(111, "Connection refused")
-        time.sleep(self.timeout)
+        type(self).clock.sleep(self.timeout)
         raise TimeoutError("timed out")
 
     def close(self):
@@ -56,64 +85,65 @@ class _Dropped:
 @pytest.fixture
 def four_dropped(monkeypatch):
     """The relay's name resolves to four addresses, none of which answers."""
-    _Dropped.tried, _Dropped.refused = [], set()
+    _Dropped.tried, _Dropped.refused, _Dropped.clock = [], set(), _Clock()
+    _Dropped.began = _Dropped.clock.now
+    monkeypatch.setattr(link, "time", _Dropped.clock)
     fake = types.SimpleNamespace(
         getaddrinfo=lambda host, port, *a, **k: list(ADDRESSES),
         socket=_Dropped,
         SOCK_STREAM=1,
     )
     monkeypatch.setattr(link, "socket", fake)
-    monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.6)
+    monkeypatch.setattr(link, "PRESS_TIMEOUT", LIMIT)
     monkeypatch.setenv(link.RELAY_ENV, "https://relay.example.test")
     return _Dropped
 
 
+def _took(dropped) -> float:
+    """How long the press waited, on its own clock."""
+    return dropped.clock.now - dropped.began
+
+
 def test_one_deadline_for_every_address(four_dropped):
-    started = time.monotonic()
     with pytest.raises(urllib.error.URLError):
         link._relay_call("https://relay.example.test", "/v1/code", None, {})
-    took = time.monotonic() - started
-    # the whole attempt, not 0.6 s for each of four addresses (2.4 s)
-    assert took < 0.6 * 1.5, took
+    # the whole attempt, not the limit for each of four addresses
+    assert _took(four_dropped) == pytest.approx(LIMIT)
     # the first address had all of the limit, and nothing more was given
-    assert four_dropped.tried and four_dropped.tried[0][1] <= 0.6
-    assert sum(t for _a, t in four_dropped.tried) <= 0.6 + 0.05
+    assert [t for _a, t in four_dropped.tried] == [pytest.approx(LIMIT)]
 
 
 def test_an_address_that_refuses_leaves_the_rest_of_the_time_to_the_next(
     four_dropped,
 ):
     four_dropped.refused = {"192.0.2.10", "192.0.2.11", "2001:db8::10"}
-    started = time.monotonic()
     with pytest.raises(urllib.error.URLError):
         link._relay_call("https://relay.example.test", "/v1/link", {}, {})
-    took = time.monotonic() - started
     assert [a for a, _t in four_dropped.tried] == [a[4][0] for a in ADDRESSES]
-    assert 0.4 < four_dropped.tried[-1][1] <= 0.6
-    assert took < 0.6 * 1.5, took
+    # each address was given exactly what the ones before it left
+    assert [t for _a, t in four_dropped.tried] == [
+        pytest.approx(LIMIT - n * REFUSAL) for n in range(4)
+    ]
+    assert _took(four_dropped) == pytest.approx(LIMIT)
 
 
 def test_connect_with_four_dropped_addresses_answers_within_the_limit(
     four_dropped, client
 ):
-    client.get("/api/switchboard/status")  # the app warmed up first
-    started = time.monotonic()
     r = client.post("/api/switchboard/connect")
-    took = time.monotonic() - started
     assert r.status_code == 503, r.text
     assert r.json()["detail"] == link.RELAY_AWAY
     # one relay call, its first address given all of the limit (four times
     # the limit before)
     assert len(four_dropped.tried) == 1, four_dropped.tried
-    assert took < 0.6 * 2.5, took
+    assert _took(four_dropped) == pytest.approx(LIMIT)
     assert not link.link_path().exists()
 
 
 def test_a_pending_deletion_retry_is_bound_the_same_way(four_dropped):
-    started = time.monotonic()
     item = {"relay": "https://relay.example.test", "credential": "x" * 8}
     assert link._tell_relay_forget(item) is False
-    assert time.monotonic() - started < 0.6 * 1.5
+    assert _took(four_dropped) == pytest.approx(LIMIT)
 
 
 def test_every_relay_call_of_the_product_goes_through_the_deadline():
