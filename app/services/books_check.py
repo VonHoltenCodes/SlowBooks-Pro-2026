@@ -884,7 +884,6 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
         dead_transaction_ids,
         uf_account_id,
         waiting_balance,
-        waiting_dated_after,
     )
 
     name, sub_label, ctl_label = (
@@ -920,7 +919,10 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
     sub = waiting_balance(db, uf_id, as_of)
     ctl = _balance(db, [uf_id], as_of, True)
     words = _account_words(db, uf_id)
-    later = waiting_dated_after(db, as_of, uf_id)
+    # What the dated cut left out is the list's own arithmetic: the Make
+    # Deposits total less this row's figure, so the two always add up to
+    # what that page shows.
+    later = waiting_balance(db, uf_id) - sub
     not_counting = (
         f", not counting {_money(later)} dated after today" if later > ZERO else ""
     )

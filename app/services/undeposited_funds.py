@@ -136,22 +136,6 @@ def waiting_balance(
     return max(total - pool, ZERO)
 
 
-def waiting_dated_after(
-    db: Session, as_of: date, uf_id: Optional[int] = None
-) -> Decimal:
-    """How much of the Make Deposits list is dated after `as_of`: the
-    waiting payments the dated list leaves out because their day has not
-    come."""
-    return sum(
-        (
-            Decimal(str(ln.debit))
-            for ln, t in _waiting_and_pool(db, uf_id)[0]
-            if t.date > as_of
-        ),
-        ZERO,
-    )
-
-
 def _waiting_and_pool(
     db: Session, uf_id: Optional[int] = None, as_of: Optional[date] = None
 ) -> tuple[list[tuple[TransactionLine, Transaction]], Decimal]:
@@ -183,20 +167,24 @@ def _waiting_and_pool(
                     Transaction.id.in_(stamps), Transaction.date > as_of
                 )
             }
-        ours = customer_money_sources() | {"deposit"}
-        rows = [
-            (ln, t)
-            for ln, t in rows
-            if t.date <= as_of or (ln.credit > 0 and (t.source_type or "") not in ours)
-        ]
 
     def taken(ln: TransactionLine) -> bool:
         stamp = ln.deposit_transaction_id
         return bool(stamp) and stamp not in dead and stamp not in later
 
     # A deposit that named its items took exactly those; its credit is not
-    # left over for the netting below.
+    # left over for the netting below. Read from every line, before the
+    # dated cut: a deposit made by the as-of day that named a payment dated
+    # after it is still a named one, and its credit must not be netted
+    # against some other payment that happens to wait.
     named = {ln.deposit_transaction_id for ln, _ in rows if taken(ln)}
+    if as_of is not None:
+        ours = customer_money_sources() | {"deposit"}
+        rows = [
+            (ln, t)
+            for ln, t in rows
+            if t.date <= as_of or (ln.credit > 0 and (t.source_type or "") not in ours)
+        ]
     money = customer_money_sources()
     items = [
         (ln, t)

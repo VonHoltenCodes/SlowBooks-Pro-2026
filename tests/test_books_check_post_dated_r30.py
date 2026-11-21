@@ -553,6 +553,108 @@ def test_nothing_post_dated_leaves_the_sentence_as_it_was(co):
     assert uf["sentence"] == AGREE + "."
 
 
+def _line_of_new_payment(co, when, amount):
+    """Receive a payment and answer its line on the Make Deposits list."""
+    before = set(_pending_line_ids(co))
+    _payment(co, when, amount=amount)
+    (line,) = set(_pending_line_ids(co)) - before
+    return line
+
+
+# what the deposit dated today took (dated ahead), what still waits today
+# and earlier -> the row's two figures
+A_DEPOSIT_TODAY_OF_A_POST_DATED_PAYMENT = {
+    "the same amount still waits": (100, [(TODAY, 100)], (100.0, 0.0)),
+    "more than it took still waits": (80, [(TODAY, 100)], (100.0, 20.0)),
+    "two payments still wait": (100, [(TODAY, 60), (PAST, 40)], (100.0, 0.0)),
+    "nothing else waits": (100, [], (0.0, -100.0)),
+}
+
+
+@pytest.mark.parametrize("case", sorted(A_DEPOSIT_TODAY_OF_A_POST_DATED_PAYMENT))
+def test_a_deposit_today_that_named_a_post_dated_payment_took_only_that(co, case):
+    """A deposit dated today that ticked a payment dated next week has
+    taken that payment and nothing else: its credit is on 1200 today and
+    is not netted against another payment that waits. The row reads apart
+    whether or not other money happens to wait (round 30 rework)."""
+    took, others, figures = A_DEPOSIT_TODAY_OF_A_POST_DATED_PAYMENT[case]
+    ahead = _line_of_new_payment(co, AHEAD, took)
+    for when, amount in others:
+        _payment(co, when, amount=amount)
+    _deposit(co, TODAY, line_ids=[ahead])
+    uf = _rows(co)["undeposited_funds"]
+    assert uf["status"] == "difference", uf
+    assert (uf["subledger"], uf["control"]) == figures
+    # the Make Deposits page shows the same waiting payments: nothing is
+    # left out, so the sentence has no clause
+    assert "dated after today" not in uf["sentence"]
+    assert round(sum(p["amount"] for p in _pending(co)), 2) == figures[0]
+    db, uf_id = co["db"], co["a"]["1200"]
+    db.expire_all()
+    assert float(waiting_balance(db, uf_id, TODAY)) == figures[0]
+    assert waiting_balance(db, uf_id, TODAY) == waiting_balance(db, uf_id)
+
+
+# payments (day, amount), typed deposits (day, total) -> the row's status
+# and waiting figure, and what the sentence says it leaves out
+NOT_COUNTING = {
+    # a typed deposit dated ahead takes today's payment on the Make
+    # Deposits page, which then shows the post-dated one: 100 either way
+    "typed deposit ahead of as much": (
+        [(TODAY, 100), (AHEAD, 100)],
+        [(AHEAD, 100)],
+        ("pass", 100.0, None),
+    ),
+    # 40 of the post-dated payment is what that page still shows
+    "typed deposit ahead of part of a post-dated payment": (
+        [(AHEAD, 100)],
+        [(AHEAD, 60)],
+        ("pass", 0.0, "$40.00"),
+    ),
+    "typed deposit ahead with older and post-dated money": (
+        [(PAST, 30), (AHEAD, 100)],
+        [(AHEAD, 30)],
+        ("pass", 30.0, "$70.00"),
+    ),
+    # the page shows less than the row: the deposit dated ahead has taken
+    # more than is dated ahead, and the row does not claim to leave it out
+    "typed deposit ahead of more than is post-dated": (
+        [(TODAY, 100), (AHEAD, 50)],
+        [(AHEAD, 100)],
+        ("pass", 100.0, None),
+    ),
+    "typed deposit today over what waits today": (
+        [(TODAY, 100), (AHEAD, 100)],
+        [(TODAY, 150)],
+        ("difference", 0.0, "$50.00"),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(NOT_COUNTING))
+def test_what_the_row_leaves_out_is_the_rest_of_the_make_deposits_total(co, case):
+    """ "not counting $X dated after today" is the Make Deposits total less
+    the row's figure, and is said only when that page shows more: the two
+    always add up to what the page shows (round 30 rework)."""
+    payments, deposits, (status, waiting, left_out) = NOT_COUNTING[case]
+    for when, amount in payments:
+        _payment(co, when, amount=amount)
+    for when, total in deposits:
+        _deposit(co, when, total=total)
+    uf = _rows(co)["undeposited_funds"]
+    assert (uf["status"], uf["subledger"]) == (status, waiting), uf
+    db = co["db"]
+    db.expire_all()
+    page_total = waiting_balance(db, co["a"]["1200"])
+    if left_out is None:
+        assert "dated after today" not in uf["sentence"]
+        assert float(page_total) <= waiting
+    else:
+        assert f", not counting {left_out} dated after today" in uf["sentence"]
+        assert uf["sentence"].count("dated after today") == 1
+        assert f"${page_total - Decimal(str(waiting)):,.2f}" == left_out
+
+
 def test_the_make_deposits_list_still_offers_a_post_dated_payment(co):
     """The dated cut is Books Check's alone: the Make Deposits page lists a
     payment dated next week and lets it be deposited, as before."""
