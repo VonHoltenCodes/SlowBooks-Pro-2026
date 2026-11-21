@@ -163,8 +163,8 @@ const RecurringPage = {
 
     removeLine(idx) {
         const row = $(`[data-recline="${idx}"]`);
-        if (row) row.remove();
-        RecurringPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => RecurringPage.recalc())) RecurringPage.recalc();
     },
 
     itemSelected(idx) {

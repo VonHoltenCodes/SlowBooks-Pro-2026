@@ -1202,7 +1202,7 @@ const JobsPage = {
             <td><input class="co-l-markup" data-write type="number" step="0.0001" min="-99.9999" max="999.9999" value="${line.markup_pct ?? ''}" style="width:64px;text-align:right" placeholder="dflt" oninput="JobsPage.coRecalc()"></td>
             <td class="amount co-l-amt">0.00</td>
             <td class="amount co-l-sell">0.00</td>
-            <td><button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coRemoveLine(this)">✕</button></td>
+            <td><button type="button" class="btn btn-sm btn-secondary" data-write aria-label="Remove line" title="Remove line" onclick="JobsPage.coRemoveLine(this)">✕</button></td>
         </tr>`;
     },
 
@@ -1235,7 +1235,8 @@ const JobsPage = {
         body.insertAdjacentHTML('beforeend', JobsPage.coLineRowHtml({}, body.children.length));
         JobsPage.coRecalc();
     },
-    coRemoveLine(btn) { const tr = btn.closest('tr'); if (tr) tr.remove(); JobsPage.coRecalc(); },
+    // The shared Remove line: names follow, and the keyboard stays on the form.
+    coRemoveLine(btn) { if (!LineOrder.removeLine(btn, () => JobsPage.coRecalc())) JobsPage.coRecalc(); },
 
     coRecalc() {
         const funding = $('#co-funding') ? $('#co-funding').value : 'contract';

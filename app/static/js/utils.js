@@ -2340,8 +2340,8 @@ const SalesCost = {
     },
     cellHtml(line) {
         if (!SalesCost.on()) return '';
-        return `<td class="sales-cost-col"><select class="line-cost-code" aria-label="Line cost code">${CostCodes.optionsHtml(line.cost_code_id == null ? null : Number(line.cost_code_id))}</select></td>`
-            + `<td class="sales-cost-col"><select class="line-cost-type" aria-label="Line cost type">${CostTypes.optionsHtml(line.cost_type || null)}</select></td>`;
+        return `<td class="sales-cost-col"><select class="line-cost-code">${CostCodes.optionsHtml(line.cost_code_id == null ? null : Number(line.cost_code_id))}</select></td>`
+            + `<td class="sales-cost-col"><select class="line-cost-type">${CostTypes.optionsHtml(line.cost_type || null)}</select></td>`;
     },
     // the row's data attributes: what the line carries where no cell is drawn
     dataAttrs(line) {
@@ -2569,7 +2569,10 @@ async function copyToClipboard(text, label = 'Text', el = null) {
 //   - a label written just before its field is tied to it;
 //   - a field in a table is named from its column heading and its row.
 // A field that already has a name (its own label, aria-label or
-// aria-labelledby) is left as it is.
+// aria-labelledby) is left as it is, with one exception: a field named
+// "…, line N" here is marked (data-line-name) and named again from the row
+// it is in now on every pass, so after a line is inserted, removed or moved
+// no two lines read the same and none reads another's number.
 // ---------------------------------------------------------------------------
 const _FIELD_SEL = 'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]), select, textarea';
 let _fieldSeq = 0;
@@ -2616,11 +2619,12 @@ function _tieLabel(label, field) {
     _requiredStar(label, field);
 }
 
+// A table field's name, and whether it is by place ("line N").
 function _gridName(field) {
     const cell = field.closest('td');
     const row = cell && cell.parentElement;
     const table = row && row.closest('table');
-    if (!table) return '';
+    if (!table) return { name: '', byLine: false };
     // the column heading over this cell, colspans counted
     let col = 0;
     for (const c of row.cells) { if (c === cell) break; col += c.colSpan || 1; }
@@ -2642,10 +2646,35 @@ function _gridName(field) {
         rowName = _cellText(c);
         if (rowName) break;
     }
+    let byLine = false;
     if (!rowName && row.parentElement && row.parentElement.tagName === 'TBODY') {
         rowName = `line ${row.sectionRowIndex + 1}`;
+        byLine = true;
     }
-    return [heading, rowName].filter(Boolean).join(', ');
+    return { name: [heading, rowName].filter(Boolean).join(', '), byLine };
+}
+
+// A field named by its line takes the number of the line it is on now (a
+// field once named by its line stays named by its line, whatever its row's
+// cells say later); a type-ahead picker's box carries its select's name, so
+// it follows. `places` is the pass's own count of each table body's rows:
+// a row's index is looked up, not counted again for every field, so a
+// table of thousands of lines is one walk a pass.
+function _nameByPlace(field, places) {
+    const cell = field.closest('td');
+    const row = cell && cell.parentElement;
+    const body = row && row.parentElement;
+    if (!body || body.tagName !== 'TBODY') return;
+    let rows = places.get(body);
+    if (!rows) {
+        rows = new Map(Array.from(body.rows, (r, i) => [r, i + 1]));
+        places.set(body, rows);
+    }
+    const was = field.getAttribute('aria-label') || '';
+    const name = was.replace(/\bline \d+$/, `line ${rows.get(row)}`);
+    if (name !== was) field.setAttribute('aria-label', name);
+    const box = field._cbx && field._cbx.box;
+    if (box && box.getAttribute('aria-label') !== name) box.setAttribute('aria-label', name);
 }
 
 // A placeholder or title: a name, if nothing better is found.
@@ -2665,9 +2694,11 @@ function _nameFromHint(field) {
 }
 
 function nameFields(root = document) {
+    const places = new Map();
     for (const field of root.querySelectorAll(_FIELD_SEL)) {
         // out of the accessibility tree (a type-ahead picker's select,
         // whose box carries the name): nothing to name
+        if (field.hasAttribute('data-line-name')) { _nameByPlace(field, places); continue; }
         if (_ownName(field) || field.closest('[aria-hidden="true"]')) continue;
         const group = field.closest('.form-group');
         const label = group && [...group.querySelectorAll('label')].find(l => !l.querySelector(_FIELD_SEL));
@@ -2684,9 +2715,10 @@ function nameFields(root = document) {
             _tieLabel(before, field);
             continue;
         } else if (field.closest('td')) {
-            const name = _gridName(field);
+            const { name, byLine } = _gridName(field);
             if (name) {
                 field.setAttribute('aria-label', name);
+                if (byLine) field.setAttribute('data-line-name', '');
                 continue;
             }
         }

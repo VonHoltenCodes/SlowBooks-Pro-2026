@@ -220,7 +220,8 @@ const ExpensesPage = {
     },
 
     removeLine(btn) {
-        if (ExpensesPage.rows().length > 1) btn.closest('tr').remove();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (ExpensesPage.rows().length > 1 && LineOrder.removeLine(btn, () => ExpensesPage.recalc())) return;
         ExpensesPage.recalc();
     },
 

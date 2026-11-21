@@ -466,7 +466,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                             <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="JournalPage.removeLine(this)">X</button></td>
                         </tr>
                         <tr data-jeline="1">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
@@ -474,7 +474,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                             <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="JournalPage.removeLine(this)">X</button></td>
                         </tr>
                     </tbody>
                 </table>
@@ -583,6 +583,11 @@ const JournalPage = {
         return lines;
     },
 
+    // The shared Remove line: names follow, and the keyboard stays on the form.
+    removeLine(btn) {
+        if (!LineOrder.removeLine(btn, () => JournalPage.recalc())) JournalPage.recalc();
+    },
+
     addLine() {
         const idx = JournalPage._lineCount++;
         const acctOpts = JournalPage._accounts.map(a =>
@@ -595,7 +600,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                 <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                 <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="JournalPage.removeLine(this)">X</button></td>
             </tr>`);
     },
 

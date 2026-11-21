@@ -401,8 +401,8 @@ const SalesReceiptsPage = {
 
     removeLine(idx) {
         const row = $(`[data-line="${idx}"]`);
-        if (row) row.remove();
-        SalesReceiptsPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => SalesReceiptsPage.recalc())) SalesReceiptsPage.recalc();
     },
 
     itemSelected(idx) {

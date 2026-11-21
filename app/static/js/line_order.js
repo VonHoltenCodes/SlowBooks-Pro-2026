@@ -15,6 +15,10 @@
  * grid sends line_order from its row position), so moving a row is all it
  * takes. Rows are told apart by their own data attribute, never by position,
  * so moving one does not disturb the grid's handlers.
+ *
+ * Every line form, attached here or not, removes a line through
+ * LineOrder.removeLine: one rule for the names and for where the keyboard
+ * goes (see "The one rule" below).
  */
 const LineOrder = {
     _opts: new WeakMap(),
@@ -79,7 +83,7 @@ const LineOrder = {
     },
 
     // Take a row out (NEW-278: the purchase order's form had no way to);
-    // the row that takes the keyboard next: the one below, else above.
+    // returns the row that takes its place: the one below, else above.
     removeRow(row) {
         const next = row.nextElementSibling || row.previousElementSibling;
         row.parentNode.removeChild(row);
@@ -116,10 +120,118 @@ const LineOrder = {
         }, 0);
     },
 
-    _changed(tbody) {
-        LineOrder.refresh(tbody);
-        const opts = LineOrder._opts.get(tbody) || {};
-        if (opts.changed) opts.changed();
+    // ---- The one rule for every line form --------------------------------
+    // After ANY change to the set or the order of a grid's lines (insert,
+    // remove, move, drop), every line's fields and buttons are named by
+    // their current place; and after Remove line the keyboard goes to the
+    // same control on the line that took its place, else on the line before,
+    // else to the form's Add line control: never to the document body.
+    // LineOrder's own buttons come here, and so does every form with a
+    // Remove line button of its own (removeLine below).
+
+    // Name every line by where it is now. A field the page named from its
+    // column and its line ("Rate, line 2") is renamed by nameFields; a name
+    // a form wrote itself with the place at its start or end ("Line 2 memo",
+    // "Remove line 2") has the number put right here.
+    renumber(tbody) {
+        if (!tbody || !tbody.children) return;
+        if (typeof nameFields === 'function') nameFields(tbody);
+        Array.from(tbody.children).filter(r => r.tagName === 'TR').forEach((row, i) => {
+            if (!row.querySelectorAll) return;
+            row.querySelectorAll('[aria-label]:not([data-line-name])').forEach(el => {
+                const was = el.getAttribute('aria-label');
+                const now = was.replace(/^(line) \d+\b/i, `$1 ${i + 1}`).replace(/\b(line) \d+$/i, `$1 ${i + 1}`);
+                if (now !== was) el.setAttribute('aria-label', now);
+            });
+        });
+    },
+
+    // The lines changed: arrows, names, then the form's own totals (the
+    // grid's `changed`, or the one a form hands in with its Remove line).
+    _changed(tbody, changed) {
+        if (LineOrder._opts.has(tbody)) LineOrder.refresh(tbody);
+        LineOrder.renumber(tbody);
+        const then = changed || (LineOrder._opts.get(tbody) || {}).changed;
+        if (then) then();
+    },
+
+    // Remove line, for every line form. `from` is the pressed button (or
+    // the row); `changed` is the form's recalc where the grid is not
+    // attached with one. False when there was no row to take out.
+    removeLine(from, changed) {
+        const row = from && from.closest ? from.closest('tr') : null;
+        const tbody = row && row.parentNode;
+        if (!tbody) return false;
+        const pressed = from !== row ? from
+            : Array.from(row.querySelectorAll('button')).find(b => /^Remove\b/.test(b.getAttribute('aria-label') || ''));
+        const like = LineOrder._like(pressed);
+        const at = Array.from(tbody.children).filter(r => r.tagName === 'TR').indexOf(row);
+        LineOrder.removeRow(row);
+        LineOrder._changed(tbody, changed);
+        LineOrder._focusAfterRemove(tbody, at, like);
+        return true;
+    },
+
+    // What tells a control apart on its row: LineOrder's own mark, else its
+    // name without the place, else the column it sits in.
+    _like(control) {
+        if (!control || !control.getAttribute) return null;
+        const cell = control.closest('td');
+        return {
+            what: control.dataset ? control.dataset.lineOrder : '',
+            name: LineOrder._nameKey(control),
+            tag: control.tagName,
+            cell: cell ? cell.cellIndex : -1,
+        };
+    },
+
+    _nameKey(el) {
+        return (el.getAttribute('aria-label') || '').replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
+    },
+
+    _twin(row, like) {
+        if (!row || !like) return null;
+        if (like.what) return row.querySelector(`[data-line-order="${like.what}"]`);
+        const controls = Array.from(row.querySelectorAll('button, input:not([type=hidden]), select, textarea'));
+        const named = like.name && controls.find(c => c.tagName === like.tag && LineOrder._nameKey(c) === like.name);
+        if (named) return named;
+        const cell = like.cell >= 0 ? row.cells[like.cell] : null;
+        return (cell && controls.find(c => c.tagName === like.tag && cell.contains(c))) || null;
+    },
+
+    _takes(el) {
+        if (!el || el.disabled || el.offsetParent === null) return false;
+        el.focus();
+        return document.activeElement === el;
+    },
+
+    // The form's Add line control: the nearest button around the grid that
+    // adds a line to it (marked data-line-add, or calling the form's
+    // add-line function), the one after the table before any other.
+    addControl(tbody) {
+        const table = tbody.closest('table');
+        const adds = b => !b.disabled && b.offsetParent !== null && !b.closest('tbody')
+            && (b.hasAttribute('data-line-add') || /add\w*line\w*\(/i.test(b.getAttribute('onclick') || ''));
+        for (let box = table && table.parentNode; box && box.querySelectorAll; box = box.parentNode) {
+            const found = Array.from(box.querySelectorAll('button')).filter(adds);
+            if (found.length) {
+                return found.find(b => table.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) || found[0];
+            }
+        }
+        return null;
+    },
+
+    _focusAfterRemove(tbody, at, like) {
+        const rows = Array.from(tbody.children).filter(r => r.tagName === 'TR');
+        if (LineOrder._takes(LineOrder._twin(rows[at], like))) return;
+        if (at > 0 && LineOrder._takes(LineOrder._twin(rows[at - 1], like))) return;
+        if (LineOrder._takes(LineOrder.addControl(tbody))) return;
+        // a form with no Add line in reach: its first open control, so the
+        // keyboard still stays inside the form
+        const form = tbody.closest('form, .modal, [role="dialog"]');
+        const first = form && Array.from(form.querySelectorAll('input:not([type=hidden]), select, textarea, button'))
+            .find(el => !el.disabled && el.offsetParent !== null && el.tabIndex >= 0);
+        if (first) first.focus();
     },
 
     _click(tbody, e) {
@@ -132,10 +244,7 @@ const LineOrder = {
             LineOrder._changed(tbody);
             LineOrder.focusFirst(fresh);
         } else if (what === 'remove') {
-            const next = LineOrder.removeRow(row);
-            LineOrder._changed(tbody);
-            const focus = next && next.querySelector('[data-line-order="remove"]');
-            if (focus) focus.focus();
+            LineOrder.removeLine(btn);
         } else if (what === 'up' || what === 'down') {
             if (!LineOrder.moveRow(row, what === 'up' ? -1 : 1)) return;
             LineOrder._changed(tbody);
