@@ -170,10 +170,10 @@ class StubSMTP:
         self.sock.listen(1)
         # The stub waits for its one connection until close(), however long
         # the test takes to get to the send. A short wait counted from here
-        # ran out under a loaded full run: a test that builds a year of
-        # books before it sends (test_batch_send_reason_w211's giving
-        # statements) then reached a socket nobody read, and the send said
-        # "could not be reached" after 30 seconds. The bound is only for a
+        # can run out before a slow test sends: one that builds a year of
+        # books first (test_batch_send_reason_w211's giving statements)
+        # would then reach a socket nobody reads, and its send would say
+        # "could not be reached". The bound is only for a
         # platform where close() does not wake the wait.
         self.sock.settimeout(ACCEPT_WAIT)
         self.port = self.sock.getsockname()[1]
@@ -480,7 +480,7 @@ def test_the_stub_answers_a_send_that_comes_long_after_it_started(
 ):
     """A test may take a while to build its books before it sends: the
     stub is still there to answer (it waited ten seconds from its start,
-    and a send after that read "could not be reached")."""
+    and a send after that timed out)."""
     stub = StubSMTP(*pki["self_signed"])
     time.sleep(11)
     ok, row = _send(db_session, stub, secrets.token_urlsafe(16))
