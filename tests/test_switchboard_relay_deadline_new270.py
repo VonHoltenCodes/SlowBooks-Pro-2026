@@ -124,6 +124,17 @@ def test_every_relay_call_of_the_product_goes_through_the_deadline():
     assert src.count("account._opener(") == 1
     assert "_opener_by(deadline).open(" in src
     assert "urlopen(" not in src
-    for name in ("connect", "new_code", "disconnect", "_tell_relay_forget"):
-        body = inspect.getsource(getattr(link, name))
-        assert "_relay_post(" in body or "_relay_call(" in body, name
+    assert src.count(").open(") == 1
+    # one function asks the relay anything (_relay_post, which classifies
+    # the answer), and it is the only caller of the bound call
+    assert src.count("_relay_call(") == 2  # its definition and that one call
+    assert "_relay_call(" in inspect.getsource(link._relay_post)
+    # the presses ask through it: Connect and a sign-in code directly,
+    # Disconnect and the quiet retry through _relay_forget
+    for name in ("connect", "new_code", "_relay_forget"):
+        assert "_relay_post(" in inspect.getsource(getattr(link, name)), name
+    for name in ("_disconnect", "_tell_relay_forget", "retry_pending_once"):
+        assert "_relay_forget(" in inspect.getsource(getattr(link, name)), name
+    # and a press that makes more than one call hands its one deadline on
+    assert "deadline=deadline" in inspect.getsource(link.connect)
+    assert inspect.getsource(link._relay_forget).count("deadline=deadline") == 2

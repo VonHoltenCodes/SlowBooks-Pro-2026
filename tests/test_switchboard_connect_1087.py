@@ -141,6 +141,7 @@ class FakeRelay:
         self.codes = []
         self.lines = queue.Queue()
         self.link_status = 201
+        self.link_error = "The relay is closed today."
         self.fail = {}  # path -> a status to answer instead (a 5xx, say)
         relay = self
 
@@ -174,7 +175,7 @@ class FakeRelay:
                 if self.path == "/v1/link":
                     if relay.link_status != 201:
                         return self._answer(
-                            relay.link_status, {"error": "The relay is closed today."}
+                            relay.link_status, {"error": relay.link_error}
                         )
                     return self._answer(
                         201,
@@ -546,12 +547,24 @@ def test_connect_with_the_relay_down_leaves_nothing(
     assert r.json()["detail"] == link.RELAY_AWAY
     assert not link.link_path().exists()
     assert db_session.query(ApiToken).count() == 0
-    # a refusal the relay words itself is its own sentence
-    relay.link_status = 429
+    # a refusal (a 4xx) is said as one, with the relay's own sentence after
+    # the product's; no address and no status code
+    relay.link_status = 403
     monkeypatch.setenv(link.RELAY_ENV, relay.url)
     r = client.post("/api/switchboard/connect")
     assert r.status_code == 502
-    assert r.json()["detail"] == "The relay is closed today."
+    assert r.json()["detail"] == (
+        "The relay did not accept the request. SlowBooks Pro is working "
+        "normally; if this keeps happening, write to support@slowbookspro.com. "
+        "The relay said: The relay is closed today."
+    )
+    assert "127.0.0.1" not in r.text and "403" not in r.text
+    assert db_session.query(ApiToken).count() == 0
+    # a 429 is the relay busy, like a server error: its one sentence
+    relay.link_status = 429
+    r = client.post("/api/switchboard/connect")
+    assert r.status_code == 503
+    assert r.json()["detail"] == link.RELAY_BUSY
     assert db_session.query(ApiToken).count() == 0
 
 
@@ -624,9 +637,21 @@ def test_the_kept_file_is_this_users_only(relay, client):
     os.chmod(path, 0o644)
     st = client.get("/api/switchboard/status").json()
     assert st["state"] == "damaged" and "other users" in st["sentence"]
-    # and Disconnect forgets it
-    assert client.post("/api/switchboard/disconnect").status_code == 200
+    # and Disconnect does the whole job: the file could still be read, so
+    # the relay is told with its credential and deletes its record, and the
+    # token (which other users could have read) is revoked
+    record = json.loads(path.read_text())
+    r = client.post("/api/switchboard/disconnect")
+    assert r.status_code == 200, r.text
+    got = r.json()
     assert not path.exists()
+    assert relay.calls[-1][1:3] == ("/v1/forget", record["credential"])
+    assert got["unlinked"] is True and got["deleted"] is True
+    assert got["revoked"] is True
+    bot = TestClient(app)
+    bot.headers["Authorization"] = f"Bearer {record['token']}"
+    assert bot.get("/api/customers").status_code == 401
+    assert not link.pending_path().exists()
 
 
 def test_no_secret_in_a_log_or_an_answer(relay, client, caplog):

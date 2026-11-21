@@ -14,6 +14,10 @@
 # end its own connection. The writes are also an administrator's in
 # _ADMIN_WRITE_PREFIXES; each route checks again. Answers never carry the
 # device credential or the token; the code is answered once, not stored.
+#
+# Every route answers through _answer: a refusal or a failure is the
+# service's own sentence, and a fault of ours is a sentence too, never an
+# HTTP 500 or exception text (the service's rule, point 2).
 # ============================================================================
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -45,12 +49,17 @@ def _answer(fn, *args):
         return fn(*args)
     except link.SwitchboardError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.sentence) from None
+    except Exception as exc:
+        # where it failed goes to the log, without the exception's own text
+        # (it can quote a value); the person gets a sentence
+        link._log_fault("the AI assistant connection could not be worked on", exc)
+        raise HTTPException(status_code=503, detail=link.UNFINISHED) from None
 
 
 @router.get("/status")
 def switchboard_status(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
-    out = link.status()
+    out = _answer(link.status)
     out["can_manage"] = _is_admin(request)
     return out
 
@@ -86,4 +95,4 @@ class DismissPending(StrictModel):
 @router.post("/dismiss")
 def switchboard_dismiss(request: Request, data: DismissPending):
     _require_admin(request)
-    return link.dismiss_pending(data.slug)
+    return _answer(link.dismiss_pending, data.slug)

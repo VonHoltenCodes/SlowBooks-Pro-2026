@@ -175,11 +175,57 @@ test('disconnect with the relay out of reach: the fallback and the name stay unt
     const html = f.panel.innerHTML;
     assert.match(html, /id="claude-relay-fallback" role="alert"/);
     assert.ok(html.includes('support@slowbookspro.com'));
-    assert.match(html, /<code id="claude-relay-fallback-name">ztnqj8djvg<\/code>/);
+    assert.match(html, /<code id="claude-relay-fallback-name"[^>]*>ztnqj8djvg<\/code>/);
     assert.ok(buttons(html).includes('Dismiss'));
     await f.page.loadSwitchboard();  // asked again: still there
     assert.match(f.panel.innerHTML, /claude-relay-fallback-name/);
     await f.page.dismissClaudeFallback();
     assert.deepEqual(f.sent.at(-2), ['POST', '/switchboard/dismiss']);
     assert.doesNotMatch(f.panel.innerHTML, /claude-relay-fallback/);
+});
+
+// What Disconnect says follows what the relay answered: a refusal and an
+// answer that did not confirm the deletion are not "out of reach"; and a
+// sentence with no notice kept for it stays on the panel.
+test('disconnect: the toast says why the relay still holds its record', async () => {
+    const said = async why => {
+        const f = fixture({
+            '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true },
+            'POST /switchboard/disconnect': { unlinked: false, revoked: true, deleted: false, slug: 'ztnqj8djvg', sentence: 'x', why, pending: true, say: false },
+        });
+        await f.page.disconnectClaude();
+        return f.toasts.at(-1)[0];
+    };
+    assert.equal(await said('away'), 'The AI assistant is disconnected and the token revoked. The relay was out of reach: see the relay name below.');
+    assert.match(await said('refused'), /^The AI assistant is disconnected and the token revoked\. The relay did not accept the request to delete its record: see the relay name below\.$/);
+    assert.match(await said('unconfirmed'), /The relay did not confirm that it deleted its record: see the relay name below\.$/);
+    assert.doesNotMatch(await said('refused'), /out of reach/);
+});
+
+test('disconnect: a sentence with no notice kept for it stays on the panel, escaped', async () => {
+    const sentence = 'The connection kept in the data folder could not be read, so it was removed here and its token revoked. <b>x</b>';
+    const f = fixture({
+        '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true },
+        'POST /switchboard/disconnect': { unlinked: false, revoked: true, deleted: false, slug: '', sentence, why: '', pending: false, say: true },
+    });
+    await f.page.disconnectClaude();
+    assert.match(f.panel.innerHTML, /id="claude-relay-error" role="alert"/);
+    assert.ok(f.panel.innerHTML.includes('could not be read, so it was removed here'));
+    assert.ok(f.panel.innerHTML.includes('&lt;b&gt;x&lt;/b&gt;'));
+    assert.ok(!f.panel.innerHTML.includes('<b>x</b>'));
+    assert.ok(buttons(f.panel.innerHTML).includes('Dismiss'));
+});
+
+test('a refresh that changes nothing draws nothing', async () => {
+    const f = fixture({ '/switchboard/status': CONNECTED });
+    await f.page.loadSwitchboard();
+    let draws = 0;
+    let html = f.panel.innerHTML;
+    Object.defineProperty(f.panel, 'innerHTML', { get: () => html, set: v => { draws += 1; html = v; } });
+    await f.page.loadSwitchboard();
+    await f.page.loadSwitchboard();
+    assert.equal(draws, 0);
+    f.page._claude.error = 'The relay could not be reached.';
+    f.page._drawSwitchboard();
+    assert.equal(draws, 1);
 });
