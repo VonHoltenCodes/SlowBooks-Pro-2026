@@ -199,6 +199,19 @@ class Terms:
         return re.sub(r"\W", "", self(key))
 
 
+class AsWritten(str):
+    """Text that is shown exactly as it is written: the vocabulary swap
+    every HTTP error body passes through (app/main.py) leaves it alone.
+
+    For a sentence that holds data and not only prose of ours: an email
+    address, a mail server's reply, a document's own printed face, a
+    person's name. Swapping whole words inside those turns
+    invoices@customer.example into an address nobody was sent to. Whoever
+    builds such a sentence words its prose itself."""
+
+    __slots__ = ()
+
+
 def document_reference(face: str, number, name: str | None = None) -> str:
     """The text a posting writes for itself — "Invoice #1081 - Boise Neon
     Supply", "Pledge #1081 - Grant Foundation" — from the document's own

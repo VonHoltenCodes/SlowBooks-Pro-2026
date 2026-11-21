@@ -132,10 +132,12 @@ def test_test_email_says_one_plain_sentence(client, db_session, monkeypatch, nam
     ), detail
     assert detail.count(REPLIES[name]) == 1
     if name == "sender-530":
+        # a username and password are set here and the sign-in was taken,
+        # so the sentence does not say that none is set
         assert detail == (
-            "Test email failed to send. The mail server wants a sign-in, and "
-            "none is set. Enter the username and password under Settings → "
-            "Email (SMTP). The mail server's reply: 530 5.7.0 Authentication "
+            "Test email failed to send. The mail server accepted the sign-in "
+            "and then asked for one again, so the email was not sent. Ask "
+            "your mail provider why. The mail server's reply: 530 5.7.0 Authentication "
             "Required. Learn more at 5.7.0 https://support.example.invalid/auth. "
             "The full list is under Settings → Email (SMTP) → Recent sends."
         )

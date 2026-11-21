@@ -38,6 +38,10 @@ from tests.test_email_failure_rule import no_pdfs as no_documents_drawn  # noqa:
 TO = "customer@example.test"
 COPY = "copy@example.test"
 POINTER = where_to_see_why(False)
+UNEXPECTED = (
+    "Unexpected error in SlowBooks Pro, not an answer from the mail server "
+    "(the server log has the cause)"
+)
 SEE_WHY = where_to_see_why(True)
 REFUSED_MESSAGE = "The mail server refused the message."
 REFUSED_CONNECTION = "The mail server refused the connection."
@@ -685,9 +689,10 @@ class _Always(dict):
 def test_any_other_fault_stores_none_of_pythons_text(
     db_session, stub, monkeypatch, caplog
 ):
-    """A fault of ours in the middle of a send: the row says "Unexpected
-    error" (no class name, none of the exception's text), and the server
-    log has what kind it was and where, without its text."""
+    """A fault of ours in the middle of a send: the row says it was an
+    unexpected error of ours and that the server log has the cause (no
+    class name, none of the exception's text), and the server log has
+    what kind it was and where, without its text."""
     import logging
     import smtplib
 
@@ -700,11 +705,11 @@ def test_any_other_fault_stores_none_of_pythons_text(
     caplog.set_level(logging.DEBUG)
     ok, row = _send(db_session, stub())
     assert not ok
-    assert row.error_message == "[local] Unexpected error"
+    assert row.error_message == f"[local] {UNEXPECTED}"
     assert stored_text(RuntimeError(f"something about {secret}")) == row.error_message
     seen = _read(db_session, row, admin=True)
     assert seen.sentence == "The email could not be sent."
-    assert seen.reply == "Unexpected error"
+    assert seen.reply == UNEXPECTED
     assert "Email send failed with RuntimeError at:" in caplog.text
     assert "in broken" in caplog.text
     # (the frame's source line is ours; the text the exception carried is not there)
