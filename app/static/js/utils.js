@@ -1967,7 +1967,12 @@ const TaxExempt = {
             }
         }
         const exempt = custExempt || (!!sw && sw.checked);
-        TaxExempt.certificate(form || (tbody && tbody.closest ? tbody.closest('form') : null), custExempt ? c : null);
+        // the paper behind the exemption: the customer's when the customer
+        // is exempt; the job's when a taxable customer's document is exempt
+        // by its switch (or, on a form with no switch, by the job it carries)
+        const docForm = form || (tbody && tbody.closest ? tbody.closest('form') : null);
+        const byJob = !custExempt && !!c && (sw ? sw.checked : !!(docForm && docForm.dataset && docForm.dataset.exemptJob));
+        TaxExempt.certificate(docForm, custExempt || byJob ? c : null);
         if (!tbody) return exempt;
         tbody.querySelectorAll('.line-taxable').forEach(box => {
             if (exempt) {
@@ -1993,7 +1998,10 @@ const TaxExempt = {
     // so in the open, under the customer, and nothing is blocked. The
     // sentence is the server's (one function decides it, the same one the
     // API's tax_note and the customer's page read). `customer` is the
-    // form's customer when marked tax exempt, else null. The note is a
+    // form's customer when the document is exempt (the customer is marked
+    // tax exempt, or the document's own switch is on, as an exempt job
+    // sets it: then the job's certificate is the one judged), else null.
+    // The note is a
     // polite live region, there before it is filled, and it follows the
     // customer, the date and the job; a look that fails says nothing.
     certificate(form, customer) {
@@ -2023,7 +2031,8 @@ const TaxExempt = {
         // it carries (its form shows neither as a box to read)
         const asOf = form.dataset.exemptAsOf || (day && day.value) || '';
         const jobId = (job ? job.value : form.dataset.exemptJob) || '';
-        const key = customer ? [customer.id, asOf, jobId].join('|') : '';
+        const sw = form.querySelector('[name="tax_exempt"]');
+        const key = customer ? [customer.id, asOf, jobId, sw ? sw.checked : ''].join('|') : '';
         if (note.dataset.key === key) return;
         note.dataset.key = key;
         // another customer's sentence never stands under this one's name
@@ -2033,6 +2042,7 @@ const TaxExempt = {
         const query = [];
         if (asOf) query.push(`as_of=${encodeURIComponent(asOf)}`);
         if (jobId) query.push(`job_id=${encodeURIComponent(jobId)}`);
+        if (sw) query.push(`tax_exempt=${sw.checked ? 'true' : 'false'}`);
         API.get(`/customers/${customer.id}/exemption-warning${query.length ? '?' + query.join('&') : ''}`)
             .then(answer => { if (note.dataset.key === key) note.textContent = (answer && answer.warning) || ''; })
             .catch(() => { if (note.dataset.key === key) note.textContent = ''; });

@@ -578,6 +578,15 @@ SET_DATE = """([form, day]) => {
 }"""
 
 
+JOB_EXPIRED = "The exemption certificate for the job Library expired on June 30, 2026."
+SWITCH = "(form) => document.querySelector(form + ' [name=\"tax_exempt\"]').checked"
+FLIP_SWITCH = """(form) => {
+    const sw = document.querySelector(form + ' [name="tax_exempt"]');
+    sw.checked = !sw.checked;
+    sw.dispatchEvent(new Event('change', { bubbles: true }));
+}"""
+
+
 def _note(page, handled, form):
     settle(page, handled)
     page.wait_for_timeout(100)
@@ -723,6 +732,51 @@ def test_a_sales_form_warns_about_a_missing_or_expired_certificate(
             page.wait_for_function(MODAL_SHOWN)
             note = _note(page, handled, "#modal-body form")
             assert (note["text"] if note else "") == expected, rec_id
+        finally:
+            page.close()
+
+    # A taxable customer's sale made exempt by its job: the job's own
+    # certificate is the paper. Expired, the form says so by the job's name
+    # once the job is picked (the switch goes on with it), and switching
+    # the document back to taxed takes the sentence away.
+    library = _made(
+        company,
+        "/api/jobs",
+        {
+            "customer_id": taxable,
+            "name": "Library",
+            "is_taxable": False,
+            "exempt_certificate_number": "EX-5120",
+            "exempt_certificate_state": "IL",
+            "exempt_certificate_kind": "public_entity",
+            "exempt_certificate_expires": "2026-06-30",
+        },
+    )
+    for route, opener, form, picker in forms[:3]:
+        page, handled = _open_at(browser, company, route)
+        errors = []
+        page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
+        try:
+            page.evaluate(f"async () => {{ await {opener}; }}")
+            page.wait_for_function(MODAL_SHOWN)
+            settle(page, handled)
+            page.evaluate(SET_DATE, [form, "2026-09-21"])
+            page.evaluate(PICK, [picker, taxable])
+            note = _note(page, handled, form)
+            assert (note["text"] if note else "") == "", route
+            page.evaluate(PICK, [form + ' select[name="job_id"]', library["id"]])
+            note = _note(page, handled, form)
+            assert page.evaluate(SWITCH, form) is True, route
+            assert note == {"text": JOB_EXPIRED, "role": "status", "shown": True}, route
+            page.evaluate(SET_DATE, [form, "2026-06-15"])
+            assert _note(page, handled, form)["text"] == "", route
+            page.evaluate(SET_DATE, [form, "2026-09-21"])
+            assert _note(page, handled, form)["text"] == JOB_EXPIRED, route
+            page.evaluate(FLIP_SWITCH, form)
+            assert _note(page, handled, form)["text"] == "", route
+            page.evaluate(FLIP_SWITCH, form)
+            assert _note(page, handled, form)["text"] == JOB_EXPIRED, route
+            assert errors == [], route
         finally:
             page.close()
 
