@@ -26,6 +26,7 @@ from app.models.jobs import Job
 from app.models.transactions import Transaction, TransactionLine
 from app.services.accounting import _q
 from app.services.jobs_service import job_attribution, not_wip_entry
+from app.services.terminology import said
 
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
@@ -1049,7 +1050,7 @@ def set_ctc_entries(db: Session, job: Job, entries: list[dict]) -> dict:
                     422, f"{code.label} is under a section; enter it on the section"
                 )
             if cost_type not in types:
-                raise HTTPException(422, f"Unknown cost type '{cost_type}'")
+                raise HTTPException(422, said("Unknown cost type '{}'", cost_type))
         if amount is not None and Decimal(str(amount)) < _ZERO:
             raise HTTPException(422, "Cost to complete cannot be negative")
 

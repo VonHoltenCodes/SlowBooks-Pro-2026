@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
 from app.models.payroll import Employee
@@ -99,7 +100,7 @@ def create_task(data: OnboardingTaskCreate, db: Session = Depends(get_db)):
         task_type = OnboardingTaskType(data.task_type)
     except ValueError:
         raise HTTPException(
-            status_code=400, detail=f"Invalid task_type: {data.task_type}"
+            status_code=400, detail=said("Invalid task_type: {}", data.task_type)
         )
     task = OnboardingTask(
         employee_id=data.employee_id, task_type=task_type, notes=data.notes

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_ as sqla_and_, or_ as sqla_or_
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.accounts import Account
 from app.models.items import Item, InventoryMovement
@@ -205,10 +206,11 @@ def _refuse_duplicate_name(db: Session, name, exclude_id=None) -> None:
     if clash:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f'There is already an item named "{clash.name}". Use that '
-                "item, give this one a different name, or make the other "
-                "one inactive first."
+            detail=said(
+                'There is already an item named "{}". Use that item, give '
+                "this one a different name, or make the other one inactive "
+                "first.",
+                clash.name,
             ),
         )
 
@@ -238,7 +240,7 @@ def _refuse_duplicate_code(db: Session, code, exclude_id=None) -> None:
     if clash:
         raise HTTPException(
             status_code=409,
-            detail=f"Item code {code} is already used by {clash.name}.",
+            detail=said("Item code {} is already used by {}.", code, clash.name),
         )
 
 

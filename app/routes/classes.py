@@ -15,6 +15,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.accounts import Account, AccountType
 from app.models.classes import TxnClass
@@ -267,7 +268,7 @@ def create_class(data: ClassCreate, db: Session = Depends(get_db)):
     existing = db.query(TxnClass).filter(TxnClass.name.ilike(data.name)).first()
     if existing:
         raise HTTPException(
-            status_code=409, detail=f"Class '{existing.name}' already exists"
+            status_code=409, detail=said("Class '{}' already exists", existing.name)
         )
     row = TxnClass(
         name=data.name,
@@ -302,7 +303,7 @@ def update_class(class_id: int, data: ClassUpdate, db: Session = Depends(get_db)
         )
         if clash:
             raise HTTPException(
-                status_code=409, detail=f"Class '{clash.name}' already exists"
+                status_code=409, detail=said("Class '{}' already exists", clash.name)
             )
         row.name = data.name
     if data.is_archived is not None:

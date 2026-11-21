@@ -7,6 +7,7 @@ from datetime import datetime, timezone, date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -108,7 +109,9 @@ def list_time_entries(
         try:
             q = q.filter(TimeEntry.status == TimeEntryStatus(status))
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            raise HTTPException(
+                status_code=400, detail=said("Invalid status: {}", status)
+            )
     return [_resp(e) for e in q.order_by(TimeEntry.date.desc()).all()]
 
 

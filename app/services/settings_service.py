@@ -15,6 +15,7 @@ from app.models.settings import Settings, DEFAULT_SETTINGS
 from cryptography.fernet import InvalidToken
 
 from app.services.crypto import decrypt_value, encrypt_value, is_encrypted, is_readable
+from app.services.terminology import said
 
 _SENSITIVE_KEYS = frozenset(
     {
@@ -705,8 +706,10 @@ def clean_setting_value(key: str, value) -> str:
         label = _ADDRESS_LIST_SETTINGS[key]
         kept, rejected = parse_addresses(text)
         if rejected:
+            # what was typed is said back as typed (said): a nonprofit's
+            # "not a customer" is not turned into "not a donor"
             raise SettingValueError(
-                f"{label}: not an email address: " + ", ".join(rejected[:5]) + "."
+                said(label + ": not an email address: {}.", ", ".join(rejected[:5]))
             )
         joined = ", ".join(kept)
         if len(joined) > LOG_ADDRESSES_MAX:

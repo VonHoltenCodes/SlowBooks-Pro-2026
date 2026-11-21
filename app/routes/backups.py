@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from typing import Optional
 
@@ -115,7 +116,7 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid filename")
     if not filepath.exists():
         raise HTTPException(
-            status_code=404, detail=f"Backup file not found: {filepath.name}"
+            status_code=404, detail=said("Backup file not found: {}", filepath.name)
         )
 
     other = backup_service.other_company(db, filepath.name)

@@ -29,6 +29,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.config import DATABASE_URL
+from app.services.terminology import said
 
 logger = logging.getLogger(__name__)
 
@@ -467,7 +468,7 @@ def manifest_create_company(
     ):
         return {
             "success": False,
-            "error": f"A company file named '{filename}' already exists",
+            "error": said("A company file named '{}' already exists", filename),
         }
 
     companies_dir().mkdir(parents=True, exist_ok=True)
@@ -598,7 +599,10 @@ def create_company(
     # Check if company already exists
     existing = db.query(Company).filter(Company.database_name == database_name).first()
     if existing:
-        return {"success": False, "error": f"Database '{database_name}' already exists"}
+        return {
+            "success": False,
+            "error": said("Database '{}' already exists", database_name),
+        }
 
     # Create the database
     base_url = _base_url()

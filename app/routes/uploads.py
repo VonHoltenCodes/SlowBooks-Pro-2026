@@ -17,6 +17,7 @@ import logging
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.routes._roles import require_admin
 from app.services import file_store, legacy_uploads
@@ -75,8 +76,10 @@ async def upload_logo(
     if content_type not in _LOGO_EXT_BY_TYPE:
         raise HTTPException(
             status_code=400,
-            detail="Logo must be a PNG, JPEG, GIF, WebP, or SVG image "
-            f"(got '{file.content_type or 'unknown'}').",
+            detail=said(
+                "Logo must be a PNG, JPEG, GIF, WebP, or SVG image (got '{}').",
+                file.content_type or "unknown",
+            ),
         )
 
     content = await file.read()

@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import Field
 
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
@@ -680,8 +681,11 @@ def put_ai_config(
     if provider and provider not in AI_PROVIDERS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown AI provider '{provider}'. Valid: "
-            f"{sorted(AI_PROVIDERS.keys())}",
+            detail=said(
+                "Unknown AI provider '{}'. Valid: {}",
+                provider,
+                sorted(AI_PROVIDERS.keys()),
+            ),
         )
 
     model = (payload.model or "").strip()
@@ -789,7 +793,9 @@ def _list_models_for(db: Session, overrides: dict) -> dict:
             detail="Pick a provider first, then list its models.",
         )
     if provider not in AI_PROVIDERS:
-        raise HTTPException(status_code=400, detail=f"Unknown AI provider: {provider}")
+        raise HTTPException(
+            status_code=400, detail=said("Unknown AI provider: {}", provider)
+        )
     # a typed key is the form's; the saved one counts only for the provider
     # it was saved with (a provider picked in the form but not saved yet has
     # no key of its own)
@@ -1017,7 +1023,7 @@ def run_ai_action(
     if action_key not in AI_ACTIONS:
         raise HTTPException(
             status_code=404,
-            detail=f"Unknown analysis action '{action_key}'.",
+            detail=said("Unknown analysis action '{}'.", action_key),
         )
 
     cfg = _read_ai_config(db)

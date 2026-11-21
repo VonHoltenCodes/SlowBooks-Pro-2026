@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.models.request_keys import RequestKey
 
 HEADER = "Idempotency-Key"
@@ -117,8 +118,9 @@ def reserve(db: Session, request: Request, route: str, payload, actor: str | Non
         raise HTTPException(
             status_code=409,
             detail=(
-                f"{HEADER} {key!r} was already used for a different request on this "
-                "route. Use a new key for a new payment."
+                said("{} {!r}", HEADER, key)
+                + " was already used for a different request on this route. Use "
+                "a new key for a new payment."
             ),
         )
     if existing.response_json is None:

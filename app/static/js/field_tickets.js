@@ -148,6 +148,7 @@ const FieldTickets = {
                 <tbody id="ft-line-body">${lines}</tbody>
                 <tfoot id="ft-line-foot"></tfoot>
             </table></div>
+            ${kind === 'delivery' ? '' : '<p id="ft-on-save-why" role="status" style="color:var(--text-muted); font-size:11px; margin:4px 0 0 0;"></p>'}
             ${ro ? '' : `<div class="form-actions" data-write style="justify-content:flex-start;gap:8px">
                 ${kind === 'delivery' ? '' : '<button type="button" class="btn btn-sm btn-secondary" onclick="FieldTickets.addLine()">+ Add line</button>'}
                 <button type="submit" class="btn btn-primary">${t.id ? 'Save ticket' : 'Create ticket'}</button>
@@ -287,6 +288,10 @@ const FieldTickets = {
 
     ON_SAVE: 'Set on save',
     ON_SAVE_WHY: "The rate is blank, so it is filled in when the ticket is saved: the employee's, equipment's or item's cost rate, and the bill rate from the cost rate with the job's markup.",
+    // The reason in the open, under the lines: a tooltip alone is read by
+    // a mouse or a screen reader, never by a keyboard or touch user, and
+    // the cells that show "Set on save" take no focus.
+    ON_SAVE_NOTE: "Set on save: the rate is blank, so it is filled in when the ticket is saved: the employee's, equipment's or item's cost rate, and the bill rate from the cost rate with the job's markup.",
 
     // A total as the footer words it: the known amounts, and that more is
     // set on save.
@@ -316,6 +321,23 @@ const FieldTickets = {
         rows.forEach((tr, i) => {
             put(tr.querySelector('.ft-cost-amt'), t.lines[i].cost);
             put(tr.querySelector('.ft-bill-amt'), t.lines[i].bill);
+        });
+        // the note under the lines says why while any amount is set on save,
+        // and each blank rate it is about is described by it, so the reason
+        // is read on the field a person tabs to
+        const note = $('#ft-on-save-why');
+        const anyPending = t.costPending || t.billPending;
+        // set only when it changes: the note is a live region, and setting
+        // the same text again on every keystroke would have it read again
+        const reason = anyPending ? FieldTickets.ON_SAVE_NOTE : '';
+        if (note && note.textContent !== reason) note.textContent = reason;
+        rows.forEach((tr, i) => {
+            for (const [box, v] of [['.ft-cost', t.lines[i].cost], ['.ft-bill', t.lines[i].bill]]) {
+                const el = tr.querySelector(box);
+                if (!el) continue;
+                if (v === null && note) el.setAttribute('aria-describedby', 'ft-on-save-why');
+                else el.removeAttribute('aria-describedby');
+            }
         });
         const cell = (sum, pending) => `<td class="amount"${pending ? ` title="${escapeHtml(FieldTickets.ON_SAVE_WHY)}"` : ''}>${escapeHtml(FieldTickets._totalText(sum, pending))}</td>`;
         const foot = $('#ft-line-foot');

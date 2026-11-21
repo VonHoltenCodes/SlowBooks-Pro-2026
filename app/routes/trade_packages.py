@@ -8,6 +8,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.cost_codes import CostCode
 from app.models.trade_packages import TradePackage, TradePackageSection
@@ -101,7 +102,8 @@ def list_trade_packages(include_inactive: bool = True, db: Session = Depends(get
 def create_trade_package(data: TradePackageCreate, db: Session = Depends(get_db)):
     if db.query(TradePackage).filter(TradePackage.name.ilike(data.name)).first():
         raise HTTPException(
-            status_code=409, detail=f"Trade package '{data.name}' already exists"
+            status_code=409,
+            detail=said("Trade package '{}' already exists", data.name),
         )
     pkg = TradePackage(
         name=data.name,
@@ -133,7 +135,8 @@ def update_trade_package(
         )
         if clash and clash.id != pkg.id:
             raise HTTPException(
-                status_code=409, detail=f"Trade package '{clash.name}' already exists"
+                status_code=409,
+                detail=said("Trade package '{}' already exists", clash.name),
             )
     for key, value in changes.items():
         setattr(pkg, key, value)

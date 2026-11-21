@@ -20,6 +20,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import Field
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
@@ -705,10 +706,11 @@ def setup(
         if other:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Another company file ({other}) is already named "
-                    f"'{payload.company_name.strip()}'. Choose a name that "
-                    "tells the two apart."
+                detail=said(
+                    "Another company file ({}) is already named '{}'. Choose "
+                    "a name that tells the two apart.",
+                    other,
+                    payload.company_name.strip(),
                 ),
             )
 

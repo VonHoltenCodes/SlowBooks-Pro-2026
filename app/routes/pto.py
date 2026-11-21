@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -78,7 +79,7 @@ def update_policy(policy_id: int, data: PTOPolicyCreate, db: Session = Depends(g
         policy.pto_type = PTOType(data.pto_type)
         policy.accrual_method = AccrualMethod(data.accrual_method)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
+        raise HTTPException(status_code=400, detail=said("Invalid value: {}", e))
     policy.name = data.name
     policy.accrual_rate = data.accrual_rate
     policy.max_carryover = data.max_carryover
@@ -97,7 +98,7 @@ def create_policy(data: PTOPolicyCreate, db: Session = Depends(get_db)):
         pto_type = PTOType(data.pto_type)
         method = AccrualMethod(data.accrual_method)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
+        raise HTTPException(status_code=400, detail=said("Invalid value: {}", e))
     _check_valuation(data.valuation)
     policy = PTOPolicy(
         name=data.name,
@@ -240,7 +241,9 @@ def list_requests(
         try:
             q = q.filter(PTORequest.status == PTORequestStatus(status))
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            raise HTTPException(
+                status_code=400, detail=said("Invalid status: {}", status)
+            )
     results = []
     for req in q.order_by(PTORequest.start_date.desc()).all():
         r = PTORequestResponse.model_validate(req)
@@ -260,7 +263,7 @@ def create_request(data: PTORequestCreate, db: Session = Depends(get_db)):
         pto_type = PTOType(data.pto_type)
     except ValueError:
         raise HTTPException(
-            status_code=400, detail=f"Invalid pto_type: {data.pto_type}"
+            status_code=400, detail=said("Invalid pto_type: {}", data.pto_type)
         )
     req = PTORequest(
         employee_id=data.employee_id,
