@@ -109,6 +109,19 @@ class RawRelay:
                 buf += got
             head = buf.split(b"\r\n\r\n")[0].decode("latin1").split("\r\n")
             path = head[0].split(" ")[1]
+            # The whole request is read before it is answered. A connection
+            # closed with part of the request still unread is reset on
+            # Windows (WinError 10053 / 10054), and the answer is lost with it.
+            length = 0
+            for line in head:
+                if line.lower().startswith("content-length:"):
+                    length = int(line.split(":", 1)[1].strip() or 0)
+            body = buf.split(b"\r\n\r\n", 1)[1]
+            while len(body) < length:
+                got = conn.recv(65536)
+                if not got:
+                    break
+                body += got
             auth = [h for h in head if h.lower().startswith("authorization:")]
             self.calls.append((path, auth[0].split(" ")[-1] if auth else None))
             if path in self.heard:
@@ -132,6 +145,15 @@ class RawRelay:
         except Exception:
             pass
         finally:
+            # Say the answer is finished and let the other side close first,
+            # so the last bytes are delivered and not cut off by a reset.
+            try:
+                conn.shutdown(socket.SHUT_WR)
+                conn.settimeout(1)
+                while conn.recv(65536):
+                    pass
+            except OSError:
+                pass
             try:
                 conn.close()
             except OSError:
