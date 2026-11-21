@@ -504,7 +504,7 @@ installs:
 
 - **Its pay applications bill no sales tax at all** — work, stored materials
   and change orders alike, whatever the SOV's Tax boxes say. The *Charge tax*
-  box on the application is off and greyed, saying why. The estimate keeps
+  box on the application is off and grayed, saying why. The estimate keeps
   its own tax figures; it is the bid, not the billing.
 - **Its material bills accrue use tax.** A bill line whose cost type is
   *material*, on the job (the line's, else the bill's), on a bill the vendor
@@ -682,7 +682,7 @@ closed. (`convert-to-bill` accepts an optional `date`; left out, the PO's date
 is used.) Editing the lines of a converted bill keeps each line tied to its
 commitment line and re-tallies billed-to-date; a void gives it all back.
 A line with no price ($0) is not a bill line — the converted bill carries only
-the lines with money on them (a change from the earlier behaviour, where a
+the lines with money on them (a change from the earlier behavior, where a
 description-only line rode along).
 
 **Retainage held.** When the commitment carries a retainage percent, that
