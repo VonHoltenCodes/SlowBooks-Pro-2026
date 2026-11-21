@@ -1347,3 +1347,187 @@ def test_an_answer_with_no_credential_made_nothing_to_undo(raw, client):
     r = client.post("/api/switchboard/connect")
     assert r.status_code == 502 and r.json()["detail"] == link.RELAY_ODD
     assert raw.paths() == ["/v1/link"] and _pending() == []
+
+
+# -- rule 2: the relay's own sentence never carries a secret -----------------------
+
+
+def _echo_bearer(text):
+    """A relay (or something in front of it) that repeats the bearer it was
+    sent in its refusal: ``text`` with {bearer} filled in."""
+
+    def answer(conn, relay):
+        conn.sendall(http(403, {"error": text.format(bearer=relay.calls[-1][1])}))
+
+    return answer
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Device credential {bearer} is not accepted.",
+        "Not accepted: Authorization: Bearer {bearer}",
+        "Not accepted ({bearer}).\n{bearer}",
+    ],
+    ids=["in a sentence", "the header", "twice"],
+)
+def test_a_refusal_that_repeats_the_bearer_shows_nobody_the_credential(
+    raw, client, text
+):
+    record = _connect(client)
+    echo = _echo_bearer(text)
+    raw.behave["/v1/code"] = lambda conn: echo(conn, raw)
+    r = _plain(
+        client.post("/api/switchboard/code"),
+        secrets_=(record["credential"], record["credential"][4:]),
+    )
+    assert r.status_code == 502, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith(link.RELAY_REFUSED + " The relay said: ")
+    assert link.HIDDEN in detail and "sbd_" not in detail
+    # the same on Disconnect, where the sentence would be kept in a note
+    raw.behave["/v1/forget"] = lambda conn: echo(conn, raw)
+    r = _plain(
+        client.post("/api/switchboard/disconnect"),
+        secrets_=(record["credential"], record["credential"][4:]),
+    )
+    assert r.status_code == 200, r.text
+    assert record["credential"] not in json.dumps(
+        client.get("/api/switchboard/status").json()
+    )
+
+
+def test_the_relays_sentence_is_passed_on_with_nothing_secret_in_it():
+    credential = "sbd_" + secrets.token_urlsafe(32)
+    other = "sbd_" + secrets.token_urlsafe(40)
+    opaque = secrets.token_urlsafe(32)
+    zero_width = credential[:10] + "​" + credential[10:]
+    for text, sent in [
+        (f"No: {credential}.", (credential,)),
+        (f"No: {credential}.", ()),  # shaped like one, whoever's it is
+        (f"No: {other} and {credential}", (credential,)),
+        (f"Authorization: Bearer {opaque}", ()),
+        (f"bearer {opaque[:12]}", ()),  # after "Bearer", however short
+        (f"key={opaque}", ()),
+        (f"No: {zero_width}.", (credential,)),  # hidden behind what cannot be seen
+        ("x" * 190 + " " + credential, (credential,)),  # never cut in half
+        (credential[:20], (credential,)),  # a part of one
+    ]:
+        said = link._said({"error": text}, sent)
+        for secret in (credential, other, opaque, credential[4:], opaque[:12]):
+            assert secret not in said, (text, said)
+        assert "sbd_" not in said, (text, said)
+        assert len(said) <= link.SAID_MAX
+    # a sentence with nothing secret in it is passed on as it is
+    plain = "Free sign-up is closed until 2027-01-01; write to help@example.org."
+    assert link._said({"error": plain}, (credential,)) == plain
+    used = f"Code {_code()} was used already."
+    assert link._said({"error": used}) == used
+
+
+# -- rule 4: whatever lies under the connection file's name is a connection file ---
+
+
+def _a_folder(path):
+    path.mkdir()
+
+
+def _a_folder_with_something_in_it(path):
+    path.mkdir()
+    (path / "notes.txt").write_text("kept")
+
+
+def _a_link_to_nowhere(path):
+    os.symlink(path.with_name("nowhere"), path)
+
+
+def _a_link_to_a_folder(path):
+    target = path.with_name("elsewhere")
+    target.mkdir(exist_ok=True)
+    os.symlink(target, path, target_is_directory=True)
+
+
+_links = pytest.mark.skipif(os.name == "nt", reason="symbolic links need a privilege")
+NOT_A_FILE = [
+    pytest.param(_a_folder, id="a folder"),
+    pytest.param(_a_folder_with_something_in_it, id="a folder with something in it"),
+    pytest.param(_a_link_to_nowhere, id="a link to nowhere", marks=_links),
+    pytest.param(_a_link_to_a_folder, id="a link to a folder", marks=_links),
+]
+
+
+@pytest.mark.parametrize("make", NOT_A_FILE)
+def test_a_connection_file_that_is_not_a_file_is_damaged_everywhere(
+    raw, client, db_session, make
+):
+    """Status, Connect, a sign-in code and Disconnect agree about it: it is
+    a damaged connection, Connect asks the relay for nothing, and
+    Disconnect clears it."""
+    make(link.link_path())
+    st = client.get("/api/switchboard/status").json()
+    assert st["state"] == "damaged" and st["linked"] is True
+    assert st["sentence"] == link.DAMAGED
+    for _ in range(2):
+        r = _plain(client.post("/api/switchboard/connect"))
+        assert r.status_code == 409 and r.json()["detail"] == link.DAMAGED, r.text
+    r = _plain(client.post("/api/switchboard/code"))
+    assert r.status_code == 409 and r.json()["detail"] == link.DAMAGED
+    # no relay record was made and deleted again for a press that could
+    # never be kept
+    assert raw.paths() == []
+    assert _tokens(db_session) == []
+    r = _plain(client.post("/api/switchboard/disconnect"))
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert got["unlinked"] is False and got["say"] is True
+    assert "could not be read, so it was removed here" in got["sentence"]
+    assert link.account.SUPPORT in got["sentence"]
+    assert not os.path.lexists(link.link_path())
+    # what was not ours is not destroyed
+    if make is _a_folder_with_something_in_it:
+        (aside,) = link.link_path().parent.glob(link.LINK_FILE + ".damaged-*")
+        assert (aside / "notes.txt").read_text() == "kept"
+    if make is _a_link_to_a_folder:
+        assert link.link_path().with_name("elsewhere").is_dir()
+    assert client.get("/api/switchboard/status").json()["state"] == "not_connected"
+    # and Connect works again
+    _connect(client)
+    assert _tokens(db_session) == [("AI assistant (relay)", True)]
+
+
+@pytest.mark.parametrize("make", NOT_A_FILE)
+def test_disconnect_revokes_the_token_of_a_file_replaced_by_what_is_not_one(
+    raw, client, db_session, make
+):
+    record = _connect(client)
+    link.link_path().unlink()
+    make(link.link_path())
+    assert client.get("/api/switchboard/status").json()["state"] == "damaged"
+    r = _plain(
+        client.post("/api/switchboard/disconnect"),
+        secrets_=(record["credential"], record["token"]),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["revoked"] is True
+    assert _tokens(db_session) == [("AI assistant (relay)", False)]
+    assert not os.path.lexists(link.link_path())
+    assert "could not be removed" in r.json()["sentence"]
+
+
+def test_a_connect_that_meets_what_is_not_a_file_at_the_last_step_says_damaged(
+    raw, client, db_session, monkeypatch
+):
+    """Something put under the name while the relay was being asked: the
+    press is undone on both sides and says what is there, not "already
+    connected"."""
+    real = link._save_new
+
+    def meanwhile(record):
+        link.link_path().mkdir()
+        return real(record)
+
+    monkeypatch.setattr(link, "_save_new", meanwhile)
+    r = _plain(client.post("/api/switchboard/connect"))
+    assert r.status_code == 409 and r.json()["detail"] == link.DAMAGED, r.text
+    assert _tokens(db_session) == []
+    assert raw.paths() == ["/v1/link", "/v1/forget"]

@@ -48,7 +48,11 @@
 #     answer an HTTP 500, an address with a bare status code, or exception
 #     text; the detail goes to the log, with no credential in it. The
 #     relay's own sentence for a refusal is passed on as plain text, one
-#     line, bounded (the panel escapes it).
+#     line, bounded (the panel escapes it), and with nothing secret in it:
+#     the credential the call carried, anything shaped like one, and any
+#     long unbroken run of letters and digits are taken out first, so a
+#     relay (or something in front of it) that repeats what it was sent
+#     shows nobody a credential.
 #  3. "The relay deleted its record of these books" is said only when the
 #     relay's answer says so ("deleted": true). Any other answer keeps the
 #     pending-deletion note, and the retry where a retry can help.
@@ -67,14 +71,20 @@
 #     says what was done and what was not, never "nothing was changed". A
 #     file that cannot be removed is written over where it lies with
 #     "ended": no credential and no token stay in it, it reads as no
-#     connection, and the next Connect takes it away.
+#     connection, and the next Connect takes it away. Whatever lies under
+#     the connection file's name counts: a folder, a link that leads
+#     nowhere or anything else that is not a file is a damaged connection,
+#     never "no connection", so status, Connect and Disconnect agree about
+#     it and Disconnect clears it.
 #  5. One Connect or Disconnect at a time: a second press while one is
 #     being worked on is refused in a sentence, and the connection file is
 #     only ever made new (never over another), so two presses, or two
 #     server processes, make one relay record and one token.
 #  6. (The panel, app/static/js/settings.js: a timed refresh never moves
-#     keyboard focus or clears a selection, and no two buttons share a
-#     name.)
+#     keyboard focus or clears a selection; when the control that had the
+#     keyboard goes, its neighbor in the panel gets it, never the top of
+#     the page; a refresh never gives back a button whose press is still
+#     being worked on; and no two buttons share a name.)
 #
 # One link per install, tied to the company it was made in. The line is up
 # only while that company is open here: on the desktop, the company the app
@@ -421,8 +431,12 @@ def _load() -> dict | None:
     """The kept link, None when there is none; SwitchboardError when it
     cannot be used (another user can read it, or it is damaged)."""
     path = link_path()
-    if not path.is_file():
+    if not os.path.lexists(path):
         return None
+    if not path.is_file():
+        # a folder, a link that leads nowhere, anything that is not a file:
+        # something is kept under the name and it is not a connection
+        raise SwitchboardError(409, DAMAGED, unreadable=True)
     try:
         open_to_others = os.name != "nt" and os.stat(path).st_mode & 0o077
     except OSError:
@@ -450,18 +464,34 @@ def _salvage() -> dict:
     """What can still be read of a kept file that _load refuses, for
     Disconnect (rule 4): the file as it is, whatever its mode, or {} when
     it is not a JSON object. Each value is checked where it is used."""
+    path = link_path()
+    if not path.is_file():
+        return {}  # not a file: nothing of it is read
     try:
-        record = _from_json(link_path().read_text(encoding="utf-8"))
+        record = _from_json(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return {}
     return record if isinstance(record, dict) else {}
 
 
 def _forget() -> None:
+    """Take away whatever lies under the connection file's name: the file,
+    a link (the link itself, not what it leads to), an empty folder. A
+    folder that holds something is not ours to delete: it is moved aside
+    under a name that says so."""
+    path = link_path()
     try:
-        link_path().unlink()
+        path.unlink()
+        return
     except FileNotFoundError:
-        pass
+        return
+    except OSError:
+        if path.is_symlink() or not path.is_dir():
+            raise
+    try:
+        path.rmdir()
+    except OSError:
+        os.rename(path, path.with_name(f"{path.name}.damaged-{time.time_ns()}"))
 
 
 # What is left in a connection file that Disconnect could not remove: no
@@ -484,8 +514,11 @@ def _end_in_place() -> bool:
     folder that cannot be written to still lets this user's own file be
     written): the credential and the token no longer lie in it, and it no
     longer reads as a connection. Whether that was done."""
+    path = link_path()
+    if path.is_symlink() or not path.is_file():
+        return False  # only a file of our own is written over
     try:
-        fd = os.open(link_path(), os.O_WRONLY | os.O_TRUNC)
+        fd = os.open(path, os.O_WRONLY | os.O_TRUNC)
     except OSError:
         return False
     try:
@@ -1246,13 +1279,32 @@ OK, AWAY, REFUSED, BUSY, ODD = "ok", "away", "refused", "busy", "odd"
 SAID_MAX = 200
 
 
-def _said(data) -> str:
+HIDDEN = "(hidden)"
+# What is never passed on from the relay's own sentence, whoever put it
+# there: a value after "Bearer", anything that begins like a device
+# credential, and any long unbroken run of letters and digits (a sentence
+# has none; a credential, a token or a key is one).
+_SECRET_SHAPES = re.compile(
+    r"(?i)(?<=bearer )\S+|sbd_[A-Za-z0-9_\-]*|[A-Za-z0-9_\-+/=]{24,}"
+)
+
+
+def _said(data, sent=()) -> str:
     """The relay's own sentence for a refusal, as plain text: one line,
-    printable, bounded. Never markup to trust: the panel escapes it."""
+    printable, bounded, and with no secret in it (``sent`` is what the call
+    carried: a relay that repeats its request shows nobody the credential).
+    Never markup to trust: the panel escapes it."""
     text = (data.get("error") or data.get("message")) if isinstance(data, dict) else ""
     if not isinstance(text, str):
         return ""
-    text = "".join(c for c in " ".join(text.split()) if c.isprintable())
+    # what cannot be seen goes first, so nothing hides a secret from the
+    # masks; the masks go before the cut, so no part of one is left
+    text = "".join(c for c in text if c.isprintable() or c.isspace())
+    text = " ".join(text.split())
+    for secret in sent:
+        if isinstance(secret, str) and secret:
+            text = text.replace(secret, HIDDEN)
+    text = _SECRET_SHAPES.sub(HIDDEN, text)
     if len(text) > SAID_MAX:
         text = text[: SAID_MAX - 1].rstrip() + "…"
     return text
@@ -1260,14 +1312,17 @@ def _said(data) -> str:
 
 class Answer:
     """One relay answer, classified (rule 2). ``data`` is the JSON object:
-    the asked-for fields when OK, the relay's own body for a refusal."""
+    the asked-for fields when OK, the relay's own body for a refusal.
+    ``sent`` is what the call carried that is secret (its bearer), kept only
+    to take it out of anything the relay says back."""
 
-    __slots__ = ("kind", "status", "data")
+    __slots__ = ("kind", "status", "data", "sent")
 
     def __init__(self, kind: str, status: int = 0, data: dict | None = None):
         self.kind = kind
         self.status = status
         self.data = data
+        self.sent = ()
 
     def error(self) -> SwitchboardError:
         """The press's failure, in the class's one sentence."""
@@ -1276,7 +1331,7 @@ class Answer:
         if self.kind == BUSY:
             return SwitchboardError(503, RELAY_BUSY, busy=True)
         if self.kind == REFUSED:
-            said = _said(self.data)
+            said = _said(self.data, self.sent)
             return SwitchboardError(
                 502, RELAY_REFUSED + (f" The relay said: {said}" if said else "")
             )
@@ -1331,6 +1386,8 @@ def _relay_post(
     except Exception as exc:
         _log_fault(f"the relay's answer to {path} could not be classified", exc)
         return Answer(ODD)
+    if bearer:
+        answer.sent = (bearer,)
     if answer.kind != OK:
         logger.warning(
             "the relay at %s answered %s to %s (%s)", relay, status, path, answer.kind
@@ -1445,6 +1502,18 @@ def _one_press(fn):
     press.__doc__ = fn.__doc__
     press.__wrapped__ = fn
     return press
+
+
+def _kept_already() -> SwitchboardError:
+    """Why a new link cannot be kept under the name: what lies there, said
+    as it is (a connection, another company's, or something damaged)."""
+    try:
+        record = _load()
+    except SwitchboardError as exc:
+        return exc
+    if record is not None and record["company_file"] != _company_here():
+        return SwitchboardError(409, OTHER_COMPANY.format(name=record["company_name"]))
+    return SwitchboardError(409, ALREADY)
 
 
 _OWN_LABEL = re.compile(re.escape(TOKEN_LABEL) + r"(?: \d+)?")
@@ -1570,7 +1639,7 @@ def connect(db, username: str) -> dict:
     try:
         _clear_ended()
     except _AlreadyKept:
-        raise SwitchboardError(409, ALREADY) from None
+        raise _kept_already() from None
     except OSError as exc:
         # before the relay is asked for anything: nothing is made anywhere
         logger.warning("the data folder cannot be written to: %s", exc)
@@ -1627,7 +1696,7 @@ def connect(db, username: str) -> dict:
             if isinstance(exc, _AlreadyKept):
                 # another Connect (another server process) kept its own
                 # meanwhile: that one is the connection
-                raise SwitchboardError(409, ALREADY) from None
+                raise _kept_already() from None
             if isinstance(exc, OSError):
                 logger.warning("the connection could not be kept: %s", exc)
             else:
