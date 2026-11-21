@@ -15,6 +15,17 @@ from tests.test_browser_ui import _open  # noqa: E402
 from tests.test_theme_contrast import browser_fixture  # noqa: E402,F401  (the fixture)
 
 YEAR = dt.date.today().year
+
+
+@pytest.fixture(autouse=True)
+def _this_year():
+    """The app reads its own today on every request, so the test's year is
+    read when each test starts, not once at import: a run that crosses New
+    Year's must not leave the later tests a year behind the app."""
+    global YEAR
+    YEAR = dt.date.today().year
+
+
 VENDOR = {"id": 7, "name": "QA Paper Co", "balance": "0", "is_active": True}
 
 
