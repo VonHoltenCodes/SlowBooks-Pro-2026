@@ -376,7 +376,6 @@ def test_an_exempt_jobs_expired_certificate_is_said_for_a_taxable_customer(
         assert r.status_code == 201, (path, r.text)
         doc = r.json()
         assert doc["tax_note"] == JOB_EXPIRED, path
-        assert doc["exemption_warning"] == JOB_EXPIRED, path
         figures = doc.get("invoice") or doc
         _exempt_figures(figures)
         assert figures["tax_exempt"] is True, path
@@ -413,7 +412,7 @@ def test_an_exempt_job_with_a_current_certificate_is_quiet(
     r = client.post("/api/invoices", json={**_sale(customer.id), "job_id": job})
     assert r.status_code == 201, r.text
     assert r.json()["tax_exempt"] is True
-    assert r.json()["tax_note"] is None and r.json()["exemption_warning"] is None
+    assert r.json()["tax_note"] is None
     assert _asked(client, customer.id, as_of=DAY, job_id=job) is None
 
 
@@ -434,24 +433,30 @@ def test_a_converted_estimate_and_a_duplicate_say_it_too(
     assert r.status_code == 200, r.text
     _exempt_figures(r.json())
     assert r.json()["tax_note"] == EXPIRED
-    assert r.json()["exemption_warning"] == EXPIRED
     r = client.post(f"/api/invoices/{r.json()['id']}/duplicate")
     assert r.status_code == 201, r.text
     _exempt_figures(r.json())
     assert r.json()["tax_note"] == EXPIRED
-    assert r.json()["exemption_warning"] == EXPIRED
 
 
 # ── the AI assistant connection ──────────────────────────────────────────
 
 
+def _sentence_then_rate_note(note, rate_note, where):
+    """The app's sentence, once, in front of the connection's own note."""
+    assert rate_note and MISSING not in rate_note, where
+    assert note == f"{MISSING} {rate_note}", where
+    assert note.startswith(MISSING) and note.endswith(rate_note), where
+    assert note.count(MISSING) == 1, where
+
+
 def test_the_assistant_connection_still_passes_the_sentence_on(
     client, db_session, seed_accounts
 ):
-    """An assistant that sends no tax_rate has its answer's tax_note written
-    by the connection (what rate was used, and why). The sentence about the
-    certificate is in a field of its own too, which that leaves alone, so
-    the person is still told."""
+    """An assistant that sends no tax_rate gets the connection's note about
+    the rate (what rate was used, and why) in tax_note. The sentence about
+    the certificate is kept there, in front of it, once, so the person is
+    still told; an assistant that gave the rate gets the sentence alone."""
     from app.switchboard.client import ApiError
     from app.switchboard.tools import sales_tax, with_left_blank, with_tax_rate
 
@@ -471,15 +476,20 @@ def test_the_assistant_connection_still_passes_the_sentence_on(
         assert r.status_code == 201, (route, r.text)
         assert r.json()["tax_note"] == MISSING, route
         told = with_left_blank(route, body, r.json(), plan)
-        # the connection's own note about the rate stands in tax_note
-        assert told["tax_note"] == plan["note"], route
-        assert told["exemption_warning"] == MISSING, route
-    # a credit memo too, and a document sent with its rate keeps both
+        # the app's sentence first, once, then the connection's own note
+        # about the rate
+        _sentence_then_rate_note(told["tax_note"], plan["note"], route)
+        assert "exemption_warning" not in told, route
+    # a credit memo too, and a document sent with its rate keeps the
+    # sentence alone
     plan = sales_tax(_Api(), "/api/credit-memos", body)
     r = client.post("/api/credit-memos", json=with_tax_rate(body, plan))
     assert r.status_code == 201, r.text
+    assert r.json()["tax_note"] == MISSING
     told = with_left_blank("/api/credit-memos", body, r.json(), plan)
-    assert told["exemption_warning"] == MISSING
+    _sentence_then_rate_note(told["tax_note"], plan["note"], "/api/credit-memos")
     r = client.post("/api/invoices", json={**body, "tax_rate": 0})
+    assert r.status_code == 201, r.text
     told = with_left_blank("/api/invoices", {**body, "tax_rate": 0}, r.json(), None)
-    assert told["tax_note"] == MISSING and told["exemption_warning"] == MISSING
+    assert told["tax_note"] == MISSING
+    assert "exemption_warning" not in told

@@ -176,13 +176,10 @@ def certificate_warning(
 
 
 def note_certificate(db: Session, resp, customer, as_of, job_id, exempt=None):
-    """Put the sentence on a sales document's answer: in tax_note, and again
-    in exemption_warning, a field of its own that an API client which writes
-    its own tax_note over the answer's (the AI assistant connection does,
-    for a document sent without a tax_rate) leaves as it is."""
-    sentence = certificate_warning(db, customer, as_of, job_id, exempt)
-    resp.tax_note = sentence
-    resp.exemption_warning = sentence
+    """Put the sentence on a sales document's answer, in tax_note. The AI
+    assistant connection keeps it there, in front of its own note about the
+    rate, for a document sent without a tax_rate."""
+    resp.tax_note = certificate_warning(db, customer, as_of, job_id, exempt)
     return resp
 
 

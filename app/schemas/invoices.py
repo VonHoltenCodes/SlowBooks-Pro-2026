@@ -324,10 +324,6 @@ class InvoiceResponse(BaseModel):
     # (services/tax_exemption.certificate_warning). The sale is exempt all
     # the same; this is for the person to be told. Null otherwise.
     tax_note: Optional[str] = None
-    # The same sentence in a field of its own: an API client that writes its
-    # own tax_note over this answer's (the AI assistant connection does, for
-    # a document sent without a tax_rate) still passes this one on.
-    exemption_warning: Optional[str] = None
     # On a void: where the balance went, as a sentence (an invoice the
     # QuickBooks Online import carried over, #704).
     notice: Optional[str] = None

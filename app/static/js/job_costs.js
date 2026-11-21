@@ -227,7 +227,7 @@ const JobCostsPage = {
         });
         // $0.00 is asked about first, as every line form asks (ZeroTotal); a
         // job cost is never posted for nothing, so Yes is answered in a sentence
-        if (!ZeroTotal.ask('Job Cost Entry', lines.reduce((sum, l) => sum + l.quantity * l.rate, 0))) return;
+        if (!ZeroTotal.ask(T('Job Cost Entry'), lines.reduce((sum, l) => sum + l.quantity * l.rate, 0))) return;
         if (!lines.length) { toast('Add at least one line with a quantity and rate', 'error'); return; }
         if (!(await TxnWarn.ok(form))) return;
         try {
