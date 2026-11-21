@@ -10,12 +10,19 @@ before, else to the form's Add line control; never to the document body.
 
 The forms: invoice, estimate (both layouts), sales receipt, credit memo,
 purchase order, vendor credit, bill, journal entry, expense, recurring
-template, deposit (its other lines) and change order. A pay application's
-lines are its schedule of values: they cannot be inserted, removed or moved,
-so there is no change for its names to follow. The bill form has no Remove
-line. Every form lets its last line be removed like any other (the expense
-form used to keep one); what a save with no lines does is another module's
+template, deposit (its other lines), change order and pay application. A pay
+application's lines are its schedule of values: they cannot be inserted,
+removed or moved, and two of them can carry the same item number, so they
+too are named by their place. The bill form has no Remove line. Every form
+lets its last line be removed like any other (the expense form used to keep
+one); what a save with no lines does is another module's
 (test_browser_zero_total_ask_r29.py).
+
+A nonprofit's Split is a change to the set of lines as well: its chooser is
+a row under the line that is not a line (the lines under it keep their
+numbers, it moves with its line and goes with it), and Apply puts one line
+per share in the line's place, each named by its place, the keyboard on the
+first.
 
 Each sweep stays whole inside one test: the forms are walked one after the
 other on one company.
@@ -443,3 +450,227 @@ def test_remove_line_hands_the_keyboard_to_the_next_line_never_the_body(
         _sweep_focus(browser, company, form)
     job_id = _construction_job(company)
     _sweep_focus(browser, company, CHANGE_ORDER, job_id)
+
+
+# ---- the nonprofit Split: a chooser row under a line, then the shares ----
+
+SPLIT_ROWS = """(sel) => [...document.querySelector(sel).querySelectorAll(':scope > tr')]
+    .map(r => ({chooser: r.classList.contains('np-split-row'), tag: r.dataset.r29 || ''}))"""
+
+# a type-ahead box a row holds twice, or one inside another
+DOUBLED_BOXES = """(sel) => [...document.querySelector(sel).querySelectorAll(':scope > tr')]
+    .map((r, i) => {
+        const boxes = [...r.querySelectorAll('input[role="combobox"]')];
+        const selects = [...r.querySelectorAll('select')].filter(s => s._cbx);
+        return boxes.length !== selects.length || r.querySelector('.cbx .cbx') ? i + 1 : 0;
+    }).filter(Boolean)"""
+
+
+def _split_named(page, sel, form, step, order):
+    """With a Split chooser about: the lines are in `order` ("A*" is line A
+    with its chooser open under it), every field of line k reads "line k",
+    the chooser's own picker reads the number of the line it is under, and
+    no two fields of the grid read the same."""
+    _pickers_settled(page)
+    got = _names(page, sel)
+    rows = page.evaluate(SPLIT_ROWS, sel)
+    where = f"{form}, after {step}"
+    seen = "".join("*" if r["chooser"] else (r["tag"] or "+") for r in rows)
+    assert seen == order, (where, seen)
+    place, n = [], 0
+    for r in rows:
+        n += 0 if r["chooser"] else 1
+        place.append(n)
+    fields = [(place[row], name) for row, _t, role, name in got if role != "button"]
+    for line, name in fields:
+        said = re.findall(r"\bline (\d+)\b", name, flags=re.I)
+        assert said == [str(line)], (where, f"line {line}", name, fields)
+    names = [name for _line, name in fields]
+    assert len(set(names)) == len(names), (where, sorted(names))
+    # the chooser took none of the line controls
+    for row, _t, role, name in got:
+        if rows[row]["chooser"]:
+            assert not re.match(r"(Move|Insert|Remove) line", name), (where, name)
+    assert page.evaluate(DOUBLED_BOXES, sel) == [], (where, "a doubled picker box")
+
+
+def _press_words(page, sel, row, text):
+    """Focus the row's button of those words (Split, Apply, Cancel) and press Enter."""
+    ok = page.evaluate(
+        """([sel, row, text]) => {
+            const tr = document.querySelector(sel).querySelectorAll(':scope > tr')[row];
+            const b = [...tr.querySelectorAll('button')].find(x => x.textContent.trim() === text);
+            if (!b) return false;
+            b.focus();
+            return document.activeElement === b;
+        }""",
+        [sel, row, text],
+    )
+    assert ok, f"no '{text}' button to focus in row {row + 1}"
+    page.keyboard.press("Enter")
+
+
+def _on_split_of(page, sel, form, step, row):
+    at = _focus(page, sel)
+    where = f"{form}, after {step}"
+    assert not at["body"], (where, "the keyboard fell to the document body", at)
+    assert (at["tagName"], at["text"], at["row"]) == ("BUTTON", "Split", row), (
+        where,
+        at,
+    )
+
+
+def _sweep_split(browser, client, form):
+    name, _route, _opener, sel, orders, removes = form
+    page, _handled = _open_form(browser, client, form)
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        while page.evaluate(ROW_COUNT, sel) < 3:
+            _add_line(page, sel)
+        page.evaluate(MARK, sel)
+        # an amount on each line, for the split to share out
+        page.evaluate(
+            """(sel) => [...document.querySelector(sel).querySelectorAll(':scope > tr')]
+                .forEach((r, i) => {
+                    const x = r.querySelector('.je-debit, .line-rate');
+                    x.value = String((i + 1) * 100);
+                    x.dispatchEvent(new Event('input', {bubbles: true}));
+                })""",
+            sel,
+        )
+        _split_named(page, sel, name, "opening", "ABC")
+
+        # the chooser under line 1: the lines under it keep their numbers
+        _press_words(page, sel, 0, "Split")
+        _split_named(page, sel, name, "Split on line 1", "A*BC")
+        # Cancel: the keyboard goes back to the line's Split
+        _press_words(page, sel, 1, "Cancel")
+        _split_named(page, sel, name, "Cancel in the chooser", "ABC")
+        _on_split_of(page, sel, name, "Cancel in the chooser", 0)
+
+        _press_words(page, sel, 0, "Split")
+        order = "A*BC"
+        if orders:
+            # the chooser moves with its line, and a new line goes under both
+            _press(page, sel, 0, "Move line down")
+            order = "BA*C"
+            _split_named(page, sel, name, "Move line down, chooser open", order)
+            _press(page, sel, 3, "Move line up")
+            order = "BCA*"
+            _split_named(page, sel, name, "Move line up past a chooser", order)
+            _press(page, sel, 2, "Insert line below")
+            page.wait_for_function(f"(sel) => ({ROW_COUNT})(sel) === 5", arg=sel)
+            order = "BCA*+"
+            _split_named(page, sel, name, "Insert line below, chooser open", order)
+        if removes:
+            # a line above the chooser's line goes: the chooser stays with
+            # its line, the keyboard on the line that took the place
+            _press_words(page, sel, 2, "Split")
+            _press(page, sel, 0, "Remove line")
+            _split_named(page, sel, name, "Remove line above a chooser", "B*C")
+            _on_remove_of(page, sel, name, "Remove line above a chooser", "B", 0)
+            # the chooser's own line goes: the chooser with it, and the
+            # keyboard to the line that took its place, not to Add line
+            _press(page, sel, 0, "Remove line")
+            _split_named(page, sel, name, "Remove line under a chooser", "C")
+            _on_remove_of(page, sel, name, "Remove line under a chooser", "C", 0)
+            _add_line(page, sel)
+            _add_line(page, sel)
+            page.evaluate(MARK, sel)
+            order = "ABC"
+            _press_words(page, sel, 0, "Split")
+            order = "A*BC"
+            _split_named(page, sel, name, "Split on line 1 again", order)
+
+        # Apply: one line per share in the line's place, each named by its
+        # place with one box a picker, the keyboard on the first share
+        at = order.index("*")
+        _press_words(page, sel, at, "Apply")
+        after = order[: at - 1] + order[at - 1] * 3 + order[at + 1 :]
+        page.wait_for_function(
+            f"([sel, n]) => ({ROW_COUNT})(sel) === n", arg=[sel, len(after)]
+        )
+        _split_named(page, sel, name, "Apply in the chooser", after)
+        _on_split_of(page, sel, name, "Apply in the chooser", at - 1)
+        assert errors == [], (name, errors)
+    finally:
+        page.close()
+
+
+def test_a_split_names_every_line_by_its_place_and_keeps_the_keyboard(browser, company):
+    r = company.put("/api/settings", json={"company_type": "nonprofit"})
+    assert r.status_code == 200, r.text
+    r = company.post(
+        "/api/nonprofit/allocation-rules",
+        json={
+            "name": "Rent split",
+            "basis": "percent",
+            "targets": [
+                {"function": "program", "weight": 70},
+                {"function": "management", "weight": 20},
+                {"function": "fundraising", "weight": 10},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    for form in FORMS:
+        if form[0] in ("bill", "journal entry"):
+            _sweep_split(browser, company, form)
+
+
+# ---- the pay application: its lines are the job's schedule of values ----
+
+
+def test_pay_application_lines_are_named_by_place_when_item_numbers_repeat(
+    browser, company
+):
+    job_id = _construction_job(company)
+    r = company.put(
+        f"/api/jobs/{job_id}/contract",
+        json={"contract_type": "lump_sum", "contract_amount": 4000},
+    )
+    assert r.status_code == 200, r.text
+    # two lines with the same item number, two with the same description
+    r = company.put(
+        f"/api/jobs/{job_id}/sov",
+        json={
+            "lines": [
+                {
+                    "item_no": "1",
+                    "description": "Sitework",
+                    "kind": "work",
+                    "scheduled_value": 1000,
+                },
+                {"description": "Concrete", "kind": "work", "scheduled_value": 1000},
+                {"description": "Concrete", "kind": "work", "scheduled_value": 1000},
+                {
+                    "item_no": "1",
+                    "description": "Framing",
+                    "kind": "work",
+                    "scheduled_value": 1000,
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    page, handled = _open_at(browser, company, f"#/jobs/{job_id}", height=900)
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.locator("#job-tab-body").wait_for()
+        page.evaluate("async () => { await JobsPage.setTab('payapps'); }")
+        settle(page, handled)
+        page.evaluate("async () => { await JobsPage.paNew(); }")
+        page.locator("#pa-body tr").first.wait_for(state="attached")
+        settle(page, handled)
+        assert page.evaluate(ROW_COUNT, "#pa-body") == 4
+        page.evaluate(MARK, "#pa-body")
+        got = _named_by_place(page, "#pa-body", "pay application", "opening", "ABCD")
+        assert [n for row, _t, _r, n in got if row == 3] == [
+            "This period, line 4",
+            "Stored, line 4",
+        ]
+        assert errors == [], errors
+    finally:
+        page.close()

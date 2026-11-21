@@ -1649,7 +1649,7 @@ const JobsPage = {
                 <th scope="col" class="amount">Completed</th><th scope="col" class="amount">%</th>
                 <th scope="col" class="amount">Balance</th><th scope="col" class="amount">Retainage</th>
             </tr></thead>
-            <tbody id="pa-body">${rows}</tbody>
+            <tbody id="pa-body" data-line-names>${rows}</tbody>
         </table></div>
         <div id="pa-totals" style="display:flex;gap:16px;flex-wrap:wrap;margin:10px 0">
             ${JobsPage.paTotalsHtml(totals)}
