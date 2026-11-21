@@ -263,8 +263,11 @@
     <div class="irs-statement" style="margin-top:14px; padding:10px 12px; border:1px solid #999; font-size:10px; line-height:1.45;">
         <div style="font-weight:700; margin-bottom:4px;">Acknowledgment of contribution</div>
         <table style="font-size:10px; margin-bottom:6px;">
-            <tr><td style="padding-right:12px;">Date of contribution</td><td>{{ inv.date | fdate }}</td></tr>
-            <tr><td style="padding-right:12px;">Amount</td><td>{{ inv.total | currency(cur) }}</td></tr>
+            {# the day the money came in and what was received, as the sentence
+               below says them: a receipt paid later, or in part, is not its own
+               date and total #}
+            <tr><td style="padding-right:12px;">Date of contribution</td><td>{{ (irs.date or inv.date) | fdate }}</td></tr>
+            <tr><td style="padding-right:12px;">Amount</td><td>{{ irs.amount_received | currency(cur) }}</td></tr>
             {% if inv.fair_value_amount %}
             <tr><td style="padding-right:12px;">Fair value of goods or services</td><td>{{ inv.fair_value_amount | currency(cur) }}{% if inv.fair_value_description %} — {{ inv.fair_value_description }}{% endif %}</td></tr>
             <tr><td style="padding-right:12px;">Deductible portion</td><td>{{ irs.deductible_amount | currency(cur) }}</td></tr>

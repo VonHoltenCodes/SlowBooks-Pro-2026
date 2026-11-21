@@ -982,3 +982,35 @@ def test_a_part_paid_receipts_irs_block_is_handed_what_was_received(
     assert (irs["amount_received"], irs["deductible_amount"]) == (30.0, 0.0)
     assert irs["date"] == date(2026, 6, 1)
     assert "In exchange for this contribution of $30.00" in irs["text"]
+
+
+def test_the_receipt_page_prints_what_was_received_and_the_day_it_came_in(
+    client, seed_accounts, seed_customer
+):
+    """The printed receipt's acknowledgment block agrees with its own
+    sentence: its Amount row is what was received, not the receipt's total,
+    and its date is the day the money came in, not the day the receipt was
+    written."""
+    _nonprofit(client)
+    donor = seed_customer.id
+    made = _receipt(
+        client, donor, fair_value_amount="40.00", fair_value_description="Dinner"
+    ).json()
+    receipt = made["invoice"]["id"]
+    total = made["invoice"]["total"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    _pay(client, donor, "2026-06-01", "30.00", receipt)
+    page = client.get(f"/api/invoices/{receipt}/print-preview").text
+    block = page[page.index("Acknowledgment of contribution") :]
+    block = block[: block.index("</table>")]
+    rows = dict(
+        (cells[0], cells[1])
+        for cells in (
+            [c.split("</td>")[0] for c in row.split("<td")[1:]]
+            for row in block.split("<tr>")[1:]
+        )
+    )
+    rows = {k.split(">", 1)[1]: v.split(">", 1)[1] for k, v in rows.items()}
+    assert rows["Amount"] == "$30.00"
+    assert f"${float(total):,.2f}" != rows["Amount"]
+    assert rows["Date of contribution"] == "Jun 01, 2026"
