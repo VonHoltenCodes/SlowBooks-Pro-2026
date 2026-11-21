@@ -1038,9 +1038,21 @@ def test_a_corrected_copy_lists_a_changed_check_number(
 
 
 def test_activity_costs_the_same_statements_however_many_lines_were_edited(
-    client, seed_accounts, db_session
+    client, seed_accounts, db_session, monkeypatch
 ):
+    """What is counted is the Activity read's own cost. The request gate's
+    read of the accountant's-copy mode (app/main.py, accountants_copy.mode)
+    is a few statements on settings at most every five seconds, on whichever
+    request falls after its cache expires; on a slow run it landed inside
+    one of the two measured reads and not the other (24 against 27). The
+    gate is given this file's mode, read once here, so it answers as it
+    would and refreshes nothing; every statement of the read is counted."""
     from sqlalchemy import event
+
+    from app.services import accountants_copy
+
+    the_mode = accountants_copy.mode_of(db_session)
+    monkeypatch.setattr(accountants_copy, "mode", lambda: the_mode)
 
     cust = _customer(client)["id"]
 
@@ -1060,6 +1072,10 @@ def test_activity_costs_the_same_statements_however_many_lines_were_edited(
         def count(*_args):
             seen.append(1)
 
+        if n == 30:
+            # the cache running out inside this measurement and not the
+            # other, as it did on the slow run, must change nothing
+            accountants_copy.forget_mode()
         event.listen(engine, "before_cursor_execute", count)
         try:
             events = _activity(client, "invoice", inv["id"])["events"]
