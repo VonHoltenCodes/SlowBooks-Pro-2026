@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import date
 from decimal import Decimal
 from typing import Iterable, Optional
 
@@ -110,42 +111,80 @@ def _uf_rows(db: Session, uf_id: int) -> list[tuple[TransactionLine, Transaction
 
 
 def waiting_items(
-    db: Session, uf_id: Optional[int] = None
+    db: Session, uf_id: Optional[int] = None, as_of: Optional[date] = None
 ) -> list[tuple[TransactionLine, Transaction]]:
-    """The 1200 debits still waiting for a deposit, oldest first."""
-    return _waiting_and_pool(db, uf_id)[0]
+    """The 1200 debits still waiting for a deposit, oldest first. With
+    `as_of`, the ones that were waiting at the end of that day (see
+    `_waiting_and_pool`); without it, the Make Deposits list."""
+    return _waiting_and_pool(db, uf_id, as_of)[0]
 
 
-def waiting_balance(db: Session, uf_id: Optional[int] = None) -> Decimal:
+def waiting_balance(
+    db: Session, uf_id: Optional[int] = None, as_of: Optional[date] = None
+) -> Decimal:
     """What is actually still waiting in Undeposited Funds.
 
     waiting_items() nets a lump deposit (one that named no items) only
     against WHOLE items, so after a partial lump deposit — $60 of a $100
     payment — the item still shows in full. The leftover of that deposit's
     credit is subtracted here, so a typed deposit can't take the $40 twice.
+
+    With `as_of`, what was waiting at the end of that day.
     """
-    waiting, pool = _waiting_and_pool(db, uf_id)
+    waiting, pool = _waiting_and_pool(db, uf_id, as_of)
     total = sum((Decimal(str(ln.debit)) for ln, _ in waiting), ZERO)
     return max(total - pool, ZERO)
 
 
 def _waiting_and_pool(
-    db: Session, uf_id: Optional[int] = None
+    db: Session, uf_id: Optional[int] = None, as_of: Optional[date] = None
 ) -> tuple[list[tuple[TransactionLine, Transaction]], Decimal]:
     """The waiting items, and what is left of the lump-deposit credits
-    after netting them against whole items oldest first."""
+    after netting them against whole items oldest first.
+
+    `as_of` (Books Check, which sets the list beside the account read to
+    the same day) leaves out customer money and deposits dated after that
+    day: a payment dated later is not waiting yet, and a deposit dated
+    later has taken nothing yet (the payments it names still wait, and its
+    credit is not netted). A later credit from anything else, a purchase
+    line saved on 1200, is still netted, as it is without the cut: it is a
+    line to move, and leaving it out would let the row agree over it.
+    Without `as_of` nothing is cut: the Make Deposits list, which offers a
+    post-dated payment like any other."""
     uf_id = uf_id or uf_account_id(db)
     if not uf_id:
         return [], ZERO
     rows = _uf_rows(db, uf_id)
     dead = dead_transaction_ids(db, (t for _, t in rows))
+    # a deposit not made yet on the as-of day: its stamp counts for nothing
+    later: set[int] = set()
+    if as_of is not None:
+        stamps = {ln.deposit_transaction_id for ln, _ in rows} - {None}
+        if stamps:
+            later = {
+                tid
+                for (tid,) in db.query(Transaction.id).filter(
+                    Transaction.id.in_(stamps), Transaction.date > as_of
+                )
+            }
+
+    def taken(ln: TransactionLine) -> bool:
+        stamp = ln.deposit_transaction_id
+        return bool(stamp) and stamp not in dead and stamp not in later
+
     # A deposit that named its items took exactly those; its credit is not
-    # left over for the netting below.
-    named = {
-        ln.deposit_transaction_id
-        for ln, _ in rows
-        if ln.deposit_transaction_id and ln.deposit_transaction_id not in dead
-    }
+    # left over for the netting below. Read from every line, before the
+    # dated cut: a deposit made by the as-of day that named a payment dated
+    # after it is still a named one, and its credit must not be netted
+    # against some other payment that happens to wait.
+    named = {ln.deposit_transaction_id for ln, _ in rows if taken(ln)}
+    if as_of is not None:
+        ours = customer_money_sources() | {"deposit"}
+        rows = [
+            (ln, t)
+            for ln, t in rows
+            if t.date <= as_of or (ln.credit > 0 and (t.source_type or "") not in ours)
+        ]
     money = customer_money_sources()
     items = [
         (ln, t)
@@ -153,7 +192,7 @@ def _waiting_and_pool(
         if ln.debit > 0
         and (t.source_type or "") in money
         and t.id not in dead
-        and not (ln.deposit_transaction_id and ln.deposit_transaction_id not in dead)
+        and not taken(ln)
     ]
     pool = sum(
         (
