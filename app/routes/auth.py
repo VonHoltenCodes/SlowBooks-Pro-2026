@@ -209,9 +209,19 @@ def _status_while_company_unavailable(request: Request, sentence: str) -> dict:
         "desktop": _desktop_window(request),
         "company_unavailable": sentence,
         "companies": [
-            {**c, "opens": False} for c in served_companies.names_for_sign_in()
+            {**c, "opens": False}
+            for c in served_companies.names_for_sign_in()
+            if not _a_program(request) or c["current"]
         ],
     }
+
+
+def _a_program(request: Request) -> bool:
+    """A request that carries an API token and no sign-in: a program's,
+    told of its own company alone."""
+    return request.session.get("authenticated") is not True and (
+        request.headers.get("authorization") or ""
+    ).lower().startswith("bearer ")
 
 
 def _auth_status(request: Request, db: Session) -> dict:
@@ -232,7 +242,10 @@ def _auth_status(request: Request, db: Session) -> dict:
         # Login UI shows a username field only when this is true.
         "multi_user": is_multi_user(db),
     }
-    if out["multi_user"] and not authenticated:
+    # A program's request (it carries an API token, not a sign-in) is told
+    # of its own company alone: no usernames, and no other company's name.
+    program = not authenticated and _a_program(request)
+    if out["multi_user"] and not authenticated and not program:
         # The names, so the sign-in screen can offer a list instead of a
         # blank field — the way a desktop bookkeeping package does. Names
         # only, never roles; and only on a multi-user install, where the
@@ -270,6 +283,7 @@ def _auth_status(request: Request, db: Session) -> dict:
         out["companies"] = [
             {**c, "opens": authenticated and c["file"] in opens}
             for c in served_companies.names_for_sign_in()
+            if not program or c["current"]
         ]
     if setup_needed:
         from app.models.transactions import Transaction

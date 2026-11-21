@@ -16,13 +16,27 @@
 # the networks listed in _LOCAL_NETWORKS (private or link-local), since the
 # token travels unencrypted. Every other host must be https://, and its
 # certificate is always verified.
+#
+# Several companies: after `add-books`, the store lists each company's books
+# (a handle, the company file, its name) and keeps each one's token in its
+# own private file. Config.books then holds them all, in the order they were
+# added; Config.token and Config.company are the first, the default company
+# (the self-hosted door serves only that one). SBPLIVE_TOKEN_FILE still means
+# one token for one company, whatever the store holds. The companies are
+# kept for the one address they were added at: SBPLIVE_URL naming another is
+# refused, never followed with their tokens.
 # ============================================================================
 
+import hashlib
 import ipaddress
+import json
 import math
 import os
+import re
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import unquote, urlsplit
 
 from app.switchboard import store
@@ -42,14 +56,33 @@ class ConfigError(ValueError):
     """A setting the server cannot start with; the message is the sentence."""
 
 
+class Book(NamedTuple):
+    """One company on a connection of several: its file, token and name."""
+
+    file: str
+    token: str
+    name: str
+
+    def __repr__(self) -> str:  # keep the token out of any log line
+        return f"Book(file={self.file!r}, name={self.name!r})"
+
+
 @dataclass(frozen=True)
 class Config:
     base_url: str
     token: str = ""
     timeout: float = 120.0
+    # The company file the token is sent for (X-SlowBooks-Company), "" for
+    # setup's single token, which names none.
+    company: str = ""
+    # handle -> Book, for a store of several companies; empty otherwise.
+    books: dict = field(default_factory=dict, hash=False)
 
-    def __repr__(self) -> str:  # keep the token out of any log line
-        return f"Config(base_url={self.base_url!r}, timeout={self.timeout})"
+    def __repr__(self) -> str:  # keep the tokens out of any log line
+        return (
+            f"Config(base_url={self.base_url!r}, timeout={self.timeout}, "
+            f"books={len(self.books)})"
+        )
 
 
 # Where plain http:// may go: this computer and the networks an office can
@@ -230,14 +263,130 @@ NOT_SET_UP = (
 )
 
 
+# -- several companies --------------------------------------------------------
+
+# The handle: the company file's stem, "~", and six random characters of
+# lowercase base32, made when the company is added and new each time.
+HANDLE_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}~[a-z2-7]{6}")
+# A company file as SlowBooks Pro names one (company_service's rule).
+FILE_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}\.db")
+MAX_BOOKS = 200
+
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _damaged(path) -> ConfigError:
+    return ConfigError(
+        f"The list of companies in {path} cannot be read: it was changed by "
+        "hand or is damaged. Put back a copy, or run sbplive disconnect "
+        "--forget and add the companies again with sbplive add-books."
+    )
+
+
+def book_rows(folder: Path | None = None) -> list:
+    """The companies the store lists, [{"books", "file", "name",
+    "token_sha256"}] in the order they were added; [] when it lists none.
+    ConfigError when the list is there but cannot be trusted."""
+    path = (folder or store.config_dir()) / store.SETTINGS_NAME
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError):
+        if store.books_dir(folder).is_dir():
+            raise _damaged(path) from None
+        return []
+    if not isinstance(data, dict) or "books" not in data:
+        return []
+    rows = data["books"]
+    if not isinstance(rows, list) or len(rows) > MAX_BOOKS:
+        raise _damaged(path)
+    seen: dict = {"books": set(), "file": set(), "token_sha256": set()}
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise _damaged(path)
+        clean = {k: row.get(k) for k in ("books", "file", "name", "token_sha256")}
+        if not all(isinstance(v, str) for v in clean.values()):
+            raise _damaged(path)
+        if (
+            not HANDLE_RE.fullmatch(clean["books"])
+            or not FILE_RE.fullmatch(clean["file"])
+            or not re.fullmatch(r"[0-9a-f]{64}", clean["token_sha256"])
+        ):
+            raise _damaged(path)
+        for key, values in seen.items():
+            if clean[key] in values:
+                raise _damaged(path)
+            values.add(clean[key])
+        out.append(clean)
+    return out
+
+
+def load_books(folder: Path | None = None) -> dict:
+    """handle -> Book for every company the store lists, each token read
+    from its own private file and checked against the hash kept for it."""
+    books = {}
+    for row in book_rows(folder):
+        handle, name = row["books"], row["name"] or row["file"]
+        path = store.book_token_path(handle, folder)
+        if not path.is_file():
+            raise ConfigError(
+                f"The token file for {name}'s books ({handle}), {path}, is "
+                f"missing. Run: sbplive remove-books {handle}, then add the "
+                "company again with sbplive add-books."
+            )
+        token = _read_token(str(path))
+        if hash_token(token) != row["token_sha256"]:
+            raise ConfigError(
+                f"The token file {path} does not hold the token added for "
+                f"{name}'s books. Run: sbplive remove-books {handle}, then add "
+                "the company again with sbplive add-books."
+            )
+        books[handle] = Book(file=row["file"], token=token, name=row["name"])
+    return books
+
+
+def _kept_for(stored: str | None, base_url: str) -> None:
+    """The companies' books were added for one SlowBooks Pro: their tokens
+    go to no other address (an office server and a copy of it on a laptop
+    hold the same token rows, so a write would land in the copy)."""
+    if not stored:
+        return
+    kept, _ = check_url(stored, must_resolve=False)
+    if kept != base_url:
+        raise ConfigError(
+            f"The companies' books here were added for {kept}, and SBPLIVE_URL "
+            f"names {base_url}. One connection reaches one SlowBooks Pro, so no "
+            "token is sent to another address. Take SBPLIVE_URL out of the "
+            "environment, or run sbplive disconnect --forget and add the books "
+            "again for that address."
+        )
+
+
 def load_config() -> Config:
-    raw_url = os.environ.get("SBPLIVE_URL") or store.stored_url() or DEFAULT_URL
+    stored = store.stored_url()
+    raw_url = os.environ.get("SBPLIVE_URL") or stored or DEFAULT_URL
     base_url, _ = check_url(raw_url, must_resolve=False)
+    timeout = _timeout(os.environ.get("SBPLIVE_TIMEOUT_SECONDS") or "120")
     token_file = os.environ.get("SBPLIVE_TOKEN_FILE")
     if token_file is None or token_file == "":
+        books = load_books()
+        if books:
+            _kept_for(stored, base_url)
+            first = next(iter(books.values()))
+            return Config(
+                base_url=base_url,
+                token=first.token,
+                timeout=timeout,
+                company=first.file,
+                books=books,
+            )
         if not store.has_token():
             raise ConfigError(NOT_SET_UP)
         token_file = str(store.token_path())
     token = _read_token(token_file)
-    timeout = _timeout(os.environ.get("SBPLIVE_TIMEOUT_SECONDS") or "120")
     return Config(base_url=base_url, token=token, timeout=timeout)

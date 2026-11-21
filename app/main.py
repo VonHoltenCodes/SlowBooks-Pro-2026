@@ -201,6 +201,11 @@ LINK_TOKEN_ADDRESS_REFUSAL = (
     "This token works only for the AI assistant connection on this computer."
 )
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
+# A 401 the gate gives a request's token (it matches nothing here, or it
+# was turned off) carries this, so a program holding the token can tell it
+# from a route's own 401 (a sign-in that failed, a webhook's signature) and
+# stop using only a token the gate refused.
+_TOKEN_REFUSED_HEADER = "X-SlowBooks-Token-Refused"
 
 
 def _payroll_secret_problem(
@@ -1533,14 +1538,20 @@ async def _require_session(request: Request, call_next):
                         "Ask an administrator for a new one under Settings, API Tokens."
                     )
                 },
+                headers={_TOKEN_REFUSED_HEADER: "1"},
             )
         if token_principal is None:
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Not authenticated"},
+                headers=(
+                    {_TOKEN_REFUSED_HEADER: "1"}
+                    if auth_header.startswith("Bearer ")
+                    else None
+                ),
             )
-        if _is_link_label(
-            token_principal.get("label")
+        if (
+            token_principal.get("link") or _is_link_label(token_principal.get("label"))
         ) and not _from_this_apps_own_address(request):
             return JSONResponse(
                 status_code=401,
@@ -1602,6 +1613,7 @@ async def _require_session(request: Request, call_next):
         request.state.token_principal = {
             "username": "token:" + token_principal["label"],
             "label": token_principal["label"],
+            "ends_with_maker": bool(token_principal.get("ends_with_maker")),
             "role": role,
             "allow_backups": allow_backups,
             "allow_payroll": allow_payroll,
@@ -1784,17 +1796,28 @@ def _request_company(scope, session):
     not a company file's name, or names a company this server does not
     serve now gets _UNSERVED, and is refused: it is never answered from
     the company the server was started for instead. A header naming that
-    company is honoured. A signed-in session ignores the header."""
+    company is honoured. A signed-in session ignores the header; a request
+    with no sign-in that carries the header or a token follows these rules
+    whatever company its cookie chose."""
     from app.services import served_companies
     from app.services.company_service import safe_company_filename
 
     chosen = served_companies.chosen_file(session)
-    if chosen is not None or session.get("authenticated") is True:
+    if session.get("authenticated") is True:
         return chosen
     wanted = _COMPANY_HEADER.lower().encode("latin-1")
-    given = [value for name, value in scope.get("headers") or [] if name == wanted]
+    headers = scope.get("headers") or []
+    given = [value for name, value in headers if name == wanted]
     if not given:
-        return None
+        # A token's request with no header is the started company's, even
+        # when its cookie chose another company before any sign-in (the
+        # sign-in screen's choice is for the person signing in, not for a
+        # token, which is looked up where it is asked for).
+        bearer = any(
+            name == b"authorization" and value[:7].lower() == b"bearer "
+            for name, value in headers
+        )
+        return None if bearer else chosen
     if len(given) > 1:
         return _UNSERVED
     filename = given[0].decode("latin-1").strip()

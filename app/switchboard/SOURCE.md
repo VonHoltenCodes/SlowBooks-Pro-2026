@@ -7,8 +7,16 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: 842aa6a73480ea7f560169319aee919bffab29f5 (branch multi-company,
-  2026-11-21): one connection can work several companies' books. Every
+- Commit: 979edbed2bf4271a582fe9e7e27595f844466775 (branch multi-company,
+  2026-11-21): a company leaves the connection only when SlowBooks Pro's
+  gate turned its token away (X-SlowBooks-Token-Refused), never on a
+  route's own 401; no tool sends anything but a GET under /api/auth/; the
+  sentence for a refused company comes from the Books provider
+  (`lost_sentence`); and Switchboard's own store (sbplive add-books, which
+  the product does not run) keeps its companies for one address and only
+  under tokens SlowBooks Pro ends with their maker. Before it: b7e258f
+  (Switchboard's store of several companies), and 842aa6a: one connection
+  can work several companies' books. Every
   tool takes a `books` argument, the handle `context` lists; a connection
   of several companies refuses a call that names none, an unknown handle,
   or a company's name or file, before anything is sent, and every result
@@ -48,19 +56,19 @@ The modules `line.py` imports, directly or through `server.py` (and
 |---|---:|
 | `__init__.py` | 16 |
 | `account.py` | 606 |
-| `client.py` | 352 |
-| `config.py` | 243 |
-| `line.py` | 1030 |
+| `client.py` | 372 |
+| `config.py` | 392 |
+| `line.py` | 1044 |
 | `logs.py` | 78 |
 | `operations.py` | 692 |
 | `protocol.py` | 493 |
-| `registry.py` | 683 |
+| `registry.py` | 708 |
 | `remote.py` | 682 |
-| `server.py` | 624 |
-| `store.py` | 170 |
+| `server.py` | 629 |
+| `store.py` | 259 |
 | `tools.py` | 1243 |
 | `ws.py` | 589 |
-| 14 files | 7501 |
+| 14 files | 7803 |
 
 Not copied: the self-hosted HTTP door's runner (`serve_http.py`, which
 shows its connector secret on first run), the OAuth door (`oauth*.py`,

@@ -199,6 +199,7 @@ def test_whoami_says_which_company_role_and_token(served):
         "company_name": "Bravo Food Pantry",
         "role": "readonly",
         "label": "pantry script",
+        "ends_with_maker": False,
     }
     assert r.headers[SERVED] == "bravo.db"
     person = TestClient(app)
@@ -208,6 +209,7 @@ def test_whoami_says_which_company_role_and_token(served):
         "company_name": "Bravo Food Pantry",
         "role": "admin",
         "label": None,
+        "ends_with_maker": False,
     }
 
 

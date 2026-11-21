@@ -680,7 +680,7 @@ def test_a_refused_token_loses_its_secret_and_a_restore_does_not_bring_it_back(
     """Smith fires the person who added it (he is demoted there): the next
     call is refused at once, the secret is deleted from the record, and
     making him an administrator again does not reopen the books through it:
-    an administrator of Smith adds it again."""
+    it is added again from Smith's panel."""
     _connected_with(three, relay, "smith.db")
     smith = _record()["companies"][1]
     registry = build_registry(link.LinkBooks())
@@ -691,8 +691,9 @@ def test_a_refused_token_loses_its_secret_and_a_restore_does_not_bring_it_back(
     assert result["content"][-1]["text"] == (
         "Smith Plumbing no longer accepts this connection: its token was turned "
         "off there, or the person who added it is no longer an administrator "
-        "there. An administrator of Smith Plumbing can add it again. Nothing was "
-        "done."
+        "there. To use it again, someone who is an administrator of Smith "
+        "Plumbing, and of every other company on this connection, adds it again "
+        "in Smith Plumbing's Settings, under Connections. Nothing was done."
     )
     kept = _record()["companies"][1]
     assert kept["off"] == "refused" and kept["token"] == ""

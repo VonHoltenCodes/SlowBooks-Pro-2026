@@ -513,3 +513,51 @@ test('a company name is shown as text, never as markup', async () => {
     assert.ok(!f.panel.innerHTML.includes('<img'));
     assert.ok(f.panel.innerHTML.includes('&lt;img src=x onerror=1&gt;'));
 });
+
+test('Add names the token it will make, " 2" and all', async () => {
+    const offered = {
+        state: 'connected', linked: true, on_link: false, this_company: false, here_name: 'Smith Plumbing',
+        can_manage: true, can_add: true, next_label: 'AI assistant (relay) 2',
+    };
+    const f = fixture({ '/switchboard/status': offered });
+    await f.page.loadSwitchboard();
+    assert.ok(text(f.panel.innerHTML).includes("Every change it makes is recorded in Smith Plumbing's audit log as token:AI assistant (relay) 2."));
+});
+
+test('a manager offered no code is told which companies it waits for', async () => {
+    const f = fixture({ '/switchboard/status': { ...MANAGER, can_code: false, code_needs: ['Lake Dental'] } });
+    await f.page.loadSwitchboard();
+    assert.ok(text(f.panel.innerHTML).includes('A sign-in code reaches every company on the connection, so it is offered only while each of them can answer now and you are an administrator of each. Not now: Lake Dental.'));
+    assert.ok(!buttons(f.panel.innerHTML).includes('Show a sign-in code'));
+    const g = fixture({ '/switchboard/status': MANAGER });
+    await g.page.loadSwitchboard();
+    assert.ok(!g.panel.innerHTML.includes('claude-relay-code-needs'));
+});
+
+test('this company, turned off, is "turned off in this company"', async () => {
+    const mine = THREE.map(c => (c.here ? { ...c, state: 'refused' } : c));
+    const f = fixture({ '/switchboard/status': { ...MANAGER, companies: mine } });
+    await f.page.loadSwitchboard();
+    assert.ok(text(f.panel.innerHTML).includes('Harbor Books (this company; turned off in this company)'));
+    assert.ok(text(f.panel.innerHTML).includes('Lake Dental (turned off in that company)'));
+});
+
+test('a long company name wraps in the list and in its button', async () => {
+    const long = 'L'.repeat(85);
+    const list = THREE.map(c => (c.file === 'lake.db' ? { ...c, name: long } : c));
+    const f = fixture({ '/switchboard/status': { ...MANAGER, companies: list } });
+    await f.page.loadSwitchboard();
+    const html = f.panel.innerHTML;
+    assert.match(html, /id="claude-relay-companies" style="[^"]*overflow-wrap:anywhere/);
+    assert.match(html, /id="claude-take-off-lake_2e_db"[^>]*overflow-wrap:anywhere/);
+});
+
+test('a company turned off here is offered Add again', async () => {
+    const dead = {
+        ...CONNECTED, can_add: true, here_name: 'Larkspur Supply', next_label: 'AI assistant (relay)',
+        companies: [{ ...CONNECTED.companies[0], state: 'refused' }],
+    };
+    const f = fixture({ '/switchboard/status': dead });
+    await f.page.loadSwitchboard();
+    assert.ok(buttons(f.panel.innerHTML).includes('Add Larkspur Supply to the AI connection'));
+});

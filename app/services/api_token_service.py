@@ -42,6 +42,20 @@ def is_link_label(label: str | None) -> bool:
     return isinstance(label, str) and label.startswith(LINK_TOKEN_LABEL)
 
 
+# A token whose name starts with this (in any letter case) is an AI
+# assistant's: the built-in connection's own, or one made by hand for
+# SlowBooks Switchboard ("AI assistant (Switchboard)"). Such a token works
+# only while the administrator who made it is still one in its company.
+AI_TOKEN_PREFIX = "AI assistant"
+
+
+def is_ai_label(label: str | None) -> bool:
+    """A label that ties a token to its maker: an AI assistant's."""
+    return isinstance(label, str) and label.strip().lower().startswith(
+        AI_TOKEN_PREFIX.lower()
+    )
+
+
 def looks_like_link_label(label: str | None) -> bool:
     """A label a token made or renamed by hand may not take: the
     connection's own, in any letter case (the connection finds its tokens
@@ -84,12 +98,30 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _link_hashes() -> frozenset:
+    """The hashes of the tokens the AI assistant connection on this computer
+    keeps (whatever they are named now), from its kept record."""
+    try:
+        from app.services.switchboard_link import link_token_hashes
+
+        return link_token_hashes()
+    except Exception:
+        return frozenset()
+
+
 def resolve(bearer: str) -> dict | None:
     """Bearer secret → {"label", "role", "allow_backups", "allow_payroll",
-    "allow_imports"} for an active token; {"revoked":
-    True, "label"} for one an administrator turned off (so the 401 can say
-    so, #434), or for an AI assistant connection token whose maker is no
-    longer an administrator here; None for a secret that matches nothing."""
+    "allow_imports", "link", "ends_with_maker"} for an active token;
+    {"revoked": True, "label"} for one an administrator turned off (so the
+    401 can say so, #434), or for an AI assistant's token whose maker is no
+    longer an administrator here; None for a secret that matches nothing.
+
+    "link": the token is one the AI assistant connection on this computer
+    keeps, known by its name or by its hash in the connection's record (a
+    connection token renamed before names were locked is still one).
+    "ends_with_maker": it works only while its maker is an administrator
+    here (every AI assistant's token: the connection's, and one named for
+    an AI assistant, as SlowBooks Switchboard's are)."""
     if not bearer or not bearer.startswith(TOKEN_PREFIX):
         return None
     from app.database import SessionLocal
@@ -103,9 +135,11 @@ def resolve(bearer: str) -> dict | None:
             return None
         if not row.is_active:
             return {"revoked": True, "label": row.label}
-        if is_link_label(row.label) and not _maker_still_admin(db, row.created_by):
-            # the AI assistant connection's token works only while the
-            # administrator who added this company to it still is one here
+        link = is_link_label(row.label) or row.token_hash in _link_hashes()
+        ends_with_maker = link or is_ai_label(row.label)
+        if ends_with_maker and not _maker_still_admin(db, row.created_by):
+            # an AI assistant's token works only while the administrator
+            # who made it (who added this company to it) still is one here
             return {"revoked": True, "label": row.label}
         now = datetime.now(timezone.utc)
         last = row.last_used_at
@@ -124,6 +158,8 @@ def resolve(bearer: str) -> dict | None:
             "allow_backups": bool(row.allow_backups),
             "allow_payroll": bool(row.allow_payroll),
             "allow_imports": bool(row.allow_imports),
+            "link": link,
+            "ends_with_maker": ends_with_maker,
         }
     finally:
         db.close()

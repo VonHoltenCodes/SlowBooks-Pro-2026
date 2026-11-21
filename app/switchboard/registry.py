@@ -548,10 +548,14 @@ def choose(entries: list, count: int, books, tool: str) -> dict:
 
 
 def _lost_sentence(name: str) -> str:
+    """A company that turned the connection's token away; a provider that
+    knows how that company is added again says so with its own
+    lost_sentence(entry)."""
     return (
         f"{name} no longer accepts this connection: its token was turned off "
         "there, or the person who added it is no longer an administrator there. "
-        f"An administrator of {name} can add it again. " + NOTHING_DONE
+        "Tell the person; it can be used again only when it is added again. "
+        + NOTHING_DONE
     )
 
 
@@ -569,14 +573,33 @@ def _unserved_sentence(name: str) -> str:
     )
 
 
-def _books_error(exc: ApiError, entry: dict) -> str | None:
+def lost_sentence(provider, entry: dict) -> str:
+    """The provider's own sentence for a company that turned its token away,
+    else the plain one."""
+    own = getattr(provider, "lost_sentence", None)
+    if callable(own):
+        try:
+            said = own(entry)
+        except Exception:  # the answer still goes back
+            log.exception("the books provider failed to word a refused token")
+            said = None
+        if isinstance(said, str) and said:
+            return said
+    return _lost_sentence(_shown(entry))
+
+
+def _books_error(exc: ApiError, entry: dict, provider=None) -> str | None:
     """The sentence for an answer about which books, on a connection that
     names its books; None for every other answer."""
     if not entry.get("books"):
         return None
     name = _shown(entry)
+    if exc.status == 401 and exc.token_refused:
+        return lost_sentence(provider, entry)
     if exc.status == 401:
-        return _lost_sentence(name)
+        # a route's own 401 (a webhook's signature, say): this request was
+        # refused, and the company's token was not
+        return f"SlowBooks Pro refused this: {_end(str(exc.detail or ''))}"
     if exc.status == 421:
         return _unserved_sentence(name)
     if exc.status == 503 and not exc.stamped:
@@ -654,9 +677,11 @@ class Registry:
             log.warning("tool %s: the answer did not confirm its company", name)
             return _error(stamp, _unconfirmed_sentence(_shown(entry)))
         except ApiError as exc:
-            if exc.status == 401:
+            if exc.status == 401 and exc.token_refused:
+                # only the gate's own refusal of the token ends the
+                # company's place: never a route's 401
                 self._lost(entry.get("books"))
-            sentence = _books_error(exc, entry) or error_sentence(exc)
+            sentence = _books_error(exc, entry, self.books) or error_sentence(exc)
             return _error(stamp, sentence)
         except ValueError as exc:
             return _error(stamp, error_sentence(exc))

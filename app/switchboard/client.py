@@ -61,6 +61,15 @@ _SERVED_LOWER = SERVED_HEADER.lower()
 # and the sign-in routes): those answers never say which company served them.
 _UNSTAMPED_EXACT = {"/openapi.json"}
 _UNSTAMPED_PREFIXES = ("/api/auth/",)
+# SlowBooks Pro's gate puts this on a 401 when it turned the request's token
+# away (it matches nothing there, or was turned off): a sign-in route's or a
+# webhook's own 401 does not carry it.
+TOKEN_REFUSED_HEADER = "X-SlowBooks-Token-Refused"
+_REFUSED_LOWER = TOKEN_REFUSED_HEADER.lower()
+# Where people sign in to SlowBooks Pro: this program works through its token
+# and only reads the sign-in status there (never a sign-in, which would
+# count against the sign-in limit, or a password change).
+_SIGN_IN_PREFIX = "/api/auth/"
 
 
 class ApiError(Exception):
@@ -71,6 +80,8 @@ class ApiError(Exception):
         # whether the answer said which company served it (a refusal made
         # before the token was read never does)
         self.stamped = False
+        # a 401 the app's gate gave the token itself, not a route's own
+        self.token_refused = False
 
     def __str__(self) -> str:
         return f"HTTP {self.status}: {self.detail}"
@@ -125,6 +136,12 @@ def refusal(method: str, path: str) -> str | None:
     """The sentence for a request this program keeps to SlowBooks Pro."""
     if not reachable(path):
         return unreachable_sentence(path)
+    if path.startswith(_SIGN_IN_PREFIX) and method.upper() != "GET":
+        return (
+            f"{path} is where people sign in to SlowBooks Pro. SlowBooks "
+            "Switchboard works through its API token and does not send to it. "
+            "Nothing was done."
+        )
     return None
 
 
@@ -326,6 +343,9 @@ class ApiClient:
             detail = json.dumps(detail)  # a validation error is a list
         exc = ApiError(status, detail or f"the request failed with status {status}")
         exc.stamped = answered is not None and _SERVED_LOWER in answered
+        exc.token_refused = status == 401 and bool(
+            answered and str(answered.get(_REFUSED_LOWER) or "").strip() == "1"
+        )
         raise exc
 
     def request(

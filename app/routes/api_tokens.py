@@ -22,6 +22,7 @@ from app.models.users import ROLE_ADMIN, ROLE_BOOKKEEPER, VALID_ROLES
 from app.services.api_token_service import (
     generate_token,
     hash_token,
+    is_ai_label,
     is_link_label,
     looks_like_link_label,
 )
@@ -33,6 +34,13 @@ LINK_LABEL_LOCKED = (
 )
 LINK_LABEL_TAKEN = (
     "That name belongs to the AI assistant connection's tokens. Choose another name."
+)
+# A token named for an AI assistant ends when its maker stops being an
+# administrator here; renamed to something else, it would not.
+AI_LABEL_KEPT = (
+    "This token is an AI assistant's: its name must still start with \"AI "
+    'assistant", so it keeps ending when the administrator who made it is no '
+    "longer one here."
 )
 
 
@@ -211,6 +219,8 @@ def update_token(
             raise HTTPException(status_code=400, detail=LINK_LABEL_LOCKED)
         if label != row.label and looks_like_link_label(label):
             raise HTTPException(status_code=400, detail=LINK_LABEL_TAKEN)
+        if is_ai_label(row.label) and not is_ai_label(label):
+            raise HTTPException(status_code=400, detail=AI_LABEL_KEPT)
         clash = (
             db.query(ApiToken)
             .filter(ApiToken.label == label, ApiToken.id != token_id)

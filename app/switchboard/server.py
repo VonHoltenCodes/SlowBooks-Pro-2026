@@ -14,7 +14,6 @@ import logging
 import sys
 
 from app.switchboard import logs, operations, tools
-from app.switchboard.client import ApiClient, urllib_transport
 from app.switchboard.config import ConfigError, load_config
 from app.switchboard.protocol import (
     HANDSHAKE_VERSIONS,
@@ -606,6 +605,10 @@ def _header_problem(message: dict, headers) -> str | None:
 
 
 def run() -> int:
+    # Imported here: a program that embeds the tools (server.Mcp) does not
+    # need the store of companies.
+    from app.switchboard import books
+
     logs.setup()
     try:
         config = load_config()
@@ -613,11 +616,13 @@ def run() -> int:
         log.error("%s", exc)
         return 2
     log.info("started for %s", config.base_url)
+    if config.books:
+        log.info("with %s companies' books", len(config.books))
     # Only protocol messages go to stdout: anything printed by mistake goes
     # to stderr instead of corrupting the stream.
     out = sys.stdout.buffer
     sys.stdout = sys.stderr
-    session = Session(build_registry(ApiClient(urllib_transport(config))), INSTRUCTIONS)
+    session = Session(build_registry(books.provider(config)), INSTRUCTIONS)
     try:
         return serve_stdio(session, sys.stdin.buffer, out)
     except KeyboardInterrupt:

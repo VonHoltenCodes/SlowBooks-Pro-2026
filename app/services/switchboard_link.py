@@ -175,6 +175,10 @@ ALREADY = "An AI assistant connection already exists on this computer. Use Add i
 ALREADY_ON = "This company is already on the AI assistant connection."
 NOT_ON = "That company is not on the AI assistant connection."
 ONLY_ADMIN = "Only an administrator can connect an AI assistant."
+NOT_ADMIN_THERE = (
+    "Only an administrator of that company can take it off the AI assistant "
+    "connection."
+)
 NOT_A_MANAGER = (
     "Only someone who is an administrator of every company on the AI assistant "
     "connection can do this. On a server, sign in with the same username and "
@@ -214,8 +218,9 @@ DAMAGED_ELSEWHERE = (
 NOTHING_DONE = "Nothing was done."
 BOOKS_LOST = (
     "{name} no longer accepts this connection: its token was turned off there, or "
-    "the person who added it is no longer an administrator there. An administrator "
-    "of {name} can add it again. " + NOTHING_DONE
+    "the person who added it is no longer an administrator there. To use it again, "
+    "someone who is an administrator of {name}, and of every other company on this "
+    "connection, adds it again in {name}'s Settings, under Connections. " + NOTHING_DONE
 )
 BOOKS_NOT_OPEN = (
     "{name} is not open in SlowBooks Pro on this computer. Ask the person to open "
@@ -585,9 +590,30 @@ def _hash(secret: str) -> str:
     return hash_token(secret)
 
 
+def _named_now(entries: list) -> list:
+    """The entries with each company's name as it is now: the name the
+    company list gives its file (a rename in Settings changes it there), or
+    the one kept when the list names it not."""
+    try:
+        from app.services import served_companies
+
+        names = {r["file"]: r["name"] for r in served_companies.listed() if r["name"]}
+    except Exception:
+        names = {}
+    for entry in entries:
+        name = names.get(entry.get("file") or "")
+        if name:
+            entry["name"] = name
+    return entries
+
+
 def _entries(record: dict) -> list:
     """The companies on the connection, as entries (copies): format 2's own
-    list, or format 1's one company."""
+    list, or format 1's one company, each named as it is now."""
+    return _named_now(_kept_entries(record))
+
+
+def _kept_entries(record: dict) -> list:
     if isinstance(record.get("companies"), list):
         return [dict(e) for e in record["companies"]]
     token = record.get("token") or ""
@@ -700,6 +726,35 @@ def _record_stamp():
     except OSError:
         return None
     return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+_hashes_seen: dict = {"stamp": object(), "hashes": frozenset()}
+_hashes_lock = threading.Lock()
+
+
+def link_token_hashes() -> frozenset:
+    """The SHA-256 of every token the kept record holds, live or turned
+    off, whatever each is named now in its company (a token beta.1 let be
+    renamed is still the connection's). Read again when the file changes;
+    empty when there is no record or it cannot be read."""
+    stamp = _record_stamp()
+    with _hashes_lock:
+        if stamp == _hashes_seen["stamp"]:
+            return _hashes_seen["hashes"]
+    found: set = set()
+    if stamp is not None:
+        try:
+            record = _load()
+        except (SwitchboardError, OSError, ValueError, KeyError, TypeError):
+            record = None
+        if record is not None:
+            for entry in _entries(record):
+                if entry.get("token_sha256"):
+                    found.add(entry["token_sha256"])
+    hashes = frozenset(found)
+    with _hashes_lock:
+        _hashes_seen.update(stamp=stamp, hashes=hashes)
+    return hashes
 
 
 # -- the locks ------------------------------------------------------------------------
@@ -1393,9 +1448,11 @@ def _server_edition() -> bool:
 
 
 def _several_served() -> bool:
-    from app.services import served_companies
-
-    return served_companies.enabled()
+    """Server Edition on company files, which may serve several companies:
+    the manager rule follows the mode, not how many companies are listed
+    now (with the others unlisted, an administrator of the one left must not
+    take power over a connection that still holds them)."""
+    return _server_edition() and not _on_postgres()
 
 
 def _on_postgres() -> bool:
@@ -1503,14 +1560,14 @@ class LinkBooks:
         stamp = _record_stamp()
         with self._mutex:
             if stamp == self._stamp:
-                return [dict(e) for e in self._entries]
+                return _named_now([dict(e) for e in self._entries])
         try:
             record = _load()
         except SwitchboardError:
             record = None
         with self._mutex:
             self._use(record, stamp)
-            return [dict(e) for e in self._entries]
+            return _named_now([dict(e) for e in self._entries])
 
     def entries(self) -> list:
         here = _company_here()
@@ -1578,6 +1635,10 @@ class LinkBooks:
 
     def lost(self, books) -> None:
         drop_secret(books)
+
+    def lost_sentence(self, entry: dict) -> str:
+        """What the assistant hears when the company turned the token away."""
+        return BOOKS_LOST.format(name=entry.get("name") or entry.get("file") or "")
 
 
 def drop_secret(books: str | None) -> bool:
@@ -1910,7 +1971,7 @@ def _may_manage(session, entries: list, *, reachable_only: bool, adding: bool = 
         return (adding or any(e["file"] == here for e in entries)), []
     checked, missing = 0, []
     for entry in entries:
-        if reachable_only and not _company_open(entry["file"]):
+        if reachable_only and not _reachable(entry["file"]):
             continue
         checked += 1
         if not _admin_of(session, entry["file"]):
@@ -1918,6 +1979,12 @@ def _may_manage(session, entries: list, *, reachable_only: bool, adding: bool = 
     if adding:
         checked += 1
     return (checked > 0 and not missing), missing
+
+
+def _reachable(company_file: str) -> bool:
+    """A company served here now whose books can be opened (not locked, not
+    under a key of its own, not behind or past this build's schema)."""
+    return _company_open(company_file) and not _locked(company_file)
 
 
 def _here_name() -> str:
@@ -1977,6 +2044,10 @@ def status(session=None) -> dict:
     here = _company_here()
     mine = next((e for e in entries if e["file"] == here), None)
     manager, _ = _may_manage(session, entries, reachable_only=True)
+    # this company is on it, but its token was turned off here: it can be
+    # added again in place (by the same rule as an Add)
+    dead_here = mine is not None and _dead(mine)
+    others = [e for e in entries if e is not mine]
     out.update(linked=True, on_link=mine is not None, this_company=mine is not None)
     if mine is not None:
         out.update(
@@ -1998,7 +2069,11 @@ def status(session=None) -> dict:
             for e in entries
         ]
         out["count_others"] = len(entries) - (1 if mine is not None else 0)
-        out["can_code"] = _may_manage(session, entries, reachable_only=False)[0]
+        can_code, needs = _may_manage(session, entries, reachable_only=False)
+        out["can_code"] = can_code
+        # the companies a code waits for: each must answer now, with this
+        # person an administrator there
+        out["code_needs"] = needs
         out["can_disconnect"] = True
     if mine is not None or manager:
         state, sentence = _line_state(record["device"])
@@ -2019,7 +2094,28 @@ def status(session=None) -> dict:
             out["here_name"] = _here_name()
         elif not manager:
             out["sentence"] = NOT_A_MANAGER_ADD.format(name=_here_name())
+    elif dead_here and admin and not _on_postgres():
+        if _may_manage(session, others, reachable_only=False, adding=True)[0]:
+            out["can_add"] = True
+            out["here_name"] = _here_name()
+    if out["can_add"]:
+        # the name the token Add makes will carry (" 2" when the plain one
+        # is taken here), which every change it makes is recorded under
+        out["next_label"] = _next_label_here()
     return out
+
+
+def _dead(entry: dict) -> bool:
+    """A company on the connection whose token was turned off there."""
+    return bool(entry.get("off")) or not entry.get("token")
+
+
+def _next_label_here() -> str:
+    try:
+        with _in_company(_company_here()) as mine:
+            return _free_label(mine)
+    except Exception:
+        return TOKEN_LABEL
 
 
 # -- a call to the relay: one deadline, one classification ---------------------------
@@ -2728,17 +2824,27 @@ def add_here(db, username: str, session) -> dict:
         if record is None:
             raise SwitchboardError(409, NOT_LINKED)
         entries = _entries(record)
-        if any(e["file"] == here for e in entries):
+        old = next((e for e in entries if e["file"] == here), None)
+        if old is not None and not _dead(old):
             raise SwitchboardError(409, ALREADY_ON)
         if _on_postgres():
             raise SwitchboardError(409, ONE_ON_POSTGRES)
-        if len(entries) >= MAX_COMPANIES:
+        if old is None and len(entries) >= MAX_COMPANIES:
             raise SwitchboardError(409, NOT_ADDED)
-        if not _may_manage(session, entries, reachable_only=False, adding=True)[0]:
+        # A company whose token was turned off here is added again in its
+        # place: by the same rule as an Add, the others on the connection
+        # counted, not its own dead entry.
+        others = [e for e in entries if e is not old]
+        if not _may_manage(session, others, reachable_only=False, adding=True)[0]:
             raise SwitchboardError(403, NOT_A_MANAGER_ADD.format(name=_here_name()))
         token_id = None
         try:
             with _in_company(here, acting=username or "operator") as mine:
+                if old is not None:
+                    # the old token's secret is gone from this computer;
+                    # its row is turned off too (its maker may be an
+                    # administrator again, which would revive it)
+                    _revoke_by_hash(mine, old)
                 label = _free_label(mine)
                 row, secret = api_tokens.issue_token(
                     mine,
@@ -2748,20 +2854,22 @@ def add_here(db, username: str, session) -> dict:
                 )
                 token_id, label = row.id, row.label
                 name = current_company_name(mine)
-            entries.append(
-                {
-                    "books": _new_handle(here, {e["books"] for e in entries}),
-                    "file": here,
-                    "name": name,
-                    "token": secret,
-                    "token_sha256": _hash(secret),
-                    "token_id": token_id,
-                    "token_label": label,
-                    "added_at": datetime.now(timezone.utc).isoformat(),
-                    "added_by": username or "operator",
-                    "off": "",
-                }
-            )
+            fresh = {
+                "books": _new_handle(here, {e["books"] for e in entries}),
+                "file": here,
+                "name": name,
+                "token": secret,
+                "token_sha256": _hash(secret),
+                "token_id": token_id,
+                "token_label": label,
+                "added_at": datetime.now(timezone.utc).isoformat(),
+                "added_by": username or "operator",
+                "off": "",
+            }
+            if old is None:
+                entries.append(fresh)
+            else:
+                entries[entries.index(old)] = fresh
             changed = _format2(record, entries)
             _save(changed)
         except Exception as exc:
@@ -2836,14 +2944,18 @@ def take_off(db, company_file: str, session) -> dict:
             raise SwitchboardError(409, NOT_LINKED)
         entries = _entries(record)
         entry = next((e for e in entries if e["file"] == company_file), None)
-        if entry is None:
-            raise SwitchboardError(404, NOT_ON)
-        dead = bool(entry["off"]) or not entry["token"]
+        # who may is asked first, and refused in one sentence whether that
+        # company is on the connection or not: a client's administrator
+        # never learns which other companies are on it
         allowed = _admin_of(session, company_file) or (
-            dead and _may_manage(session, entries, reachable_only=True)[0]
+            entry is not None
+            and _dead(entry)
+            and _may_manage(session, entries, reachable_only=True)[0]
         )
         if not allowed:
-            raise SwitchboardError(403, NOT_A_MANAGER)
+            raise SwitchboardError(403, NOT_ADMIN_THERE)
+        if entry is None:
+            raise SwitchboardError(404, NOT_ON)
         if len(entries) == 1:
             return _disconnect_press(db, session)
         acting = (session or {}).get("username") or "operator"

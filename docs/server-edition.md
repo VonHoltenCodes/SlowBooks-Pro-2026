@@ -240,7 +240,14 @@ administrator of each of them (the company switch's own check). A client
 company's administrator who is not one sees only that company, can take it
 off the connection, and never learns the other companies' names or how many
 there are. A company's access ends at once when the administrator who added
-it is deactivated or demoted there. The connection stays up while any
+it is deactivated or demoted there; it is added again with **Add** in its own
+panel, by someone who is an administrator of it and of every other company on
+the connection. A token you make whose name starts with "AI assistant"
+(SlowBooks Switchboard's, for example) is held to the same rule. A token reads
+only its own company from the company list and from the sign-in status. The
+sign-in screen itself (no token) still lists every company the server serves
+and their usernames, for the people choosing one: that is why the server
+belongs on a trusted network. The connection stays up while any
 company on it is served; a company that is not served now is said so on the
 panel, and the assistant is told so without anything being sent. On
 PostgreSQL the server serves one company, so the connection reaches only
@@ -302,7 +309,10 @@ What a token cannot do, whatever its role or permission:
   is let run them.
 - Restore a backup. Restoring replaces the whole company, so it is done by an
   administrator signed in to SlowBooks Pro (Settings → Backups → Backup / Restore, or
-  `POST /api/backups/restore` from that session). A tool that resets the books
+  `POST /api/backups/restore` from that session). On a server, a company is
+  restored only from its own backups (the ones its list shows): another
+  company's backup is refused, so one client's administrator cannot pull
+  another client's books into their own. A tool that resets the books
   between runs takes its backups with a token and leaves the restore to a
   person.
 - Manage users or tokens, its own included.

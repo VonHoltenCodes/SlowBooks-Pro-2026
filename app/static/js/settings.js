@@ -2796,7 +2796,7 @@ const SettingsPage = {
             return html;
         }
         if (st.can_add) {
-            html += `<div id="claude-relay-add" style="margin-top:8px;">${escapeHtml(SettingsPage.claudeAddWords(here))}</div>`;
+            html += `<div id="claude-relay-add" style="margin-top:8px;">${escapeHtml(SettingsPage.claudeAddWords(here, st.next_label))}</div>`;
         }
         if (list && st.address) {
             html += '<div id="claude-relay-lines" style="display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:6px 8px; align-items:center; margin-top:8px;">'
@@ -2811,22 +2811,29 @@ const SettingsPage = {
                 + (list && list.length > 1 ? '<div id="claude-relay-code-reach" style="margin-top:2px;">Anyone who signs an assistant in with this code can work every company listed above.</div>' : '')
                 + '</div>';
         }
+        // a manager who is offered no code is told why: which companies it
+        // waits for
+        if (list && !st.can_code && Array.isArray(st.code_needs) && st.code_needs.length) {
+            html += `<div id="claude-relay-code-needs" style="margin-top:4px; overflow-wrap:anywhere;">${escapeHtml(SettingsPage.claudeCodeNeedsWords(st.code_needs))}</div>`;
+        }
         const presses = [];
+        // a long company name with no spaces wraps inside its button
+        const wraps = ' style="max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:left;"';
         if (st.can_add) {
-            presses.push(`<button type="button" class="btn btn-primary btn-sm" id="claude-add" data-admin${off} onclick="SettingsPage.addClaudeCompany()">${escapeHtml(busy === 'add' ? 'Adding…' : `Add ${here} to the AI connection`)}</button>`);
+            presses.push(`<button type="button" class="btn btn-primary btn-sm" id="claude-add" data-admin${off}${wraps} onclick="SettingsPage.addClaudeCompany()">${escapeHtml(busy === 'add' ? 'Adding…' : `Add ${here} to the AI connection`)}</button>`);
         }
         if (st.can_code) presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-code" data-admin${off} onclick="SettingsPage.claudeCode()">Show a sign-in code</button>`);
         // this company off the connection; with it alone on the connection,
         // that is what Disconnect does, so only Disconnect is offered
         if (st.can_take_off && st.this_company && !(list && list.length === 1)) {
-            presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-take-off" data-admin${off} onclick="SettingsPage.takeClaudeOff('')">${escapeHtml(`Take ${here} off the AI connection`)}</button>`);
+            presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-take-off" data-admin${off}${wraps} onclick="SettingsPage.takeClaudeOff('')">${escapeHtml(`Take ${here} off the AI connection`)}</button>`);
         }
         // a company whose token is already turned off there: someone with
         // power over the connection only drops the dead entry
         if (list && list.length > 1) {
             for (const co of list) {
                 if (co.state !== 'refused' || co.file === SettingsPage._claudeHereFile(st, list)) continue;
-                presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-take-off-${SettingsPage.claudeKey(co.file)}" data-admin${off} data-file="${escapeHtml(co.file)}" onclick="SettingsPage.takeClaudeOff(this.dataset.file)">${escapeHtml(`Take ${co.name || co.file} off the AI connection`)}</button>`);
+                presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-take-off-${SettingsPage.claudeKey(co.file)}" data-admin${off}${wraps} data-file="${escapeHtml(co.file)}" onclick="SettingsPage.takeClaudeOff(this.dataset.file)">${escapeHtml(`Take ${co.name || co.file} off the AI connection`)}</button>`);
             }
         }
         if (st.can_disconnect) presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-disconnect" data-admin${off} onclick="SettingsPage.disconnectClaude()">Disconnect the AI assistant</button>`);
@@ -2862,12 +2869,15 @@ const SettingsPage = {
     claudeCompaniesHtml(st, list) {
         const mine = SettingsPage._claudeHereFile(st, list);
         const names = list.map(co => {
-            const notes = [co.file === mine ? 'this company' : '', SettingsPage.claudeNote(co.state)].filter(Boolean);
+            const here = co.file === mine;
+            // the company the panel is open in is "this company", not "that"
+            const note = here && co.state === 'refused' ? 'turned off in this company' : SettingsPage.claudeNote(co.state);
+            const notes = [here ? 'this company' : '', note].filter(Boolean);
             const said = (co.name || co.file) + (notes.length ? ` (${notes.join('; ')})` : '');
             return `<span id="claude-relay-co-${SettingsPage.claudeKey(co.file)}">${escapeHtml(said)}</span>`;
         });
         const lead = st.state === 'connected' ? 'Connected. ' : '';
-        let html = `<div id="claude-relay-companies" style="margin-top:4px;">${lead}The AI assistant can work the books of: ${names.join(', ')}.</div>`;
+        let html = `<div id="claude-relay-companies" style="margin-top:4px; overflow-wrap:anywhere;">${lead}The AI assistant can work the books of: ${names.join(', ')}.</div>`;
         if (!st.server_edition && list.length > 1) {
             html += '<div id="claude-relay-desktop" style="margin-top:4px;">On this computer only the open company answers. When the assistant asks for another, open that company here.</div>';
         }
@@ -2879,8 +2889,12 @@ const SettingsPage = {
         return `${st.company || 'This company'} is on this computer's AI assistant connection. The assistant works these books as a bookkeeper; every change is recorded here as token:${label}.`;
     },
 
-    claudeAddWords(name) {
-        return `Add ${name} to the AI assistant connection, and the assistant can work ${name}'s books as a bookkeeper. Every change it makes is recorded in ${name}'s audit log as token:AI assistant (relay).`;
+    claudeAddWords(name, label) {
+        return `Add ${name} to the AI assistant connection, and the assistant can work ${name}'s books as a bookkeeper. Every change it makes is recorded in ${name}'s audit log as token:${label || 'AI assistant (relay)'}.`;
+    },
+
+    claudeCodeNeedsWords(names) {
+        return `A sign-in code reaches every company on the connection, so it is offered only while each of them can answer now and you are an administrator of each. Not now: ${names.join(', ')}.`;
     },
 
     // Where a selection's end is: the nearest element above it that has an
