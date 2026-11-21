@@ -710,14 +710,16 @@ const InvoicesPage = {
         e.preventDefault();
         const form = e.target;
         try {
-            await API.post(`/invoices/${id}/email`, {
+            const res = await API.post(`/invoices/${id}/email`, {
                 recipient: form.recipient.value,
                 cc: form.cc.value.trim() || null,
                 bcc: form.bcc.value.trim() || null,
                 subject: form.subject.value,
                 message: form.message.value,
             });
-            toast(`${T('Invoice')} emailed`);
+            // a copy the mail server refused is said with it
+            toast(res && res.note ? `${T('Invoice')} emailed. ${res.note}` : `${T('Invoice')} emailed`,
+                res && res.note ? 'warning' : 'success');
             closeModal();
         } catch (err) {
             // An administrator is offered the Recent sends section, where the

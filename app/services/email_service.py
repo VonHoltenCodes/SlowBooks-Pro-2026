@@ -223,6 +223,37 @@ class _ReplyBoundSMTP(_PLAIN_SMTP):
                     pass
 
 
+def _watch_body(server) -> None:
+    """Sets `server.body_given` True once the whole message has been handed
+    to the server: a connection lost after that may have delivered it.
+    Works on whatever connection a send is made on (smtplib's data() sends
+    the DATA command, then the message)."""
+    send, data = getattr(server, "send", None), getattr(server, "data", None)
+    if not (callable(send) and callable(data)):
+        return
+    sends = [None]
+
+    def watched_send(s):
+        send(s)
+        if sends[0] is not None:
+            sends[0] += 1
+            if sends[0] == 2:
+                server.body_given = True
+
+    def watched_data(msg):
+        sends[0] = 0
+        try:
+            return data(msg)
+        finally:
+            sends[0] = None
+
+    try:
+        server.body_given = False
+        server.send, server.data = watched_send, watched_data
+    except (AttributeError, TypeError):
+        pass
+
+
 def _connect(host: str, port: int):
     """The connection a send is made on. smtplib.SMTP is looked up when
     called, so whatever stands in for it is used as it is."""
@@ -377,6 +408,7 @@ def send_email(
             # a host no connection can be made to ("smtp..example.com": an
             # empty label), which Python reports as a codec error
             raise host_name_error() from None
+        _watch_body(server)
         if use_tls:
             # verified every time; a failure raises before the login below
             _secure(server, host)
@@ -481,7 +513,9 @@ def send_email(
             status="failed",
             # the stage tagged, then the server's reply as readable text
             # (or the plain cause), never str(e)
-            error_message=stored_text(e),
+            error_message=stored_text(
+                e, after_body=getattr(server, "body_given", False) is True
+            ),
         )
         db.add(log)
         db.commit()

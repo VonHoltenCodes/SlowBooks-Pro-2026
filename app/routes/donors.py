@@ -140,7 +140,14 @@ def acknowledgment_email(
                 reads_mail_server_words(request),
             ),
         )
-    return {"sent": True, "recipient": recipient}
+    from app.services.email_errors import note_for_last_send
+
+    answer = {"sent": True, "recipient": recipient}
+    # a copy the server refused (an Always CC address, say)
+    note = note_for_last_send(db, f"acknowledgment_{kind}", gift_id)
+    if note:
+        answer["note"] = note
+    return answer
 
 
 # ── Year-end giving statements ───────────────────────────────────────────
@@ -295,6 +302,7 @@ def giving_statements_batch_email(
     org = (company.get("display_name") or "").strip() or company.get("company_name", "")
     sent = failed = skipped = 0
     errors: list[str] = []
+    notes: list[str] = []
     for customer in _donors_with_gifts(db, data.year, data.customer_ids):
         if not customer.send_year_end_statement:
             skipped += 1
@@ -323,6 +331,11 @@ def giving_statements_batch_email(
             )
             if ok:
                 sent += 1
+                from app.services.email_errors import note_for_last_send
+
+                note = note_for_last_send(db, "giving_statement", customer.id)
+                if note:
+                    notes.append(f"{customer.name}: {note}")
             else:
                 failed += 1
                 # the reply's sentence when the server said why (#811)
@@ -338,4 +351,8 @@ def giving_statements_batch_email(
             logger.exception("giving statement failed for customer %s", customer.id)
             failed += 1
             errors.append(f"{customer.name}: unable to send")
-    return {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}
+    from app.services.email_errors import with_notes
+
+    return with_notes(
+        {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}, notes
+    )

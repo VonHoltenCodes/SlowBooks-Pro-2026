@@ -33,6 +33,7 @@ from app.services.email_errors import (
 )
 from app.services.email_service import send_email
 from tests.test_email_failure_rule import FROM, _configure, _session
+from tests.test_email_failure_rule import no_pdfs as no_documents_drawn  # noqa: F401
 
 TO = "customer@example.test"
 COPY = "copy@example.test"
@@ -608,12 +609,38 @@ def test_a_port_that_does_not_speak_smtp(db_session, stub):
     server = stub({"GREETING": ["HTTP/1.1 400 Bad Request"]})
     ok, row = _send(db_session, server)
     assert not ok
-    assert row.error_message == "[connect not-smtp] /1.1 400 Bad Request"
+    # smtplib keeps the line without its first four characters: what is
+    # stored says so in words of ours, and is not called a server's reply
+    words = "The answer was not an SMTP reply: …/1.1 400 Bad Request"
+    assert row.error_message == f"[connect not-smtp] {words}"
     seen = _read(db_session, row, admin=True)
     assert seen.sentence == UNREACHABLE
-    assert seen.reply == "/1.1 400 Bad Request"
+    assert seen.reply == words
+    assert seen.with_reply() == UNREACHABLE
     # the same answer on a row of an earlier release reads the same
-    assert failure_sentence("(-1, b'/1.1 400 Bad Request')") == UNREACHABLE
+    old = "(-1, b'/1.1 400 Bad Request')"
+    assert failure_sentence(old) == UNREACHABLE
+    row.error_message = old  # test-only: a row as 2.31 stored it
+    seen = _read(db_session, row, admin=True)
+    assert seen.reply == words
+    assert seen.with_reply() == UNREACHABLE
+
+
+def test_test_email_does_not_call_a_cut_off_line_the_servers_reply(
+    client, db_session, stub
+):
+    server = stub({"GREETING": ["HTTP/1.1 400 Bad Request"]})
+    _configure(db_session, server.port)
+    r = client.post("/api/settings/test-email")
+    assert r.status_code == 502
+    assert r.json()["detail"] == (
+        f"Test email failed to send. {UNREACHABLE} The full list is under "
+        "Settings → Email (SMTP) → Recent sends."
+    )
+    (row,) = client.get("/api/email-log").json()["rows"]
+    assert row["error_message"] == (
+        "The answer was not an SMTP reply: …/1.1 400 Bad Request"
+    )
 
 
 def test_a_sign_in_the_server_never_finishes(db_session, stub):
@@ -793,3 +820,232 @@ def test_every_kind_of_send_has_a_name_in_recent_sends():
             assert "startsWith('acknowledgment')" in labels
         else:
             assert re.search(rf"\b{kind}: ", labels), f"no name for {kind!r}"
+
+
+# -- a size refusal at RCPT is about the message, not the address -------------------
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["552 5.3.4 Message size exceeds fixed limit", "552 5.2.3 Message too long"],
+)
+def test_a_size_refusal_at_rcpt_is_about_the_message(db_session, stub, reply):
+    ok, row = _send(db_session, stub({"RCPT": [reply]}))
+    assert not ok
+    seen = _read(db_session, row)
+    assert seen.sentence == seen.reason() == TOO_BIG
+    assert TO not in seen.sentence
+    # the administrator's line keeps who the server answered, and how
+    assert _read(db_session, row, admin=True).reply == f"{TO}: {reply}"
+    # the same refusal on a row of an earlier release
+    code, words = reply[:3], reply[4:]
+    assert failure_sentence(repr({TO: (int(code), words.encode())})) == TOO_BIG
+    # a full mailbox is still about the address
+    ok, row = _send(db_session, stub({"RCPT": ["552 5.2.2 Mailbox full"]}))
+    assert _read(db_session, row).sentence == (
+        f"The address was refused by the mail server: {TO}. Check it and send again."
+    )
+
+
+# -- a refused STARTTLS: the reply is kept, and "not now" is not a setting ----------
+
+TLS_REFUSED = (
+    "SlowBooks Pro could not set up a secure connection to the mail server, "
+    "so nothing was sent and your password was not given to it. Check the "
+    "port and the Use TLS setting under Settings → Email (SMTP), or ask your "
+    "mail provider. (127.0.0.1)"
+)
+TLS_NOT_NOW = (
+    "The mail server could not set up a secure connection just now, so "
+    "nothing was sent and your password was not given to it. Try again "
+    "later. (127.0.0.1)"
+)
+
+
+@pytest.mark.parametrize(
+    "code,words,sentence",
+    [
+        (454, "4.7.0 TLS not available due to temporary reason", TLS_NOT_NOW),
+        (501, "5.5.4 Syntax error (no parameters allowed)", TLS_REFUSED),
+    ],
+)
+def test_a_refused_starttls_keeps_the_reply_and_says_what_it_was(
+    client, db_session, code, words, sentence
+):
+    from tests.test_email_failure_rule import RefusingStub
+
+    canary = "canary" + secrets.token_hex(8)
+    user, password = _sign_in()
+    server = RefusingStub("starttls", lambda u, p: [f"{words} {canary}"], code)
+    try:
+        _configure(db_session, server.port, user, password, use_tls="true")
+        r = client.post("/api/settings/test-email")
+        keeper = _session(db_session, ROLE_BOOKKEEPER)
+        theirs = keeper.get("/api/email-log")
+    finally:
+        server.close()
+    reply = f"{code} {words} {canary}"
+    assert r.status_code == 502
+    # Test Email is an administrator's: the sentence, then the reply
+    assert r.json()["detail"] == (
+        f"Test email failed to send. {sentence} The mail server's reply: "
+        f"{reply}. The full list is under Settings → Email (SMTP) → Recent sends."
+    )
+    (row,) = client.get("/api/email-log").json()["rows"]
+    assert row["failure"] == sentence
+    assert row["error_message"] == reply
+    # no sign-in and no mail went to a server with no secure connection
+    assert not {"AUTH", "MAIL", "RCPT", "DATA"} & set(server.verbs)
+    # nobody else reads the reply
+    assert canary not in theirs.text
+    (shown,) = theirs.json()["rows"]
+    assert shown["failure"] == shown["error_message"] == sentence
+
+
+# -- a refused copy is said in the answer to the send, on every path ----------------
+
+
+@pytest.mark.usefixtures("no_documents_drawn")
+def test_a_refused_copy_is_said_in_every_answer_to_a_send(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The To address took the message and the server refused the Always
+    CC address: each answer that says "sent" says the copy was refused, in
+    our words, to the administrator and the bookkeeper alike."""
+    from app.services.settings_service import set_setting
+    from tests import test_email_failure_rule as rule
+
+    canary = "canary" + secrets.token_hex(8)
+    server = Stub({"RCPT": _refuse(COPY, f"550 5.1.1 User unknown {canary}")})
+    note = f"The mail server refused a copy to: {COPY}."
+    try:
+        _configure(db_session, server.port)
+        set_setting(db_session, "smtp_always_cc", COPY)
+        db_session.commit()
+        ids = rule._books(client, db_session, seed_accounts, seed_customer)
+        keeper = _session(db_session, ROLE_BOOKKEEPER)
+        theirs = dict((p, (s, t)) for p, s, t in rule._every_send(keeper, ids))
+        mine = dict((p, (s, t)) for p, s, t in rule._every_send(client, ids))
+        # the reminder by hand went first each time, so the run had nothing
+        # due: a new overdue invoice gives it one
+        rule._overdue(db_session)
+        run = client.post("/api/collections/reminders/run", json={})
+    finally:
+        server.close()
+    assert server.messages >= 10
+    said = 0
+    for who, answers in (("administrator", mine), ("bookkeeper", theirs)):
+        for path, (status, text) in answers.items():
+            assert canary not in text, (who, path)
+            if who == "bookkeeper" and path == rule.TEST_EMAIL:
+                assert status == 403
+                continue
+            assert status in (200, 400), (who, path, text)
+            if status == 400 or '"sent":0' in text or '"emailed":0' in text:
+                # nothing was due on this path the second time round
+                continue
+            assert note in text, f"{who}: {path} said sent and no more: {text}"
+            said += 1
+    # Test Email, the three documents, the reminder and the five batches
+    assert len(mine) == 10
+    told = {p for p, (s, t) in mine.items() if note in t} | {
+        p for p, (s, t) in theirs.items() if note in t
+    }
+    assert sorted(set(mine) - told) == ["/api/collections/reminders/run"]
+    assert run.status_code == 200 and run.json()["sent"] == 1, run.text
+    (line,) = run.json()["notes"]
+    assert line.startswith("Mail Probe, ") and line.endswith(f": {note}")
+    assert canary not in run.text
+    assert said >= 12
+    # the single answers carry it as `note`
+    import json
+
+    for path in (rule.TEST_EMAIL, f"/api/invoices/{ids['invoice']}/email"):
+        assert json.loads(mine[path][1])["note"] == note
+    # a send with nothing refused carries none
+    plain = Stub()
+    try:
+        _configure(db_session, plain.port)
+        r = client.post(rule.TEST_EMAIL)
+    finally:
+        plain.close()
+    assert r.json() == {"status": "sent"}
+
+
+# -- a long reply costs no more than its length --------------------------------------
+
+
+def test_a_very_long_reply_is_stored_and_read_at_once():
+    """A server chooses how long its reply is. Storing one, and reading a
+    long row of an earlier release, once took time that grew with the
+    square of its length."""
+    import smtplib
+
+    from app.services.email_errors import _holds_reply, server_words
+
+    started = time.monotonic()
+    for filler in (b"250 ", b"A", b"AUTH PLAIN ", b"a=b "):
+        long = filler * (50000 // len(filler))
+        for error in (
+            smtplib.SMTPDataError(554, long),
+            smtplib.SMTPRecipientsRefused({TO: (550, long)}),
+            smtplib.SMTPAuthenticationError(535, long),
+        ):
+            stored = stored_text(error)
+            assert len(stored) <= 2000
+            # what 2.31 stored: Python's str() of the exception, any length
+            for text in (stored, str(error), long.decode()):
+                failure_sentence(text, "smtp.example.test")
+                server_words(text)
+                _holds_reply(text)
+    assert time.monotonic() - started < 5
+
+
+# -- a connection lost once the message was handed over ------------------------------
+
+LOST_AFTER_BODY = (
+    "The connection to the mail server was lost after the message was handed "
+    "to it, before it answered, so the email may or may not have gone out. "
+    "Check with the recipient before sending it again."
+)
+
+
+def test_a_hang_up_before_the_answer_to_the_message_says_it_may_have_gone(
+    client, db_session, stub
+):
+    """The server was reached, signed in to and given the whole message,
+    then hung up without answering. "Could not be reached, check the host
+    and port" is untrue of it, and a second send could be a duplicate."""
+    server = stub({"BODY": "hang-up"})
+    ok, row = _send(db_session, server)
+    assert not ok and row.status == "failed"
+    assert server.messages == 1
+    assert (
+        row.error_message == "[disconnected after-body] Connection unexpectedly closed"
+    )
+    seen = _read(db_session, row, admin=True)
+    assert seen.sentence == seen.reason() == seen.with_reply() == LOST_AFTER_BODY
+    assert seen.reply == "Connection unexpectedly closed"
+    (shown,) = client.get("/api/email-log").json()["rows"]
+    assert shown["failure"] == LOST_AFTER_BODY
+    # lost any earlier, nothing had been handed over: as before
+    for step in ("MAIL", "RCPT", "DATA"):
+        ok, row = _send(db_session, stub({step: "hang-up"}))
+        assert not ok
+        assert row.error_message == "[disconnected] Connection unexpectedly closed"
+        assert _read(db_session, row).sentence == UNREACHABLE
+
+
+def test_a_server_silent_after_the_message_says_it_may_have_gone(
+    db_session, stub, monkeypatch
+):
+    monkeypatch.setattr(email_service, "_REPLY_TIMEOUT", 1.0)
+
+    def silent(line):
+        time.sleep(2.5)
+        return "hang-up"
+
+    ok, row = _send(db_session, stub({"BODY": silent}))
+    assert not ok
+    assert row.error_message == "[disconnected after-body] timed out"
+    assert _read(db_session, row).sentence == LOST_AFTER_BODY

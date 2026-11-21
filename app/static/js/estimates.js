@@ -227,14 +227,16 @@ const EstimatesPage = {
         e.preventDefault();
         const form = e.target;
         try {
-            await API.post(`/estimates/${id}/email`, {
+            const res = await API.post(`/estimates/${id}/email`, {
                 recipient: form.recipient.value,
                 cc: form.cc.value.trim() || null,
                 bcc: form.bcc.value.trim() || null,
                 subject: form.subject.value.trim() || null,
                 message: form.message.value,
             });
-            toast('Estimate emailed');
+            // a copy the mail server refused is said with it
+            toast(res && res.note ? `Estimate emailed. ${res.note}` : 'Estimate emailed',
+                res && res.note ? 'warning' : 'success');
             closeModal();
         } catch (err) { toast(err.message, 'error'); }
     },

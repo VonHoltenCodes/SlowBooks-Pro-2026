@@ -678,6 +678,19 @@ def _send_one(db, plan, settings, words, home, trigger, admin=False):
     return f"{to[0].name}, {label}: {shown or error}"
 
 
+def _copy_refused(db, entity_type: str, plan, words) -> str:
+    """ "Name, Invoice 1001: The mail server refused a copy to: …" for a
+    reminder that went out though the server refused a copy, else ""."""
+    from app.services.email_errors import note_for_last_send
+
+    inv = plan["invoice"]
+    note = note_for_last_send(db, entity_type, inv.id)
+    if not note:
+        return ""
+    label = f"{document_label(inv, words)} {inv.invoice_number}"
+    return f"{plan['to'][0].name}, {label}: {note}"
+
+
 def run_reminders(
     db: Session, trigger: str, invoice_ids=None, admin: bool = False
 ) -> dict:
@@ -694,23 +707,31 @@ def run_reminders(
     from app.services.currency import home_currency
 
     home = home_currency(db)
-    sent, taken, errors = 0, 0, []
+    sent, taken, errors, notes = 0, 0, [], []
     for plan in sends:
         result = _send_one(db, plan, settings, words, home, trigger, admin)
         if result is None:
             sent += 1
+            note = _copy_refused(db, "reminder", plan, words)
+            if note:
+                notes.append(note)
         elif result is TAKEN:
             taken += 1
         else:
             errors.append(result)
-    return {
-        "sent": sent,
-        "failed": len(errors),
-        "skipped": len(skipped) + taken,
-        "taken": taken,
-        "errors": errors,
-        "ran_on": today.isoformat(),
-    }
+    from app.services.email_errors import with_notes
+
+    return with_notes(
+        {
+            "sent": sent,
+            "failed": len(errors),
+            "skipped": len(skipped) + taken,
+            "taken": taken,
+            "errors": errors,
+            "ran_on": today.isoformat(),
+        },
+        notes,
+    )
 
 
 def _claim_day(db: Session, today: date) -> bool:
@@ -799,7 +820,14 @@ def remind_invoice(db: Session, invoice_id: int, admin: bool = False) -> dict:
         raise RemindError("Another window is sending this reminder right now.")
     if result:
         raise RemindError(result)
-    return {"sent": True, "label": rule_label(rule.days_from_due), "to": _emails(to)}
+    answer = {"sent": True, "label": rule_label(rule.days_from_due), "to": _emails(to)}
+    from app.services.email_errors import note_for_last_send
+
+    # a copy the server refused (another contact, an Always CC address)
+    note = note_for_last_send(db, "reminder", inv.id)
+    if note:
+        answer["note"] = note
+    return answer
 
 
 def invoice_rows(
@@ -1066,7 +1094,7 @@ def run_statements(db: Session, force: bool = False, admin: bool = False) -> dic
 
     today = date.today()
     period = period_of(today)
-    todo, skipped, errors = [], 0, []
+    todo, skipped, errors, notes = [], 0, [], []
     for c in statement_candidates(db, today):
         if c["reason"] == "no email":
             skipped += 1
@@ -1120,6 +1148,11 @@ def run_statements(db: Session, force: bool = False, admin: bool = False) -> dic
         db.commit()
         if ok:
             sent += 1
+            from app.services.email_errors import note_for_last_send
+
+            note = note_for_last_send(db, "statement", customer.id)
+            if note:
+                notes.append(f"{customer.name}: {note}")
         else:
             failed += 1
             # the reason a single send gives (the month's row keeps the
@@ -1128,4 +1161,8 @@ def run_statements(db: Session, force: bool = False, admin: bool = False) -> dic
                 "The statement", "statement", customer.id, db, ran, admin
             )
             errors.append(f"{customer.name}: {shown}")
-    return {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}
+    from app.services.email_errors import with_notes
+
+    return with_notes(
+        {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}, notes
+    )

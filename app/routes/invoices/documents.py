@@ -211,7 +211,10 @@ def email_invoice(
                     db, "invoice", inv.id, reads_mail_server_words(request)
                 ),
             )
-        return {"status": "sent"}
+        from app.services.email_errors import sent_answer
+
+        # with a note when the server refused a copy
+        return sent_answer(db, "invoice", inv.id)
     except HTTPException:
         raise
     except Exception as e:

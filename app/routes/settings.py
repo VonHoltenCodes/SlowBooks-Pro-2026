@@ -621,7 +621,11 @@ def test_email(request: Request, db: Session = Depends(get_db)):
                 db, reads_mail_server_words(request), settings.get("smtp_host", "")
             )
             raise HTTPException(status_code=502, detail=detail)
-        return {"status": "sent"}
+        from app.services.email_errors import sent_answer
+
+        # with a note when the server refused a copy (an Always CC or
+        # Always BCC address it does not take)
+        return sent_answer(db, "settings_test", None)
     except HTTPException:
         # Don't let the catch-all below rewrite our own 502 into a 500.
         raise

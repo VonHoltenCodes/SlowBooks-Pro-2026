@@ -175,9 +175,12 @@ STAGES = {
         "The mail server refused the message.",
         "550 5.7.1 Absender ungültig",
     ),
+    # the stub hangs up once it has the whole message, before answering:
+    # the server was reached and may have taken it
     "drop": (
-        "The server could not be reached — check the host, port, and the Use "
-        "TLS setting.",
+        "The connection to the mail server was lost after the message was "
+        "handed to it, before it answered, so the email may or may not have "
+        "gone out. Check with the recipient before sending it again.",
         "Connection unexpectedly closed",
     ),
     "timeout": (

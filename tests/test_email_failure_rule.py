@@ -69,6 +69,12 @@ NO_SECURE_CONNECTION = (
     "port and the Use TLS setting under Settings → Email (SMTP), or ask your "
     "mail provider. (127.0.0.1)"
 )
+# a STARTTLS the server answered with a 4xx: it cannot just now
+NO_SECURE_CONNECTION_NOW = (
+    "The mail server could not set up a secure connection just now, so "
+    "nothing was sent and your password was not given to it. Try again "
+    "later. (127.0.0.1)"
+)
 # every sentence of ours the stubs here can cause (the certificate
 # sentences are tests/test_smtp_tls_verify.py's)
 SENTENCES = {
@@ -85,6 +91,7 @@ SENTENCES = {
     REFUSED_CONNECTION,
     REFUSED_MESSAGE,
     NO_SECURE_CONNECTION,
+    NO_SECURE_CONNECTION_NOW,
     "The mail server did not accept the sign-in.",
     "The email could not be sent.",
 }
@@ -483,7 +490,8 @@ def test_the_servers_words_reach_nobody_but_an_administrator(
     fixed = {
         "greeting": REFUSED_CONNECTION,
         "ehlo": REFUSED_CONNECTION,
-        "starttls": NO_SECURE_CONNECTION,
+        # the stub's 454 to STARTTLS is the server's "not now"
+        "starttls": NO_SECURE_CONNECTION_NOW,
         "auth": "The server rejected the username or password — check both.",
         "mail": f"The mail server refused the sender address: {FROM}. Check the "
         "From address under Settings → Email (SMTP).",

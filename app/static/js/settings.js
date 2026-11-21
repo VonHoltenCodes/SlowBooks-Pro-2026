@@ -2488,8 +2488,10 @@ const SettingsPage = {
 
     async testEmail() {
         try {
-            await API.post('/settings/test-email');
-            toast('Test email sent');
+            const res = await API.post('/settings/test-email');
+            // an Always CC or Always BCC address the server refused is said
+            toast(res && res.note ? `Test email sent. ${res.note}` : 'Test email sent',
+                res && res.note ? 'warning' : 'success');
         } catch (err) {
             // The failure now carries the reason; the full history is just
             // below, so point there and refresh it (#447).
