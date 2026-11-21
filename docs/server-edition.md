@@ -312,10 +312,7 @@ What a token cannot do, whatever its role or permission:
   is let run them.
 - Restore a backup. Restoring replaces the whole company, so it is done by an
   administrator signed in to SlowBooks Pro (Settings → Backups → Backup / Restore, or
-  `POST /api/backups/restore` from that session). On a server serving several
-  companies, a company is restored only from its own backups (the ones its list shows): another
-  company's backup is refused, so one client's administrator cannot pull
-  another client's books into their own. A tool that resets the books
+  `POST /api/backups/restore` from that session). A tool that resets the books
   between runs takes its backups with a token and leaves the restore to a
   person.
 - Manage users or tokens, its own included.

@@ -469,20 +469,6 @@ def manifest_create_company(
             "success": False,
             "error": f"A company file named '{filename}' already exists",
         }
-    from app.services.backup_service import backup_key_clash
-
-    clash = backup_key_clash(filename)
-    if clash is not None:
-        # every company's backups share one folder, told apart by a part of
-        # their names; a new company must not take another's
-        return {
-            "success": False,
-            "error": (
-                f"A company file named '{filename}' would have its backups "
-                f"named like those of '{clash}'. Choose a name that tells the "
-                "two apart. Nothing was created."
-            ),
-        }
 
     companies_dir().mkdir(parents=True, exist_ok=True)
     url = "sqlite:///" + db_path.as_posix()

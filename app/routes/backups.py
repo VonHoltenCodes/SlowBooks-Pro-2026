@@ -98,15 +98,6 @@ def download_backup(filename: str, request: Request, db: Session = Depends(get_d
     )
 
 
-def _several_companies_served() -> bool:
-    """Server Edition serving several companies, whose backups share one
-    folder. A server with one company keeps the desktop's rule: another
-    company's backup is restored only when confirmed again."""
-    from app.services import served_companies
-
-    return served_companies.enabled()
-
-
 @router.post("/restore")
 def restore(data: RestoreRequest, db: Session = Depends(get_db)):
     """Replace this company's books with a backup.
@@ -116,10 +107,8 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
     confirmed again (409 "other_company" — every company's backups share
     one folder, and this used to copy any of them over the open company),
     a copy made by a newer version this one cannot open (409
-    "newer_version"), books from before 2.29.0, which this version does
-    not migrate (409 "before_floor", #769), and, on a server serving
-    several companies, any backup that is not one of this company's own
-    (409 "other_company_server", whatever the confirmation says). Otherwise a safety backup of the books as they are is
+    "newer_version"), and books from before 2.29.0, which this version does
+    not migrate (409 "before_floor", #769). Otherwise a safety backup of the books as they are is
     taken first, and named in the answer, so a restore can be undone."""
     filepath = backup_service.backup_path(data.filename)
     if filepath is None:
@@ -130,23 +119,6 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
         )
 
     other = backup_service.other_company(db, filepath.name)
-    if _several_companies_served() and filepath.name not in {
-        b["filename"] for b in backup_service.list_company_backups(db)
-    }:
-        # A server keeps several clients' books, and their backups share one
-        # folder: one company's administrator must not pull another's books
-        # (its users, password hashes and tokens with them) into their own.
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "other_company_server",
-                "message": (
-                    "This backup is not one of this company's. On a server, a "
-                    "company's books are restored only from its own backups, "
-                    "the ones listed here. Nothing was restored."
-                ),
-            },
-        )
     if other and not data.allow_other_company:
         raise HTTPException(
             status_code=409,

@@ -24,7 +24,6 @@
 - The connection's tokens are known by their hash in the kept record, not
   only by their name, and a token named for an AI assistant works only
   while its maker is an administrator there.
-- On a server, a company's books are restored only from its own backups.
 
 Every password and token is made at run time with `secrets`.
 """
@@ -427,23 +426,3 @@ def test_the_panel_names_what_stops_a_code(three, relay):
     _serve(three, [f for f, _ in COMPANIES])
     st = jdoe.get("/api/switchboard/status").json()
     assert st["can_code"] is True and st["code_needs"] == []
-
-
-# -- restoring another company's backup on a server -----------------------------------------------
-
-
-def test_a_server_restores_a_company_only_from_its_own_backups(three):
-    jdoe = _signed_in(three, "jdoe")
-    _switch(jdoe, "smith.db")
-    made = jdoe.post("/api/backups")
-    assert made.status_code == 200, made.text
-    filename = made.json()["filename"]
-    cli = _signed_in(three, "cli", company="lake.db")
-    assert filename not in [b["filename"] for b in cli.get("/api/backups").json()]
-    r = cli.post(
-        "/api/backups/restore",
-        json={"filename": filename, "allow_other_company": True},
-    )
-    assert r.status_code == 409, r.text
-    assert r.json()["detail"]["code"] == "other_company_server"
-    assert cli.get("/api/settings").json()["company_name"] == "Lake Dental"

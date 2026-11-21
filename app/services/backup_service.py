@@ -10,14 +10,11 @@
 # state they are in, whichever state the backup was in.
 # ============================================================================
 
-import hashlib
-import json
 import logging
 import os
 import re
 import shutil
 import subprocess
-import threading
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,313 +65,19 @@ def parse_backup_name(filename: str) -> dict | None:
     return m.groupdict() if m else None
 
 
-# A company's part of a backup name decides whose backups are whose, so two
-# companies must never share one: a file stem that is already that part
-# (lowercase letters, digits and single dashes, 60 characters at most) is
-# kept as it is, and any other stem is shortened and given ten characters of
-# a hash of the whole stem, after a "--" no kept stem has.
-_PLAIN_KEY_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-_KEY_MAX = 60
-
-
-def _readable(stem: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
-
-
-def backup_key_for_stem(stem: str) -> str:
-    """The backup-name part of a company whose file stem (or database name)
-    is ``stem``. Two different stems never get the same one."""
-    if stem == LEGACY_SLUG:
-        return f"{LEGACY_SLUG}-books"
-    if (
-        len(stem) <= _KEY_MAX
-        and _PLAIN_KEY_RE.fullmatch(stem)
-        and stem != f"{LEGACY_SLUG}-books"
-    ):
-        return stem
-    digest = hashlib.sha256(stem.encode("utf-8")).hexdigest()[:10]
-    readable = _readable(stem)[: _KEY_MAX - 12].strip("-") or "company"
-    return f"{readable}--{digest}"
-
-
-def old_backup_key_for_stem(stem: str) -> str:
-    """The part a backup name was given before 2.32.0-beta.2: the stem
-    lowercased, every other character a dash, cut to 60 characters. Two
-    companies could share it."""
-    slug = _readable(stem)[:_KEY_MAX].strip("-")
-    if not slug:
-        slug = "company"
-    return f"{slug}-books" if slug == LEGACY_SLUG else slug
-
-
-def _company_stem() -> str:
-    if _is_sqlite():
-        path = _sqlite_db_path()
-        return path.stem if path is not None else ""
-    return _parse_db_url(DATABASE_URL)["dbname"]
-
-
 def company_slug() -> str:
     """This company's part of a backup file name: "harbor-light-bakery" for
     harbor-light-bakery.db, the database name on a server. Never the old
-    anonymous "slowbooks", so a new name can always be told from an old one,
-    and never another company's."""
-    return backup_key_for_stem(_company_stem())
-
-
-def backup_key_clash(filename: str) -> str | None:
-    """The listed company file whose backups a new company file named
-    ``filename`` would be mixed up with, or None."""
-    from app.services import served_companies
-
-    stem = Path(filename).stem
-    key = backup_key_for_stem(stem)
-    try:
-        rows = served_companies.listed()
-    except Exception:
-        return None
-    for row in rows:
-        other = Path(row["file"]).stem
-        if other == stem:
-            continue
-        if key in (backup_key_for_stem(other), old_backup_key_for_stem(other)):
-            return row["file"]
-    return None
-
-
-# Whose is a backup whose company part two listed companies have, or had?
-# Before 2.32.0-beta.2 two companies could share one ("acme_co" and
-# "acme--co" both made "acme-co_..."; so did two long names sharing their
-# first 60 characters), and a plain part like "acme-co" is also what such a
-# company's backups were named with. The name alone cannot say whose such a
-# file is; a backups table can, but a restore replaces the table with the
-# backup's, so the safety copy taken before it, and every backup made after
-# the one restored, are in no table. What the install itself knows is kept
-# here: a record in the backups folder, written by this app only (no company
-# administrator can write it), of whose each backup is. Every new backup is
-# recorded as it is made; one made before is settled once, the first time a
-# company it could belong to looks, from the evidence the company files hold.
-_OWNERS_FILE = ".owners.json"
-_owners_lock = threading.Lock()
-
-
-def _owners_path() -> Path:
-    return BACKUP_DIR / _OWNERS_FILE
-
-
-def _read_owners() -> dict:
-    """{backup file name: the stem of the company it is, or None when it
-    was settled and nothing said whose it is}."""
-    try:
-        data = json.loads(_owners_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    owners = data.get("owners") if isinstance(data, dict) else None
-    if not isinstance(owners, dict):
-        return {}
-    return {
-        name: stem
-        for name, stem in owners.items()
-        if _safe_backup_filename(name) is not None
-        and (stem is None or isinstance(stem, str))
-    }
-
-
-def _record_owners(changes: dict) -> None:
-    """Add ``changes`` to the record, dropping files no longer there. A
-    record that cannot be written is logged: the backup itself is made."""
-    with _owners_lock:
-        owners = _read_owners()
-        owners.update(changes)
-        owners = {n: s for n, s in owners.items() if (BACKUP_DIR / n).is_file()}
-        path = _owners_path()
-        staged = path.with_name(path.name + ".writing")
-        try:
-            staged.write_text(
-                json.dumps({"version": 1, "owners": owners}, sort_keys=True),
-                encoding="utf-8",
-            )
-            os.replace(staged, path)
-        except OSError:
-            logger.exception("Could not record whose the backups are")
-            staged.unlink(missing_ok=True)
-
-
-def _listed_rows() -> list:
-    from app.services import served_companies
-
-    try:
-        return served_companies.listed()
-    except Exception:
-        return []
-
-
-def _table_rows_of_file(path: Path, *, as_it_lies: bool = False) -> set | None:
-    """The (filename, created_at) rows of the backups table in a company
-    file or (``as_it_lies``: opened read-only, never changed) a SQLite
-    backup, or None when it cannot be read here."""
-    if path is None or not path.is_file():
-        return None
-    keys = [None]
-    if company_file.is_encrypted_file(path):
-        keys = []
-        for find in (company_file.install_key, company_file.resolve_key):
-            try:
-                key = find()
-            except Exception:
-                key = None
-            if key is not None and key not in keys:
-                keys.append(key)
-    for key in keys:
-        try:
-            with closing(
-                company_file.connect_raw(path, key, readonly=as_it_lies)
-            ) as conn:
-                found = conn.execute(
-                    "SELECT filename, created_at FROM backups"
-                ).fetchall()
-            return {(str(f), str(c)) for f, c in found}
-        except company_file.errors() + (OSError,):
-            continue
-    return None
-
-
-class _Ownership:
-    """Whose each named backup is, as the open company sees it."""
-
-    def __init__(self, db: Session):
-        from app.services import served_companies
-
-        self.db = db
-        self.stem = _company_stem()
-        self.slug = backup_key_for_stem(self.stem)
-        self.several = served_companies.enabled()
-        self.listed = _listed_rows()
-        self.names = {Path(r["file"]).stem: r.get("name") or "" for r in self.listed}
-        self.files = {Path(r["file"]).stem: r["file"] for r in self.listed}
-        self.by_key: dict = {}
-        for stem in set(self.names) | {self.stem}:
-            for key in {backup_key_for_stem(stem), old_backup_key_for_stem(stem)}:
-                self.by_key.setdefault(key, set()).add(stem)
-        self.rows = {b.filename: b for b in db.query(Backup).all()}
-        self._owners = None
-
-    def candidates(self, slug: str) -> set:
-        """The companies a backup named with ``slug`` may be, this one among
-        them only when the name could be its."""
-        return set(self.by_key.get(slug, ()))
-
-    def owners(self) -> dict:
-        """The record, after settling every file this company may own that
-        the record does not have yet."""
-        if self._owners is None:
-            owners = _read_owners()
-            unsettled = {}
-            for path in BACKUP_DIR.iterdir():
-                name = path.name
-                if name in owners or _safe_backup_filename(name) is None:
-                    continue
-                parsed = parse_backup_name(name)
-                if not parsed or not path.is_file():
-                    continue
-                found = self.candidates(parsed["slug"])
-                if self.stem in found and len(found) > 1:
-                    unsettled[name] = found
-            if unsettled:
-                settled = self._settle(unsettled)
-                _record_owners(settled)
-                owners.update(settled)
-            self._owners = owners
-        return self._owners
-
-    def _live_rows(self, stem: str) -> set | None:
-        if stem == self.stem:
-            from sqlalchemy import text
-
-            try:
-                found = self.db.execute(
-                    text("SELECT filename, created_at FROM backups")
-                ).fetchall()
-            except Exception:
-                return None
-            return {(str(f), str(c)) for f, c in found}
-        from app.services import company_service
-
-        listed = self.files.get(stem)
-        if listed is None:
-            return None
-        return _table_rows_of_file(company_service.company_db_path(listed))
-
-    def _settle(self, unsettled: dict) -> dict:
-        """Whose each file is, from what cannot be forged by a company's
-        administrator: the company whose backups table lists it, or whose
-        table shares a row with the backups table the file itself holds (the
-        books it is a copy of), or that owns a backup whose own table lists
-        it. A file two companies have evidence for, or none, is settled as
-        nobody's (None)."""
-        stems = set().union(*unsettled.values())
-        live = {stem: self._live_rows(stem) for stem in stems}
-        held = {
-            name: _table_rows_of_file(BACKUP_DIR / name, as_it_lies=True)
-            for name in unsettled
-            if name.endswith(".db")
-        }
-        evidence = {name: set() for name in unsettled}
-        for name, found in unsettled.items():
-            for stem in found:
-                rows = live.get(stem)
-                if not rows:
-                    continue
-                own = held.get(name)
-                if name in {f for f, _ in rows} or (own and own & rows):
-                    evidence[name].add(stem)
-        changed = True
-        while changed:
-            changed = False
-            for name, found in unsettled.items():
-                if len(evidence[name]) == 1:
-                    continue
-                for other, rows in held.items():
-                    if other == name or len(evidence[other]) != 1 or not rows:
-                        continue
-                    (owner,) = evidence[other]
-                    if owner in found and owner not in evidence[name]:
-                        if name in {f for f, _ in rows}:
-                            evidence[name].add(owner)
-                            changed = True
-        return {
-            name: (next(iter(stems)) if len(stems) == 1 else None)
-            for name, stems in evidence.items()
-        }
-
-    def is_mine(self, filename: str, slug: str) -> bool:
-        """Whether a backup named for ``slug`` is this company's."""
-        found = self.candidates(slug)
-        if self.stem not in found:
-            return False  # named for another company
-        if len(found) == 1:
-            return True
-        owner = self.owners().get(filename)
-        if owner == self.stem or filename in self.rows:
-            return True
-        if owner is not None or self.several:
-            # another company's, or, on a server serving several, a file
-            # nothing the install holds says is this one's
-            return False
-        # The desktop: one person's companies. A file nothing settled is
-        # this company's when it carries this company's name, or no other
-        # company's it could be, so nobody loses sight of a backup they had.
-        stored = read_backup_facts(filename).get("company_name")
-        if stored is None:
-            return True
-        name = current_company_name(self.db)
-        if _same_name(stored, name):
-            return True
-        return not any(
-            _same_name(stored, self.names.get(other))
-            for other in found
-            if other != self.stem
-        )
+    anonymous "slowbooks", so a new name can always be told from an old one."""
+    if _is_sqlite():
+        path = _sqlite_db_path()
+        stem = path.stem if path is not None else ""
+    else:
+        stem = _parse_db_url(DATABASE_URL)["dbname"]
+    slug = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:60].strip("-")
+    if not slug:
+        slug = "company"
+    return f"{slug}-books" if slug == LEGACY_SLUG else slug
 
 
 def _new_backup_filename(tag: str | None = None) -> str:
@@ -492,7 +195,6 @@ def _create_sqlite_backup(
     )
     db.add(backup)
     db.commit()
-    _record_owners({filename: _company_stem()})
 
     return {"success": True, "filename": filename, "file_size": file_size}
 
@@ -671,7 +373,6 @@ def create_backup(
         )
         db.add(backup)
         db.commit()
-        _record_owners({filename: _company_stem()})
 
         return {"success": True, "filename": filename, "file_size": file_size}
 
@@ -831,15 +532,13 @@ def list_company_backups(db: Session) -> list[dict]:
     """The open company's backups, newest first.
 
     The folder holds every company's. This company's are the files named
-    for it (when another company has, or had, that name too, the ones the
-    install's record or this company's backups table says are its own; see
-    _Ownership), plus older anonymous "slowbooks_*" files that are its own: ones
+    for it, plus older anonymous "slowbooks_*" files that are its own: ones
     its backups table lists, or (a SQLite copy) that carry its company name.
     Read from the folder, not only the table: restoring an older backup
     replaces the table too, and the safety copy taken just before it must
     still be listed afterwards."""
-    whose = _Ownership(db)
-    rows = whose.rows
+    slug = company_slug()
+    rows = {b.filename: b for b in db.query(Backup).all()}
     name = current_company_name(db)
     listed = []
     for path in BACKUP_DIR.iterdir():
@@ -848,11 +547,10 @@ def list_company_backups(db: Session) -> list[dict]:
             continue
         parsed = parse_backup_name(filename)
         owner = parsed["slug"] if parsed else None
-        if owner not in (None, LEGACY_SLUG):
-            # named for a company: this one's when only this company has (or
-            # had) that name, else when the install's record, this
-            # company's backups table or, on the desktop, the file says so
-            mine = whose.is_mine(filename, owner)
+        if owner == slug:
+            mine = True
+        elif owner not in (None, LEGACY_SLUG):
+            mine = False  # named for another company
         elif filename in rows:
             mine = True
         else:
@@ -914,12 +612,8 @@ def other_company(db: Session, filename: str) -> dict | None:
     stored = read_backup_facts(filename).get("company_name")
     if stored and not _same_name(stored, current):
         return {"backup_company": stored, "current_company": current}
-    if parsed and parsed["slug"] != LEGACY_SLUG:
-        if not _Ownership(db).is_mine(filename, parsed["slug"]):
-            return {
-                "backup_company": stored or parsed["slug"],
-                "current_company": current,
-            }
+    if parsed and parsed["slug"] not in (company_slug(), LEGACY_SLUG):
+        return {"backup_company": stored or parsed["slug"], "current_company": current}
     return None
 
 
