@@ -660,10 +660,13 @@ jobs:
           # 444 with round 26: ten WeasyPrint cases of the totals' right edge
           # (test_pdf_totals_right_edge_w226.py, one per document) and the bid with
           # tables' long scope line (test_pdf_bid_tables_long_line_new277.py).
-          # 448 with round 28's in-house audit: the relay link's two read-only-folder tests
-          # (POSIX folder modes), and two modules without playwright
-          # (test_browser_line_controls_r29.py, test_browser_zero_total_ask_r29.py).
-          MAX_SKIPS: "448"
+          # 454 with round 28's in-house audit (measured, CI 44849171083: 297 + 83 + 74):
+          # six tests of the relay link that need POSIX folder modes or symbolic links
+          # (test_switchboard_relay_rule_r29.py), two WeasyPrint cases of the giving
+          # statement (test_reports_giving_statement_agree_r29.py), and two modules
+          # without playwright (test_browser_line_controls_r29.py,
+          # test_browser_zero_total_ask_r29.py).
+          MAX_SKIPS: "454"
         run: |
           total=0
           for f in shards/*/skips.txt; do
