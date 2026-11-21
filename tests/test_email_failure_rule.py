@@ -97,13 +97,17 @@ SENTENCES = {
 }
 POINTER = where_to_see_why(False)
 SEE_WHY = where_to_see_why(True)
-# the refused-address sentences, naming addresses of our own
+# the refused-address sentences, naming addresses of our own: the refused
+# one, then (when another was only put off) who the server asked to try
+# again later for
+_OURS = r"[\w.+-]+@example\.(?:test|org)"
 _REFUSED_ONE = re.compile(
-    r"The address was refused by the mail server: [\w.+-]+@example\.(?:test|org)\. "
+    rf"(?:The address was refused by the mail server: {_OURS}\. "
     r"Check it and send again\."
-    r"|The mail server would not take mail for: [\w.+-]+@example\.(?:test|org)\. "
+    rf"|The mail server would not take mail for: {_OURS}\. "
     r"If the address is right, the server may want a sign-in \(Settings → Email "
-    r"\(SMTP\)\) or may not allow mail to it\."
+    r"\(SMTP\)\) or may not allow mail to it\.)"
+    rf"(?: The mail server asked to try again later for: {_OURS}(?:, {_OURS})*\.)?"
 )
 
 
@@ -615,6 +619,12 @@ def test_a_reply_that_repeats_the_sign_in_is_an_administrators_as_received(
 # -- what a row stores ---------------------------------------------------------------
 
 
+UNEXPECTED_ROW = (
+    "[local] Unexpected error in SlowBooks Pro, not an answer from the mail "
+    "server (the server log has the cause)"
+)
+
+
 def _data(words, code=554):
     return smtplib.SMTPDataError(
         code, words if isinstance(words, bytes) else words.encode()
@@ -688,10 +698,10 @@ STORED = [
     ),
     # ... nor a Python class name, nor Python's own text for a fault of ours
     (OSError(), "[socket] Connection failed"),
-    (RuntimeError("boom at 0x7f"), "[local] Unexpected error"),
+    (RuntimeError("boom at 0x7f"), UNEXPECTED_ROW),
     (
         UnicodeEncodeError("ascii", "naïve", 2, 3, "ordinal not in range(128)"),
-        "[local] Unexpected error",
+        UNEXPECTED_ROW,
     ),
     # words of our own
     (

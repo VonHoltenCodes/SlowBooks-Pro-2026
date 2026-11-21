@@ -63,7 +63,7 @@ from app.services.email_service import send_email
 from app.services.pdf_service import generate_invoice_pdf, generate_statement_pdf
 from app.services.settings_service import get_all_settings, set_setting
 from app.services.sub_customers import billed_balances, billed_subs, billed_to
-from app.services.terminology import terms_from_db
+from app.services.terminology import AsWritten, terms_from_db
 
 logger = logging.getLogger(__name__)
 
@@ -819,7 +819,9 @@ def remind_invoice(db: Session, invoice_id: int, admin: bool = False) -> dict:
     if result is TAKEN:
         raise RemindError("Another window is sending this reminder right now.")
     if result:
-        raise RemindError(result)
+        # names the customer, the document by its own face, and addresses
+        # of the send: shown as written, never reworded by the vocabulary
+        raise RemindError(AsWritten(result))
     answer = {"sent": True, "label": rule_label(rule.days_from_due), "to": _emails(to)}
     from app.services.email_errors import note_for_last_send
 

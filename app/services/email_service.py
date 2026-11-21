@@ -9,7 +9,7 @@ import smtplib
 import ssl
 import time
 import traceback
-from email.utils import getaddresses
+from email.utils import getaddresses, parseaddr
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -341,6 +341,7 @@ def send_email(
         MailLocalError,
         MailTLSError,
         RecipientsPartlyRefused,
+        address_letters_error,
         host_name_error,
         sign_in_letters_error,
         stored_text,
@@ -401,7 +402,19 @@ def send_email(
         msg.attach(part)
 
     server = None
+    signed_in = False
     try:
+        # An SMTP envelope is ASCII: smtplib would fail on such an address
+        # part-way through the conversation with a codec error. Said
+        # before anything is sent, naming the address.
+        unsendable = [
+            a
+            for a in [from_email, to_email] + cc_list + bcc_list
+            if not (parseaddr(a)[1] or a).isascii()
+        ]
+        if unsendable:
+            # each once (Test Email goes from and to one address)
+            raise address_letters_error(list(dict.fromkeys(unsendable)))
         try:
             server = _connect(host, port)
         except UnicodeError:
@@ -429,6 +442,7 @@ def send_email(
                 # SMTP sign-in is ASCII: smtplib fails before it sends
                 # anything, and its error names a character of the password
                 raise sign_in_letters_error() from None
+            signed_in = True
 
         everyone = [to_email] + cc_list + bcc_list
         refused = server.sendmail(from_email, everyone, msg.as_string())
@@ -514,7 +528,9 @@ def send_email(
             # the stage tagged, then the server's reply as readable text
             # (or the plain cause), never str(e)
             error_message=stored_text(
-                e, after_body=getattr(server, "body_given", False) is True
+                e,
+                after_body=getattr(server, "body_given", False) is True,
+                signed_in=signed_in,
             ),
         )
         db.add(log)
