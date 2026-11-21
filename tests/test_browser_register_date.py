@@ -138,6 +138,20 @@ def test_the_far_date_question_is_asked_once_not_for_the_carried_date(browser):
         page.close()
 
 
+# The register drawn again from the From date: a newer drawing than `was`,
+# done (its bar carries the drawing in hand, BankingPage._drawing), on that
+# date. The address changes as the filter is applied, before the drawing:
+# waited for on its own, a key pressed then went to the old bar, which the
+# drawing in flight then replaced, and the date never moved (CI, once).
+REDRAWN_FROM = """([was, date]) => {
+    const bar = document.getElementById('reg-filters');
+    const box = document.getElementById('reg-start');
+    return !!bar && !!box && bar.dataset.drawn !== was
+        && bar.dataset.drawn === String(BankingPage._drawing)
+        && location.hash.includes('start_date=' + date) && box.value === date;
+}"""
+
+
 def test_plus_minus_and_t_move_the_row_date(browser):
     page = _register_page(browser, [])
     try:
@@ -162,17 +176,13 @@ def test_plus_minus_and_t_move_the_row_date(browser):
         assert page.input_value("#qe-memo") == "a+b-c"
         # the register's From filter is a date box too: the key moves it
         # and its onchange redraws the register
+        drawn = page.get_attribute("#reg-filters", "data-drawn")
         page.fill("#reg-start", "2026-09-01")  # its change redraws the register
-        page.wait_for_function(
-            "() => location.hash.includes('start_date=2026-09-01')"
-            " && document.getElementById('reg-start').value === '2026-09-01'"
-        )
+        page.wait_for_function(REDRAWN_FROM, arg=[drawn, "2026-09-01"])
+        drawn = page.get_attribute("#reg-filters", "data-drawn")
         page.focus("#reg-start")
         page.keyboard.press("-")
-        page.wait_for_function(
-            "() => location.hash.includes('start_date=2026-08-31')"
-            " && document.getElementById('reg-start').value === '2026-08-31'"
-        )
+        page.wait_for_function(REDRAWN_FROM, arg=[drawn, "2026-08-31"])
     finally:
         page.close()
 
