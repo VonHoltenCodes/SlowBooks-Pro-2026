@@ -12,9 +12,10 @@
 #
 # The app's address: this computer by default. The office's Server Edition
 # is reached at a LAN address, so any http:// or https:// address is taken,
-# with one rule: plain http:// leaves this computer only for a private-network
-# or link-local host, since the token travels unencrypted. A public host must
-# be https://, and its certificate is always verified.
+# with one rule: plain http:// leaves this computer only for a host on one of
+# the networks listed in _LOCAL_NETWORKS (private or link-local), since the
+# token travels unencrypted. Every other host must be https://, and its
+# certificate is always verified.
 # ============================================================================
 
 import ipaddress
@@ -22,7 +23,7 @@ import math
 import os
 import socket
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from app.switchboard import store
 
@@ -51,23 +52,55 @@ class Config:
         return f"Config(base_url={self.base_url!r}, timeout={self.timeout})"
 
 
+# Where plain http:// may go: this computer and the networks an office can
+# own. The list is the whole rule. Anything not on it must be https://, and
+# that includes ranges that are reserved without being anyone's network (the
+# documentation and benchmark ranges, 240.0.0.0/4, the shared range
+# 100.64.0.0/10).
+_LOCAL_NETWORKS = tuple(
+    ipaddress.ip_network(net)
+    for net in (
+        "127.0.0.0/8",  # loopback
+        "::1/128",  # loopback
+        "10.0.0.0/8",  # private (RFC 1918)
+        "172.16.0.0/12",  # private (RFC 1918)
+        "192.168.0.0/16",  # private (RFC 1918)
+        "169.254.0.0/16",  # link-local
+        "fc00::/7",  # unique local
+        "fe80::/10",  # link-local
+    )
+)
+
+
+def _address(text: str):
+    """The address in text, without an IPv6 zone. An IPv4-mapped IPv6
+    address (::ffff:192.168.1.20) is the IPv4 address inside it: that is
+    where the connection goes, so that is what is judged. A zone (%eth0)
+    belongs on an IPv6 address only: any other text with a % in it is not
+    an address, whatever stands in front of the %."""
+    head, percent, zone = text.partition("%")
+    addr = ipaddress.ip_address(head)
+    if percent and (addr.version != 6 or not zone):
+        raise ValueError("a zone belongs on an IPv6 address")
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return mapped if mapped is not None else addr
+
+
 def _ip(host: str):
     try:
-        return ipaddress.ip_address(host.split("%", 1)[0])
+        return _address(host)
     except ValueError:
         return None
 
 
 def _is_local_network(addr) -> bool:
-    """Loopback, a private network or link-local; never 0.0.0.0 or multicast."""
-    if addr.is_unspecified or addr.is_multicast:
-        return False
-    return addr.is_loopback or addr.is_private or addr.is_link_local
+    """Whether addr is on one of _LOCAL_NETWORKS."""
+    return any(addr.version == net.version and addr in net for net in _LOCAL_NETWORKS)
 
 
 def _resolve(host: str, port: int) -> list:
     infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    return [ipaddress.ip_address(i[4][0].split("%", 1)[0]) for i in infos]
+    return [_address(i[4][0]) for i in infos]
 
 
 def check_url(raw: str, *, must_resolve: bool = True) -> tuple:
@@ -99,7 +132,10 @@ def check_url(raw: str, *, must_resolve: bool = True) -> tuple:
         raise ConfigError(shape)
     clean = f"{parts.scheme}://{parts.netloc}"
     port = port or (443 if parts.scheme == "https" else 80)
-    addr = _ip(host)
+    # The request is made to the host with its percent escapes undone
+    # (urllib does that), so that is the host judged here: 10.0.0.1%2eoffice
+    # goes to the name 10.0.0.1.office, not to 10.0.0.1.
+    addr = _ip(unquote(host))
     if addr is not None and (addr.is_unspecified or addr.is_multicast):
         raise ConfigError(
             f"{host} is not the address of a computer. Use 127.0.0.1 for this "
@@ -118,6 +154,8 @@ def check_url(raw: str, *, must_resolve: bool = True) -> tuple:
         if not _is_local_network(addr):
             raise ConfigError(public)
         return clean, UNENCRYPTED_WARNING
+    if "%" in host:
+        raise ConfigError(public)  # a name is written without one
     try:
         found = _resolve(host, port)
     except (OSError, UnicodeError):

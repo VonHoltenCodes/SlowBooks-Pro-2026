@@ -6,17 +6,16 @@
 # transport is a plain callable, which is how the tests run the tools
 # against the app in-process.
 #
-# What the program refuses on its own ("match the software", the owner's
-# answer on admin operations): nothing the API decides for the token's role.
+# What the program refuses on its own: nothing the API decides for the
+# token's role. The rule is to match the software.
 # Tokens, users, backups, the company file and system go to the API like
 # everything else, and its answer is what the person hears. One thing stays
 # refused here: paths outside /api/ (and /openapi.json). The pages, /health
 # and the payment and portal pages are not the API.
 #
-# Making a backup (POST /api/backups) is the API's to decide like the rest
-# (the owner, 2026-11-06): the app lets a token an administrator ticked
-# "Can make backups" make one whatever its role, and this program does not
-# second-guess that.
+# Making a backup (POST /api/backups) is the API's to decide like the rest:
+# the app lets a token an administrator ticked "Can make backups" make one
+# whatever its role, and this program does not second-guess that.
 #
 # The files the API returns (PDFs, CSV and IIF downloads, print pages) and
 # uploads are refused in operations.py, since they cannot be carried here.
@@ -24,11 +23,20 @@
 # HTTPS certificates are always verified, with no switch to turn that off,
 # and redirects are never followed: the token is sent only to the address
 # the person gave setup.
+#
+# One client works one company's books. A client made for a company sends
+# X-SlowBooks-Company with that company's file on every request (no tool can
+# set or change it), and with expect_served it takes an answer only when
+# SlowBooks Pro says, in X-SlowBooks-Company-Served, that it answered from
+# that same company. Every client of one connection shares one copy of the
+# OpenAPI document (a SpecHolder): the document is the same for every company
+# the app serves.
 # ============================================================================
 
 import json
 import logging
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -40,8 +48,19 @@ from app.switchboard.config import Config
 
 log = logging.getLogger("sbplive")
 
-# (method, path, params, body, headers) -> (status, parsed JSON or text)
+# (method, path, params, body, headers) -> (status, parsed JSON or text), or
+# (status, parsed JSON or text, the answer's headers): the headers are needed
+# when the client checks which company answered.
 Transport = Callable[[str, str, dict | None, Any, dict | None], tuple]
+
+COMPANY_HEADER = "X-SlowBooks-Company"
+SERVED_HEADER = "X-SlowBooks-Company-Served"
+_COMPANY_LOWER = COMPANY_HEADER.lower()
+_SERVED_LOWER = SERVED_HEADER.lower()
+# What SlowBooks Pro answers before it reads a token (the OpenAPI document
+# and the sign-in routes): those answers never say which company served them.
+_UNSTAMPED_EXACT = {"/openapi.json"}
+_UNSTAMPED_PREFIXES = ("/api/auth/",)
 
 
 class ApiError(Exception):
@@ -49,6 +68,9 @@ class ApiError(Exception):
         super().__init__(status, detail)
         self.status = status
         self.detail = detail
+        # whether the answer said which company served it (a refusal made
+        # before the token was read never does)
+        self.stamped = False
 
     def __str__(self) -> str:
         return f"HTTP {self.status}: {self.detail}"
@@ -56,6 +78,33 @@ class ApiError(Exception):
 
 class Refused(ApiError):
     """A request this program does not send; the detail is the whole sentence."""
+
+
+class Unconfirmed(Exception):
+    """An answer that did not say it came from the expected company's books.
+
+    It is deliberately not an ApiError, so no tool that reads past a refused
+    request can go on to its write after it: the whole call stops."""
+
+    def __init__(self, expected: str, served: str | None):
+        super().__init__(expected, served)
+        self.expected = expected
+        self.served = served
+
+    def __str__(self) -> str:
+        return (
+            f"SlowBooks Pro did not confirm it answered from {self.expected}, "
+            "so this call stopped."
+        )
+
+
+class SpecHolder:
+    """The OpenAPI document, read once and shared by every client of one
+    connection."""
+
+    def __init__(self):
+        self.spec: dict | None = None
+        self.lock = threading.Lock()
 
 
 def reachable(path: str) -> bool:
@@ -150,8 +199,10 @@ def urllib_transport(config: Config) -> Transport:
         try:
             with opener.open(req, timeout=config.timeout) as resp:
                 status, payload = resp.status, _parse(resp.read())
+                answered = _headers_of(resp.headers)
         except urllib.error.HTTPError as exc:
             status = exc.code
+            answered = _headers_of(exc.headers)
             if 300 <= status < 400:
                 where = exc.headers.get("Location") or "another address"
                 payload = {
@@ -176,20 +227,96 @@ def urllib_transport(config: Config) -> Transport:
             status,
             (time.monotonic() - started) * 1000,
         )
-        return status, payload
+        return status, payload, answered
 
     return send
 
 
+def _headers_of(message) -> dict:
+    """An answer's headers by lower-case name; a repeated header's values are
+    joined, so a repeated company header never matches one company."""
+    out: dict = {}
+    if message is None:
+        return out
+    for name in set(message.keys()):
+        values = message.get_all(name) or []
+        out[name.lower()] = ", ".join(str(v) for v in values)
+    return out
+
+
 class ApiClient:
-    def __init__(self, transport: Transport):
+    """Requests to the app under one token.
+
+    company: the company file to name in X-SlowBooks-Company on every
+    request; none is sent when it is empty. expect_served: the company file
+    every answer must say it came from (X-SlowBooks-Company-Served); a
+    different one, or none on a success, raises Unconfirmed. spec_holder: the
+    OpenAPI document shared with the connection's other clients."""
+
+    def __init__(
+        self,
+        transport: Transport,
+        *,
+        company: str | None = None,
+        expect_served: str | None = None,
+        spec_holder: SpecHolder | None = None,
+    ):
         self._transport = transport
-        self.spec: dict | None = None  # openapi.json, cached by the tools
+        self.company = company or None
+        self.expect_served = expect_served
+        self.spec_holder = spec_holder or SpecHolder()
+
+    @property
+    def spec(self) -> dict | None:
+        """openapi.json, cached by the tools (shared through spec_holder)."""
+        return self.spec_holder.spec
+
+    @spec.setter
+    def spec(self, value: dict | None) -> None:
+        self.spec_holder.spec = value
+
+    def openapi(self) -> dict:
+        """The OpenAPI document, fetched once for every client that shares
+        the holder."""
+        holder = self.spec_holder
+        if holder.spec is None:
+            with holder.lock:
+                if holder.spec is None:
+                    holder.spec = self.get("/openapi.json")
+        return holder.spec
+
+    def _headers(self, headers: dict | None) -> dict | None:
+        # A caller's company header, in any spelling, never travels: only the
+        # client's own does.
+        out = {k: v for k, v in (headers or {}).items() if k.lower() != _COMPANY_LOWER}
+        if self.company:
+            out[COMPANY_HEADER] = self.company
+        return out or None
+
+    def _confirm(self, path: str, status: int, answered: dict | None) -> None:
+        if self.expect_served is None:
+            return
+        if path in _UNSTAMPED_EXACT or path.startswith(_UNSTAMPED_PREFIXES):
+            return
+        served = (answered or {}).get(_SERVED_LOWER)
+        if served is None:
+            # The app's refusals before a token is read (401, 421, 503)
+            # carry no served header; an answer with data always does.
+            if 200 <= status < 300:
+                raise Unconfirmed(self.expect_served, None)
+            return
+        if served != self.expect_served:
+            raise Unconfirmed(self.expect_served, served)
 
     def _request(self, method, path, params=None, body=None, headers=None):
         _check(method, path)
         clean = {k: v for k, v in (params or {}).items() if v is not None}
-        status, payload = self._transport(method, path, clean, body, headers)
+        result = self._transport(method, path, clean, body, self._headers(headers))
+        status, payload = result[0], result[1]
+        answered = None
+        if len(result) > 2 and result[2] is not None:
+            answered = {str(k).lower(): v for k, v in result[2].items()}
+        self._confirm(path, status, answered)
         if 200 <= status < 300:
             return payload
         detail = payload.get("detail") if isinstance(payload, dict) else payload
@@ -197,7 +324,9 @@ class ApiClient:
             detail = detail["message"]  # e.g. the possible-duplicate 409
         elif detail and not isinstance(detail, str):
             detail = json.dumps(detail)  # a validation error is a list
-        raise ApiError(status, detail or f"the request failed with status {status}")
+        exc = ApiError(status, detail or f"the request failed with status {status}")
+        exc.stamped = answered is not None and _SERVED_LOWER in answered
+        raise exc
 
     def request(
         self,

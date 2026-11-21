@@ -7,7 +7,19 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: e5d2b2dcc4af58842f5701586a2174f7061ce6b7 (main, 2026-11-20,
+- Commit: 842aa6a73480ea7f560169319aee919bffab29f5 (branch multi-company,
+  2026-11-21): one connection can work several companies' books. Every
+  tool takes a `books` argument, the handle `context` lists; a connection
+  of several companies refuses a call that names none, an unknown handle,
+  or a company's name or file, before anything is sent, and every result
+  starts by naming the books. The registry takes a Books provider (one
+  ApiClient still works as before); a client names its company in
+  X-SlowBooks-Company, drops any other spelling of that header, and takes
+  an answer only when X-SlowBooks-Company-Served names the same company.
+  It carries main up to 9854f0e (the 1.0.0 public-export fixes: plain
+  http:// only to a listed local network, an untaxed sales document
+  answered as untaxed, reports without print pages).
+  Before them: e5d2b2d (main, 2026-11-20,
   "sbplive/keep-the-apps-tax-note"): a sales document's own `tax_note`
   from SlowBooks Pro (a missing or expired exemption certificate) is kept,
   in front of the note about the rate, instead of being written over.
@@ -36,19 +48,19 @@ The modules `line.py` imports, directly or through `server.py` (and
 |---|---:|
 | `__init__.py` | 16 |
 | `account.py` | 606 |
-| `client.py` | 223 |
-| `config.py` | 205 |
+| `client.py` | 352 |
+| `config.py` | 243 |
 | `line.py` | 1030 |
 | `logs.py` | 78 |
-| `operations.py` | 684 |
+| `operations.py` | 692 |
 | `protocol.py` | 493 |
-| `registry.py` | 401 |
+| `registry.py` | 683 |
 | `remote.py` | 682 |
-| `server.py` | 615 |
+| `server.py` | 624 |
 | `store.py` | 170 |
-| `tools.py` | 1011 |
+| `tools.py` | 1243 |
 | `ws.py` | 589 |
-| 14 files | 6803 |
+| 14 files | 7501 |
 
 Not copied: the self-hosted HTTP door's runner (`serve_http.py`, which
 shows its connector secret on first run), the OAuth door (`oauth*.py`,
@@ -64,9 +76,10 @@ and `probe.py`.
    lines only; the logger's name, the user agent and the sentences keep
    `sbplive`).
 
-Everything SlowBooks Pro needs on top (where the link is kept, the token,
-the company, the thread) is in `app/services/switchboard_link.py`, never in
-these files.
+Everything SlowBooks Pro needs on top (where the link is kept, each
+company's token and handle, which companies are open here, the thread) is
+in `app/services/switchboard_link.py`, never in these files: its
+`LinkBooks` is the Books provider the line's registry is built on.
 
 ## Syncing
 

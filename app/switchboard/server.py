@@ -54,7 +54,12 @@ INSTRUCTIONS = (
     "(still empty) and what defaulted lists (not given, so SlowBooks Pro used "
     "its default: the value is there). A sales document sent without "
     "tax_rate takes the company's default rate, as the app's form does; pass "
-    "tax_note on."
+    "tax_note on. A connection can reach several companies' books. Call "
+    "context first: it lists them. Name the books on every call with books, "
+    "using the handle context gives; ids, keys and answers belong to those "
+    "books only. Never carry an id from one company's books to another's. A "
+    "customer's or vendor's company field is part of the record and never "
+    "chooses the books."
 )
 
 _ASKS = (
@@ -101,7 +106,9 @@ def _tool(tool_name, title, fn, annotations, description, /, **params) -> Tool:
     )
 
 
-def build_registry(client: ApiClient) -> Registry:
+def build_registry(client) -> Registry:
+    """Every tool over client: one ApiClient (one company) or a Books
+    provider (registry.Books), which may reach several companies' books."""
     reg = Registry(client)
     add = reg.add
 
@@ -114,7 +121,9 @@ def build_registry(client: ApiClient) -> Registry:
             READ_ONLY,
             "The company's name, type, closing date and the app's version. Read "
             "it before working: a change dated on or before the closing date is "
-            "refused by the app.",
+            "refused by the app. On a connection that reaches several "
+            "companies, context without books lists their handles instead; "
+            "call it again with books for one company's facts.",
         )
     )
     add(
