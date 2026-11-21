@@ -31,16 +31,39 @@ def _sync():
     return module
 
 
+def _pinned() -> str:
+    return re.search(
+        r"\b([0-9a-f]{40})\b", (VENDOR / "SOURCE.md").read_text(encoding="utf-8")
+    ).group(1)
+
+
+def _head(path: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def _checkout():
+    """The source checkout to compare with: the one SLOWBOOKS_SWITCHBOARD_SOURCE
+    names, else a checkout beside this one that is at the pinned commit
+    (several branches of the source can sit side by side; only the one at
+    the pinned commit says what the copies must be)."""
     raw = os.environ.get(SOURCE_ENV)
     if raw:
         candidates = [Path(raw).expanduser()]
     else:  # a source checkout beside this one, by what it holds
         candidates = sorted(ROOT.parent.glob("*"))
-    for path in candidates:
-        if (path / "sbplive" / "line.py").is_file() and (path / "relay").is_dir():
-            return path
-    return None
+    found = [
+        path
+        for path in candidates
+        if (path / "sbplive" / "line.py").is_file() and (path / "relay").is_dir()
+    ]
+    if raw:
+        return found[0] if found else None
+    pinned = _pinned()
+    return next((path for path in found if _head(path) == pinned), None)
 
 
 def test_every_vendored_file_is_listed_with_its_header():
@@ -73,15 +96,13 @@ def test_the_relay_is_one_constant_and_nothing_is_added_to_requirements():
 def test_the_copies_match_the_source_checkout():
     checkout = _checkout()
     if checkout is None:
-        pytest.skip("no SlowBooks Switchboard source checkout here")
+        pytest.skip("no Switchboard source checkout at the pinned commit")
     sync = _sync()
     for name in sync.FILES:
         copy = (VENDOR / name).read_text(encoding="utf-8")
         source = (checkout / "sbplive" / name).read_text(encoding="utf-8")
         assert sync.vendored(name, source) == copy, name
-    pinned = re.search(
-        r"\b([0-9a-f]{40})\b", (VENDOR / "SOURCE.md").read_text(encoding="utf-8")
-    ).group(1)
+    pinned = _pinned()
     # the pinned commit is in the checkout's history, and its files make these
     for name in sync.FILES:
         shown = subprocess.run(

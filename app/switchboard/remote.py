@@ -122,7 +122,7 @@ _ALLOW = "POST, DELETE"
 
 
 def new_secret() -> str:
-    """256 random bits, URL-safe, with a prefix the log filter recognises."""
+    """256 random bits, URL-safe, with a prefix the log filter recognizes."""
     return SECRET_PREFIX + secrets.token_urlsafe(32)
 
 

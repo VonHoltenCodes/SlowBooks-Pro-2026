@@ -78,7 +78,13 @@ from email.message import Message
 from urllib.parse import urlsplit
 
 from app.switchboard import __version__, account, store, ws
-from app.switchboard.client import ApiClient, ApiError, tls_context, urllib_transport
+from app.switchboard.client import (
+    ApiClient,
+    ApiError,
+    Unconfirmed,
+    tls_context,
+    urllib_transport,
+)
 from app.switchboard.config import (
     DEFAULT_URL,
     ConfigError,
@@ -997,17 +1003,25 @@ def from_store(
         raw = os.environ.get("SBPLIVE_URL") or store.stored_url() or DEFAULT_URL
         app_url, _ = check_url(raw, must_resolve=False)
     else:
+        # The companies this user added (sbplive add-books), or setup's one
+        # token. Imported here: the product carries this module without it.
+        from app.switchboard.books import provider
+
         app_url = config.base_url
         # Under the relay's 110 seconds, so the answer is the app's own.
         config = replace(config, timeout=min(config.timeout, MCP_TIMEOUT - 10))
-        client = ApiClient(urllib_transport(config))
-        mcp = Mcp(build_registry(client), INSTRUCTIONS)
+        mcp = Mcp(build_registry(provider(config)), INSTRUCTIONS)
         try:
-            quick = ApiClient(urllib_transport(replace(config, timeout=5)))
+            company = config.company or None
+            quick = ApiClient(
+                urllib_transport(replace(config, timeout=5)),
+                company=company,
+                expect_served=company,
+            )
             info = quick.get("/api/system")
             if isinstance(info, dict) and info.get("version"):
                 version = str(info["version"])
-        except ApiError:
+        except (ApiError, Unconfirmed):
             pass
     return Line(
         made.line_url,

@@ -10,6 +10,14 @@
 # built from the function's signature plus a sentence per parameter. No
 # third-party validator: the schemas use a handful of keywords, and the check
 # here covers exactly those.
+#
+# Which books: a connection can reach several companies' books, each through
+# its own token (a Books provider). Every tool takes a `books` argument, the
+# handle `context` lists. With one company on the connection it may be left
+# out; with more it must be given, and a call that names none, an unknown
+# handle, or a company's name or file is refused before anything is sent.
+# One call works one company's books from start to end, and on a connection
+# of several companies its result starts by naming them.
 # ============================================================================
 
 import inspect
@@ -19,8 +27,10 @@ import types
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Protocol, runtime_checkable
 
-from app.switchboard.client import ApiClient, ApiError, Refused
+from app.switchboard import tools as _tools
+from app.switchboard.client import ApiClient, ApiError, Refused, Unconfirmed
 
 log = logging.getLogger("sbplive")
 
@@ -44,7 +54,8 @@ NARROW = (
 # destructive, and only the reads are not. idempotentHint is true where the
 # same call again changes nothing more: a payment under the same key books
 # once, a second void or delete of the same record is refused. Every tool
-# works one company's books through one API, so none is open-world.
+# works the books of companies this connection was granted, through their
+# own API, so none is open-world.
 READ_ONLY = {
     "readOnlyHint": True,
     "destructiveHint": False,
@@ -173,6 +184,20 @@ def check_arguments(name: str, schema: dict, args: dict) -> str | None:
     return None
 
 
+# The one argument every tool takes on top of its own. It is not required
+# (one company needs no naming) and has no enum (the handles differ per
+# connection, and the list of tools stays the same for everyone).
+BOOKS = "books"
+BOOKS_PROPERTY = {
+    "type": "string",
+    "description": (
+        "Which company's books to work in: its handle exactly as context "
+        "lists it (for example smith-plumbing~k3f9q2). Needed whenever this "
+        "connection reaches more than one company."
+    ),
+}
+
+
 @dataclass
 class Tool:
     name: str
@@ -184,7 +209,11 @@ class Tool:
     input_schema: dict = field(init=False)
 
     def __post_init__(self):
-        self.input_schema = schema_from_signature(self.fn, self.params)
+        schema = schema_from_signature(self.fn, self.params)
+        if BOOKS in schema["properties"]:
+            raise TypeError(f"{self.name}: {BOOKS} is the registry's own argument")
+        schema["properties"][BOOKS] = dict(BOOKS_PROPERTY)
+        self.input_schema = schema
 
     def definition(self) -> dict:
         return {
@@ -349,9 +378,245 @@ def error_sentence(exc: Exception) -> str:
     return _end(str(exc))
 
 
-class Registry:
-    def __init__(self, client: ApiClient):
+# ---------------------------------------------------------------------------
+# Books providers: which companies a connection reaches, and the client for
+# each. An entry is {"books", "name", "answers", "why"} and may carry "file";
+# "books" is the handle (None for a connection that names none).
+# ---------------------------------------------------------------------------
+
+NOTHING_DONE = "Nothing was done."
+
+
+@runtime_checkable
+class Books(Protocol):
+    def entries(self) -> list[dict]:
+        """[{"books", "name", "answers": bool, "why": str}], plus "file"
+        when it is known."""
+        ...
+
+    def pick(self, books: str | None, tool: str) -> tuple[ApiClient, dict]:
+        """The client and entry for a handle the registry resolved; raises
+        Refused(sentence) when that company cannot be reached now."""
+        ...
+
+    def count(self) -> int:
+        """The companies on the connection, never only the ones open now."""
+        ...
+
+    def lost(self, books: str | None) -> None:
+        """Told that the company's token was refused (401)."""
+        ...
+
+
+class SingleBooks:
+    """One company through one client: the connection of a single token,
+    which names no handle unless it is given one."""
+
+    def __init__(
+        self,
+        client: ApiClient,
+        books: str | None = None,
+        name: str = "",
+        file: str = "",
+    ):
         self.client = client
+        self.books = books
+        self.name = name
+        self.file = file
+
+    def _entry(self) -> dict:
+        return {
+            "books": self.books,
+            "name": self.name,
+            "answers": True,
+            "why": "",
+            "file": self.file,
+        }
+
+    def entries(self) -> list[dict]:
+        return [self._entry()]
+
+    def pick(self, books: str | None, tool: str) -> tuple[ApiClient, dict]:
+        return self.client, self._entry()
+
+    def count(self) -> int:
+        return 1
+
+    def lost(self, books: str | None) -> None:
+        return None
+
+
+def _shown(entry: dict) -> str:
+    return entry.get("name") or entry.get("file") or str(entry.get("books") or "")
+
+
+def _handles(entries: list) -> str:
+    return ", ".join(str(e.get("books")) for e in entries if e.get("books"))
+
+
+def _quoted(value: str) -> str:
+    text = value if len(value) <= 80 else value[:79] + "…"
+    return "'" + text.replace("'", "") + "'"
+
+
+def _same(a, b) -> bool:
+    return isinstance(a, str) and isinstance(b, str) and a.casefold() == b.casefold()
+
+
+def _stem(file) -> str | None:
+    if not isinstance(file, str) or not file:
+        return None
+    return file[: -len(".db")] if file.lower().endswith(".db") else file
+
+
+def overview(entries: list) -> dict:
+    """context's answer on a connection of several companies, when no books
+    are named: which books it reaches, and no books data."""
+    return {
+        "books": [
+            {
+                "books": e.get("books"),
+                "name": e.get("name") or "",
+                "answers": bool(e.get("answers")),
+                "why": e.get("why") or "",
+            }
+            for e in entries
+        ],
+        "next": (
+            "Every call names one of these with books. Ids, keys and answers "
+            "belong to one company's books only."
+        ),
+    }
+
+
+class _Stop(Exception):
+    """A call refused before anything was sent; the sentence is the answer."""
+
+    def __init__(self, sentence: str, value=None):
+        super().__init__(sentence)
+        self.sentence = sentence
+        self.value = value
+
+
+def choose(entries: list, count: int, books, tool: str) -> dict:
+    """The entry a call works, or _Stop with the refusal (or, for context
+    with no books on several companies, the overview as its value)."""
+    if books is None:
+        if count == 1 and len(entries) == 1:
+            return entries[0]
+        if not entries:
+            raise _Stop(
+                "This connection reaches no company's books yet. " + NOTHING_DONE
+            )
+        if tool == "context":
+            raise _Stop("", overview(entries))
+        raise _Stop(
+            f"This connection reaches {count} companies' books, so every call "
+            "names one with books. Call context to see them, then call "
+            f"{tool} again with books set to one of: {_handles(entries)}. "
+            + NOTHING_DONE
+        )
+    for entry in entries:
+        if entry.get("books") and books == entry["books"]:
+            return entry
+    named = [
+        e
+        for e in entries
+        if e.get("books")
+        and (
+            _same(books, e.get("name"))
+            or _same(books, e.get("file"))
+            or _same(books, _stem(e.get("file")))
+        )
+    ]
+    if named:
+        handles = " or ".join(str(e["books"]) for e in named)
+        raise _Stop(
+            f"Name the books by their handle, {handles}, not by the company's "
+            "name or file (names repeat and change). " + NOTHING_DONE
+        )
+    if not any(e.get("books") for e in entries):
+        raise _Stop(
+            f"This connection does not reach the books {_quoted(books)}. It "
+            "reaches one company's books, which need no handle: leave books "
+            "out. " + NOTHING_DONE
+        )
+    raise _Stop(
+        f"This connection does not reach the books {_quoted(books)}. It "
+        f"reaches: {_handles(entries)}. " + NOTHING_DONE
+    )
+
+
+def _lost_sentence(name: str) -> str:
+    """A company that turned the connection's token away; a provider that
+    knows how that company is added again says so with its own
+    lost_sentence(entry)."""
+    return (
+        f"{name} no longer accepts this connection: its token was turned off "
+        "there, or the person who added it is no longer an administrator there. "
+        "Tell the person; it can be used again only when it is added again. "
+        + NOTHING_DONE
+    )
+
+
+def _unconfirmed_sentence(name: str) -> str:
+    return (
+        f"SlowBooks Pro did not confirm it answered from {name}'s books, so "
+        "this call stopped. Tell the person; do not retry."
+    )
+
+
+def _unserved_sentence(name: str) -> str:
+    return (
+        f"{name} is not served by this SlowBooks Pro server right now. Ask its "
+        "administrator. " + NOTHING_DONE
+    )
+
+
+def lost_sentence(provider, entry: dict) -> str:
+    """The provider's own sentence for a company that turned its token away,
+    else the plain one."""
+    own = getattr(provider, "lost_sentence", None)
+    if callable(own):
+        try:
+            said = own(entry)
+        except Exception:  # the answer still goes back
+            log.exception("the books provider failed to word a refused token")
+            said = None
+        if isinstance(said, str) and said:
+            return said
+    return _lost_sentence(_shown(entry))
+
+
+def _books_error(exc: ApiError, entry: dict, provider=None) -> str | None:
+    """The sentence for an answer about which books, on a connection that
+    names its books; None for every other answer."""
+    if not entry.get("books"):
+        return None
+    name = _shown(entry)
+    if exc.status == 401 and exc.token_refused:
+        return lost_sentence(provider, entry)
+    if exc.status == 401:
+        # a route's own 401 (a webhook's signature, say): this request was
+        # refused, and the company's token was not
+        return f"SlowBooks Pro refused this: {_end(str(exc.detail or ''))}"
+    if exc.status == 421:
+        return _unserved_sentence(name)
+    if exc.status == 503 and not exc.stamped:
+        # Locked, its own key, or behind the schema: the app's own sentence,
+        # given before the token was read, so nothing was done.
+        reason = _plain_reason(str(exc.detail or ""))
+        if reason:
+            return f"{_end(reason)} {NOTHING_DONE}"
+    return None
+
+
+class Registry:
+    def __init__(self, books):
+        """books: a Books provider, or one ApiClient (one company, no handle)."""
+        if isinstance(books, ApiClient) or not isinstance(books, Books):
+            books = SingleBooks(books)
+        self.books = books
         self._tools: dict = {}
 
     def add(self, tool: Tool) -> None:
@@ -379,23 +644,65 @@ class Registry:
     def call(self, name: str, args: dict) -> dict:
         """A tools/call result. The tool must exist (the caller checks)."""
         tool = self._tools[name]
+        args = dict(args)
+        books = args.pop(BOOKS, None)
+        if books is not None and not isinstance(books, str):
+            return _error([], f"{name}: {BOOKS} must be text. " + NOTHING_DONE)
+        try:
+            count = self.books.count()
+            entry = choose(self.books.entries(), count, books, name)
+        except _Stop as stop:
+            if stop.value is not None:
+                return {"content": render(stop.value), "isError": False}
+            return _error([], stop.sentence)
+        many = count > 1
+        stamp = [_text(f"Books: {_shown(entry)} ({entry['books']}).")] if many else []
+        try:
+            client, entry = self.books.pick(entry.get("books"), name)
+        except Refused as exc:
+            return _error(stamp, error_sentence(exc))
         problem = check_arguments(name, tool.input_schema, args)
         if problem:
-            return {"content": [_text(problem)], "isError": True}
+            return _error(stamp, problem)
+        called = _tools.Called(
+            books=entry.get("books"),
+            name=_shown(entry),
+            file=entry.get("file") or "",
+            many=many,
+        )
+        token = _tools.CALLED.set(called)
         try:
-            value = tool.fn(self.client, **args)
-        except (ApiError, ValueError) as exc:
-            return {"content": [_text(error_sentence(exc))], "isError": True}
+            value = tool.fn(client, **args)
+        except Unconfirmed:
+            log.warning("tool %s: the answer did not confirm its company", name)
+            return _error(stamp, _unconfirmed_sentence(_shown(entry)))
+        except ApiError as exc:
+            if exc.status == 401 and exc.token_refused:
+                # only the gate's own refusal of the token ends the
+                # company's place: never a route's 401
+                self._lost(entry.get("books"))
+            sentence = _books_error(exc, entry, self.books) or error_sentence(exc)
+            return _error(stamp, sentence)
+        except ValueError as exc:
+            return _error(stamp, error_sentence(exc))
         except Exception:  # a bug here must not end the session
             log.exception("tool %s failed", name)
-            return {
-                "content": [
-                    _text(
-                        f"SlowBooks Switchboard hit an internal error running {name}. "
-                        "The details are in its log on standard error. Try "
-                        "again, or another way to the same answer."
-                    )
-                ],
-                "isError": True,
-            }
-        return {"content": render(value), "isError": False}
+            return _error(
+                stamp,
+                f"SlowBooks Switchboard hit an internal error running {name}. "
+                "The details are in its log on standard error. Try "
+                "again, or another way to the same answer.",
+            )
+        finally:
+            _tools.CALLED.reset(token)
+        return {"content": stamp + render(value), "isError": False}
+
+    def _lost(self, books) -> None:
+        try:
+            self.books.lost(books)
+        except Exception:  # the answer still goes back
+            log.exception("the books provider failed on a refused token")
+
+
+def _error(stamp: list, sentence: str) -> dict:
+    return {"content": stamp + [_text(sentence)], "isError": True}

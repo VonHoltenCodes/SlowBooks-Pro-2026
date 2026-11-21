@@ -63,9 +63,11 @@ def sentence_of(exc: CompanyUnavailable) -> str:
     of the server's own, looked up, never the exception's text itself (a
     code scanner reads ``str(exc)`` on the way to a response as a possible
     traceback; here it is never one, and this keeps it so)."""
-    from app.services import company_file
+    from app.services import company_file, migration_floor
 
     known = (
+        migration_floor.BELOW_FLOOR_MESSAGE,
+        migration_floor.NEWER_VERSION_MESSAGE,
         NOT_SERVED,
         MISSING,
         OTHER_VERSION,
