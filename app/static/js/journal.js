@@ -613,22 +613,20 @@ const JournalPage = {
     splitApply(row, res) {
         const isDebit = (parseFloat(row.querySelector('.je-debit')?.value) || 0) > 0;
         const baseDesc = row.querySelector('.je-desc')?.value || '';
-        let anchor = row;
-        res.lines.forEach((ln, i) => {
-            const clone = row.cloneNode(true);
+        const shares = res.lines.map(ln => {
+            // a line of its own: its pickers plain again, its choices kept
+            const clone = LineOrder.cloneRow(row);
             clone.dataset.jeline = JournalPage._lineCount++;
-            // cloneNode drops <select> state; copy it by hand
-            row.querySelectorAll('select').forEach((sel, k) => { clone.querySelectorAll('select')[k].value = sel.value; });
             clone.querySelector('.je-desc').value = `${baseDesc} (${res.rule_name}: ${Nonprofit.label(ln.function) || ln.class_name || 'share'})`;
             clone.querySelector(isDebit ? '.je-debit' : '.je-credit').value = Number(ln.amount).toFixed(2);
             clone.querySelector(isDebit ? '.je-credit' : '.je-debit').value = 0;
             const fund = clone.querySelector('.je-function-fund'); if (fund) fund.value = ln.class_id || '';
             const fn = clone.querySelector('.je-function'); if (fn) fn.value = ln.function || '';
-            anchor.insertAdjacentElement('afterend', clone);
-            anchor = clone;
+            return clone;
         });
-        row.remove();
-        JournalPage.recalc();
+        // the shares take the line's place: every line named by its place
+        // again, the keyboard on the first share's Split
+        LineOrder.replaceRow(row, shares, () => JournalPage.recalc(), row.querySelector('.np-split'));
     },
 
     recalc() {

@@ -2083,16 +2083,30 @@ const Nonprofit = {
 
     // Split: an inline chooser under the row; on Apply the page's
     // splitApply(row, lines) clones the row into one line per share.
+    // The chooser's row is not a line: it is marked as belonging to the
+    // line above (data-line-part), so the lines under it keep their
+    // numbers, it travels with its line and goes when the line is removed;
+    // its picker is named for that line (data-line-name: nameFields keeps
+    // the number right).
     splitRow(btn) {
         const row = btn.closest('tr');
         const next = row.nextElementSibling;
-        if (next && next.classList.contains('np-split-row')) { next.remove(); return; }
+        if (next && next.classList.contains('np-split-row')) { next.remove(); btn.focus(); return; }
         const rules = (Nonprofit._rules || []).map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
-        row.insertAdjacentHTML('afterend', `<tr class="np-split-row"><td colspan="12" style="background:var(--gray-50);font-size:11px;">
-            Split this line by <select class="np-split-rule">${rules}</select>
+        const place = typeof LineOrder === 'undefined' ? 1 : LineOrder.rows(row.parentNode).indexOf(row) + 1;
+        row.insertAdjacentHTML('afterend', `<tr class="np-split-row" data-line-part><td colspan="12" style="background:var(--gray-50);font-size:11px;">
+            Split this line by <select class="np-split-rule" data-line-name aria-label="Allocation rule, line ${place}">${rules}</select>
             <button type="button" class="btn btn-sm btn-primary" onclick="Nonprofit.splitApply(this)">Apply</button>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="this.closest('tr').remove()">Cancel</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="Nonprofit.splitCancel(this)">Cancel</button>
             <span class="np-split-msg" style="margin-left:8px;color:var(--gray-500)"></span></td></tr>`);
+    },
+    // Cancel closes the chooser and hands the keyboard back to the line's
+    // Split button, where it came from.
+    splitCancel(btn) {
+        const chooser = btn.closest('tr');
+        const split = chooser.previousElementSibling && chooser.previousElementSibling.querySelector('.np-split');
+        chooser.remove();
+        if (split) split.focus();
     },
     async splitApply(btn) {
         const chooser = btn.closest('tr');
@@ -2620,7 +2634,7 @@ function _tieLabel(label, field) {
 }
 
 // A table field's name, and whether it is by place ("line N").
-function _gridName(field) {
+function _gridName(field, places) {
     const cell = field.closest('td');
     const row = cell && cell.parentElement;
     const table = row && row.closest('table');
@@ -2639,19 +2653,40 @@ function _gridName(field) {
     }
     // the row: the words of its first cell before this one that has any (an
     // amount isn't a row's name), or "line N" where they're all fields
+    // (a grid of lines that says so, data-line-names, is named by place
+    // whatever its cells hold: two lines can hold the same words)
+    const body = row.parentElement && row.parentElement.tagName === 'TBODY' ? row.parentElement : null;
     let rowName = '';
-    for (const c of row.cells) {
+    for (const c of body && body.hasAttribute('data-line-names') ? [] : row.cells) {
         if (c === cell) break;
         if (c.matches('.amount, .col-amount')) continue;
         rowName = _cellText(c);
         if (rowName) break;
     }
     let byLine = false;
-    if (!rowName && row.parentElement && row.parentElement.tagName === 'TBODY') {
-        rowName = `line ${row.sectionRowIndex + 1}`;
+    if (!rowName && body) {
+        rowName = `line ${_linePlaces(body, places).get(row)}`;
         byLine = true;
     }
     return { name: [heading, rowName].filter(Boolean).join(', '), byLine };
+}
+
+// Where each row of a table body is among its lines, counted once a pass.
+// A row that belongs to the line above it (data-line-part: the nonprofit
+// Split chooser) is not a line: it has that line's number, and the lines
+// under it keep theirs.
+function _linePlaces(body, places) {
+    let rows = places.get(body);
+    if (!rows) {
+        rows = new Map();
+        let n = 0;
+        for (const r of body.rows) {
+            if (!r.hasAttribute('data-line-part') || !n) n += 1;
+            rows.set(r, n);
+        }
+        places.set(body, rows);
+    }
+    return rows;
 }
 
 // A field named by its line takes the number of the line it is on now (a
@@ -2665,11 +2700,7 @@ function _nameByPlace(field, places) {
     const row = cell && cell.parentElement;
     const body = row && row.parentElement;
     if (!body || body.tagName !== 'TBODY') return;
-    let rows = places.get(body);
-    if (!rows) {
-        rows = new Map(Array.from(body.rows, (r, i) => [r, i + 1]));
-        places.set(body, rows);
-    }
+    const rows = _linePlaces(body, places);
     const was = field.getAttribute('aria-label') || '';
     const name = was.replace(/\bline \d+$/, `line ${rows.get(row)}`);
     if (name !== was) field.setAttribute('aria-label', name);
@@ -2715,7 +2746,7 @@ function nameFields(root = document) {
             _tieLabel(before, field);
             continue;
         } else if (field.closest('td')) {
-            const { name, byLine } = _gridName(field);
+            const { name, byLine } = _gridName(field, places);
             if (name) {
                 field.setAttribute('aria-label', name);
                 if (byLine) field.setAttribute('data-line-name', '');

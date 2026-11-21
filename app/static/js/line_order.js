@@ -19,6 +19,11 @@
  * Every line form, attached here or not, removes a line through
  * LineOrder.removeLine: one rule for the names and for where the keyboard
  * goes (see "The one rule" below).
+ *
+ * A row marked data-line-part is not a line: it belongs to the line above it
+ * (the nonprofit Split chooser). It has no place of its own, takes no
+ * controls, travels with its line when the line moves and goes when the line
+ * is removed.
  */
 const LineOrder = {
     _opts: new WeakMap(),
@@ -43,9 +48,31 @@ const LineOrder = {
         LineOrder.refresh(tbody);
     },
 
-    // Give every row its controls and set which arrows are available.
+    // A grid's lines, in order: its rows but the ones that belong to a line.
+    rows(tbody) {
+        return Array.from((tbody && tbody.children) || []).filter(r => r.tagName === 'TR' && !LineOrder._isPart(r));
+    },
+
+    _isPart(row) {
+        return !!(row && row.hasAttribute && row.hasAttribute('data-line-part'));
+    },
+
+    // The rows that belong to a line: the marked rows right under it.
+    _parts(row) {
+        const parts = [];
+        for (let r = row.nextElementSibling; LineOrder._isPart(r); r = r.nextElementSibling) parts.push(r);
+        return parts;
+    },
+
+    // The line a row is, or belongs to.
+    lineOf(row) {
+        while (LineOrder._isPart(row) && row.previousElementSibling) row = row.previousElementSibling;
+        return row;
+    },
+
+    // Give every line its controls and set which arrows are available.
     refresh(tbody) {
-        const rows = Array.from(tbody.children).filter(r => r.tagName === 'TR');
+        const rows = LineOrder.rows(tbody);
         rows.forEach((row, i) => {
             if (!row.querySelector('.line-order-cell')) {
                 row.insertAdjacentHTML('beforeend', LineOrder.cellHtml((LineOrder._opts.get(tbody) || {}).remove));
@@ -67,33 +94,46 @@ const LineOrder = {
         </span></td>`;
     },
 
-    // Swap a row with its neighbour; false at the ends.
+    // Swap a line with its neighbour, each with the rows that belong to it;
+    // false at the ends.
     moveRow(row, dir) {
         const parent = row.parentNode;
-        if (dir < 0) {
-            const prev = row.previousElementSibling;
-            if (!prev) return false;
-            parent.insertBefore(row, prev);
-        } else {
-            const next = row.nextElementSibling;
-            if (!next) return false;
-            parent.insertBefore(next, row);
-        }
+        const rows = LineOrder.rows(parent);
+        const other = rows[rows.indexOf(row) + (dir < 0 ? -1 : 1)];
+        if (!other) return false;
+        // the lower of the two goes above the upper
+        const [mover, ref] = dir < 0 ? [row, other] : [other, row];
+        [mover, ...LineOrder._parts(mover)].forEach(r => parent.insertBefore(r, ref));
         return true;
     },
 
-    // Take a row out (NEW-278: the purchase order's form had no way to);
-    // returns the row that takes its place: the one below, else above.
+    // Take a line out, with the rows that belong to it (NEW-278: the
+    // purchase order's form had no way to); returns the line that takes its
+    // place: the one below, else above.
     removeRow(row) {
-        const next = row.nextElementSibling || row.previousElementSibling;
-        row.parentNode.removeChild(row);
+        const parent = row.parentNode;
+        const rows = LineOrder.rows(parent);
+        const at = rows.indexOf(row);
+        const next = rows[at + 1] || rows[at - 1] || null;
+        [...LineOrder._parts(row), row].forEach(r => parent.removeChild(r));
         return next;
     },
 
-    // Put a row before or after another (the drop).
+    // Put a line before or after another (the drop), with the rows that
+    // belong to it. A drop on a row that belongs to a line lands after
+    // that line.
     moveNextTo(row, target, after) {
+        if (LineOrder._isPart(target)) { target = LineOrder.lineOf(target); after = true; }
         if (row === target) return false;
-        row.parentNode.insertBefore(row, after ? target.nextElementSibling : target);
+        const parent = row.parentNode;
+        const group = [row, ...LineOrder._parts(row)];
+        let ref = target;
+        if (after) {
+            const under = LineOrder._parts(target);
+            ref = (under.length ? under[under.length - 1] : target).nextElementSibling;
+        }
+        if (group.includes(ref)) ref = group[group.length - 1].nextElementSibling;
+        group.forEach(r => parent.insertBefore(r, ref));
         return true;
     },
 
@@ -104,7 +144,10 @@ const LineOrder = {
         opts.add();
         const fresh = tbody.lastElementChild;
         if (!fresh || fresh === row) return null;
-        if (row.nextElementSibling !== fresh) tbody.insertBefore(fresh, row.nextElementSibling);
+        // under the line and the rows that belong to it
+        const parts = LineOrder._parts(row);
+        const under = (parts.length ? parts[parts.length - 1] : row).nextElementSibling;
+        if (under !== fresh) tbody.insertBefore(fresh, under);
         return fresh;
     },
 
@@ -136,7 +179,7 @@ const LineOrder = {
     renumber(tbody) {
         if (!tbody || !tbody.children) return;
         if (typeof nameFields === 'function') nameFields(tbody);
-        Array.from(tbody.children).filter(r => r.tagName === 'TR').forEach((row, i) => {
+        LineOrder.rows(tbody).forEach((row, i) => {
             if (!row.querySelectorAll) return;
             row.querySelectorAll('[aria-label]:not([data-line-name])').forEach(el => {
                 const was = el.getAttribute('aria-label');
@@ -165,7 +208,7 @@ const LineOrder = {
         const pressed = from !== row ? from
             : Array.from(row.querySelectorAll('button')).find(b => /^Remove\b/.test(b.getAttribute('aria-label') || ''));
         const like = LineOrder._like(pressed);
-        const at = Array.from(tbody.children).filter(r => r.tagName === 'TR').indexOf(row);
+        const at = LineOrder.rows(tbody).indexOf(row);
         LineOrder.removeRow(row);
         LineOrder._changed(tbody, changed);
         LineOrder._focusAfterRemove(tbody, at, like);
@@ -222,7 +265,7 @@ const LineOrder = {
     },
 
     _focusAfterRemove(tbody, at, like) {
-        const rows = Array.from(tbody.children).filter(r => r.tagName === 'TR');
+        const rows = LineOrder.rows(tbody);
         if (LineOrder._takes(LineOrder._twin(rows[at], like))) return;
         if (at > 0 && LineOrder._takes(LineOrder._twin(rows[at - 1], like))) return;
         if (LineOrder._takes(LineOrder.addControl(tbody))) return;
@@ -234,10 +277,55 @@ const LineOrder = {
         if (first) first.focus();
     },
 
+    // A copy of a line, to stand as a line of its own. A type-ahead picker
+    // in the copy is put back to its plain select (the copied box is tied
+    // to nothing and would keep the old line's name; the page gives the
+    // select a box of its own once the row lands), and each select keeps
+    // the choice the line had, which a copy alone drops.
+    cloneRow(row) {
+        const clone = row.cloneNode(true);
+        clone.querySelectorAll('.cbx').forEach(wrap => {
+            const sel = wrap.querySelector('select');
+            if (!sel) { wrap.remove(); return; }
+            sel.classList.remove('cbx-select');
+            sel.removeAttribute('aria-hidden');
+            sel.removeAttribute('tabindex');
+            wrap.replaceWith(sel);
+        });
+        const copies = clone.querySelectorAll('select');
+        row.querySelectorAll('select').forEach((sel, k) => { if (copies[k]) copies[k].value = sel.value; });
+        return clone;
+    },
+
+    // One line becomes several (a split): the new lines take its place,
+    // under the one rule. Every line is named by its place again, and a
+    // keyboard that was on the line, or was left nowhere when the control
+    // that asked for this went away, goes to `control`'s like on the first
+    // new line (else that line's first field): never to the document body.
+    replaceRow(row, fresh, changed, control) {
+        const tbody = row && row.parentNode;
+        if (!tbody || !fresh || !fresh.length) return false;
+        const active = document.activeElement;
+        const lost = !active || active === document.body || active === document.documentElement
+            || !active.isConnected || row.contains(active)
+            || LineOrder._parts(row).some(p => p.contains(active));
+        const like = LineOrder._like(control);
+        LineOrder._parts(row).forEach(p => tbody.removeChild(p));
+        fresh.forEach(r => tbody.insertBefore(r, row));
+        tbody.removeChild(row);
+        LineOrder._changed(tbody, changed);
+        if (lost && !LineOrder._takes(LineOrder._twin(fresh[0], like))) {
+            const first = Array.from(fresh[0].querySelectorAll('input:not([type=hidden]), select, textarea, button'))
+                .find(el => !el.disabled && el.offsetParent !== null && el.tabIndex >= 0);
+            if (first) first.focus();
+        }
+        return true;
+    },
+
     _click(tbody, e) {
         const btn = e.target.closest && e.target.closest('[data-line-order]');
         if (!btn || btn.disabled) return;
-        const row = btn.closest('tr');
+        const row = LineOrder.lineOf(btn.closest('tr'));
         const what = btn.dataset.lineOrder;
         if (what === 'insert') {
             const fresh = LineOrder.insertBelow(tbody, row);
@@ -274,7 +362,7 @@ const LineOrder = {
         e.preventDefault();
         const target = e.target.closest && e.target.closest('tr');
         Array.from(tbody.children).forEach(r => r.classList.remove('line-order-over-top', 'line-order-over-bottom'));
-        if (!target || target === LineOrder._dragging || target.parentNode !== tbody) return;
+        if (!target || LineOrder.lineOf(target) === LineOrder._dragging || target.parentNode !== tbody) return;
         target.classList.add(LineOrder._after(target, e) ? 'line-order-over-bottom' : 'line-order-over-top');
     },
 
