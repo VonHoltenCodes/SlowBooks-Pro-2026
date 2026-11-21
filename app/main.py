@@ -82,6 +82,7 @@ from app.routes import reclassify as reclassify_routes
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
 from app.routes import switchboard as switchboard_routes
+from app.routes import whoami as whoami_routes
 from app.routes import classes as classes_routes
 from app.routes import jobs as jobs_routes
 from app.routes import preferences as preferences_routes
@@ -174,6 +175,7 @@ from app.services.closing_date import (
     password_from_header as _closing_password_from_header,
 )
 from app.services.api_token_service import ADMIN_TOKEN_REFUSAL
+from app.services.api_token_service import is_link_label as _is_link_label
 from app.services.api_token_service import resolve as _resolve_api_token
 from app.services.served_companies import CompanyUnavailable, sentence_of
 from app.services.pdf_service import PdfEngineMissing
@@ -181,6 +183,24 @@ from app.services.pdf_service import PdfEngineMissing
 # An API token's request names the company it works in with this header
 # (#358); a signed-in person's session carries its company instead.
 _COMPANY_HEADER = "X-SlowBooks-Company"
+# ...and every answer to a token says which company's books it came from,
+# so a client holding tokens for several companies can check it was
+# answered from the one it asked (the AI assistant connection does).
+_COMPANY_SERVED_HEADER = "X-SlowBooks-Company-Served"
+# A request with no sign-in whose company header this server cannot honour
+# (repeated, blank, not a company file's name, or a company it does not
+# serve now) is refused before its token is looked up, never answered from
+# another company. The sentence names nothing: no one has signed in yet.
+UNSERVED_COMPANY_REFUSAL = (
+    "This server does not serve that company for this request. Nothing was done."
+)
+# The AI assistant connection's tokens are used by this app's own line to
+# itself, never from another computer: a copied connection file is no use
+# elsewhere on the network.
+LINK_TOKEN_ADDRESS_REFUSAL = (
+    "This token works only for the AI assistant connection on this computer."
+)
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 
 
 def _payroll_secret_problem(
@@ -1404,12 +1424,31 @@ def _role_refusal(role: str, method: str = "POST", path: str = "") -> str:
 
 async def require_session(request: Request, call_next):
     try:
-        return await _require_session(request, call_next)
+        response = await _require_session(request, call_next)
     except CompanyUnavailable as exc:
         # The session's company cannot be opened now (#358): the gate itself
         # opens it (the company id, the copy's mode) before any route runs,
         # so the sentence is answered here too, as a 503, never a traceback.
-        return JSONResponse(status_code=503, content={"detail": sentence_of(exc)})
+        response = JSONResponse(status_code=503, content={"detail": sentence_of(exc)})
+    served = getattr(request.state, "company_served", None)
+    if served is not None:
+        response.headers[_COMPANY_SERVED_HEADER] = served
+    return response
+
+
+def _from_this_apps_own_address(request: Request) -> bool:
+    """The request comes from this computer's loopback address, or from the
+    one address this app listens on, which is the address the AI assistant
+    connection calls the app at (switchboard_link._app_base_url)."""
+    host = getattr(request.client, "host", None) or ""
+    if host in _LOOPBACK_HOSTS:
+        return True
+    from urllib.parse import urlsplit
+
+    from app.services.switchboard_link import _app_base_url
+
+    own = urlsplit(_app_base_url()).hostname or ""
+    return bool(host) and host == own
 
 
 async def _require_session(request: Request, call_next):
@@ -1500,6 +1539,18 @@ async def _require_session(request: Request, call_next):
                 status_code=401,
                 content={"detail": "Not authenticated"},
             )
+        if _is_link_label(
+            token_principal.get("label")
+        ) and not _from_this_apps_own_address(request):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": LINK_TOKEN_ADDRESS_REFUSAL},
+            )
+        # From here every answer to the token names the company it came
+        # from (require_session adds the header).
+        from app.services import served_companies as _sc
+
+        request.state.company_served = _sc.current_file() or ""
         if token_principal.get("role") == "admin":
             # Tokens have not been made as administrators since 2.29.0
             # (#434), but one made earlier kept working until revoked
@@ -1550,6 +1601,7 @@ async def _require_session(request: Request, call_next):
         # get_db reads this to stamp audit attribution ("token:<label>")
         request.state.token_principal = {
             "username": "token:" + token_principal["label"],
+            "label": token_principal["label"],
             "role": role,
             "allow_backups": allow_backups,
             "allow_payroll": allow_payroll,
@@ -1699,7 +1751,16 @@ class ActingUserContextMiddleware:
         override_token = _closing_date_password.set(override)
         # The company this request works in (#358), here for the same reason
         # as the username: every Session the request opens binds to it.
-        company_token = _served_company.set(_request_company(scope, session))
+        company = _request_company(scope, session)
+        if company is _UNSERVED:
+            _acting_username.reset(token)
+            _acting_source.reset(source_token)
+            _closing_date_password.reset(override_token)
+            response = JSONResponse(
+                status_code=421, content={"detail": UNSERVED_COMPANY_REFUSAL}
+            )
+            return await response(scope, receive, send)
+        company_token = _served_company.set(company)
         try:
             await self.app(scope, receive, send)
         finally:
@@ -1709,23 +1770,40 @@ class ActingUserContextMiddleware:
             _acting_username.reset(token)
 
 
-def _request_company(scope, session) -> str | None:
+# what _request_company answers for a company header the server cannot honour
+_UNSERVED = object()
+
+
+def _request_company(scope, session):
     """The company file a request works in: the one its session chose, or,
     for an API token's request (no sign-in), the one its
     X-SlowBooks-Company header names, where the token is then looked up.
-    None is the company the server was started for."""
+    None is the company the server was started for.
+
+    A request with no sign-in whose header is given more than once, blank,
+    not a company file's name, or names a company this server does not
+    serve now gets _UNSERVED, and is refused: it is never answered from
+    the company the server was started for instead. A header naming that
+    company is honoured. A signed-in session ignores the header."""
     from app.services import served_companies
+    from app.services.company_service import safe_company_filename
 
     chosen = served_companies.chosen_file(session)
     if chosen is not None or session.get("authenticated") is True:
         return chosen
     wanted = _COMPANY_HEADER.lower().encode("latin-1")
-    for name, value in scope.get("headers") or []:
-        if name == wanted:
-            return served_companies.chosen_file(
-                {served_companies.SESSION_FILE_KEY: value.decode("latin-1").strip()}
-            )
-    return None
+    given = [value for name, value in scope.get("headers") or [] if name == wanted]
+    if not given:
+        return None
+    if len(given) > 1:
+        return _UNSERVED
+    filename = given[0].decode("latin-1").strip()
+    if not filename or safe_company_filename(filename) != filename:
+        return _UNSERVED
+    if filename == served_companies.started_file():
+        return None
+    chosen = served_companies.chosen_file({served_companies.SESSION_FILE_KEY: filename})
+    return _UNSERVED if chosen is None else chosen
 
 
 # ---- Middleware stack ----
@@ -1857,6 +1935,7 @@ app.include_router(mercury.router)
 app.include_router(users_routes.router)
 app.include_router(api_tokens_routes.router)
 app.include_router(switchboard_routes.router)
+app.include_router(whoami_routes.router)
 app.include_router(tax.router)
 app.include_router(backups.router)
 app.include_router(company_file_routes.router)

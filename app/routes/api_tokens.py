@@ -19,7 +19,21 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.api_tokens import ApiToken
 from app.models.users import ROLE_ADMIN, ROLE_BOOKKEEPER, VALID_ROLES
-from app.services.api_token_service import generate_token, hash_token
+from app.services.api_token_service import (
+    generate_token,
+    hash_token,
+    is_link_label,
+    looks_like_link_label,
+)
+
+# The AI assistant connection's tokens carry its own label, which the gate
+# reads them by: no other token may take it, and theirs may not lose it.
+LINK_LABEL_LOCKED = (
+    "This token belongs to the AI assistant connection; its name can't be changed."
+)
+LINK_LABEL_TAKEN = (
+    "That name belongs to the AI assistant connection's tokens. Choose another name."
+)
 
 
 def _utc_iso(stamp):
@@ -138,6 +152,8 @@ def create_token(payload: TokenCreate, request: Request, db: Session = Depends(g
     label = payload.label.strip()
     if payload.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+    if looks_like_link_label(label):
+        raise HTTPException(status_code=400, detail=LINK_LABEL_TAKEN)
     if payload.role == ROLE_ADMIN:
         # A token is a program, not a person. Roles are its only scope
         # (#434), and the one that reaches settings, closing dates and
@@ -191,6 +207,10 @@ def update_token(
         )
     if payload.label is not None:
         label = payload.label.strip()
+        if label != row.label and is_link_label(row.label):
+            raise HTTPException(status_code=400, detail=LINK_LABEL_LOCKED)
+        if label != row.label and looks_like_link_label(label):
+            raise HTTPException(status_code=400, detail=LINK_LABEL_TAKEN)
         clash = (
             db.query(ApiToken)
             .filter(ApiToken.label == label, ApiToken.id != token_id)

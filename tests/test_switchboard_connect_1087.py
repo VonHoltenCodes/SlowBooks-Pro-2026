@@ -296,8 +296,13 @@ def relay(monkeypatch, tmp_path):
         fake.close()
 
 
+# The connection's token is used from this computer's own address only, so
+# the in-process stand-in for its requests calls from loopback too.
+_THIS_COMPUTER = ("127.0.0.1", 50000)
+
+
 def _in_process_transport(record):
-    api = TestClient(app)
+    api = TestClient(app, client=_THIS_COMPUTER)
     company = record.get("company_file") or ""
 
     def send(method, path, params, body, headers):
@@ -596,7 +601,7 @@ def test_no_api_token_reaches_the_connection(relay, client):
             "/api/tokens", json={"label": "other", "role": "bookkeeper"}
         ).json()["token"],
     ):
-        bot = TestClient(app)
+        bot = TestClient(app, client=_THIS_COMPUTER)
         bot.headers["Authorization"] = f"Bearer {token}"
         assert bot.get("/api/switchboard/status").status_code == 403
         for what in ("connect", "code", "disconnect"):
@@ -648,7 +653,7 @@ def test_the_kept_file_is_this_users_only(relay, client):
     assert relay.calls[-1][1:3] == ("/v1/forget", record["credential"])
     assert got["unlinked"] is True and got["deleted"] is True
     assert got["revoked"] is True
-    bot = TestClient(app)
+    bot = TestClient(app, client=_THIS_COMPUTER)
     bot.headers["Authorization"] = f"Bearer {record['token']}"
     assert bot.get("/api/customers").status_code == 401
     assert not link.pending_path().exists()

@@ -28,8 +28,14 @@ class CompanyCreate(StrictModel):
 
 
 @router.get("")
-def get_companies(db: Session = Depends(get_db)):
-    return list_companies(db)
+def get_companies(request: Request, db: Session = Depends(get_db)):
+    companies = list_companies(db)
+    if getattr(request.state, "token_principal", None):
+        # A token was made in one company and works only there: it is told
+        # of that company alone, never the names of the others this install
+        # keeps.
+        return [c for c in companies if c.get("is_current")]
+    return companies
 
 
 @router.post("", status_code=201)
