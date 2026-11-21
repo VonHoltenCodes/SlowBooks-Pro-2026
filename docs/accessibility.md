@@ -6,7 +6,7 @@ conform to WCAG 2.1 Level AA**. We do not claim compliance — no certifying
 body issues one — but we test against it, fix what we find, and treat a
 barrier as a bug.
 
-![The Company Snapshot split down the middle: the light theme on the left, the dark theme on the right, with the same figures and the same A/R aging colour key in both](../screenshots/a11y-split.png)
+![The Company Snapshot split down the middle: the light theme on the left, the dark theme on the right, with the same figures and the same A/R aging color key in both](../screenshots/a11y-split.png)
 
 *The same screen in both themes. Switch with the theme button in the toolbar,
 or Alt+D.*
@@ -19,12 +19,12 @@ or Alt+D.*
   18.66px bold) in the light and the dark theme everywhere it is drawn: every
   page and dialog, the sign-in and setup screens, pop-up messages and the
   PDF window. Semi-transparent text is measured as it is painted. (v2.18.0)
-- Chart lines, bars and colour keys meet **3:1** (WCAG 1.4.11), so the A/R
-  aging colours can be told apart in both themes. (v2.18.0)
+- Chart lines, bars and color keys meet **3:1** (WCAG 1.4.11), so the A/R
+  aging colors can be told apart in both themes. (v2.18.0)
 - **How it's checked:** `tests/test_theme_contrast.py`,
   `tests/test_dialog_contrast.py` and `tests/test_css_hidden_and_contrast.py`
   open every page, notice and dialog in Chromium in both themes and measure
-  the colours actually painted. They run with the suite before each release
+  the colors actually painted. They run with the suite before each release
   (they skip where playwright's Chromium isn't installed), and the macOS
   release gate carries its own contrast rules.
 
@@ -68,11 +68,11 @@ or Alt+D.*
   followed through a report's rows as well as its buttons. The gold has a
   halo of the theme's own ground on both its sides (white in the light
   theme, the page's dark in the dark), so it stands 3:1 against what it
-  meets wherever it is — the toolbar's grey, a dialog's blue title bar, the
+  meets wherever it is — the toolbar's gray, a dialog's blue title bar, the
   lines and the table header around a link in running text — measured as
   the browser paints it (`tests/test_browser_keyboard.py`); on
   the toolbar the light theme's gold is a deeper one, which clears the
-  bar's grey by itself too.
+  bar's gray by itself too.
   A mouse click on a button or a link draws none.
   A field keeps its own focus style (the blue border and pale ground), and
   a dialog that takes focus itself is not outlined. The skip link, Tab's
@@ -138,7 +138,7 @@ or Alt+D.*
 - **Every data table declares its column headers** (`scope="col"`).
 - **Icon-only buttons** (remove a line, delete an attachment, close a dialog)
   carry accessible names.
-- **State is never conveyed by colour alone:** an invoice reads Paid, Draft or
+- **State is never conveyed by color alone:** an invoice reads Paid, Draft or
   Sent; a reconciliation reads "Balanced" or "Out of balance".
 - **Landmarks and skip links where the forms are long** (v2.22.2): the
   invoice, bill and journal-entry forms are form landmarks named by the
@@ -154,7 +154,7 @@ or Alt+D.*
   dashboard's and Analytics' charts the amount is written on or beside the
   mark — past a bar's end (inside it when the chart has no room), in a
   slice (one under 4% is too thin to hold it), above a line's point — so
-  the colour is not the only way from a mark to its amount. A label that
+  the color is not the only way from a mark to its amount. A label that
   would land on another is left off; the table under each chart has every
   figure. The dashboard's aging bar and monthly revenue bars say theirs too.
 
@@ -202,7 +202,7 @@ screen reader reads as it changes, Tab stays among the bar's controls,
 and Escape closes the bar alone, focus going back where it was. A match
 is marked by a tinted box over its text and a field that matches by an
 outline, the current one stronger in both themes; the page's own text
-and colours are left as they are.
+and colors are left as they are.
 
 ## What we know is still open
 

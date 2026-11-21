@@ -186,7 +186,7 @@ If you're behind AWS ALB / GCP Load Balancer / Azure Application Gateway:
 - Make sure the LB sets `X-Forwarded-Proto: https` so SlowBooks knows
   the original scheme
 
-The app honours `X-Forwarded-For` and `X-Forwarded-Proto` only from the
+The app honors `X-Forwarded-For` and `X-Forwarded-Proto` only from the
 addresses in `FORWARDED_ALLOW_IPS` (below), so set it to the load balancer's
 subnet. A health check that speaks plain HTTP to the instance is answered
 `307` (the redirect to HTTPS): configure the check to accept 200–399, or
@@ -220,7 +220,7 @@ FORWARDED_ALLOW_IPS=172.18.0.0/16
 
 `docker-compose.prod.yml` passes it through (it assumes a proxy). Nothing
 else is needed: uvicorn reads `FORWARDED_ALLOW_IPS` from the environment
-itself and honours `X-Forwarded-For` / `X-Forwarded-Proto` from those
+itself and honors `X-Forwarded-For` / `X-Forwarded-Proto` from those
 addresses, so the client address the rate limiter and the audit tables see
 is the one uvicorn decided on. (The older `TRUST_PROXY_HEADERS` knob is
 retired; the app no longer parses the header a second time.)
