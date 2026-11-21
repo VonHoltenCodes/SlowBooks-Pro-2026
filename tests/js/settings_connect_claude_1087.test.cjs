@@ -355,7 +355,17 @@ const THREE = [
 const MANAGER = {
     ...CONNECTED, company: 'Harbor Books', here_file: 'harbor.db', companies: THREE, count_others: 2,
 };
-const text = html => html.replace(/<[^>]*>/g, '').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+// The words of a piece of markup: tags are taken out until none is left, so
+// one that only appears once another is removed goes too.
+const text = html => {
+    let out = String(html);
+    let before;
+    do {
+        before = out;
+        out = out.replace(/<[^>]*>/g, '');
+    } while (out !== before);
+    return out.replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+};
 
 test('a manager sees every company, each with its note, and buttons named for their company', async () => {
     const f = fixture({ '/switchboard/status': MANAGER });
