@@ -393,7 +393,8 @@ OLD_ROWS = [
     (
         "(530, b'5.7.0 Authentication Required', 'books@example.com')",
         "530 5.7.0 Authentication Required",
-        "The mail server wants a sign-in",
+        # the old tuple does not say whether a sign-in was made
+        "The mail server asked for a sign-in before it would take the email.",
     ),
     (
         "{'mail199@example.com': (550, b'5.1.1 User unknown'), "

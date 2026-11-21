@@ -37,8 +37,15 @@ from tests.test_email_failure_rule import FROM, _configure, _session
 from tests.test_email_failure_rule import no_pdfs  # noqa: F401
 from tests.test_email_failure_sentences import (
     COPY,
+    HUNG_UP,
+    LATER,
+    REFUSED_CONNECTION,
+    SIGN_IN_ASKED,
     TO,
+    UNREACHABLE,
+    USE_TLS,
     WANTS_SIGN_IN,
+    WRONG_SIGN_IN,
     _read,
     _refuse,
     _send,
@@ -863,3 +870,504 @@ def test_a_to_address_with_no_usable_answer_is_said_beside_a_refused_copy(
         f"The address was refused by the mail server: {COPY}. Check it and "
         f"send again. {NOT_TAKEN.format(TO)} {COPY_WENT.format(BLIND)}"
     )
+
+
+# -- the error handler's rewording is linear, and still leaves an address alone ------
+
+
+def _probe_error(client, detail):
+    """What the app answers when a route raises a 400 with `detail`, and
+    how long it took."""
+    import time
+
+    from fastapi import HTTPException
+
+    from app.main import app
+
+    path = "/api/_probe/long-detail"
+
+    @app.get(path)
+    def _probe():
+        raise HTTPException(status_code=400, detail=detail)
+
+    try:
+        started = time.monotonic()
+        r = client.get(path)
+        took = time.monotonic() - started
+    finally:
+        app.router.routes[:] = [
+            route for route in app.router.routes if getattr(route, "path", "") != path
+        ]
+    assert r.status_code == 400
+    return r.json()["detail"], took
+
+
+def test_a_very_long_error_is_reworded_in_time_that_grows_with_its_length(client):
+    """An error that repeats a long value back (one word of 400,000
+    characters, or 400,000 characters of words) is answered at once: the
+    rewording that keeps addresses as written makes one pass over the
+    sentence. Before, each character of an unspaced run started a new
+    search to the end of it, and the app answered nothing else meanwhile."""
+    _nonprofit(client)
+    address = "invoices@customer.example.test"
+    unspaced = "x" * 400_000
+    words = "the invoice is here " * 20_000
+    with_addresses = f"an invoice for {address} " * 10_000
+    for detail, expected in (
+        (unspaced, unspaced),
+        ("Invoice " + unspaced, "Pledge " + unspaced),
+        (words, "the pledge is here " * 20_000),
+        (with_addresses, f"an pledge for {address} " * 10_000),
+        (unspaced + "@" + unspaced, unspaced + "@" + unspaced),
+    ):
+        answered, took = _probe_error(client, detail)
+        assert answered == expected
+        # the old pattern took minutes for the first of these
+        assert took < 2, f"{took:.1f}s for {len(detail)} characters"
+
+
+def test_rewording_around_an_address_reads_as_it_did():
+    """The words around an address are reworded as a whole stretch (a
+    phrase of two words is still one phrase), and a run of characters with
+    an @ in it is left exactly as written."""
+    terms = Terms("nonprofit")
+    keep = terms.text_keeping_addresses
+    address = "invoices@customer.example.test"
+    assert keep("Invoice not found") == terms.text("Invoice not found")
+    assert keep(f"Email to {address}: Invoice missing") == (
+        f"Email to {address}: Pledge missing"
+    )
+    assert keep("Invoice,customer@x.example,Invoice missing") == (
+        "Invoice,customer@x.example,Invoice missing"
+    )
+    assert keep("Customer @ Invoice") == "Donor @ Pledge"
+    for sentence in (
+        f"The Sales Tax on the invoice for {address}\n  and the customer",
+        f"{address}",
+        f"  {address}  invoice\tcustomer {address}",
+        "",
+    ):
+        # the same as swapping each stretch between two addresses
+        import re
+
+        expected = "".join(
+            part if "@" in part else terms.text(part)
+            for part in re.split(r"(\S*@\S*)", sentence)
+        )
+        assert keep(sentence) == expected
+    assert Terms("business").text_keeping_addresses(f"Invoice {address}") == (
+        f"Invoice {address}"
+    )
+
+
+# -- a server that answered as a mail server and then hung up was reached ------------
+
+CLOSED = "Connection unexpectedly closed"
+
+
+@pytest.mark.parametrize(
+    "step,at,signs_in",
+    [
+        ("EHLO", "helo", False),
+        ("AUTH", "auth", True),
+        ("MAIL", "mail", False),
+        ("RCPT", "rcpt", False),
+        ("DATA", "data", False),
+    ],
+)
+def test_a_hang_up_after_the_greeting_is_not_a_server_out_of_reach(
+    client, db_session, stub, step, at, signs_in
+):
+    """The server greeted us as a mail server and then closed the
+    connection: it was reached, so the sentence does not send anyone to
+    change the host, the port or Use TLS. The row keeps the step."""
+    server = stub({step: "hang-up"})
+    user, password = _sign_in() if signs_in else ("", "")
+    ok, row = _send(db_session, server, user, password)
+    assert not ok and server.messages == 0
+    assert row.error_message == f"[disconnected at-{at}] {CLOSED}"
+    seen, mine = _read(db_session, row), _read(db_session, row, admin=True)
+    assert seen.sentence == mine.sentence == HUNG_UP
+    # the sentence says what happened: no pointer, and nothing unsure
+    assert seen.reason() == HUNG_UP and not seen.unsure
+    assert mine.reply == CLOSED and seen.reply is None
+    # Test Email: the sentence, and no "reply" (there was none)
+    r = client.post("/api/settings/test-email")
+    assert r.status_code == 502, r.text
+    assert r.json()["detail"] == f"Test email failed to send. {HUNG_UP} {FULL_LIST}"
+
+
+def test_nothing_that_answered_as_a_mail_server_is_still_out_of_reach(db_session, stub):
+    """Closed before a greeting was read, or a greeting that is not SMTP:
+    nothing answered as a mail server."""
+    ok, row = _send(db_session, stub({"GREETING": "hang-up"}))
+    assert not ok
+    assert row.error_message == f"[disconnected] {CLOSED}"
+    assert _read(db_session, row).sentence == UNREACHABLE
+    ok, row = _send(db_session, stub({"GREETING": ["HTTP/1.1 400 Bad Request"]}))
+    assert not ok
+    assert row.error_message.startswith("[connect not-smtp] ")
+    assert _read(db_session, row).sentence == UNREACHABLE
+
+
+@pytest.mark.parametrize(
+    "reply,sentence",
+    [
+        ("421 4.3.0 Service shutting down", LATER),
+        ("454 4.7.0 Temporary authentication failure", LATER),
+        ("535 5.7.8 Authentication credentials invalid", WRONG_SIGN_IN),
+    ],
+)
+def test_a_refusal_at_sign_in_is_not_lost_when_the_server_then_hangs_up(
+    client, db_session, stub, reply, sentence
+):
+    """A server that answers the sign-in with a refusal and closes the
+    connection, as a 421 does. The next sign-in method is then tried on a
+    closed connection; the refusal still decides the sentence, as it would
+    have with the connection left open, and is the administrator's line."""
+    user, password = _sign_in()
+    server = stub({"AUTH": ("then-hang-up", [reply])})
+    ok, row = _send(db_session, server, user, password)
+    assert not ok and server.messages == 0
+    code = " ".join(reply.split(" ")[:2])
+    assert row.error_message == f"[disconnected at-auth {code}] {reply}"
+    seen, mine = _read(db_session, row), _read(db_session, row, admin=True)
+    assert seen.sentence == mine.sentence == sentence
+    assert mine.reply == reply and seen.reply is None
+    r = client.post("/api/settings/test-email")
+    assert r.status_code == 502, r.text
+    assert r.json()["detail"] == (
+        f"Test email failed to send. {sentence} The mail server's reply: "
+        f"{reply}. {FULL_LIST}"
+    )
+    # neither the username nor the password is on the row
+    assert user not in row.error_message and password not in row.error_message
+
+
+@pytest.mark.parametrize(
+    "reply,sentence",
+    [
+        ("421 4.3.2 Too many connections", LATER),
+        ("554 5.7.1 No service for you", REFUSED_CONNECTION),
+    ],
+)
+def test_a_refused_greeting_exchange_then_a_hang_up(db_session, stub, reply, sentence):
+    """EHLO refused and the connection closed: the HELO that is tried
+    next finds it closed, and the refusal is what is said."""
+    server = stub({"EHLO": ("then-hang-up", [reply])})
+    ok, row = _send(db_session, server)
+    assert not ok
+    code = " ".join(reply.split(" ")[:2])
+    assert row.error_message == f"[disconnected at-helo {code}] {reply}"
+    assert _read(db_session, row).sentence == sentence
+    assert _read(db_session, row, admin=True).reply == reply
+
+
+def test_an_answer_to_ehlo_that_is_no_reply_after_a_proper_greeting(db_session, stub):
+    """A proper 220 was read, so a mail server answered: what came after
+    is not "could not be reached"."""
+    server = stub({"EHLO": ["hello there"]})
+    ok, row = _send(db_session, server)
+    assert not ok and server.messages == 0
+    assert row.error_message.startswith("[helo not-smtp] ")
+    seen = _read(db_session, row)
+    assert seen.sentence == GENERAL
+    assert seen.reason() == f"{GENERAL} {POINTER}"
+
+
+def test_a_refusal_before_a_hang_up_is_each_commands_own(db_session, stub):
+    """A refused To address is not what a hang-up at the next RCPT is read
+    by: each command is judged by its own reply."""
+
+    def rcpt(line):
+        if TO in line:
+            return ["550 5.1.1 User unknown"]
+        return "hang-up"
+
+    server = stub({"RCPT": rcpt})
+    ok, row = _send(db_session, server, cc=[COPY])
+    assert not ok and server.messages == 0
+    assert row.error_message == f"[disconnected at-rcpt] {CLOSED}"
+    assert _read(db_session, row).sentence == HUNG_UP
+
+
+def test_what_the_writer_keeps_of_a_lost_connection():
+    """The step and the refusal stand in our tag; a wait that timed out,
+    a step that is not known and a message already handed over are stored
+    as before."""
+    closed = smtplib.SMTPServerDisconnected(CLOSED)
+    assert stored_text(closed) == f"[disconnected] {CLOSED}"
+    assert stored_text(closed, lost_at="mail") == f"[disconnected at-mail] {CLOSED}"
+    # a reply that is no refusal is not what the hang-up is read by
+    assert stored_text(closed, lost_at="data", last_reply=(354, b"go ahead")) == (
+        f"[disconnected at-data] {CLOSED}"
+    )
+    assert stored_text(closed, lost_at="nonsense") == f"[disconnected] {CLOSED}"
+    # handed over whole: it may have gone out, as before
+    after = stored_text(closed, after_body=True, lost_at="data")
+    assert after == f"[disconnected after-body] {CLOSED}"
+    assert failure_sentence(after) == LOST_AFTER_BODY
+    # a wait that ran out is not a hang-up (and not part of this rule)
+    try:
+        try:
+            raise TimeoutError("timed out")
+        except OSError as cause:
+            raise smtplib.SMTPServerDisconnected(f"{CLOSED}: {cause}")
+    except smtplib.SMTPServerDisconnected as error:
+        silent = stored_text(error, lost_at="mail", last_reply=(250, b"OK"))
+    assert silent == "[disconnected] timed out"
+    assert failure_sentence(silent) == UNREACHABLE
+    assert stored_text(TimeoutError("timed out"), lost_at="rcpt") == (
+        "[socket] timed out"
+    )
+    # a 530 before the hang-up, after a sign-in the server had accepted
+    signed = stored_text(
+        closed,
+        signed_in=True,
+        lost_at="mail",
+        last_reply=(530, b"5.7.0 Authentication Required"),
+    )
+    assert signed == (
+        "[disconnected at-mail 530 5.7.0; signed-in] 530 5.7.0 Authentication Required"
+    )
+    assert failure_sentence(signed) == SIGNED_IN_AND_ASKED_AGAIN
+    # a connection reset by the server after its greeting
+    reset = stored_text(ConnectionResetError(104, "Connection reset by peer"))
+    assert reset == "[socket] Connection reset by peer"
+    assert failure_sentence(reset) == UNREACHABLE
+    reset = stored_text(
+        ConnectionResetError(104, "Connection reset by peer"), lost_at="starttls"
+    )
+    assert reset == "[socket at-starttls] Connection reset by peer"
+    assert failure_sentence(reset) == HUNG_UP
+    assert server_words(reset) == "Connection reset by peer"
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        f"[disconnected] {CLOSED}",
+        "[disconnected] Server not connected",
+        CLOSED,
+        "Connection unexpectedly closed: timed out",
+        "[socket] Connection refused",
+        "[socket] timed out",
+    ],
+)
+def test_a_row_that_does_not_say_how_far_it_got_reads_as_it_did(stored):
+    """Rows of a gate build and of 2.31.14 keep no record of the step."""
+    assert failure_sentence(stored) == UNREACHABLE
+
+
+# -- a 530 on a row that does not say whether a sign-in was made --------------------
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        repr((530, b"5.7.0 Authentication Required", FROM)),
+        repr((530, b"5.7.0 Authentication Required")),
+        repr({TO: (530, b"5.7.0 Authentication Required")}),
+        repr((530, b"Authentication required")),
+    ],
+)
+def test_an_old_row_for_a_530_does_not_say_no_sign_in_is_set(stored):
+    """A row of 2.31.14 keeps no record of whether a sign-in was made, and
+    one may well have been: its sentence is true either way."""
+    assert failure_sentence(stored) == SIGN_IN_ASKED
+    assert "none is set" not in failure_sentence(stored)
+
+
+def test_a_530_row_of_this_version_reads_as_it_recorded(db_session, stub):
+    """This version records whether the server had accepted a sign-in, so
+    its rows say which it was; and a 530 that asks for STARTTLS is about
+    Use TLS on a row of any age."""
+    server = stub({"MAIL": ["530 5.7.0 Authentication Required"]})
+    ok, row = _send(db_session, server)
+    assert not ok
+    assert row.error_message == f"[sender {FROM}] 530 5.7.0 Authentication Required"
+    assert _read(db_session, row).sentence == WANTS_SIGN_IN
+    user, password = _sign_in()
+    ok, row = _send(db_session, server, user, password)
+    assert not ok and row.error_message.startswith(f"[sender {FROM}; signed-in] ")
+    assert _read(db_session, row).sentence == SIGNED_IN_AND_ASKED_AGAIN
+    starttls = repr((530, b"5.7.0 Must issue a STARTTLS command first", FROM))
+    assert failure_sentence(starttls) == USE_TLS
+
+
+# -- a reminder that reached someone is not sent again by the next run ---------------
+
+
+def _reminder_setup(db):
+    from app.services import collections as svc
+    from tests.test_email_failure_rule import _overdue
+
+    svc.seed_default_rules(db)
+    return _overdue(db)
+
+
+def _reminder_rows(db):
+    from app.models.collections import InvoiceReminder
+
+    db.expire_all()
+    return db.query(InvoiceReminder).order_by(InvoiceReminder.id).all()
+
+
+def _three_runs(client, db, server, automatic=False):
+    """The run made three times (three days of the automatic run, or the
+    Send due reminders button three times): each run's answer, and how
+    many messages the server had taken after it."""
+    from datetime import date, timedelta
+
+    from app.services import collections as svc
+
+    answers, taken = [], []
+    for day in range(3):
+        if automatic:
+            set_setting(db, "invoice_reminders_auto", "true")
+            db.commit()
+            answers.append(svc.run_if_due(db, date.today() + timedelta(days=day)))
+        else:
+            r = client.post("/api/collections/reminders/run", json={})
+            assert r.status_code == 200, r.text
+            answers.append(r.json())
+        taken.append(server.messages)
+    return answers, taken
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize(
+    "reply,copy_setting,copy",
+    [
+        ("550 5.1.1 User unknown", "smtp_always_bcc", BLIND),
+        ("451 4.7.1 Greylisted, try again later", "smtp_always_cc", COPY),
+    ],
+)
+def test_a_reminder_that_reached_a_copy_is_not_sent_again_by_the_run(
+    client,
+    db_session,
+    seed_accounts,
+    stub,
+    no_pdfs,
+    reply,
+    copy_setting,
+    copy,
+    automatic,
+):
+    """The To address is turned away (refused, or put off) and a copy
+    takes the message. The send is a failed one and says so, and the run
+    does not send the same reminder to the copy again each day; Remind, by
+    hand, still sends."""
+    customer, inv = _reminder_setup(db_session)
+    to = customer.email
+    server = stub({"RCPT": _refuse(to, reply)})
+    _configure(db_session, server.port)
+    set_setting(db_session, copy_setting, copy)
+    db_session.commit()
+    answers, taken = _three_runs(client, db_session, server, automatic)
+    assert taken == [1, 1, 1]
+    first, second, third = answers
+    assert (first["sent"], first["failed"]) == (0, 1)
+    (line,) = first["errors"]
+    assert line.startswith(f"Mail Probe, Invoice {inv.invoice_number}: The email ")
+    assert line.endswith(f"A copy still went to: {copy}.")
+    assert to in line
+    for later in (second, third):
+        assert (later["sent"], later["failed"], later["errors"]) == (0, 0, [])
+    # one audit row, failed, with the sentence it was given
+    (row,) = _reminder_rows(db_session)
+    assert row.status == "failed" and row.error.endswith(
+        f"A copy still went to: {copy}."
+    )
+    # the run offers nothing for it; Remind, by hand, is not held back
+    due = client.get("/api/collections/reminders/due").json()
+    assert due["items"] == []
+    by_hand = client.post(f"/api/collections/invoices/{inv.id}/remind")
+    assert by_hand.status_code == 400, by_hand.text
+    assert by_hand.json()["detail"] == line
+    assert server.messages == 2
+    assert [r.status for r in _reminder_rows(db_session)] == ["failed", "failed"]
+
+
+def test_a_reminder_held_back_goes_when_remind_reaches_the_customer(
+    client, db_session, seed_accounts, stub, no_pdfs
+):
+    """Once the address is fixed, Remind sends it and the rule is spent
+    in the ordinary way."""
+    customer, inv = _reminder_setup(db_session)
+    refusing = stub({"RCPT": _refuse(customer.email)})
+    _configure(db_session, refusing.port)
+    set_setting(db_session, "smtp_always_bcc", BLIND)
+    db_session.commit()
+    _three_runs(client, db_session, refusing)
+    assert refusing.messages == 1
+    working = stub()
+    _configure(db_session, working.port)
+    r = client.post(f"/api/collections/invoices/{inv.id}/remind")
+    assert r.status_code == 200, r.text
+    assert working.messages == 1
+    assert [r.status for r in _reminder_rows(db_session)] == ["failed", "sent"]
+    _three_runs(client, db_session, working)
+    assert working.messages == 1
+
+
+def test_a_reminder_that_reached_nobody_is_tried_again_by_each_run(
+    client, db_session, seed_accounts, stub, no_pdfs
+):
+    """To refused and no copy: nothing went out, so the next run tries
+    again, as before."""
+    _reminder_setup(db_session)
+    server = stub({"RCPT": ["550 5.1.1 User unknown"]})
+    _configure(db_session, server.port)
+    answers, _taken = _three_runs(client, db_session, server)
+    assert [(a["sent"], a["failed"]) for a in answers] == [(0, 1)] * 3
+    rcpts = [line for line in server.lines if line.upper().startswith("RCPT")]
+    assert len(rcpts) == 3 and server.messages == 0
+    assert [r.status for r in _reminder_rows(db_session)] == ["failed"] * 3
+
+
+def test_a_refused_copy_beside_a_reminder_that_went_is_sent_once(
+    client, db_session, seed_accounts, stub, no_pdfs
+):
+    """To accepted and the copy refused: a sent reminder with a note, and
+    the rule is spent, as before."""
+    _reminder_setup(db_session)
+    server = stub({"RCPT": _refuse(BLIND)})
+    _configure(db_session, server.port)
+    set_setting(db_session, "smtp_always_bcc", BLIND)
+    db_session.commit()
+    answers, taken = _three_runs(client, db_session, server)
+    assert taken == [1, 1, 1]
+    assert [(a["sent"], a["failed"]) for a in answers] == [(1, 0), (0, 0), (0, 0)]
+    assert answers[0]["notes"] and BLIND in answers[0]["notes"][0]
+    assert [r.status for r in _reminder_rows(db_session)] == ["sent"]
+
+
+def test_what_a_failed_send_reached_is_read_from_our_own_record(db_session):
+    """ "Reached anyone" is the copies our writer recorded in its tag,
+    given by the one reader; a sentence or the server's lines are never
+    read for it."""
+    partly = RecipientsPartlyRefused({TO: (550, b"5.1.1 User unknown")}, [COPY, BLIND])
+    row = EmailLog(
+        entity_type="reminder",
+        entity_id=1,
+        recipient=TO,
+        subject="s",
+        status="failed",
+        error_message=stored_text(partly),
+    )
+    assert _read(db_session, row).reached == [COPY, BLIND]
+    # the server's own line naming a copy is not our record
+    row.error_message = (
+        f"[recipients {TO} 550 5.1.1] {TO}: 550 5.1.1 User unknown; sent {COPY}"
+    )
+    assert _read(db_session, row).reached == []
+    row.error_message = f"[disconnected after-body] {CLOSED}"
+    assert _read(db_session, row).reached == []
+    row.error_message = repr({TO: (550, b"5.1.1 User unknown")})
+    assert _read(db_session, row).reached == []
+    # a send that went out reached its To address: this is about failures
+    row.status, row.error_message = "sent", stored_text(
+        RecipientsPartlyRefused({COPY: (550, b"5.1.1 User unknown")}, [TO])
+    )
+    assert _read(db_session, row).reached == []
