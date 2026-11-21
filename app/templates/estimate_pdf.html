@@ -3,6 +3,7 @@
 <head>
     <title>Estimate</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     /* every page after the first names its document and page, in the top margin (#1035) */
     @page { @top-center { content: {{ ('Estimate ' ~ (est.estimate_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; } }
@@ -30,7 +31,7 @@
     table.line-items > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
     table.line-items > thead > tr > th.r { text-align: right; }
     table.line-items > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.line-items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.line-items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     table.line-items > tbody > tr:nth-child(even) { background: #f7f9fb; }
     /* The last line row, the totals, the notes and the footer are one
        unbreakable group of the line table (W-183, #1039): the totals never start a
@@ -67,6 +68,8 @@
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .totals td.tax-exempt { padding-top: 6px; font-size: 8.5pt; font-style: italic; color: #333; text-align: right; }
     .totals.keep { float: none; margin-left: auto; break-inside: avoid; page-break-inside: avoid; }
+    /* a unit a person typed wraps in the unit prices' Unit column */
+    table.line-items > tbody > tr > td.r.words { white-space: normal; overflow-wrap: anywhere; }
     .alt-tag { font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #7a4b00; border: 1px solid #c9923a; border-radius: 3px; padding: 0 4px; margin-left: 4px; white-space: nowrap; }
     .terms-block { clear: both; margin-top: 24px; font-size: 9pt; color: #333; white-space: pre-wrap; }
     .acceptance { clear: both; margin-top: 28px; break-inside: avoid; page-break-inside: avoid; font-size: 9pt; }
@@ -258,7 +261,7 @@
             {%- set d_head, d_end = line_cut(line.description) if cut else (line.description or '', '') %}
             <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
                 <td>{{ d_head | desc }}</td>
-                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+                <td class="r">{{ line.quantity | qty }}{% if line.unit is long_text(12) %} <span class="unit">{{ line.unit }}</span>{% elif line.unit %} {{ line.unit }}{% endif %}</td>
                 <td class="r">{{ line.amount | currency }}</td>
             </tr>
             {% if cut %}</tbody><tbody class="doc-tail"><tr class="{% if loop.index is even %}alt {% endif %}row-end"><td>{{ d_end | desc }}</td><td colspan="2"></td></tr>{% endif %}
@@ -297,7 +300,7 @@
             {%- set alt_tag %}{% if (line.line_kind or 'base') == 'alternate' %}<span class="alt-tag">{{ 'Deduct' if line.amount < 0 else 'Add' }} alternate, accepted</span>{% endif %}{% endset %}
             <tr{% if cut %} class="row-head{{ ' joined' if d_end }}" data-last-line{% endif %}>
                 <td>{{ d_head | desc }}{% if not d_end %}{{ alt_tag }}{% endif %}</td>
-                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+                <td class="r">{{ line.quantity | qty }}{% if line.unit is long_text(12) %} <span class="unit">{{ line.unit }}</span>{% elif line.unit %} {{ line.unit }}{% endif %}</td>
                 {% if not spread %}<td class="r">{{ line.rate | rate }}</td>{% endif %}
                 <td class="r">{% if not spread %}{{ line.amount | currency }}{% elif bare and pkg_lines | length == 1 %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td>
             </tr>
@@ -359,7 +362,7 @@
             {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
             {%- set cut = loop.last and long_last %}
             {%- set d_head, d_end = line_cut(up.description) if cut else (up.description or '', '') %}
-            <tr{% if cut %} class="row-head{{ ' joined' if d_end }}" data-last-line{% endif %}><td>{{ d_head | desc }}</td><td class="r">{{ up.unit or '' }}</td><td class="r">{{ up.rate | rate }}</td></tr>
+            <tr{% if cut %} class="row-head{{ ' joined' if d_end }}" data-last-line{% endif %}><td>{{ d_head | desc }}</td><td class="r words">{{ up.unit or '' }}</td><td class="r">{{ up.rate | rate }}</td></tr>
             {% if cut %}</tbody><tbody class="doc-tail"><tr class="row-end"><td>{{ d_end | desc }}</td><td colspan="2"></td></tr>{% endif %}
         {% endfor %}
         <tr class="doc-end"><td colspan="3">{{ tail }}</td></tr>

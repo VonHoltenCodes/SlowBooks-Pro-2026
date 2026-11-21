@@ -3,6 +3,7 @@
 <head>
     <title>Deposit</title>
 <style>
+{% include '_print_text.html' %}
     /* The bank's pre-printed deposit slip (#798): the figures alone, each at
        its place in inches from the sheet's top-left (the slip's), nothing
        the slip already carries. */
@@ -13,6 +14,13 @@
     .slip-page:last-child { page-break-after: auto; }
     .slip-field { position: absolute; line-height: 1; white-space: nowrap; }
     .slip-amount { width: {{ amount_width }}in; text-align: right; font-variant-numeric: tabular-nums; }
+    /* a check number or an account name is one line in the room the slip
+       gives it: a longer one is cut there, and never runs over a figure
+       (the padding keeps the tails of g and y, which hang below a line as
+       tall as its type, from being cut with it) */
+    {%- for field, room in text_room.items() %}
+    .slip-{{ field }} { max-width: {{ '%g' % room }}in; overflow: hidden; text-overflow: ellipsis; padding-bottom: 0.25em; }
+    {%- endfor %}
 </style>
 </head>
 <body>

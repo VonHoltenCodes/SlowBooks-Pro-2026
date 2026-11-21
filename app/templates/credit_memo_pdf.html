@@ -3,6 +3,7 @@
 <head>
     <title>Credit Memo</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     /* every page after the first names its document and page, in the top margin (#1035) */
     @page { @top-center { content: {{ ('Credit memo ' ~ (cm.memo_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; } }
@@ -88,7 +89,7 @@
             <div class="doc-number">#{{ cm.memo_number }}{% if cm.status.value == 'void' %} · <span class="void">VOID</span>{% endif %}</div>
             <table class="meta-table">
                 <tr><th scope="row">Date:</th><td>{{ cm.date | fdate }}</td></tr>
-                {% if cm.original_invoice %}<tr><th scope="row">For {{ terms('Invoice') }} #:</th><td>{{ cm.original_invoice.invoice_number }}</td></tr>{% endif %}
+                {% if cm.original_invoice %}<tr><th scope="row">For {{ terms('Invoice') }} #:</th><td class="text">{{ cm.original_invoice.invoice_number }}</td></tr>{% endif %}
                 {% if cm.is_write_off %}<tr><th scope="row">Type:</th><td>Write-off</td></tr>{% endif %}
             </table>
         </div>

@@ -317,3 +317,173 @@ def test_a_two_line_packaged_bid_prints_whole_when_it_fits(
                 wrong.append(f"{said}: cut though it fits; {first}")
     assert whole >= 5, whole
     assert not wrong, "\n".join(wrong)
+
+
+# ---------------------------------------------------------------------------
+# A cut falls at a line of the layout, whatever ended the line.
+#
+# The layout's carried lines were counted in words, which is their length
+# only when every line ends at a space. Text written without spaces
+# (Japanese, Chinese, one unbroken run) was not cut at all: every line of it
+# went into the group with the totals and its Qty, Rate and Amount printed
+# on another page. Where the layout broke a line after a hyphen ("pre-" /
+# "construction") the cut fell a word early, and the first part ended in a
+# short line. The carried lines are now counted in characters, the same in
+# the layout and in the description, so the row as printed in two parts has
+# the lines of the row laid out whole.
+# ---------------------------------------------------------------------------
+
+HYPHENS = (
+    "Furnish and install heavy-duty stainless-steel anchors (3/4-inch x 6-inch),"
+    " self-tapping; includes owner-supplied fixtures, pre-construction"
+    " walk-through and post-installation clean-up per section 05-50-00/2.3(b)."
+    " Contractor-furnished, owner-installed items are by others. "
+) * 12
+NO_SPACES = "0123456789abcdefghijklmnopqrstuvwxyz" * 60
+SCRIPT = (
+    "見積書に記載された工事範囲は以下のとおりです。基礎工事および鉄骨工事を含みます。"
+    * 40
+)
+SEAM_CASES = [
+    ("hyphens, an invoice", "invoice", 48, 900, HYPHENS),
+    ("hyphens, a purchase order", "purchase order", 10, 1900, HYPHENS),
+    ("hyphens, a bid", "bid", 47, 900, HYPHENS),
+    ("no spaces, an invoice", "invoice", 47, 900, NO_SPACES),
+    ("no spaces, a credit memo", "credit memo", 47, 1000, NO_SPACES),
+    ("no spaces, a bill", "bill", 49, 900, NO_SPACES),
+    ("Japanese, an invoice", "invoice", 30, 1200, SCRIPT),
+]
+
+
+def _row_lines(html):
+    """The lines of the last line's description as laid out: the whole
+    row's, or the cut row's two parts one after the other; and the pages
+    its figures are on."""
+    from weasyprint.formatting_structure import boxes as wb
+
+    lines, figures = [], []
+    for number, page in enumerate(pdf_service._layout(html).pages):
+        for box in page._page_box.descendants():
+            classes, element = pdf_service._box_classes(box)
+            if element is None or not isinstance(box, wb.TableRowBox):
+                continue
+            if element.get("data-last-line") is None and "row-end" not in classes:
+                continue
+            cells = [c for c in box.children if isinstance(c, wb.TableCellBox)]
+            texts = [t.strip() for t in pdf_service._line_texts(cells[0])]
+            lines += [(number, t) for t in texts if t]
+            if any(t.strip() for c in cells[1:] for t in pdf_service._line_texts(c)):
+                figures.append(number)
+    return lines, figures
+
+
+def _printed_and_whole(client, url, monkeypatch):
+    """The HTML a document prints as, and the layout of its last line
+    whole that decided the cut."""
+    whole = []
+    real = pdf_service.choose_last_line
+
+    def spy(html, keep=True):
+        whole.append(html)
+        return real(html, keep)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pdf_service, "choose_last_line", spy)
+        html = client.get(f"{url}/print-preview").text
+    assert whole, "the last line was not long"
+    return html, whole[0]
+
+
+def _seam(said, html, whole):
+    """What is wrong with a cut row: it is the row laid out whole, in two
+    parts, the end alone on the totals' page, two lines of it or what the
+    page break left there, and the figures on the row's first line."""
+    head, end, tail, _stretched = _where(html)
+    if not end:
+        return [f"{said}: not cut"]
+    if len(tail) != 1:
+        return [f"{said}: the totals' group is on pages {sorted(tail)}"]
+    page = tail.pop()
+    wrong = []
+    if not head or page in head:
+        wrong.append(f"{said}: the first part is on the totals' page, or empty")
+    if set(end) != {page}:
+        wrong.append(f"{said}: the end is on pages {sorted(set(end))}")
+    was, _f = _row_lines(whole)
+    now, figures = _row_lines(html)
+    # no line of the first part is cut short, none of the end is set again
+    if [t for _p, t in now] != [t for _p, t in was]:
+        wrong.append(f"{said}: the two parts are not the lines of the row whole")
+    on_totals = sum(1 for p, _t in was if p == page)
+    if len(end) != max(pdf_service.DOC_TAIL_LINES, on_totals):
+        wrong.append(f"{said}: {len(end)} lines carried")
+    if figures != [now[0][0]]:
+        wrong.append(f"{said}: the figures are on pages {figures}")
+    return wrong
+
+
+def test_a_cut_falls_at_a_line_of_the_layout_whatever_ended_the_line(
+    client, seed_accounts, seed_customer, monkeypatch
+):
+    pytest.importorskip("weasyprint")
+    wrong = []
+    for said, kind, n, length, text in SEAM_CASES:
+        url = _shaped(client, seed_accounts, seed_customer, kind, n, length, text)
+        html, whole = _printed_and_whole(client, url, monkeypatch)
+        wrong += _seam(said, html, whole)
+    assert not wrong, "\n".join(wrong)
+
+
+def test_the_end_is_counted_in_the_characters_of_the_layouts_lines():
+    cut, carry = pdf_service._cut_chars, pdf_service._carry
+    # at a space, after a hyphen, inside a run with no spaces: the end is
+    # the carried lines' own characters
+    assert cut("one two three four", 9) == ("one two", "three four")
+    assert cut("install pre-construction walk", 16) == (
+        "install pre-",
+        "construction walk",
+    )
+    assert cut("abcdefghij", 4) == ("abcdef", "ghij")
+    assert cut("工事範囲は以下のとおり", 5) == ("工事範囲は以", "下のとおり")
+    # a line break between the two parts stays out of both
+    assert cut("first line\nsecond line", 10) == ("first line", "second line")
+    # nothing to carry, or all of it: no first part
+    assert cut("one two", 0) == ("", "one two")
+    assert cut("one two", 6) == ("", "one two")
+    assert cut("one two", 60) == ("", "one two")
+    # the layout's lines, their spaces not counted; a blank first line is
+    # one of the lines carried
+    assert carry(["one two ", "three-", "four five"], 2) == (14, 0)
+    assert carry(["one", "", "two three"], 2) == (8, 1)
+    assert carry(["", " "], 2) is None
+
+
+def test_a_tag_after_the_description_is_no_part_of_what_a_cut_divides(
+    client, seed_accounts, seed_customer, monkeypatch
+):
+    """A taxed invoice's untaxed last line ends "(non-taxable)", in an
+    element of its own: the layout's lines of the description do not count
+    it, so the cut is at the description's own line."""
+    pytest.importorskip("weasyprint")
+    lines = [
+        {"description": f"Line {i}", "quantity": 1, "rate": 33} for i in range(1, 49)
+    ]
+    text = ("Line 48 " + WORDS)[:900].rstrip()
+    lines[-1] = {"description": text, "quantity": 1, "rate": 33, "is_taxable": False}
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-11-01",
+            "tax_rate": "0.0825",
+            "lines": lines,
+        },
+    )
+    assert r.status_code == 201, r.text
+    url = f"/api/invoices/{r.json()['id']}"
+    html, whole = _printed_and_whole(client, url, monkeypatch)
+    assert "(non-taxable)" in html
+    assert _seam("an untaxed last line", html, whole) == []
+    now, _figures = _row_lines(html)
+    printed = " ".join(t for _p, t in now).replace("(non-taxable)", "").split()
+    assert printed == text.split()

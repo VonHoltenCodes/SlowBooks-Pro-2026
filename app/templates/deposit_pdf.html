@@ -3,6 +3,7 @@
 <head>
     <title>Deposit</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
@@ -15,14 +16,26 @@
     .as-of { font-size: 10pt; color: #666; margin-top: 4px; }
     .deposit-block { margin-bottom: 20px; padding: 12px; background: #f7f9fb; border: 1px solid #e0e0e0; }
     .deposit-block .row { display: flex; gap: 24px; font-size: 10pt; }
-    .deposit-block .label { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.03em; }
+    .deposit-block .label { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+    .deposit-block .value.nw { white-space: nowrap; }
     .deposit-block .value { font-weight: 700; color: #003366; }
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
     table.items > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; white-space: nowrap; }
     table.items > thead > tr > th.r { text-align: right; }
     table.items > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
     table.items > tbody > tr > td.nw { white-space: nowrap; }
+    /* Who it is from, the reference and the method are on one line while
+       they are short, as the date is; a longer one wraps in a column of a
+       set width, so the Amount column and the total stay where they are. */
+    table.items > tbody > tr > td.from { width: 1.7in; min-width: 1.7in; overflow-wrap: anywhere; }
+    table.items > tbody > tr > td.ref { width: 0.9in; min-width: 0.9in; overflow-wrap: anywhere; }
+    table.items > tbody > tr > td.method { width: 0.8in; min-width: 0.8in; overflow-wrap: anywhere; }
     table.items > tbody > tr > td.desc { width: 100%; }
+    /* The description has the room the other columns leave it, which may be
+       narrower than a word: a word of it then breaks inside (text longer
+       than a memo is measured too slowly for that, and breaks between its
+       words and inside its long ones, as text does everywhere). */
+    table.items > tbody > tr > td.desc.squeeze { overflow-wrap: anywhere; }
     table.items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     table.items > tbody > tr.alt { background: #f7f9fb; }
     /* The last row, the totals and the footer are one unbreakable group of
@@ -65,7 +78,7 @@
     <div class="deposit-block">
         <div class="row">
             <div><div class="label">Deposited to</div><div class="value">{{ deposit.account_name }}</div></div>
-            <div><div class="label">Date</div><div class="value">{{ deposit.date | fdate }}</div></div>
+            <div><div class="label">Date</div><div class="value nw">{{ deposit.date | fdate }}</div></div>
             {% if deposit.reference %}<div><div class="label">Slip #</div><div class="value">{{ deposit.reference }}</div></div>{% endif %}
             <div><div class="label">Items</div><div class="value">{{ (deposit.payments | length) + (deposit.other_lines | default([]) | length) }}</div></div>
         </div>
@@ -100,10 +113,12 @@
             {% if loop.last and not others %}</tbody><tbody class="doc-tail">{% endif %}
             <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td class="nw">{{ p.date | fdate }}</td>
-                <td class="nw">{{ p.received_from }}</td>
-                <td class="desc">{{ p.description | desc }}{% if p.document %} ({{ p.document }}){% endif %}</td>
-                <td class="nw">{{ p.check_number or p.payment_reference or p.reference }}</td>
-                <td class="nw">{{ p.method }}</td>
+                <td class="{{ 'from' if p.received_from is long_text(20) else 'nw' }}">{{ p.received_from }}</td>
+                {%- set squeeze = ' squeeze' if not ((p.description or '') ~ (p.document or '')) is long_text(200) else '' %}
+                <td class="desc{{ squeeze }}">{{ p.description | desc }}{% if p.document %} ({{ p.document }}){% endif %}</td>
+                {%- set ref = p.check_number or p.payment_reference or p.reference %}
+                <td class="{{ 'ref' if ref is long_text(10) else 'nw' }}">{{ ref }}</td>
+                <td class="{{ 'method' if p.method is long_text(10) else 'nw' }}">{{ p.method }}</td>
                 <td class="r">{{ p.amount | currency }}</td>
             </tr>
         {% endfor %}
@@ -112,10 +127,11 @@
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr{% if (loop.index + (deposit.payments | length)) is even %} class="alt"{% endif %}>
                 <td class="nw">{{ deposit.date | fdate }}</td>
-                <td class="nw">{{ o.received_from }}</td>
-                <td class="desc">{{ o.account_name }}{% if o.memo %} ({{ o.memo | desc }}){% endif %}</td>
-                <td class="nw">{{ o.check_number }}</td>
-                <td class="nw">{{ o.method }}</td>
+                <td class="{{ 'from' if o.received_from is long_text(20) else 'nw' }}">{{ o.received_from }}</td>
+                {%- set squeeze = ' squeeze' if not ((o.account_name or '') ~ (o.memo or '')) is long_text(200) else '' %}
+                <td class="desc{{ squeeze }}">{{ o.account_name }}{% if o.memo %} ({{ o.memo | desc }}){% endif %}</td>
+                <td class="{{ 'ref' if o.check_number is long_text(10) else 'nw' }}">{{ o.check_number }}</td>
+                <td class="{{ 'method' if o.method is long_text(10) else 'nw' }}">{{ o.method }}</td>
                 <td class="r">{{ o.amount | currency }}</td>
             </tr>
         {% endfor %}

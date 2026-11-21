@@ -3,6 +3,7 @@
 <head>
     <title>Check</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: letter; margin: 0.25in 0.5in; }
     body { font-family: 'Courier New', Courier, monospace; font-size: 10pt; color: #000; }
     /* The 8 px the panels are measured with (#732, #727) is the browser's
@@ -16,6 +17,10 @@
     .stub { height: 3.33in; border-bottom: 1px dashed #999; padding: 0.25in 0.25in; box-sizing: border-box; }
     .check-area { height: 3.33in; padding: 0.25in 0.25in; box-sizing: border-box; position: relative; }
     .stub-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 9pt; }
+    /* On a stub the company's name at the left wraps in the room the check
+       number and the date at the right leave it. */
+    .stub-header > :first-child { flex: 1 1 0%; min-width: 0; }
+    .stub-header > :last-child { flex: none; white-space: nowrap; }
     .stub-company { font-weight: bold; font-size: 11pt; }
     .stub-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
     .stub-table th { text-align: left; padding: 2px 6px; border-bottom: 1px solid #333; font-size: 8pt; }
@@ -99,7 +104,10 @@
     .check-top .check-date { top: 0.57in; right: 0.4in; text-align: right; }
     .check-top .pay-to { position: absolute; top: 1.07in; left: 0; margin: 0; }
     .check-top .pay-to-label { position: absolute; top: 0; left: 0.05in; width: 0.6in; font-size: 6.5pt; line-height: 1.1; }
-    .check-top .pay-to-line { position: absolute; top: 0; left: 0.75in; min-width: 4.6in; white-space: nowrap; }
+    /* The payee is one line, as the stock's own line is: a name longer than
+       the room before the amount is cut there with an ellipsis, and never
+       runs under the amount or off the sheet. */
+    .check-top .pay-to-line { position: absolute; top: 0; left: 0.75in; min-width: 4.6in; max-width: 5.2in; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .check-top .amount-box { top: 1.01in; right: 0.1in; font-size: 12pt; }
     .check-top .amount-words { position: absolute; top: 1.4in; left: 0.1in; right: 1.1in; margin: 0; }
     .check-top .payee-address { position: absolute; top: 1.72in; left: 0.75in; margin: 0; }
@@ -108,6 +116,9 @@
     .voucher { height: 3.66in; border-top: 1px dashed #999; padding: 0.25in 0.25in; box-sizing: border-box; position: relative; font-size: 9pt; }
     .voucher + .voucher { height: 3.42in; }
     .voucher-head { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 10pt; }
+    /* the name at the left wraps in the room the date or the amount at the right leaves it */
+    .voucher-head > :first-child, .voucher-foot > :first-child { flex: 1 1 0%; min-width: 0; }
+    .voucher-head > :last-child, .voucher-foot > :last-child { flex: none; white-space: nowrap; }
     .voucher-payee { font-weight: bold; }
     .voucher-table { width: 100%; border-collapse: collapse; }
     .voucher-table td { padding: 2px 6px; }

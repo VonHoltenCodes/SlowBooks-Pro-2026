@@ -3,6 +3,7 @@
 <head>
     <title>Change Order</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
@@ -82,7 +83,7 @@
             {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
                 <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description | desc }} <span style="color:#888;font-size:8pt;">({{ line.cost_type }})</span></td>
-                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+                <td class="r">{{ line.quantity | qty }}{% if line.unit is long_text(12) %} <span class="unit">{{ line.unit }}</span>{% elif line.unit %} {{ line.unit }}{% endif %}</td>
                 <td class="r">{{ line.sell_amount | currency }}</td>
             </tr>
         {% endfor %}
