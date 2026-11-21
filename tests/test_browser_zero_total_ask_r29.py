@@ -538,6 +538,234 @@ def test_every_line_form_asks_before_saving_nothing(browser, company):
         r = company.put("/api/settings", json={"company_type": "construction"})
         assert r.status_code == 200, r.text
 
+    # The question follows the total the form shows, and the total the form
+    # shows is what is saved (round 30).
+    _the_shown_total_decides(browser, company)
+
+
+NEW_TM_TICKET = """async () => {
+    await JobsPage.setTab('fieldtickets');
+    FieldTickets.newTicket('tm');
+    FieldTickets.addLine();
+}"""
+# One line of the ticket as a person fills it: hours, the two rates, and who.
+FILL_TICKET_LINE = """([qty, cost, bill, who]) => {
+    const row = document.querySelector('#ft-line-body tr.ft-line');
+    const put = (cls, v, type) => {
+        const el = row.querySelector(cls);
+        el.value = v;
+        el.dispatchEvent(new Event(type, { bubbles: true }));
+    };
+    put('.ft-who', who, 'change');
+    put('.ft-qty', qty, 'input');
+    put('.ft-cost', cost, 'input');
+    put('.ft-bill', bill, 'input');
+}"""
+# What the ticket form shows: the line's Cost and Bill, then the footer's.
+TICKET_FIGURES = """() => [
+    ...document.querySelectorAll(
+        '#ft-line-body .ft-cost-amt, #ft-line-body .ft-bill-amt'),
+    ...document.querySelectorAll('#ft-line-foot td.amount'),
+].map(td => td.textContent.trim())"""
+FILL_GIFT_LINE = """([qty, fair]) => {
+    const row = document.querySelector('#ik-lines tr');
+    for (const [cls, v] of [['.ik-qty', qty], ['.ik-fv', fair]]) {
+        const el = row.querySelector(cls);
+        el.value = v;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}"""
+GIFT_FIGURES = """() => [
+    document.querySelector('#ik-lines .ik-amount').textContent.trim(),
+    document.querySelector('#ik-total').textContent.trim(),
+]"""
+
+
+def _the_shown_total_decides(browser, client):
+    """A field ticket and an in-kind gift: a document that shows a total
+    saves as it always did, with the same body and no question; one whose
+    form reads $0.00 is asked about before anything is sent; and neither
+    form reads $0.00 for a document that is saved for more."""
+    jobs = client.get("/api/jobs").json()
+    jobs = jobs.get("items") if isinstance(jobs, dict) else jobs
+    job = next(j for j in jobs if j["name"] == "Birch Lane")
+    crew = _made(
+        client,
+        "/api/employees",
+        {"first_name": "Ada", "last_name": "Mason", "pay_rate": 32},
+    )
+    modal = "#modal-body form"
+
+    def watch(page):
+        asked, bodies = [], []
+        answer = [False]
+
+        def on_dialog(d):
+            asked.append(d.message)
+            d.accept() if answer[0] else d.dismiss()
+
+        page.on("dialog", on_dialog)
+        page.on(
+            "request",
+            lambda r: (
+                bodies.append(r.post_data_json)
+                if r.method != "GET" and "/api/" in r.url
+                else None
+            ),
+        )
+        return asked, bodies, answer
+
+    def tickets():
+        return client.get("/api/field-tickets", params={"job_id": job["id"]}).json()
+
+    known = {t["id"] for t in tickets()}
+    page, handled = _open_at(browser, client, f"#/jobs/{job['id']}")
+    asked, bodies, _answer = watch(page)
+    line = {
+        "line_type": "labor",
+        "employee_id": None,
+        "equipment_id": None,
+        "item_id": None,
+        "description": None,
+        "quantity": "8",
+        "unit": None,
+        "cost_code_id": None,
+    }
+    try:
+        page.locator("#job-tab-body").wait_for()
+
+        def new_ticket(qty, cost, bill, who=""):
+            page.evaluate(NEW_TM_TICKET)
+            page.wait_for_function("() => !!document.querySelector('#ft-line-body tr')")
+            settle(page, handled)
+            page.evaluate(FILL_TICKET_LINE, [qty, cost, bill, who])
+            bodies.clear()
+            return page.evaluate("() => document.querySelector('#ft-date').value")
+
+        def head(day):
+            return {
+                "job_id": job["id"],
+                "kind": "tm",
+                "date": day,
+                "cost_code_id": None,
+                "submitted_by": None,
+                "description": None,
+                "commitment_id": None,
+            }
+
+        # a priced ticket: no question, the body it always sent
+        day = new_ticket("8", "40", "65")
+        assert page.evaluate(TICKET_FIGURES) == ["$320.00", "$520.00"] * 2
+        page.evaluate(SUBMIT, "#ft-form")
+        settle(page, handled)
+        assert asked == []
+        assert bodies == [
+            dict(head(day), lines=[dict(line, cost_rate="40", bill_rate="65")])
+        ]
+        assert page.evaluate(TOASTS) == [FIELD_TICKET_YES]
+
+        # hours typed, both rates blank, nobody picked: the form reads
+        # Total $0.00, so it asks, and No sends nothing
+        new_ticket("8", "", "")
+        assert page.evaluate(TICKET_FIGURES) == ["$0.00"] * 4
+        page.evaluate(SUBMIT, "#ft-form")
+        settle(page, handled)
+        page.wait_for_timeout(150)
+        assert asked == [QUESTION.format(noun="field ticket")]
+        assert bodies == []
+        assert page.evaluate("() => !!document.querySelector('#ft-form')")
+        assert len(tickets()) == len(known) + 1
+
+        # the same hours for an employee: the rates are set when the
+        # ticket is saved, the form says so and never reads $0.00, and
+        # the ticket is saved for more than nothing with no question
+        asked.clear()
+        day = new_ticket("8", "", "", f"emp:{crew['id']}")
+        assert page.evaluate(TICKET_FIGURES) == ["Set on save"] * 4
+        page.evaluate(SUBMIT, "#ft-form")
+        settle(page, handled)
+        assert asked == []
+        assert bodies == [dict(head(day), lines=[dict(line, employee_id=crew["id"])])]
+        saved = [t for t in tickets() if t["id"] not in known]
+        assert sorted((t["cost_total"], t["bill_total"]) for t in saved) == [
+            (256.0, 256.0),
+            (320.0, 520.0),
+        ]
+
+        # one line with its bill rate left for the save beside a priced
+        # one: the footer adds what it knows and says the rest is to come
+        new_ticket("8", "40", "")
+        assert page.evaluate(TICKET_FIGURES) == [
+            "$320.00",
+            "Set on save",
+            "$320.00",
+            "Set on save",
+        ]
+    finally:
+        page.close()
+
+    # the in-kind gift
+    r = client.put("/api/settings", json={"company_type": "nonprofit"})
+    assert r.status_code == 200, r.text
+    page, handled = _open_at(browser, client, "#/in-kind-gifts")
+    asked, bodies, _answer = watch(page)
+    try:
+
+        def new_gift(qty, fair):
+            page.evaluate("async () => { await InKindPage.showForm(); }")
+            page.wait_for_function(MODAL_SHOWN)
+            settle(page, handled)
+            page.evaluate(FILL_REQUIRED, modal)
+            page.evaluate(FILL_GIFT_LINE, [qty, fair])
+            bodies.clear()
+            return page.evaluate(
+                "(form) => { const f = document.querySelector(form); return {"
+                " customer_id: parseInt(f.customer_id.value), date: f.date.value,"
+                " memo: null, job_id: null,"
+                " class_id: parseInt((f.class_id || {}).value) || null,"
+                " account: parseInt(f.querySelector('.ik-debit').value) }; }",
+                modal,
+            )
+
+        def body(top, qty, fair):
+            account = top.pop("account")
+            return dict(
+                top,
+                lines=[
+                    {
+                        "description": "Zero total",
+                        "quantity": qty,
+                        "fair_value": fair,
+                        "debit_account_id": account,
+                    }
+                ],
+            )
+
+        # a priced gift: no question, the body it always sent
+        top = new_gift("2", "250")
+        assert page.evaluate(GIFT_FIGURES) == ["$500.00", "Total: $500.00"]
+        page.evaluate(SUBMIT, modal)
+        settle(page, handled)
+        page.wait_for_timeout(150)
+        assert asked == []
+        assert bodies == [body(top, 2, 250)]
+
+        # the quantity box cleared: the gift posts for one, as it always
+        # did, and the form says so before it is posted
+        top = new_gift("", "500")
+        assert page.evaluate(GIFT_FIGURES) == ["$500.00", "Total: $500.00"]
+        page.evaluate(SUBMIT, modal)
+        settle(page, handled)
+        page.wait_for_timeout(150)
+        assert asked == []
+        assert bodies == [body(top, 1, 500)]
+        gifts = client.get("/api/in-kind-gifts").json()
+        assert sorted(float(g["total"]) for g in gifts)[-2:] == [500.0, 500.0]
+    finally:
+        page.close()
+        r = client.put("/api/settings", json={"company_type": "construction"})
+        assert r.status_code == 200, r.text
+
 
 def _forms_invoice_opener(client):
     """Opens a priced invoice that is not flagged a pledge."""

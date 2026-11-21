@@ -149,11 +149,27 @@ MARK = """(sel) => [...document.querySelector(sel).querySelectorAll(':scope > tr
 
 CONTROLS = """(sel) => {
     const out = [];
+    // whether the heading over the control's cell marks its column required
+    // ("Account *"), colspans counted
+    const head = document.querySelector(sel).closest('table').tHead;
+    const starred = (el) => {
+        const cell = el.closest('td');
+        if (!cell || !head || !head.rows.length) return false;
+        let col = 0;
+        for (const c of cell.parentElement.cells) { if (c === cell) break; col += c.colSpan || 1; }
+        let at = 0;
+        for (const h of head.rows[head.rows.length - 1].cells) {
+            if (col >= at && col < at + (h.colSpan || 1)) return /\\*\\s*$/.test(h.textContent);
+            at += h.colSpan || 1;
+        }
+        return false;
+    };
     [...document.querySelector(sel).querySelectorAll(':scope > tr')].forEach((row, i) => {
         row.querySelectorAll('input:not([type=hidden]), select, textarea, button').forEach(el => {
             if (el.closest('[aria-hidden="true"]') || el.offsetParent === null) return;
             el.dataset.r29c = String(out.length);
-            out.push({row: i, tag: row.dataset.r29 || '', kind: el.tagName});
+            out.push({row: i, tag: row.dataset.r29 || '', kind: el.tagName,
+                      star: starred(el)});
         });
     });
     return out;
@@ -246,12 +262,15 @@ def _press(page, sel, row, label, key="Enter"):
     page.keyboard.press(key)
 
 
-def _names(page, sel):
+def _names(page, sel, starred=None):
     """Every control of every line, with the name Chromium's accessibility
-    tree gives it: [(line index, the line's tag, role, name)]."""
+    tree gives it: [(line index, the line's tag, role, name)]. The names of
+    the fields under a heading that marks its column required ("Account *")
+    are added to `starred`; each of them must say it is required."""
     controls = page.evaluate(CONTROLS, sel)
     cdp = page.context.new_cdp_session(page)
     out = []
+    starred = [] if starred is None else starred
     try:
         for i, c in enumerate(controls):
             found = cdp.send(
@@ -263,6 +282,15 @@ def _names(page, sel):
                 {"objectId": found["result"]["objectId"], "fetchRelatives": False},
             )["nodes"][0]
             name = " ".join(str((node.get("name") or {}).get("value", "")).split())
+            if c["star"] and c["kind"] != "BUTTON":
+                # a field under a heading that marks its column required
+                # says so itself, the way a screen reader hears it
+                said = {
+                    p["name"]: p["value"].get("value")
+                    for p in node.get("properties", [])
+                }
+                assert said.get("required") is True, (name, said)
+                starred.append(name)
             out.append((c["row"], c["tag"], node["role"]["value"], name))
     finally:
         cdp.detach()
@@ -274,8 +302,19 @@ def _named_by_place(page, sel, form, step, order):
     every field of line k reads "line k", no two fields read the same, and a
     button that says a line's number says the line it is on."""
     _pickers_settled(page)
-    got = _names(page, sel)
+    starred = []
+    got = _names(page, sel, starred)
     where = f"{form}, after {step}"
+    # a name is the heading's words and the line: never the heading's
+    # required-field mark ("Account *, line 2")
+    for _row, _tag, _role, name in got:
+        assert "*" not in name, (where, name)
+    if form == "expense":
+        rows = len({row for row, _t, _r, _n in got})
+        assert starred == [f"Account, line {k + 1}" for k in range(rows)], (
+            where,
+            starred,
+        )
     tags = []
     for row, tag, _role, _name in got:
         if len(tags) == row:

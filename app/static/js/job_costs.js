@@ -199,6 +199,7 @@ const JobCostsPage = {
         });
         const el = $('#jc-total');
         if (el) el.textContent = `Total: ${formatCurrency(total)}`;
+        return total;
     },
 
     async save(e) {
@@ -227,7 +228,8 @@ const JobCostsPage = {
         });
         // $0.00 is asked about first, as every line form asks (ZeroTotal); a
         // job cost is never posted for nothing, so Yes is answered in a sentence
-        if (!ZeroTotal.ask(T('Job Cost Entry'), lines.reduce((sum, l) => sum + l.quantity * l.rate, 0))) return;
+        // (the total the form shows decides it: each line to the cent, as drawn)
+        if (!ZeroTotal.ask(T('Job Cost Entry'), JobCostsPage.recalc())) return;
         if (!lines.length) { toast('Add at least one line with a quantity and rate', 'error'); return; }
         if (!(await TxnWarn.ok(form))) return;
         try {
