@@ -13,8 +13,9 @@ purchase order, vendor credit, bill, journal entry, expense, recurring
 template, deposit (its other lines) and change order. A pay application's
 lines are its schedule of values: they cannot be inserted, removed or moved,
 so there is no change for its names to follow. The bill form has no Remove
-line; which forms may lose their last line is each form's own rule (the
-expense form keeps one), and is not decided here.
+line. Every form lets its last line be removed like any other (the expense
+form used to keep one); what a save with no lines does is another module's
+(test_browser_zero_total_ask_r29.py).
 
 Each sweep stays whole inside one test: the forms are walked one after the
 other on one company.
@@ -107,7 +108,9 @@ INVOICE_WITH_COST_CODES = (
     True,
     True,
 )
-KEEPS_ITS_LAST_LINE = {"expense"}
+# No form keeps its last line anymore: the expense form's lock went with the
+# rule that every form asks before saving a document that adds up to $0.00.
+KEEPS_ITS_LAST_LINE = set()
 
 ROW_COUNT = (
     "(sel) => document.querySelector(sel).querySelectorAll(':scope > tr').length"
