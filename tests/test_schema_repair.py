@@ -287,6 +287,12 @@ def test_the_launcher_exposes_that_flag():
     )
 
 
+# Four walks of the chain in this process, each to a revision the migration
+# cache does not hold: 50 s on a quiet Windows runner and 103 s on a busy one,
+# against the job's 120 s per-test limit, whose only method on Windows ends
+# the whole worker. Its own budget keeps a slow run a slow run; a hang still
+# ends at five minutes.
+@pytest.mark.timeout(300)
 def test_the_repair_is_linear_in_blocking_tables(tmp_path):
     """@skytech measured the old loop at 2**N - 1 drops, not N: every retry
     re-ran the migration from the start and SQLite, whose DDL is not
