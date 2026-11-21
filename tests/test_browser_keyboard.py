@@ -42,6 +42,7 @@ import sys
 import pytest
 
 pytest.importorskip("playwright.sync_api")
+from playwright.sync_api import TimeoutError as PlaywrightTimeout  # noqa: E402
 
 from tests.test_browser_classes import classed as _classed  # noqa: E402,F401
 from tests.test_browser_grid import (  # noqa: E402,F401  (eleven classes)
@@ -3421,6 +3422,78 @@ ACTIVE_KEY = """() => { const a = document.activeElement;
     return (a.dataset && a.dataset.rowKey) || a.id || a.tagName.toLowerCase(); }"""
 NOTED = "() => (history.state && history.state.focus) || null"
 
+# What the page saw of a click: each pointer and mouse event, its target and
+# keys as it started, and whether anything prevented it by the end.
+_WATCH_CLICK = """() => {
+    window.__clickSeen = [];
+    if (window.__clickWatched) return;
+    window.__clickWatched = true;
+    const name = (t) => !t || t.nodeType !== 1 ? String(t)
+        : t.tagName.toLowerCase() + (t.id ? '#' + t.id : '')
+          + (t.dataset && t.dataset.rowKey ? '[' + t.dataset.rowKey + ']' : '');
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'auxclick']) {
+        window.addEventListener(type, (e) => window.__clickSeen.push({ type, target: name(e.target),
+            connected: !!(e.target && e.target.isConnected), ctrl: e.ctrlKey, meta: e.metaKey,
+            shift: e.shiftKey, button: e.button }), true);
+        window.addEventListener(type, (e) => window.__clickSeen.push({ type, prevented: e.defaultPrevented }));
+    }
+}"""
+
+_PAGE_STATE = """(sel) => {
+    const el = document.querySelector(sel);
+    const r = el && el.getBoundingClientRect();
+    const at = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    const overlay = document.getElementById('modal-overlay');
+    return { hash: location.hash, visibility: document.visibilityState, focused: document.hasFocus(),
+        link: el ? { href: el.getAttribute('href'), box: [r.left, r.top, r.width, r.height] } : null,
+        under_its_middle: at ? at.outerHTML.slice(0, 200) : null,
+        dialog: overlay && !overlay.classList.contains('hidden')
+            ? document.getElementById('modal-title').textContent : null,
+        active: document.activeElement ? document.activeElement.outerHTML.slice(0, 120) : null,
+        events: window.__clickSeen || [] };
+}"""
+
+
+def _click_to_a_new_tab(page, handled, selector, held):
+    """A click on `selector` with `held`, which the browser opens in a new
+    tab (or window): that page, closed. A click that opens none fails with
+    what the page saw and showed, its console's errors and the last
+    requests the app served, so a miss explains itself. (On CI the
+    customer page's Ctrl+click once opened no tab in 30 s; the cause was
+    not found from the log, which said only that.)"""
+    errors = []
+
+    def console(msg):
+        if msg.type in ("error", "warning"):
+            errors.append(f"console {msg.type}: {msg.text}")
+
+    def pageerror(err):
+        errors.append(f"page error: {err}")
+
+    page.on("console", console)
+    page.on("pageerror", pageerror)
+    try:
+        page.evaluate(_WATCH_CLICK)
+        try:
+            with page.context.expect_page() as opened:
+                page.click(selector, modifiers=[held])
+        except PlaywrightTimeout as exc:
+            try:
+                state = page.evaluate(_PAGE_STATE, selector)
+            except Exception as read:  # the page itself gone or stuck
+                state = f"(the page could not be read: {read})"
+            raise AssertionError(
+                f"{held}+click on {selector} opened no new page: {exc}\n"
+                f"pages in the context: {len(page.context.pages)}\n"
+                f"page: {state}\n"
+                f"console: {errors or 'nothing'}\n"
+                f"last requests served: {handled[-15:]}"
+            ) from exc
+        opened.value.close()
+    finally:
+        page.remove_listener("console", console)
+        page.remove_listener("pageerror", pageerror)
+
 
 def test_a_click_that_opens_elsewhere_notes_nothing_and_steals_nothing(
     browser, company, books
@@ -3443,9 +3516,7 @@ def test_a_click_that_opens_elsewhere_notes_nothing_and_steals_nothing(
         link = '#page-content a[data-row-key^="account:"]'
         key = page.get_attribute(link, "data-row-key")
         for held in ("ControlOrMeta", "Shift"):
-            with page.context.expect_page() as opened:
-                page.click(link, modifiers=[held])
-            opened.value.close()
+            _click_to_a_new_tab(page, handled, link, held)
             assert page.evaluate("location.hash") == "#/accounts", held
             assert page.evaluate(NOTED) is None, held
             page.focus("#global-search")
@@ -3469,9 +3540,7 @@ def test_a_click_that_opens_elsewhere_notes_nothing_and_steals_nothing(
         page.wait_for_selector(report)
         settle(page, handled)
         here = page.evaluate("location.hash")
-        with page.context.expect_page() as opened:
-            page.click(report, modifiers=["ControlOrMeta"])
-        opened.value.close()
+        _click_to_a_new_tab(page, handled, report, "ControlOrMeta")
         assert page.evaluate("location.hash") == here
         assert page.evaluate(NOTED) is None
         page.focus("#modal-body textarea")

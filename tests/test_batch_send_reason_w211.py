@@ -122,6 +122,7 @@ def test_giving_statements(client, db_session, seed_accounts, seed_customer, stu
     _giving_year(client, seed_accounts, seed_customer)
     r = client.post("/api/donors/giving-statements/batch-email", json={"year": 2026})
     assert r.status_code == 200, r.text
+    # the whole answer on a failure: it once differed in one full run only
     assert r.json()["errors"] == [
         "Test Customer: the giving statement could not be sent. " + SENTENCE
-    ]
+    ], r.json()
