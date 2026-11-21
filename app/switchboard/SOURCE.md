@@ -7,8 +7,12 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: 979edbed2bf4271a582fe9e7e27595f844466775 (branch multi-company,
-  2026-11-21): a company leaves the connection only when SlowBooks Pro's
+- Commit: 091dbe8c033d8d07f55f1e6a446e09daf950210a (branch multi-company,
+  2026-11-21): Switchboard's own store of several companies (sbplive
+  add-books, which the product does not run) is used by a running
+  connection only while it was added for the same address; of the copied
+  files only `store.py` changed (its settings can be read from a given
+  folder). Before it: 979edbe: a company leaves the connection only when SlowBooks Pro's
   gate turned its token away (X-SlowBooks-Token-Refused), never on a
   route's own 401; no tool sends anything but a GET under /api/auth/; the
   sentence for a refused company comes from the Books provider

@@ -187,7 +187,7 @@ _COMPANY_HEADER = "X-SlowBooks-Company"
 # so a client holding tokens for several companies can check it was
 # answered from the one it asked (the AI assistant connection does).
 _COMPANY_SERVED_HEADER = "X-SlowBooks-Company-Served"
-# A request with no sign-in whose company header this server cannot honour
+# A request with no sign-in whose company header this server cannot honor
 # (repeated, blank, not a company file's name, or a company it does not
 # serve now) is refused before its token is looked up, never answered from
 # another company. The sentence names nothing: no one has signed in yet.
@@ -198,7 +198,15 @@ UNSERVED_COMPANY_REFUSAL = (
 # itself, never from another computer: a copied connection file is no use
 # elsewhere on the network.
 LINK_TOKEN_ADDRESS_REFUSAL = (
-    "This token works only for the AI assistant connection on this computer."
+    "This token works only for the AI assistant connection on this computer. "
+    "Nothing was done."
+)
+# An AI assistant's token whose maker is no longer an administrator of the
+# company: nobody revoked it, and the sentence says what did happen.
+MAKER_GONE_REFUSAL = (
+    'The API token "{label}" stopped working because the administrator who made '
+    "it is no longer an administrator of this company. Nothing was done. An "
+    "administrator can make a new one under Settings, API Tokens."
 )
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 # A 401 the gate gives a request's token (it matches nothing here, or it
@@ -1540,6 +1548,14 @@ async def _require_session(request: Request, call_next):
                 },
                 headers={_TOKEN_REFUSED_HEADER: "1"},
             )
+        if token_principal is not None and token_principal.get("maker_gone"):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": MAKER_GONE_REFUSAL.format(label=token_principal["label"])
+                },
+                headers={_TOKEN_REFUSED_HEADER: "1"},
+            )
         if token_principal is None:
             return JSONResponse(
                 status_code=401,
@@ -1782,7 +1798,7 @@ class ActingUserContextMiddleware:
             _acting_username.reset(token)
 
 
-# what _request_company answers for a company header the server cannot honour
+# what _request_company answers for a company header the server cannot honor
 _UNSERVED = object()
 
 
@@ -1796,7 +1812,7 @@ def _request_company(scope, session):
     not a company file's name, or names a company this server does not
     serve now gets _UNSERVED, and is refused: it is never answered from
     the company the server was started for instead. A header naming that
-    company is honoured. A signed-in session ignores the header; a request
+    company is honored. A signed-in session ignores the header; a request
     with no sign-in that carries the header or a token follows these rules
     whatever company its cookie chose."""
     from app.services import served_companies

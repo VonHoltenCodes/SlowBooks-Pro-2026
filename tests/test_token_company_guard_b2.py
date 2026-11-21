@@ -105,9 +105,7 @@ def no_lookup(monkeypatch):
         [(HEADER, "charlie.db")],  # not on the list
     ],
 )
-def test_a_header_the_server_cannot_honour_is_refused_unread(
-    served, no_lookup, headers
-):
+def test_a_header_the_server_cannot_honor_is_refused_unread(served, no_lookup, headers):
     secret = "sbp_" + secrets.token_urlsafe(32)
     r = TestClient(app).get(
         "/api/customers", headers=[("Authorization", f"Bearer {secret}"), *headers]
@@ -130,7 +128,7 @@ def test_a_listed_company_not_served_now_is_refused(served, no_lookup, monkeypat
     assert no_lookup == []
 
 
-def test_the_desktop_honours_only_its_own_company(served, monkeypatch):
+def test_the_desktop_honors_only_its_own_company(served, monkeypatch):
     monkeypatch.delenv("SLOWBOOKS_SERVER_MODE")
     secret = _token("alpha.db", "office script", created_by="pat")
     assert _bot(secret, company="bravo.db").get("/api/customers").status_code == 421
@@ -279,11 +277,13 @@ def test_the_address_the_app_listens_on_counts_as_its_own(served, monkeypatch):
 # -- the connection's tokens: only while their maker is an administrator -------------
 
 
-def _revoked(label):
+def _maker_gone(label):
     return {
         "detail": (
-            f'The API token "{label}" was revoked. Ask an administrator for a new '
-            "one under Settings, API Tokens."
+            f'The API token "{label}" stopped working because the administrator '
+            "who made it is no longer an administrator of this company. Nothing "
+            "was done. An administrator can make a new one under Settings, API "
+            "Tokens."
         )
     }
 
@@ -307,7 +307,7 @@ def test_a_connection_token_ends_with_its_makers_admin(served, change, restore):
     assert bot.get("/api/customers").status_code == 200
     _set_user("bravo.db", "lee", **change)
     r = bot.get("/api/customers")
-    assert (r.status_code, r.json()) == (401, _revoked(LINK))
+    assert (r.status_code, r.json()) == (401, _maker_gone(LINK))
     # a token made by hand is a program's, not its maker's: it keeps working
     assert _bot(other, company="bravo.db").get("/api/customers").status_code == 200
     # the row says what it is now, wherever that came from: a restore, an
@@ -319,7 +319,7 @@ def test_a_connection_token_ends_with_its_makers_admin(served, change, restore):
 def test_a_connection_token_whose_maker_is_gone_is_refused(served):
     link = _token("alpha.db", LINK, created_by="nobody-here")
     r = _bot(link).get("/api/customers")
-    assert (r.status_code, r.json()) == (401, _revoked(LINK))
+    assert (r.status_code, r.json()) == (401, _maker_gone(LINK))
     # the maker's admin is the company's own: pat is Alpha's administrator
     # and only a bookkeeper in Bravo
     in_bravo = _token("bravo.db", LINK, created_by="pat")

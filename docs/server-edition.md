@@ -236,7 +236,9 @@ company adds it there, with the **Add** button in that company's panel
 every call. Showing a sign-in code, adding a company and Disconnect belong
 only to someone who is an administrator of every company on the connection:
 on a server that means signing in with the same username and password as an
-administrator of each of them (the company switch's own check). A client
+administrator of each of them (the company switch's own check; Disconnect
+skips a company that cannot be opened now only for the person who added it).
+A client
 company's administrator who is not one sees only that company, can take it
 off the connection, and never learns the other companies' names or how many
 there are. A company's access ends at once when the administrator who added
@@ -309,8 +311,8 @@ What a token cannot do, whatever its role or permission:
   is let run them.
 - Restore a backup. Restoring replaces the whole company, so it is done by an
   administrator signed in to SlowBooks Pro (Settings → Backups → Backup / Restore, or
-  `POST /api/backups/restore` from that session). On a server, a company is
-  restored only from its own backups (the ones its list shows): another
+  `POST /api/backups/restore` from that session). On a server serving several
+  companies, a company is restored only from its own backups (the ones its list shows): another
   company's backup is refused, so one client's administrator cannot pull
   another client's books into their own. A tool that resets the books
   between runs takes its backups with a token and leaves the restore to a

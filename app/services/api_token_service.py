@@ -90,6 +90,27 @@ def _maker_still_admin(db, created_by: str | None) -> bool:
     return expires_on is None or date.today() <= expires_on
 
 
+def ends_with_maker(row) -> bool:
+    """The token works only while its maker is an administrator here: the
+    AI assistant connection's own (by its name or by its hash in the
+    connection's record), and any named for an AI assistant."""
+    return (
+        is_link_label(row.label)
+        or is_ai_label(row.label)
+        or row.token_hash in _link_hashes()
+    )
+
+
+def maker_gone(db, row) -> bool:
+    """An active token the gate turns away because the administrator who
+    made it is no longer one in this company."""
+    return bool(
+        row.is_active
+        and ends_with_maker(row)
+        and not _maker_still_admin(db, row.created_by)
+    )
+
+
 def generate_token() -> str:
     return TOKEN_PREFIX + secrets.token_urlsafe(32)
 
@@ -113,8 +134,9 @@ def resolve(bearer: str) -> dict | None:
     """Bearer secret → {"label", "role", "allow_backups", "allow_payroll",
     "allow_imports", "link", "ends_with_maker"} for an active token;
     {"revoked": True, "label"} for one an administrator turned off (so the
-    401 can say so, #434), or for an AI assistant's token whose maker is no
-    longer an administrator here; None for a secret that matches nothing.
+    401 can say so, #434); {"maker_gone": True, "label"} for an AI
+    assistant's token whose maker is no longer an administrator here; None
+    for a secret that matches nothing.
 
     "link": the token is one the AI assistant connection on this computer
     keeps, known by its name or by its hash in the connection's record (a
@@ -139,8 +161,9 @@ def resolve(bearer: str) -> dict | None:
         ends_with_maker = link or is_ai_label(row.label)
         if ends_with_maker and not _maker_still_admin(db, row.created_by):
             # an AI assistant's token works only while the administrator
-            # who made it (who added this company to it) still is one here
-            return {"revoked": True, "label": row.label}
+            # who made it (who added this company to it) still is one here;
+            # nobody revoked it, and the gate says which it is
+            return {"maker_gone": True, "label": row.label}
         now = datetime.now(timezone.utc)
         last = row.last_used_at
         if last is not None and last.tzinfo is None:

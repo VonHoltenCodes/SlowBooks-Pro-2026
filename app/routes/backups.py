@@ -5,7 +5,6 @@
 
 
 import logging
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -99,9 +98,13 @@ def download_backup(filename: str, request: Request, db: Session = Depends(get_d
     )
 
 
-def _on_a_server() -> bool:
-    """Server Edition, which serves several companies' books."""
-    return os.environ.get("SLOWBOOKS_SERVER_MODE") == "1"
+def _several_companies_served() -> bool:
+    """Server Edition serving several companies, whose backups share one
+    folder. A server with one company keeps the desktop's rule: another
+    company's backup is restored only when confirmed again."""
+    from app.services import served_companies
+
+    return served_companies.enabled()
 
 
 @router.post("/restore")
@@ -114,9 +117,9 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
     one folder, and this used to copy any of them over the open company),
     a copy made by a newer version this one cannot open (409
     "newer_version"), books from before 2.29.0, which this version does
-    not migrate (409 "before_floor", #769), and, on Server Edition, any
-    backup that is not one of this company's own (409
-    "other_company_server"). Otherwise a safety backup of the books as they are is
+    not migrate (409 "before_floor", #769), and, on a server serving
+    several companies, any backup that is not one of this company's own
+    (409 "other_company_server", whatever the confirmation says). Otherwise a safety backup of the books as they are is
     taken first, and named in the answer, so a restore can be undone."""
     filepath = backup_service.backup_path(data.filename)
     if filepath is None:
@@ -127,7 +130,7 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
         )
 
     other = backup_service.other_company(db, filepath.name)
-    if _on_a_server() and filepath.name not in {
+    if _several_companies_served() and filepath.name not in {
         b["filename"] for b in backup_service.list_company_backups(db)
     }:
         # A server keeps several clients' books, and their backups share one

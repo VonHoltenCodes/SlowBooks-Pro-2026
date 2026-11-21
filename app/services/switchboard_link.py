@@ -171,18 +171,21 @@ NOT_LINKED = (
     "No AI assistant is connected. An administrator can press Connect to AI "
     "assistant."
 )
-ALREADY = "An AI assistant connection already exists on this computer. Use Add instead."
-ALREADY_ON = "This company is already on the AI assistant connection."
-NOT_ON = "That company is not on the AI assistant connection."
+ALREADY = (
+    "An AI assistant connection already exists on this computer. Nothing was done. "
+    "Use Add instead."
+)
+ALREADY_ON = "This company is already on the AI assistant connection. Nothing was done."
+NOT_ON = "That company is not on the AI assistant connection. Nothing was done."
 ONLY_ADMIN = "Only an administrator can connect an AI assistant."
 NOT_ADMIN_THERE = (
     "Only an administrator of that company can take it off the AI assistant "
-    "connection."
+    "connection. Nothing was done."
 )
 NOT_A_MANAGER = (
     "Only someone who is an administrator of every company on the AI assistant "
     "connection can do this. On a server, sign in with the same username and "
-    "password as an administrator of each of them."
+    "password as an administrator of each of them. Nothing was done."
 )
 NOT_A_MANAGER_ADD = (
     "An AI assistant connection already exists on this server. Only someone who "
@@ -193,13 +196,18 @@ ONE_ON_POSTGRES = (
     "this one."
 )
 EDIT_BUSY = (
-    "Another change to the AI assistant connection is under way. Try again in a "
-    "moment."
+    "Another change to the AI assistant connection is under way, so nothing was "
+    "done. Try again in a moment."
 )
 NOT_ADDED = (
     "SlowBooks Pro could not add this company to the AI assistant connection, so "
     "nothing was changed. Check that the data folder can be written to, then try "
     "again."
+)
+# Add when the connection already reaches as many companies as it can
+FULL = (
+    "The AI assistant connection already reaches {count} companies, the most it "
+    "can. Nothing was done."
 )
 LATER = (
     " {name} is not open now; its token will be turned off the next time it is "
@@ -211,7 +219,8 @@ DAMAGED_OTHERS = (
 )
 DAMAGED_ELSEWHERE = (
     "The AI assistant connection kept in the data folder cannot be read, and this "
-    "company is not on it. An administrator of a company on it can disconnect it."
+    "company is not on it. Nothing was done. An administrator of a company on it "
+    "can disconnect it."
 )
 # what the assistant hears when the books it named cannot be reached now; each
 # ends "Nothing was done." (the registry sends nothing)
@@ -1494,6 +1503,8 @@ def _entry_state(entry: dict, here: str | None = None) -> str:
         return "other_window"
     if _locked(company_file):
         return "locked"
+    if _refused_there(entry):
+        return "refused"
     return "ready"
 
 
@@ -1961,7 +1972,8 @@ def _may_manage(session, entries: list, *, reachable_only: bool, adding: bool = 
     """(whether this person holds power over the whole connection, the
     companies that stop them). On a server serving several companies: an
     administrator of every company on it (with reachable_only, of every one
-    that can be opened now, and of at least one). On the desktop: an
+    that can be opened now, and of at least one, and the person who added
+    each one that cannot be opened now). On the desktop: an
     administrator of the open company, which is on the connection (or is
     being added to it)."""
     if not _session_admin(session):
@@ -1970,8 +1982,15 @@ def _may_manage(session, entries: list, *, reachable_only: bool, adding: bool = 
     if not _several_served():
         return (adding or any(e["file"] == here for e in entries)), []
     checked, missing = 0, []
+    username = (session.get("username") or "").strip().lower()
     for entry in entries:
         if reachable_only and not _reachable(entry["file"]):
+            # a company that cannot be opened now cannot be asked; it is
+            # skipped only for the person who added it to the connection
+            # (no one else learns its name or ends its access this way)
+            added_by = (entry.get("added_by") or "").strip().lower()
+            if not username or added_by != username:
+                missing.append(entry["name"] or entry["file"])
             continue
         checked += 1
         if not _admin_of(session, entry["file"]):
@@ -2091,7 +2110,10 @@ def status(session=None) -> dict:
             out["sentence"] = ONE_ON_POSTGRES
         elif _may_manage(session, entries, reachable_only=False, adding=True)[0]:
             out["can_add"] = len(entries) < MAX_COMPANIES
-            out["here_name"] = _here_name()
+            if out["can_add"]:
+                out["here_name"] = _here_name()
+            else:
+                out["sentence"] = FULL.format(count=MAX_COMPANIES)
         elif not manager:
             out["sentence"] = NOT_A_MANAGER_ADD.format(name=_here_name())
     elif dead_here and admin and not _on_postgres():
@@ -2106,8 +2128,37 @@ def status(session=None) -> dict:
 
 
 def _dead(entry: dict) -> bool:
-    """A company on the connection whose token was turned off there."""
-    return bool(entry.get("off")) or not entry.get("token")
+    """A company on the connection whose token was turned off there, or that
+    the gate there turns away now (its token revoked or gone, or the person
+    who made it no longer an administrator there), whether or not the
+    assistant has been refused yet."""
+    if entry.get("off") or not entry.get("token"):
+        return True
+    return _refused_there(entry)
+
+
+def _refused_there(entry: dict) -> bool:
+    """The company's gate would refuse the entry's token now. A company that
+    cannot be opened now cannot say, and is not counted as refusing."""
+    from app.models.api_tokens import ApiToken
+    from app.services.api_token_service import _maker_still_admin
+
+    company_file = entry.get("file") or ""
+    digest = entry.get("token_sha256") or ""
+    if not digest or not _reachable(company_file):
+        return False
+    try:
+        with _in_company(company_file) as db:
+            row = db.query(ApiToken).filter(ApiToken.token_hash == digest).first()
+            # every token of the connection ends with its maker
+            return (
+                row is None
+                or not row.is_active
+                or not _maker_still_admin(db, row.created_by)
+            )
+    except Exception as exc:
+        _log_fault("a company's AI connection token could not be checked", exc)
+        return False
 
 
 def _next_label_here() -> str:
@@ -2828,15 +2879,17 @@ def add_here(db, username: str, session) -> dict:
         if old is not None and not _dead(old):
             raise SwitchboardError(409, ALREADY_ON)
         if _on_postgres():
-            raise SwitchboardError(409, ONE_ON_POSTGRES)
+            raise SwitchboardError(409, ONE_ON_POSTGRES + " " + NOTHING_DONE)
         if old is None and len(entries) >= MAX_COMPANIES:
-            raise SwitchboardError(409, NOT_ADDED)
+            raise SwitchboardError(409, FULL.format(count=MAX_COMPANIES))
         # A company whose token was turned off here is added again in its
         # place: by the same rule as an Add, the others on the connection
         # counted, not its own dead entry.
         others = [e for e in entries if e is not old]
         if not _may_manage(session, others, reachable_only=False, adding=True)[0]:
-            raise SwitchboardError(403, NOT_A_MANAGER_ADD.format(name=_here_name()))
+            raise SwitchboardError(
+                403, NOT_A_MANAGER_ADD.format(name=_here_name()) + " " + NOTHING_DONE
+            )
         token_id = None
         try:
             with _in_company(here, acting=username or "operator") as mine:
@@ -2959,6 +3012,16 @@ def take_off(db, company_file: str, session) -> dict:
         if len(entries) == 1:
             return _disconnect_press(db, session)
         acting = (session or {}).get("username") or "operator"
+        # The record is changed first: when it cannot be written, nothing
+        # was changed (the token still works, and the company is still on
+        # the connection). After it, a token that cannot be turned off now
+        # is turned off when its company opens next.
+        rest = [e for e in entries if e is not entry]
+        try:
+            _save(_format2(record, rest))
+        except OSError as exc:
+            logger.warning("the connection could not be changed: %s", exc)
+            raise SwitchboardError(503, NOT_WRITTEN) from None
         if company_file == _company_here():
             try:
                 _revoke(db, _as_record(entry), True)
@@ -2973,12 +3036,6 @@ def take_off(db, company_file: str, session) -> dict:
                 result = "later"
         else:
             result = _end_elsewhere(entry, acting)
-        rest = [e for e in entries if e is not entry]
-        try:
-            _save(_format2(record, rest))
-        except OSError as exc:
-            logger.warning("the connection could not be changed: %s", exc)
-            raise SwitchboardError(503, NOT_WRITTEN) from None
     _sweep_quietly()
     out = status(session)
     out["results"] = [{"file": company_file, "name": entry["name"], "result": result}]

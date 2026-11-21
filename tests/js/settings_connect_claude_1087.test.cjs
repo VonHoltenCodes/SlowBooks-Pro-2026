@@ -461,8 +461,25 @@ test('Take off asks first in the exact words and names the file', async () => {
     const g = fixture({ '/switchboard/status': MANAGER, 'POST /switchboard/take-off': { ...MANAGER, results: [{ file: 'lake.db', name: 'Lake Dental', result: 'later' }] } });
     await g.page.loadSwitchboard();
     await g.page.takeClaudeOff('lake.db');
-    assert.match(g.confirms[0], /^Take Lake Dental off\? /);
+    assert.match(g.confirms[0], /^Take Lake Dental off the AI connection\? /);
     assert.equal(g.toasts.at(-1)[0], 'Lake Dental is off the AI assistant connection. It is not open now; its token will be turned off the next time it is opened.');
+});
+
+test('Take off asked of a client administrator says nothing of other companies', async () => {
+    const mine = {
+        state: 'connected', linked: true, on_link: true, this_company: true, company: 'Smith Plumbing',
+        here_file: 'smith.db', token_label: 'AI assistant (relay) 2', address: ADDRESS, can_manage: true,
+        can_take_off: true, can_code: false, can_disconnect: false, can_add: false,
+    };
+    const f = fixture({ '/switchboard/status': mine, 'POST /switchboard/take-off': { ...mine, on_link: false, this_company: false, results: [{ file: 'smith.db', name: 'Smith Plumbing', result: 'ended' }] } });
+    await f.page.loadSwitchboard();
+    await f.page.takeClaudeOff('');
+    assert.equal(f.confirms[0], 'Take Smith Plumbing off? Its token, AI assistant (relay) 2, is turned off at once and the assistant can no longer reach these books.');
+    // a manager dropping a company whose token is already off there
+    const g = fixture({ '/switchboard/status': MANAGER, 'POST /switchboard/take-off': { ...MANAGER, results: [{ file: 'lake.db', name: 'Lake Dental', result: 'ended' }] } });
+    await g.page.loadSwitchboard();
+    await g.page.takeClaudeOff('lake.db');
+    assert.equal(g.confirms[0], 'Take Lake Dental off the AI connection? Its token is already turned off in that company; this removes it from the connection. The other companies stay connected.');
 });
 
 test('Disconnect from several companies asks in the exact words, then says which are not open', async () => {

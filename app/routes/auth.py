@@ -187,6 +187,12 @@ def auth_status(request: Request):
     import app.database as db_module
 
     try:
+        if _a_program(request) and not _token_works_here(request):
+            # a program is told only of the company its own token opens
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=TOKEN_NOT_HERE_MESSAGE,
+            )
         db = db_module.SessionLocal()
     except served_companies.CompanyUnavailable as exc:
         return _status_while_company_unavailable(
@@ -214,6 +220,25 @@ def _status_while_company_unavailable(request: Request, sentence: str) -> dict:
             if not _a_program(request) or c["current"]
         ],
     }
+
+
+TOKEN_NOT_HERE_MESSAGE = (
+    "This API token does not open this company's books. Nothing was read."
+)
+
+
+def _token_works_here(request: Request) -> bool:
+    """The request's API token is an active one of the company the request
+    works in (the one its company header names), as the gate would let in."""
+    from app.services.api_token_service import resolve
+
+    header = request.headers.get("authorization") or ""
+    principal = resolve(header[7:].strip())
+    return (
+        principal is not None
+        and not principal.get("revoked")
+        and not principal.get("maker_gone")
+    )
 
 
 def _a_program(request: Request) -> bool:
@@ -651,6 +676,13 @@ def set_own_password(
     return {"status": "ok"}
 
 
+def _working_in_another_company() -> str | None:
+    """The company file this request works in when it is not the one the
+    server was started for, else None."""
+    here = served_companies.current_file()
+    return None if here == served_companies.started_file() else here
+
+
 @router.post("/setup")
 def setup(
     payload: SetupPayload,
@@ -665,7 +697,9 @@ def setup(
             status_code=status.HTTP_409_CONFLICT,
             detail="Password already set — use /login",
         )
-    chosen = served_companies.chosen_file(request.session)
+    # The company this request works in: the cookie's choice, or the one a
+    # request with no sign-in names in its company header.
+    chosen = _working_in_another_company()
     if chosen is not None and request.session.get(SET_UP_KEY) != chosen:
         # Another company on this server with no password yet (#358): made
         # under Companies, and set up by the administrator who opens it from
@@ -931,7 +965,7 @@ def login(
         )
     _record_login_attempt(db, request, success=True)
     # Same rotation rationale as /setup.
-    company = served_companies.chosen_file(request.session)
+    company = _working_in_another_company()
     request.session.clear()
     request.session["authenticated"] = True
     remember_this_start(request.session)

@@ -76,8 +76,8 @@ def secret_path() -> Path:
     return config_dir() / SECRET_NAME
 
 
-def settings_path() -> Path:
-    return config_dir() / SETTINGS_NAME
+def settings_path(folder: Path | None = None) -> Path:
+    return (folder or config_dir()) / SETTINGS_NAME
 
 
 def log_path() -> Path:
@@ -214,18 +214,18 @@ def has_secret() -> bool:
     return secret_path().is_file()
 
 
-def load_settings() -> dict:
+def load_settings(folder: Path | None = None) -> dict:
     """The stored settings, or {} when there are none or they cannot be read."""
     try:
-        with open(settings_path(), encoding="utf-8") as fh:
+        with open(settings_path(folder), encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def stored_url() -> str | None:
-    url = load_settings().get("url")
+def stored_url(folder: Path | None = None) -> str | None:
+    url = load_settings(folder).get("url")
     return url if isinstance(url, str) and url.strip() else None
 
 

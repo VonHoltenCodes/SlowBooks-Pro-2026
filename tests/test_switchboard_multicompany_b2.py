@@ -97,15 +97,15 @@ def relay(monkeypatch, tmp_path):
 def three(tmp_path, monkeypatch):
     """Harbor Books (the company the server was started for), Smith Plumbing
     and Lake Dental. jdoe is an administrator of all three with one
-    password; cli is Lake Dental's own administrator; kim keeps Harbor's
+    password; cli is Lake Dental's own administrator; bkpr keeps Harbor's
     books."""
-    pw = {"jdoe": _pw(), "cli": _pw(), "kim": _pw()}
+    pw = {"jdoe": _pw(), "cli": _pw(), "bkpr": _pw()}
     folder = tmp_path / "companies"
     folder.mkdir()
     _make_company(
         folder / "harbor.db",
         "Harbor Books",
-        [("jdoe", pw["jdoe"], "admin", True), ("kim", pw["kim"], "bookkeeper", True)],
+        [("jdoe", pw["jdoe"], "admin", True), ("bkpr", pw["bkpr"], "bookkeeper", True)],
     )
     _make_company(
         folder / "smith.db", "Smith Plumbing", [("jdoe", pw["jdoe"], "admin", True)]
@@ -280,9 +280,9 @@ def test_add_from_another_company_makes_its_token_in_its_own_books(three, relay)
 
 def test_only_an_administrator_adds_and_no_token_reaches_the_presses(three, relay):
     _connected_with(three, relay)
-    kim = _signed_in(three, "kim")
-    assert kim.post("/api/switchboard/add").status_code == 403
-    r = kim.post("/api/switchboard/take-off", json={"file": "harbor.db"})
+    bkpr = _signed_in(three, "bkpr")
+    assert bkpr.post("/api/switchboard/add").status_code == 403
+    r = bkpr.post("/api/switchboard/take-off", json={"file": "harbor.db"})
     assert r.status_code == 403
     record = _record()
     bot = TestClient(app, client=_THIS_COMPUTER)
@@ -584,8 +584,8 @@ def test_a_killed_lock_holder_lets_the_lock_go(tmp_path, monkeypatch):
             busy.value.sentence
             == link.EDIT_BUSY
             == (
-                "Another change to the AI assistant connection is under way. Try "
-                "again in a moment."
+                "Another change to the AI assistant connection is under way, so "
+                "nothing was done. Try again in a moment."
             )
         )
     finally:

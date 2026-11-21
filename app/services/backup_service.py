@@ -10,6 +10,7 @@
 # state they are in, whichever state the backup was in.
 # ============================================================================
 
+import hashlib
 import logging
 import os
 import re
@@ -65,19 +66,98 @@ def parse_backup_name(filename: str) -> dict | None:
     return m.groupdict() if m else None
 
 
-def company_slug() -> str:
-    """This company's part of a backup file name: "harbor-light-bakery" for
-    harbor-light-bakery.db, the database name on a server. Never the old
-    anonymous "slowbooks", so a new name can always be told from an old one."""
-    if _is_sqlite():
-        path = _sqlite_db_path()
-        stem = path.stem if path is not None else ""
-    else:
-        stem = _parse_db_url(DATABASE_URL)["dbname"]
-    slug = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:60].strip("-")
+# A company's part of a backup name decides whose backups are whose, so two
+# companies must never share one: a file stem that is already that part
+# (lowercase letters, digits and single dashes, 60 characters at most) is
+# kept as it is, and any other stem is shortened and given ten characters of
+# a hash of the whole stem, after a "--" no kept stem has.
+_PLAIN_KEY_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_KEY_MAX = 60
+
+
+def _readable(stem: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
+
+
+def backup_key_for_stem(stem: str) -> str:
+    """The backup-name part of a company whose file stem (or database name)
+    is ``stem``. Two different stems never get the same one."""
+    if stem == LEGACY_SLUG:
+        return f"{LEGACY_SLUG}-books"
+    if (
+        len(stem) <= _KEY_MAX
+        and _PLAIN_KEY_RE.fullmatch(stem)
+        and stem != f"{LEGACY_SLUG}-books"
+    ):
+        return stem
+    digest = hashlib.sha256(stem.encode("utf-8")).hexdigest()[:10]
+    readable = _readable(stem)[: _KEY_MAX - 12].strip("-") or "company"
+    return f"{readable}--{digest}"
+
+
+def old_backup_key_for_stem(stem: str) -> str:
+    """The part a backup name was given before 2.32.0-beta.2: the stem
+    lowercased, every other character a dash, cut to 60 characters. Two
+    companies could share it."""
+    slug = _readable(stem)[:_KEY_MAX].strip("-")
     if not slug:
         slug = "company"
     return f"{slug}-books" if slug == LEGACY_SLUG else slug
+
+
+def _company_stem() -> str:
+    if _is_sqlite():
+        path = _sqlite_db_path()
+        return path.stem if path is not None else ""
+    return _parse_db_url(DATABASE_URL)["dbname"]
+
+
+def company_slug() -> str:
+    """This company's part of a backup file name: "harbor-light-bakery" for
+    harbor-light-bakery.db, the database name on a server. Never the old
+    anonymous "slowbooks", so a new name can always be told from an old one,
+    and never another company's."""
+    return backup_key_for_stem(_company_stem())
+
+
+def _listed_stems() -> list:
+    """The file stems of the companies the company list names."""
+    from app.services import served_companies
+
+    try:
+        return [Path(r["file"]).stem for r in served_companies.listed()]
+    except Exception:
+        return []
+
+
+def backup_key_clash(filename: str) -> str | None:
+    """The listed company file whose backups a new company file named
+    ``filename`` would be mixed up with, or None."""
+    from app.services import served_companies
+
+    stem = Path(filename).stem
+    key = backup_key_for_stem(stem)
+    try:
+        rows = served_companies.listed()
+    except Exception:
+        return None
+    for row in rows:
+        other = Path(row["file"]).stem
+        if other == stem:
+            continue
+        if key in (backup_key_for_stem(other), old_backup_key_for_stem(other)):
+            return row["file"]
+    return None
+
+
+def _old_key_is_only_mine(old: str, mine: str) -> bool:
+    """No other listed company has, or had, ``old`` as its backup part."""
+    for stem in _listed_stems():
+        if stem == mine:
+            continue
+        if old in (backup_key_for_stem(stem), old_backup_key_for_stem(stem)):
+            return False
+    return True
 
 
 def _new_backup_filename(tag: str | None = None) -> str:
@@ -528,6 +608,16 @@ def current_company_name(db: Session) -> str:
     ]
 
 
+def _old_key_here() -> dict | None:
+    """This company's backup part from before 2.32.0-beta.2, when it is not
+    the one it has now: {"key", "only_mine"}; else None."""
+    stem = _company_stem()
+    old = old_backup_key_for_stem(stem)
+    if old == backup_key_for_stem(stem):
+        return None
+    return {"key": old, "only_mine": _old_key_is_only_mine(old, stem)}
+
+
 def list_company_backups(db: Session) -> list[dict]:
     """The open company's backups, newest first.
 
@@ -538,6 +628,7 @@ def list_company_backups(db: Session) -> list[dict]:
     replaces the table too, and the safety copy taken just before it must
     still be listed afterwards."""
     slug = company_slug()
+    old = _old_key_here()
     rows = {b.filename: b for b in db.query(Backup).all()}
     name = current_company_name(db)
     listed = []
@@ -549,6 +640,11 @@ def list_company_backups(db: Session) -> list[dict]:
         owner = parsed["slug"] if parsed else None
         if owner == slug:
             mine = True
+        elif old is not None and owner == old["key"]:
+            # named the way this company's were before 2.32.0-beta.2: its
+            # own, unless another listed company has (or had) that name too,
+            # when only the ones its backups table lists are
+            mine = old["only_mine"] or filename in rows
         elif owner not in (None, LEGACY_SLUG):
             mine = False  # named for another company
         elif filename in rows:
@@ -613,7 +709,16 @@ def other_company(db: Session, filename: str) -> dict | None:
     if stored and not _same_name(stored, current):
         return {"backup_company": stored, "current_company": current}
     if parsed and parsed["slug"] not in (company_slug(), LEGACY_SLUG):
-        return {"backup_company": stored or parsed["slug"], "current_company": current}
+        old = _old_key_here()
+        named_the_old_way = old is not None and parsed["slug"] == old["key"]
+        if not named_the_old_way or not (
+            old["only_mine"]
+            or db.query(Backup.id).filter(Backup.filename == filename).first()
+        ):
+            return {
+                "backup_company": stored or parsed["slug"],
+                "current_company": current,
+            }
     return None
 
 

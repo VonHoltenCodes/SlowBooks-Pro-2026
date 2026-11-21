@@ -210,7 +210,7 @@ def test_a_token_reads_only_its_own_company_from_the_sign_in_status(three, relay
     st = _bot(harbor["token"], "harbor.db").get("/api/auth/status").json()
     assert [c["file"] for c in st["companies"]] == ["harbor.db"]
     assert st.get("usernames", []) == []
-    for name in ("Smith", "Lake", "jdoe", "kim"):
+    for name in ("Smith", "Lake", "jdoe", "bkpr"):
         assert name not in json.dumps(st)
     registry = build_registry(link.LinkBooks())
     result = registry.call("api_get", {"path": "/api/auth/status"})
@@ -327,16 +327,16 @@ def test_the_turned_off_sentence_says_who_adds_it_again(three, relay):
 
 def test_the_manager_rule_holds_with_one_company_listed(three, relay):
     _connected_with(three, relay, "smith.db")
-    _set_role(three, "harbor.db", "kim", "admin")
+    _set_role(three, "harbor.db", "bkpr", "admin")
     _serve(three, ["harbor.db"])
-    kim = _signed_in(three, "kim")
-    st = kim.get("/api/switchboard/status").json()
+    bkpr = _signed_in(three, "bkpr")
+    st = bkpr.get("/api/switchboard/status").json()
     # Disconnect stays hers (an administrator of every company that can be
     # opened now), and a code, which would reach Smith when it is listed
     # again, does not
     assert st["can_code"] is False and st["code_needs"] == ["Smith Plumbing"]
     assert st["can_disconnect"] is True
-    assert kim.post("/api/switchboard/code").status_code == 403
+    assert bkpr.post("/api/switchboard/code").status_code == 403
     assert relay.codes == []
 
 
@@ -359,7 +359,7 @@ def test_a_renamed_connection_token_is_still_the_connections(three, relay):
         "This token works only for the AI assistant connection on this computer."
     )
     assert _bot(harbor["token"], "harbor.db").get("/api/whoami").status_code == 200
-    _set_role(three, "harbor.db", "kim", "admin")
+    _set_role(three, "harbor.db", "bkpr", "admin")
     _sql("harbor.db", "UPDATE users SET is_active = 0 WHERE username = 'jdoe'")
     r = _bot(harbor["token"], "harbor.db").get("/api/whoami")
     assert r.status_code == 401 and r.headers[REFUSED_HEADER] == "1"

@@ -2025,7 +2025,7 @@ const SettingsPage = {
             const rows = tokens.map(t => `<tr>
                 <td>${escapeHtml(t.label)}</td>
                 <td style="font-family:var(--font-mono); font-size:10px;">${escapeHtml(t.token_hint)}&hellip;</td>
-                <td>${escapeHtml(t.role)}${t.refused ? `<div style="font-size:10px;color:var(--text-danger)">no longer accepted: tokens can't be administrators. Revoke it and make a bookkeeper, accountant or read-only token (tick Can make backups if it makes backups). Settings, payroll and HR need an administrator signed in.</div>` : ''}</td>
+                <td>${escapeHtml(t.role)}${t.refused ? `<div style="font-size:10px;color:var(--text-danger)">no longer accepted: tokens can't be administrators. Revoke it and make a bookkeeper, accountant or read-only token (tick Can make backups if it makes backups). Settings, payroll and HR need an administrator signed in.</div>` : ''}${t.maker_gone ? `<div style="font-size:10px;color:var(--text-danger)">not working: the administrator who made it is no longer an administrator of this company. Revoke it and make a new one.</div>` : ''}</td>
                 <td>${t.is_active
                     ? `<input type="checkbox" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
                     : (t.allow_backups ? 'Yes' : 'No')}</td>
@@ -3245,8 +3245,7 @@ const SettingsPage = {
         const co = file ? SettingsPage._claudeList().find(e => e && e.file === file) : null;
         const target = file || st.here_file || '';
         const name = file ? ((co && (co.name || co.file)) || file) : (st.company || 'this company');
-        const label = (!file && st.token_label) || 'AI assistant (relay)';
-        if (!confirm(`Take ${name} off? Its token, ${label}, is turned off at once and the assistant can no longer reach these books. The other companies stay connected.`)) return;
+        if (!confirm(SettingsPage.claudeTakeOffQuestion(st, SettingsPage._claudeList(), file, name))) return;
         const id = file ? `claude-take-off-${SettingsPage.claudeKey(file)}` : 'claude-take-off';
         await SettingsPage._claudePress('take-off', id, async c => {
             try {
@@ -3267,6 +3266,18 @@ const SettingsPage = {
                 return true;
             }
         });
+    },
+
+    // What Take off asks first. A company whose token is already off there
+    // (a manager's button) is only removed from the connection; only someone
+    // who sees the list is told that other companies stay connected.
+    claudeTakeOffQuestion(st, list, file, name) {
+        if (file) {
+            return `Take ${name} off the AI connection? Its token is already turned off in that company; this removes it from the connection. The other companies stay connected.`;
+        }
+        const label = (st || {}).token_label || 'AI assistant (relay)';
+        const others = list && list.length > 1 ? ' The other companies stay connected.' : '';
+        return `Take ${name} off? Its token, ${label}, is turned off at once and the assistant can no longer reach these books.${others}`;
     },
 
     // What Disconnect asks first: with several companies, every one of them
