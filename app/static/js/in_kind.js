@@ -104,6 +104,7 @@ const InKindPage = {
                 debit_account_id: parseInt(row.querySelector('.ik-debit')?.value) || null,
             });
         });
+        if (!ZeroTotal.ask('In-Kind Gift', lines.reduce((sum, l) => sum + l.quantity * l.fair_value, 0))) return;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {

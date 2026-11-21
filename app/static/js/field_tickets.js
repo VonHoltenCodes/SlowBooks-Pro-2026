@@ -289,6 +289,18 @@ const FieldTickets = {
         e.preventDefault();
         const t = FieldTickets._editing;
         const body = FieldTickets.collect();
+        // a ticket with no hours or quantities on it, or with every rate
+        // typed as 0, adds up to $0.00: asked first, as every line form
+        // asks (ZeroTotal). A rate left blank is the server's to fill, so it
+        // is not read as zero. A delivery ticket counts what arrived and
+        // carries no money, so it is not asked.
+        if (t.kind !== 'delivery') {
+            const worth = body.lines.some(l => {
+                const zero = v => v !== undefined && !parseFloat(v);
+                return !!parseFloat(l.quantity) && !(zero(l.cost_rate) && (t.kind === 'tm' ? zero(l.bill_rate) : true));
+            });
+            if (!ZeroTotal.ask('Field Ticket', worth ? 1 : 0)) return;
+        }
         const send = (extra) => t.id
             ? API.put(`/field-tickets/${t.id}`, { ...body, ...extra })
             : API.post('/field-tickets', { job_id: FieldTickets._job.id, kind: t.kind, ...body, ...extra });

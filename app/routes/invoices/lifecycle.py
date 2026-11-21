@@ -798,4 +798,16 @@ def duplicate_invoice(
     if new_invoice.customer:
         resp.customer_name = invoice_customer_name(new_invoice)
     resp.jobs_left_off = left_off
+    # the copy is a new sale: its answer says what a new invoice's says
+    # about a missing or expired exemption certificate
+    from app.services.tax_exemption import note_certificate
+
+    note_certificate(
+        db,
+        resp,
+        new_invoice.customer,
+        new_invoice.date,
+        new_invoice.job_id,
+        bool(new_invoice.tax_exempt),
+    )
     return resp

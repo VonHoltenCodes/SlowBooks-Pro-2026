@@ -46,7 +46,7 @@ from app.services.estimating import (
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
 from app.services.tax_exemption import (
-    certificate_warning,
+    note_certificate,
     refresh_certificate_copy,
     settle_tax_exempt,
 )
@@ -620,8 +620,13 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
-    resp.tax_note = certificate_warning(
-        db, estimate.customer, estimate.date, estimate.job_id
+    note_certificate(
+        db,
+        resp,
+        estimate.customer,
+        estimate.date,
+        estimate.job_id,
+        bool(estimate.tax_exempt),
     )
     return resp
 
@@ -824,8 +829,13 @@ def update_estimate(
     db.refresh(estimate)
     resp = _estimate_response(estimate)
     resp.warnings = priced_warnings
-    resp.tax_note = certificate_warning(
-        db, estimate.customer, estimate.date, estimate.job_id
+    note_certificate(
+        db,
+        resp,
+        estimate.customer,
+        estimate.date,
+        estimate.job_id,
+        bool(estimate.tax_exempt),
     )
     return resp
 
@@ -1277,4 +1287,14 @@ def convert_to_invoice(
     if invoice.customer:
         resp.customer_name = invoice.customer.name
     resp.jobs_left_off = left_off
+    # the invoice is a new sale: its answer says what a new invoice's says
+    # about a missing or expired exemption certificate
+    note_certificate(
+        db,
+        resp,
+        invoice.customer,
+        invoice.date,
+        invoice.job_id,
+        bool(invoice.tax_exempt),
+    )
     return resp

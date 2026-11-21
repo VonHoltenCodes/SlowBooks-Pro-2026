@@ -148,17 +148,26 @@ def customer_exemption_warning(
     job_id: Optional[int] = Query(
         None, description="The document's job, whose own certificate counts."
     ),
+    tax_exempt: Optional[bool] = Query(
+        None,
+        description=(
+            "The document's own Tax exempt switch, where it has one: a "
+            "taxable customer's document is exempt by its job only while "
+            "this is on."
+        ),
+    ),
     db: Session = Depends(get_db),
 ):
-    """What a sales form and the customer's page show for a tax-exempt
-    customer whose exemption certificate is missing or expired as of the
-    date: ``{"warning": sentence}``, or ``{"warning": null}`` when there is
-    nothing to say (a taxable customer included). A warning only: the
-    customer is not charged tax either way."""
+    """What a sales form and the customer's page show when the exemption
+    certificate behind an exempt sale is missing or expired as of the date:
+    a tax-exempt customer's, or for a taxable customer the certificate of an
+    exempt job (``job_id``). ``{"warning": sentence}``, or ``{"warning":
+    null}`` when there is nothing to say. A warning only: no tax figure
+    changes either way."""
     from app.services.tax_exemption import certificate_warning
 
     customer = get_or_404(db, Customer, customer_id)
-    return {"warning": certificate_warning(db, customer, as_of, job_id)}
+    return {"warning": certificate_warning(db, customer, as_of, job_id, tax_exempt)}
 
 
 @router.get("/{customer_id}/subs")

@@ -182,6 +182,9 @@ const BillQuickEntry = {
         const form = e.target;
         if (form.dataset.saving) return;
         const { lines, missing } = BillQuickEntry._lines();
+        // $0.00 is asked about first, as the bill form asks (ZeroTotal); a
+        // bill is never saved for nothing, so Yes is answered in a sentence
+        if (!ZeroTotal.ask('Bill', BillQuickEntry.recalc())) return;
         if (BillQuickEntry.recalc() <= 0) {
             toast('Enter what the vendor charged: an amount on at least one line.', 'error');
             return;
