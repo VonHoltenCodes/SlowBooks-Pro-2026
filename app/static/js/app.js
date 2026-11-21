@@ -2619,7 +2619,7 @@ const App = {
         const entry = App.qeInvoiceData(form);
         // lines that add up to $0.00: asked first, as the invoice form asks
         // (ZeroTotal); Yes saves it, No leaves the entry as typed
-        const zero = ZeroTotal.ask('Invoice', total);
+        const zero = ZeroTotal.ask(T('Invoice'), total);
         if (!zero) return;
         try {
             const inv = await SalesLines.sendAllowingZero(flags => {

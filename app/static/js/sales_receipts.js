@@ -461,7 +461,7 @@ const SalesReceiptsPage = {
             lines,
         };
 
-        if (!ZeroTotal.ask('Sales Receipt', SalesReceiptsPage.recalc().total)) return;
+        if (!ZeroTotal.ask(T('Sales Receipt'), SalesReceiptsPage.recalc().total)) return;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {
