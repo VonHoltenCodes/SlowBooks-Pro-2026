@@ -237,7 +237,8 @@ every call. Showing a sign-in code, adding a company and Disconnect belong
 only to someone who is an administrator of every company on the connection:
 on a server that means signing in with the same username and password as an
 administrator of each of them (the company switch's own check; Disconnect
-skips a company that cannot be opened now only for the person who added it).
+skips a company that cannot be opened now only for the person who added it;
+for a connection made in beta.1, the person who made its token).
 A client
 company's administrator who is not one sees only that company, can take it
 off the connection, and never learns the other companies' names or how many

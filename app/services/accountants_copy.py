@@ -404,6 +404,20 @@ def open_copy(
             status_code=409,
             detail=f"A company file named '{filename}' is already here. Open that one, or remove it first.",
         )
+    from app.services.backup_service import backup_key_clash
+
+    clash = backup_key_clash(filename)
+    if clash is not None:
+        # every company's backups share one folder, told apart by a part of
+        # their names; the copy must not take another company's
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A company file named '{filename}' would have its backups "
+                f"named like those of '{clash}'. Rename or remove that company "
+                "first. Nothing was opened."
+            ),
+        )
     work = Path(tempfile.mkdtemp(prefix="sbacopy-"))
     try:
         staged = work / "company.db"

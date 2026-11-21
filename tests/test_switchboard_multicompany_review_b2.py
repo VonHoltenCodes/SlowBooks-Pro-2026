@@ -371,7 +371,7 @@ def test_the_panel_offers_add_at_once_when_the_maker_was_demoted(three, relay):
     cli = _signed_in(three, "cli", company="lake.db")
     st = cli.get("/api/switchboard/status").json()
     assert st["can_add"] is True, st
-    assert [c["state"] for c in st["companies"]] == ["refused"]
+    assert [c["state"] for c in st["companies"]] == ["maker_gone"]
     r = cli.post("/api/switchboard/add")
     assert r.status_code == 200, r.text
     again = _record()["companies"]

@@ -381,7 +381,8 @@ test('each state of a company has its note', () => {
     const f = fixture();
     const said = {
         not_open_here: 'not open on this computer', other_window: 'open in another window',
-        not_served: 'not served by this server now', locked: 'locked', refused: 'turned off in that company', ready: '',
+        not_served: 'not served by this server now', locked: 'locked', refused: 'turned off in that company',
+        maker_gone: 'the person who added it is no longer an administrator there', ready: '',
     };
     for (const [st, words] of Object.entries(said)) assert.equal(f.page.claudeNote(st), words, st);
 });
@@ -480,6 +481,19 @@ test('Take off asked of a client administrator says nothing of other companies',
     await g.page.loadSwitchboard();
     await g.page.takeClaudeOff('lake.db');
     assert.equal(g.confirms[0], 'Take Lake Dental off the AI connection? Its token is already turned off in that company; this removes it from the connection. The other companies stay connected.');
+});
+
+test('a company whose token\'s maker is no longer an administrator is said to be that, and offered Take off', async () => {
+    const gone = THREE.map(co => (co.file === 'lake.db' ? { ...co, state: 'maker_gone' } : co));
+    const status = { ...MANAGER, companies: gone };
+    const f = fixture({ '/switchboard/status': status, 'POST /switchboard/take-off': { ...status, results: [{ file: 'lake.db', name: 'Lake Dental', result: 'ended' }] } });
+    await f.page.loadSwitchboard();
+    const html = f.panel.innerHTML;
+    assert.ok(text(html).includes('Lake Dental (the person who added it is no longer an administrator there)'));
+    assert.ok(!text(html).includes('turned off in that company'));
+    assert.ok(buttons(html).includes('Take Lake Dental off the AI connection'));
+    await f.page.takeClaudeOff('lake.db');
+    assert.equal(f.confirms[0], 'Take Lake Dental off the AI connection? The person who added it is no longer an administrator there, so that company refuses its token; this removes it from the connection and turns the token off. The other companies stay connected.');
 });
 
 test('Disconnect from several companies asks in the exact words, then says which are not open', async () => {

@@ -187,18 +187,15 @@ def auth_status(request: Request):
     import app.database as db_module
 
     try:
-        refused = _a_program(request) and _token_refusal(request)
-        if refused:
+        if _a_program(request):
             # a program is told only of the company its own token opens,
-            # refused as the gate refuses it: the header tells the program
-            # its token was turned away, not that the route failed
-            from app.main import _TOKEN_REFUSED_HEADER
+            # and refused by the gate's own check, with the gate's answer
+            # (its header tells the program its token was turned away)
+            from app.main import api_token_refusal
 
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=refused,
-                headers={_TOKEN_REFUSED_HEADER: "1"},
-            )
+            _principal, refused = api_token_refusal(request)
+            if refused is not None:
+                return refused
         db = db_module.SessionLocal()
     except served_companies.CompanyUnavailable as exc:
         return _status_while_company_unavailable(
@@ -226,29 +223,6 @@ def _status_while_company_unavailable(request: Request, sentence: str) -> dict:
             if not _a_program(request) or c["current"]
         ],
     }
-
-
-TOKEN_NOT_HERE_MESSAGE = (
-    "This API token does not open this company's books. Nothing was read."
-)
-
-
-def _token_refusal(request: Request) -> str | None:
-    """None when the request's API token is an active one of the company the
-    request works in (the one its company header names), as the gate would
-    let in; else the sentence the gate would refuse it with."""
-    from app.main import MAKER_GONE_REFUSAL, REVOKED_REFUSAL
-    from app.services.api_token_service import resolve
-
-    header = request.headers.get("authorization") or ""
-    principal = resolve(header[7:].strip())
-    if principal is None:
-        return TOKEN_NOT_HERE_MESSAGE
-    if principal.get("revoked"):
-        return REVOKED_REFUSAL.format(label=principal["label"])
-    if principal.get("maker_gone"):
-        return MAKER_GONE_REFUSAL.format(label=principal["label"])
-    return None
 
 
 def _a_program(request: Request) -> bool:

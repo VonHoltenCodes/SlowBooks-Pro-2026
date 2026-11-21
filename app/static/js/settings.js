@@ -2832,7 +2832,7 @@ const SettingsPage = {
         // power over the connection only drops the dead entry
         if (list && list.length > 1) {
             for (const co of list) {
-                if (co.state !== 'refused' || co.file === SettingsPage._claudeHereFile(st, list)) continue;
+                if ((co.state !== 'refused' && co.state !== 'maker_gone') || co.file === SettingsPage._claudeHereFile(st, list)) continue;
                 presses.push(`<button type="button" class="btn btn-secondary btn-sm" id="claude-take-off-${SettingsPage.claudeKey(co.file)}" data-admin${off}${wraps} data-file="${escapeHtml(co.file)}" onclick="SettingsPage.takeClaudeOff(this.dataset.file)">${escapeHtml(`Take ${co.name || co.file} off the AI connection`)}</button>`);
             }
         }
@@ -2863,6 +2863,7 @@ const SettingsPage = {
             not_served: 'not served by this server now',
             locked: 'locked',
             refused: 'turned off in that company',
+            maker_gone: 'the person who added it is no longer an administrator there',
         })[state] || '';
     },
 
@@ -2871,7 +2872,11 @@ const SettingsPage = {
         const names = list.map(co => {
             const here = co.file === mine;
             // the company the panel is open in is "this company", not "that"
-            const note = here && co.state === 'refused' ? 'turned off in this company' : SettingsPage.claudeNote(co.state);
+            const note = here && co.state === 'refused'
+                ? 'turned off in this company'
+                : (here && co.state === 'maker_gone'
+                    ? 'the person who added it is no longer an administrator here'
+                    : SettingsPage.claudeNote(co.state));
             const notes = [here ? 'this company' : '', note].filter(Boolean);
             const said = (co.name || co.file) + (notes.length ? ` (${notes.join('; ')})` : '');
             return `<span id="claude-relay-co-${SettingsPage.claudeKey(co.file)}">${escapeHtml(said)}</span>`;
@@ -3273,6 +3278,10 @@ const SettingsPage = {
     // who sees the list is told that other companies stay connected.
     claudeTakeOffQuestion(st, list, file, name) {
         if (file) {
+            const co = (list || []).find(e => e && e.file === file);
+            if (co && co.state === 'maker_gone') {
+                return `Take ${name} off the AI connection? The person who added it is no longer an administrator there, so that company refuses its token; this removes it from the connection and turns the token off. The other companies stay connected.`;
+            }
             return `Take ${name} off the AI connection? Its token is already turned off in that company; this removes it from the connection. The other companies stay connected.`;
         }
         const label = (st || {}).token_label || 'AI assistant (relay)';

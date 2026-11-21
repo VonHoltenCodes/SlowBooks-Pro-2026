@@ -7,8 +7,10 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: 091dbe8c033d8d07f55f1e6a446e09daf950210a (branch multi-company,
-  2026-11-21): Switchboard's own store of several companies (sbplive
+- Commit: c725852f7ebdedebfb504acdb2efebb253c22f7f (branch multi-company,
+  2026-11-21): setup given the address several companies are kept for
+  connects Claude (only `sbplive/cli.py` changed, which is not copied; the
+  copies are as they were). Before it: 091dbe8: Switchboard's own store of several companies (sbplive
   add-books, which the product does not run) is used by a running
   connection only while it was added for the same address; of the copied
   files only `store.py` changed (its settings can be read from a given

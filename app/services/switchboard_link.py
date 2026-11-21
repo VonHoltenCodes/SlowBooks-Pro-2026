@@ -647,6 +647,34 @@ def _rev(record: dict) -> int:
     return rev if isinstance(rev, int) and not isinstance(rev, bool) else 0
 
 
+def _with_adders(entries: list) -> list:
+    """A beta.1 record (format 1) names nobody as the person who added its
+    company, and Disconnect, a sign-in code and Take off skip a company that
+    cannot be opened now only for the person who added it. So the first
+    time format 2 is written, an entry with no adder is given its token's
+    maker, read in that company's books while it can be opened."""
+    from app.models.api_tokens import ApiToken
+
+    if not _several_served():
+        return entries
+    for entry in entries:
+        digest = entry.get("token_sha256") or ""
+        if (entry.get("added_by") or "").strip() or not digest:
+            continue
+        if not _reachable(entry["file"]):
+            continue
+        try:
+            with _in_company(entry["file"]) as db:
+                row = db.query(ApiToken).filter(ApiToken.token_hash == digest).first()
+                maker = ((row.created_by if row is not None else "") or "").strip()
+        except Exception as exc:
+            _log_fault("who added a company to the AI connection was not read", exc)
+            continue
+        if maker:
+            entry["added_by"] = maker
+    return entries
+
+
 def _format2(record: dict, entries: list) -> dict:
     """The record to keep for these entries: the link's own fields, the
     revision one up, and companies[0] mirrored at the top."""
@@ -929,6 +957,24 @@ def _add_leftover(entry: dict, why: str) -> None:
                 }
             )
         _save_leftovers(found)
+
+
+def _drop_leftover(entry: dict) -> None:
+    """Forget the leftover kept for the entry's token: it is turned off
+    already, or its company stays on the connection after all. One that
+    cannot be forgotten is logged: for a token turned off already it changes
+    nothing; for one still on the connection, its token is turned off when
+    its company opens next, and the panel offers to add it again."""
+    try:
+        with _record_lock():
+            found = _load_leftovers()
+            items = found.get(entry["file"]) or []
+            found[entry["file"]] = [
+                i for i in items if i["token_sha256"] != entry["token_sha256"]
+            ]
+            _save_leftovers(found)
+    except (OSError, SwitchboardError) as exc:
+        logger.warning("a leftover AI connection token was not forgotten: %s", exc)
 
 
 def sweep_leftovers() -> int:
@@ -1490,7 +1536,9 @@ def _books_transport(entry: dict):
 
 
 def _entry_state(entry: dict, here: str | None = None) -> str:
-    """ready, not_open_here, other_window, not_served, locked or refused."""
+    """ready, not_open_here, other_window, not_served, locked, refused or
+    maker_gone (the token is not turned off, but the person who added it is
+    no longer an administrator there, so the company's gate refuses it)."""
     if entry.get("off") or not entry.get("token"):
         return "refused"
     company_file = entry["file"]
@@ -1503,9 +1551,7 @@ def _entry_state(entry: dict, here: str | None = None) -> str:
         return "other_window"
     if _locked(company_file):
         return "locked"
-    if _refused_there(entry):
-        return "refused"
-    return "ready"
+    return _refusal_there(entry) or "ready"
 
 
 def _locked(company_file: str) -> bool:
@@ -1529,6 +1575,7 @@ _NOTES = {
     "not_served": "not served by this server now",
     "locked": "locked",
     "refused": "turned off in that company",
+    "maker_gone": "the person who added it is no longer an administrator there",
 }
 
 
@@ -1672,7 +1719,7 @@ def drop_secret(books: str | None) -> bool:
                     break
             else:
                 return False
-            _save(_format2(record, entries))
+            _save(_format2(record, _with_adders(entries)))
             logger.warning(
                 "an AI assistant connection token was refused by its company; its "
                 "secret is deleted from this computer"
@@ -2140,25 +2187,112 @@ def _dead(entry: dict) -> bool:
 def _refused_there(entry: dict) -> bool:
     """The company's gate would refuse the entry's token now. A company that
     cannot be opened now cannot say, and is not counted as refusing."""
-    from app.models.api_tokens import ApiToken
-    from app.services.api_token_service import _maker_still_admin
+    return _refusal_there(entry) is not None
 
+
+# What a company's gate makes of an entry's token is asked for every entry
+# on every assistant call and every panel refresh: up to MAX_COMPANIES
+# companies, a session and two queries each. The answer is kept until that
+# company's file changes (any write to it: a token turned off, a person
+# demoted, a backup restored), something this process saves changes a user
+# or a token, or a few seconds pass (an end date passing changes nothing on
+# disk).
+_REFUSAL_KEEP = 15.0
+_refusal_kept: dict = {}
+_refusal_mutex = threading.Lock()
+_refusal_generation = [0]
+
+
+def _company_marker(company_file: str):
+    """What changes when a company's file is written to, or None when it is
+    not a file this can watch (then nothing is kept)."""
+    from app.services.company_service import company_db_path
+
+    path = company_db_path(company_file) if company_file else None
+    if path is None:
+        return None
+    marker = []
+    for one in (path, path.with_name(path.name + "-wal")):
+        try:
+            st = one.stat()
+            marker.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            marker.append(None)
+    return tuple(marker)
+
+
+def _users_or_tokens_changed(session, _context=None) -> None:
+    from app.models.api_tokens import ApiToken
+    from app.models.users import User
+
+    for obj in (*session.new, *session.dirty, *session.deleted):
+        if isinstance(obj, (ApiToken, User)):
+            with _refusal_mutex:
+                _refusal_generation[0] += 1
+                _refusal_kept.clear()
+            return
+
+
+def _watch_users_and_tokens() -> None:
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    if not event.contains(Session, "after_flush", _users_or_tokens_changed):
+        event.listen(Session, "after_flush", _users_or_tokens_changed)
+
+
+_watch_users_and_tokens()
+
+
+def _refusal_there(entry: dict) -> str | None:
+    """Why the company's gate would refuse the entry's token now: "refused"
+    (the token is turned off there, or gone), "maker_gone" (the person who
+    made it is no longer an administrator there), or None when it lets it
+    in or the company cannot be opened now to say."""
     company_file = entry.get("file") or ""
     digest = entry.get("token_sha256") or ""
     if not digest or not _reachable(company_file):
-        return False
+        return None
+    marker = _company_marker(company_file)
+    key = (company_file, digest)
+    now = time.monotonic()
+    with _refusal_mutex:
+        generation = _refusal_generation[0]
+        kept = _refusal_kept.get(key)
+    if (
+        kept is not None
+        and marker is not None
+        and kept[0] == marker
+        and kept[1] == generation
+        and now - kept[2] < _REFUSAL_KEEP
+    ):
+        return kept[3]
+    answer = _ask_refusal(company_file, digest)
+    if marker is not None:
+        with _refusal_mutex:
+            if _refusal_generation[0] == generation:
+                if len(_refusal_kept) > 4 * MAX_COMPANIES:
+                    _refusal_kept.clear()
+                _refusal_kept[key] = (marker, generation, now, answer)
+    return answer
+
+
+def _ask_refusal(company_file: str, digest: str) -> str | None:
+    from app.models.api_tokens import ApiToken
+    from app.services.api_token_service import _maker_still_admin
+
     try:
         with _in_company(company_file) as db:
             row = db.query(ApiToken).filter(ApiToken.token_hash == digest).first()
+            if row is None or not row.is_active:
+                return "refused"
             # every token of the connection ends with its maker
-            return (
-                row is None
-                or not row.is_active
-                or not _maker_still_admin(db, row.created_by)
-            )
+            if not _maker_still_admin(db, row.created_by):
+                return "maker_gone"
+            return None
     except Exception as exc:
         _log_fault("a company's AI connection token could not be checked", exc)
-        return False
+        return None
 
 
 def _next_label_here() -> str:
@@ -2923,7 +3057,7 @@ def add_here(db, username: str, session) -> dict:
                 entries.append(fresh)
             else:
                 entries[entries.index(old)] = fresh
-            changed = _format2(record, entries)
+            changed = _format2(record, _with_adders(entries))
             _save(changed)
         except Exception as exc:
             if token_id is not None:
@@ -2967,10 +3101,11 @@ def _revoke_by_hash(db, entry: dict) -> bool:
     return True
 
 
-def _end_elsewhere(entry: dict, acting: str) -> str:
+def _end_elsewhere(entry: dict, acting: str, kept: bool = False) -> str:
     """Turn off a token in a company other than the request's: "ended",
     or "later" when that company is not open now (or could not be reached),
-    a leftover kept to turn it off when it opens next."""
+    a leftover kept to turn it off when it opens next (``kept``: the caller
+    kept it already)."""
     why = "not_open"
     if _company_open(entry["file"]):
         try:
@@ -2980,7 +3115,8 @@ def _end_elsewhere(entry: dict, acting: str) -> str:
         except Exception as exc:
             _log_fault("a company's AI connection token was not turned off", exc)
             why = "failed"
-    _add_leftover(entry, why)
+    if not kept:
+        _add_leftover(entry, why)
     return "later"
 
 
@@ -3012,15 +3148,23 @@ def take_off(db, company_file: str, session) -> dict:
         if len(entries) == 1:
             return _disconnect_press(db, session)
         acting = (session or {}).get("username") or "operator"
-        # The record is changed first: when it cannot be written, nothing
-        # was changed (the token still works, and the company is still on
-        # the connection). After it, a token that cannot be turned off now
-        # is turned off when its company opens next.
+        # The token is kept as a leftover first, and the record changed
+        # next: when either cannot be written, nothing was changed (the token
+        # still works, and the company is still on the connection). After
+        # both, a token that cannot be turned off now is turned off when its
+        # company opens next, and one that is turned off now drops its
+        # leftover.
         rest = [e for e in entries if e is not entry]
         try:
-            _save(_format2(record, rest))
+            _add_leftover(entry, "taken_off")
         except OSError as exc:
             logger.warning("the connection could not be changed: %s", exc)
+            raise SwitchboardError(503, NOT_WRITTEN) from None
+        try:
+            _save(_format2(record, _with_adders(rest)))
+        except OSError as exc:
+            logger.warning("the connection could not be changed: %s", exc)
+            _drop_leftover(entry)
             raise SwitchboardError(503, NOT_WRITTEN) from None
         if company_file == _company_here():
             try:
@@ -3032,10 +3176,11 @@ def take_off(db, company_file: str, session) -> dict:
                     db.rollback()
                 except Exception:
                     pass
-                _add_leftover(entry, "failed")
                 result = "later"
         else:
-            result = _end_elsewhere(entry, acting)
+            result = _end_elsewhere(entry, acting, kept=True)
+        if result == "ended":
+            _drop_leftover(entry)
     _sweep_quietly()
     out = status(session)
     out["results"] = [{"file": company_file, "name": entry["name"], "result": result}]

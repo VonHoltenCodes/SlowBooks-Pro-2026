@@ -1468,6 +1468,69 @@ def _from_this_apps_own_address(request: Request) -> bool:
     return bool(host) and host == own
 
 
+def api_token_refusal(request: Request):
+    """(the token's principal, None) when the gate lets the request's API
+    token in, else (the principal or None, the response the gate refuses it
+    with). The gate and the sign-in status (/api/auth/status) both ask
+    this, so a token is refused by one rule wherever it is sent."""
+    token_principal = None
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        token_principal = _resolve_api_token(auth_header[7:].strip())
+    if token_principal is not None and token_principal.get("revoked"):
+        # A revoked token says so (#434): the client that holds it is
+        # usually unattended, and "Not authenticated" sent its operator
+        # to the sign-in page. A secret that matches nothing stays vague.
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": REVOKED_REFUSAL.format(label=token_principal["label"])},
+            headers={_TOKEN_REFUSED_HEADER: "1"},
+        )
+    if token_principal is not None and token_principal.get("maker_gone"):
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={
+                "detail": MAKER_GONE_REFUSAL.format(label=token_principal["label"])
+            },
+            headers={_TOKEN_REFUSED_HEADER: "1"},
+        )
+    if token_principal is None:
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": "Not authenticated"},
+            headers=(
+                {_TOKEN_REFUSED_HEADER: "1"}
+                if auth_header.startswith("Bearer ")
+                else None
+            ),
+        )
+    if (
+        token_principal.get("link") or _is_link_label(token_principal.get("label"))
+    ) and not _from_this_apps_own_address(request):
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": LINK_TOKEN_ADDRESS_REFUSAL},
+        )
+    # From here every answer to the token names the company it came
+    # from (require_session adds the header).
+    from app.services import served_companies as _sc
+
+    request.state.company_served = _sc.current_file() or ""
+    if token_principal.get("role") == "admin":
+        # Tokens have not been made as administrators since 2.29.0
+        # (#434), but one made earlier kept working until revoked
+        # (#659). It is refused now, with what to do instead; the
+        # row stays, flagged under Settings, API Tokens, until an
+        # administrator revokes it.
+        return token_principal, JSONResponse(
+            status_code=403,
+            content={
+                "detail": ADMIN_TOKEN_REFUSAL.format(label=token_principal["label"])
+            },
+        )
+    return token_principal, None
+
+
 async def _require_session(request: Request, call_next):
     path = request.url.path
     if (
@@ -1535,62 +1598,9 @@ async def _require_session(request: Request, call_next):
         # Scoped API tokens: non-human principals (agents, integrations)
         # authenticate with `Authorization: Bearer sbp_...` and wear a role
         # exactly like a user. Session auth always wins when present.
-        auth_header = request.headers.get("authorization") or ""
-        if auth_header.startswith("Bearer "):
-            token_principal = _resolve_api_token(auth_header[7:].strip())
-        if token_principal is not None and token_principal.get("revoked"):
-            # A revoked token says so (#434): the client that holds it is
-            # usually unattended, and "Not authenticated" sent its operator
-            # to the sign-in page. A secret that matches nothing stays vague.
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": REVOKED_REFUSAL.format(label=token_principal["label"])
-                },
-                headers={_TOKEN_REFUSED_HEADER: "1"},
-            )
-        if token_principal is not None and token_principal.get("maker_gone"):
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": MAKER_GONE_REFUSAL.format(label=token_principal["label"])
-                },
-                headers={_TOKEN_REFUSED_HEADER: "1"},
-            )
-        if token_principal is None:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Not authenticated"},
-                headers=(
-                    {_TOKEN_REFUSED_HEADER: "1"}
-                    if auth_header.startswith("Bearer ")
-                    else None
-                ),
-            )
-        if (
-            token_principal.get("link") or _is_link_label(token_principal.get("label"))
-        ) and not _from_this_apps_own_address(request):
-            return JSONResponse(
-                status_code=401,
-                content={"detail": LINK_TOKEN_ADDRESS_REFUSAL},
-            )
-        # From here every answer to the token names the company it came
-        # from (require_session adds the header).
-        from app.services import served_companies as _sc
-
-        request.state.company_served = _sc.current_file() or ""
-        if token_principal.get("role") == "admin":
-            # Tokens have not been made as administrators since 2.29.0
-            # (#434), but one made earlier kept working until revoked
-            # (#659). It is refused now, with what to do instead; the
-            # row stays, flagged under Settings, API Tokens, until an
-            # administrator revokes it.
-            return JSONResponse(
-                status_code=403,
-                content={
-                    "detail": ADMIN_TOKEN_REFUSAL.format(label=token_principal["label"])
-                },
-            )
+        token_principal, refused = api_token_refusal(request)
+        if refused is not None:
+            return refused
         # Tokens cannot manage identities — a leaked bookkeeper token must
         # not be able to mint itself an admin token or a user account.
         if path.startswith(("/api/users", "/api/tokens")):
