@@ -2615,10 +2615,18 @@ const App = {
         }
         // read after the customer is settled: a non-taxable one's lines go
         // with their Tax boxes off
-        App.qeRecalc();
-        const data = App.qeInvoiceData(form);
+        const total = App.qeRecalc().total;
+        const entry = App.qeInvoiceData(form);
+        // lines that add up to $0.00: asked first, as the invoice form asks
+        // (ZeroTotal); Yes saves it, No leaves the entry as typed
+        const zero = ZeroTotal.ask('Invoice', total);
+        if (!zero) return;
         try {
-            const inv = await API.post('/invoices', { ...data, pending_attachments: PendingFiles.ids() });
+            const inv = await SalesLines.sendAllowingZero(flags => {
+                const data = { ...entry, ...flags };
+                return API.post('/invoices', { ...data, pending_attachments: PendingFiles.ids() });
+            }, zero);
+            if (!inv) return;
             // the files are the invoice's now; the next one starts with none
             PendingFiles.saved();
             PendingFiles.render();

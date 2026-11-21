@@ -10,6 +10,8 @@ add up to $0.00, asks the invoice's question with the kind's own name. No
 leaves the form as it stands and sends nothing; Yes goes on to the save,
 and a kind the server will not take that way answers in a sentence."""
 
+import re
+
 import pytest
 
 pytest.importorskip("playwright.sync_api")
@@ -167,6 +169,21 @@ def _forms(client):
             "#invoice-form [name=notes]",
             "Invoice updated",
             saved=True,
+        ),
+        # Quick Entry, the other form that makes invoices: one described
+        # line with no rate
+        _Form(
+            "invoice",
+            "#/quick-entry",
+            "null",
+            "#qe-form",
+            "#qe-lines",
+            "#qe-po",
+            re.compile(r"Invoice #\S+ created"),
+            saved=True,
+            prep="() => { document.querySelector('#qe-lines .line-desc').value"
+            " = 'Site visit, no charge'; }",
+            ready="() => !!document.querySelector('#qe-lines tr')",
         ),
         _Form(
             "estimate",
@@ -371,12 +388,71 @@ def test_every_line_form_asks_before_saving_nothing(browser, company):
             settle(page, handled)
             page.wait_for_timeout(300)
             assert asked == question, f.noun
-            assert page.evaluate(TOASTS) == [f.yes], f.noun
+            toasts = page.evaluate(TOASTS)
+            if isinstance(f.yes, str):
+                assert toasts == [f.yes], f.noun
+            else:
+                assert len(toasts) == 1 and f.yes.fullmatch(toasts[0]), (
+                    f.route,
+                    toasts,
+                )
             if f.saved:
                 assert len(writes) == 1, (f.noun, writes)
             assert errors == [], f.noun
         finally:
             page.close()
+
+    # A nonprofit's invoice form is titled, and answers, as a pledge whether
+    # or not the box that prints PLEDGE is ticked: it asks about a pledge too.
+    edit_invoice = _forms_invoice_opener(company)
+    assert (
+        company.put("/api/settings", json={"company_type": "nonprofit"}).status_code
+        == 200
+    )
+    page, handled = _open_at(browser, company, "#/invoices")
+    asked = []
+    page.on("dialog", lambda d: (asked.append(d.message), d.dismiss()))
+    try:
+        page.evaluate(f"async () => {{ await {edit_invoice}; }}")
+        page.wait_for_function(MODAL_SHOWN)
+        settle(page, handled)
+        assert (
+            page.evaluate(
+                "() => document.getElementById('modal-title').textContent.trim()"
+            )
+            == "Edit Pledge"
+        )
+        assert not page.evaluate(
+            "() => document.querySelector('#invoice-form [name=is_pledge]').checked"
+        )
+        page.evaluate(CLEAR_AMOUNTS, "#inv-lines")
+        settle(page, handled)
+        page.evaluate(SUBMIT, "#invoice-form")
+        settle(page, handled)
+        page.wait_for_timeout(150)
+        assert asked == [QUESTION.format(noun="pledge")]
+        assert page.evaluate(MODAL_SHOWN)
+    finally:
+        page.close()
+        r = company.put("/api/settings", json={"company_type": "construction"})
+        assert r.status_code == 200, r.text
+
+
+def _forms_invoice_opener(client):
+    """Opens a priced invoice that is not flagged a pledge."""
+    cust = _first(client, "/api/customers")
+    inv = _made(
+        client,
+        "/api/invoices",
+        {
+            "customer_id": cust,
+            "date": "2026-09-21",
+            "tax_rate": 0,
+            "lines": [{"description": "Demo", "quantity": 1, "rate": 100}],
+        },
+    )
+    assert not inv.get("is_pledge")
+    return f"InvoicesPage.showForm({inv['id']})"
 
 
 # ── a tax-exempt customer's certificate, on the sales forms ──────────────

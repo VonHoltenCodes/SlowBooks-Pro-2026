@@ -1101,7 +1101,7 @@ const InvoicesPage = {
         };
 
         // no lines, or lines that add up to $0.00: asked first (ZeroTotal)
-        const zero = ZeroTotal.ask(data.is_pledge ? 'Pledge' : 'Invoice', InvoicesPage.recalc().total, true);
+        const zero = ZeroTotal.ask('Invoice', InvoicesPage.recalc().total);
         if (!zero) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         if (!(await ClassWarn.ok(form, { rows: '#inv-lines tr', cls: 'line-class' }))) return;
