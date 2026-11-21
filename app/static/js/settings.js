@@ -973,8 +973,11 @@ const SettingsPage = {
                         that record is known: if Disconnect cannot reach the relay, SlowBooks Pro will keep trying to remove
                         the record itself, and the name stays here in case you ever need to ask support@slowbookspro.com about it.
                         The connection is made in one company. An administrator of each other company adds it there, and the
-                        assistant names which company's books it works in on every call. The connection holds a key to each
-                        company's books on this computer, so treat its sign-in codes like a master key.` },
+                        assistant names which company's books it works in on every call. On a server, adding a company,
+                        showing a sign-in code and Disconnect take someone who is an administrator of every company on the
+                        connection; an administrator of this company alone sees only this company and can take it off.
+                        A company's access ends when the administrator who added it is no longer one there. The connection
+                        holds a key to each company's books on this computer, so treat its sign-in codes like a master key.` },
                         { id: 'settings-switchboard-help', text: `<strong>Without the relay: SlowBooks Switchboard.</strong> SlowBooks Switchboard lets Claude Desktop, Claude Code and other agents that speak the
                         Model Context Protocol work this company's books. It is a free program of its own,
                         <code>sbplive</code>, that runs on this computer and reaches SlowBooks Pro through its API
@@ -1383,7 +1386,9 @@ const SettingsPage = {
                         stays revoked: make a new one instead. A bookkeeper token is
                         what <code>sbplive setup</code> asks for, to let Claude work
                         the books through SlowBooks Switchboard (Connections, AI
-                        assistants); make a read-only one for an agent that only reports.` },
+                        assistants); make a read-only one for an agent that only reports.
+                        A token whose name starts with "AI assistant" stops working
+                        when the administrator who made it is no longer one here.` },
                     ])}</div>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
