@@ -32,16 +32,25 @@ def irs_statement(
     fair_value_amount=None,
     fair_value_description: Optional[str] = None,
     in_kind_descriptions: Optional[list[str]] = None,
+    received: Optional[list[dict]] = None,
 ) -> dict:
     """{deductible_amount, text} for one gift.
 
     amount               the contribution (None for property)
     fair_value_amount    value of goods/services the donor received back
     in_kind_descriptions the property given, when the gift is not cash
+    received             [{date, amount}] when the money came in on more
+                         than one day: the sentence then says how much came
+                         in when, so a gift paid across two tax years reads
+                         the same here as on each year's giving statement
     """
     name = _legal_name(company)
     ein = (company or {}).get("company_tax_id") or ""
-    tail = f" {name}" + (f" (EIN {ein})" if ein else "") + f". {RETAIN}"
+    tail = (
+        f" {name}"
+        + (f" (EIN {ein})" if ein else "")
+        + f".{_received_sentence(received)} {RETAIN}"
+    )
 
     if in_kind_descriptions:
         what = "; ".join(d for d in in_kind_descriptions if d)
@@ -67,6 +76,19 @@ def irs_statement(
         return {"deductible_amount": float(deductible), "text": text}
     text = f"{NO_GOODS} Contribution of {_money(amount)} received by" + tail
     return {"deductible_amount": float(amount), "text": text}
+
+
+def _received_sentence(received: Optional[list[dict]]) -> str:
+    """ " It was received as $0.01 on Dec 31, 2025 and $149.99 on Jan 01,
+    2026." for money that came in on more than one day, else nothing. The
+    dates are written as the printed documents write every date."""
+    if not received or len(received) < 2:
+        return ""
+    parts = [
+        f"{_money(r['amount'])} on {r['date'].strftime('%b %d, %Y')}" for r in received
+    ]
+    listed = ", ".join(parts[:-1]) + " and " + parts[-1]
+    return f" It was received as {listed}."
 
 
 def invoice_doc_kind(inv, t: Terms) -> str:
@@ -207,12 +229,21 @@ def receipt_money(inv, start=None, end=None) -> dict:
     year's money was less than the dinner was worth. With no dates it is
     the whole fair value, the figure the letter and the receipt state.
 
+    The contribution is dated when its money came in: the date of the
+    first payment counted, never the date the receipt was written. A
+    December receipt whose check came back and was made good in January is
+    a January gift on the letter, on the receipt and on the giving
+    statement alike. Money that came in on more than one day is listed in
+    `received`, a row a day, so the letter can say how much came in when.
+
     {paid: document currency, amount: home currency, fair_value: home
-    currency (the part that belongs to the dates), date: the receipt's
-    date when it is in the dates, else the first payment's in them}
+    currency (the part that belongs to the dates), date: the first counted
+    payment's, received: [{date, amount in home currency}] by day}
 
     A receipt with no payment record at all (written by an import that
-    keeps none) counts at its own amount paid, on its own date."""
+    keeps none) counts at its own amount paid, on its own date. Only
+    payments count: a credit applied to a receipt lowers what is owed on
+    it and is not money received."""
     from sqlalchemy.orm import object_session
 
     from app.models.payments import Payment, PaymentAllocation
@@ -243,6 +274,7 @@ def receipt_money(inv, start=None, end=None) -> dict:
             "amount": home_amount(paid, rate),
             "fair_value": fair_value if paid > 0 else Decimal("0"),
             "date": inv.date,
+            "received": [],
         }
     live = [(amt, p) for amt, p in rows if not p.is_voided]
     counted = [(amt, p) for amt, p in live if in_dates(p.date)]
@@ -259,14 +291,17 @@ def receipt_money(inv, start=None, end=None) -> dict:
             left -= covered
             if in_dates(p.date):
                 fv_here += covered
-    when = inv.date
-    if counted and not in_dates(inv.date):
-        when = counted[0][1].date
+    by_day: dict = {}
+    for amt, p in counted:
+        by_day[p.date] = by_day.get(p.date, Decimal("0")) + home_amount(
+            amt, p.exchange_rate
+        )
     return {
         "paid": _q(paid),
         "amount": _q(amount),
         "fair_value": _q(fv_here),
-        "date": when,
+        "date": counted[0][1].date if counted else inv.date,
+        "received": [{"date": d, "amount": _q(a)} for d, a in by_day.items()],
     }
 
 
@@ -276,7 +311,10 @@ def receipt_irs(company: dict, inv) -> Optional[dict]:
     not paid acknowledges no contribution. The sentence is in home
     currency, at what was received; `deductible_amount` stays in the
     receipt's own currency, beside the figures the printed table shows in
-    it, and `amount_received` is what was paid, in that currency too."""
+    it, and `amount_received` is what was paid, in that currency too.
+    `date` is the day the contribution came in (receipt_money), which is
+    not the receipt's date when its first payment was voided and it was
+    paid later."""
     if _is_void(inv):
         return None
     money = receipt_money(inv)
@@ -287,10 +325,12 @@ def receipt_irs(company: dict, inv) -> Optional[dict]:
         money["amount"],
         money["fair_value"],
         getattr(inv, "fair_value_description", None),
+        received=money["received"],
     )
     doc_fv = _q(_dec(getattr(inv, "fair_value_amount", None)))
     irs["deductible_amount"] = float(max(money["paid"] - doc_fv, Decimal("0")))
     irs["amount_received"] = float(money["paid"])
+    irs["date"] = money["date"]
     return irs
 
 
@@ -317,6 +357,10 @@ def gift_from_invoice(inv, start=None, end=None) -> dict:
         "number": inv.invoice_number,
         "date": money["date"],
         "amount": money["amount"],
+        # what was paid in the receipt's own currency, for the receipt's
+        # window, and the days the money came in, for the letter
+        "document_paid": money["paid"],
+        "received": money["received"],
         "description": ", ".join(ln.description for ln in inv.lines if ln.description),
         "fair_value_amount": money["fair_value"] or None,
         "fair_value_description": (
@@ -458,6 +502,7 @@ def gift_irs(company: dict, gift: dict) -> dict:
         gift["amount"],
         gift["fair_value_amount"],
         gift["fair_value_description"],
+        received=gift.get("received"),
     )
 
 
@@ -582,7 +627,8 @@ def collect_gifts(db, customer_id: int, year: int) -> dict:
 
     Every amount is home currency, and every gift is money that came in
     during the year: a donation receipt counts at what its payments that
-    are not void paid on it in the year (receipt_money), so one whose
+    are not void paid on it in the year (receipt_money), dated the day
+    the first of them came in, so one whose
     payment was voided is not on the statement, as it is not on the cash
     basis Income by Customer."""
     from datetime import date as _date

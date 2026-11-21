@@ -186,8 +186,12 @@ receipt is what gets acknowledged.
   paid, and a foreign-currency gift is stated in dollars at its own rate.
   The fair value of what the donor received back comes off the money in
   the order it was paid: a receipt paid across two years has it deducted
-  once, in full, between the two statements. The receipt's window offers
-  the acknowledgment only once something has been received on it.
+  once, in full, between the two statements. A gift is dated the day its
+  money came in, on the statement and on the acknowledgment letter alike,
+  not the day the receipt was written; when the money came in on more
+  than one day the IRS sentence says how much came in when. The receipt's
+  window offers the acknowledgment only once money has been received on
+  it: a credit applied to a receipt is not money received.
 - **The ministry's own words** — Settings → Sales documents → Giving Statement (nonprofit mode)
   keeps the ministry's own message and footer on the statement. The **Opening
   messages** are saved the same way as Invoice Messages (a short list, one the

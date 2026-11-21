@@ -14,6 +14,12 @@ home-currency dollars.
   $187.50, the figure Income by Customer and the Profit and Loss carry.
 - A payment with no reference has an empty Reference. It read "payment 7",
   the row's database id.
+- A gift is dated the day its money came in, on the letter, the receipt's
+  IRS block and the statement alike; money that came in on more than one
+  day is listed by day in the IRS sentence.
+- Only payments are money received: a credit applied to a receipt is not,
+  and the receipt's window asks the acknowledgment route instead of reading
+  the receipt's amount paid.
 
 And two report figures:
 
@@ -95,6 +101,7 @@ def test_a_receipt_whose_payment_is_voided_is_off_the_statement(
     assert _preview(client, "invoice", receipt) == {
         "eligible": True,
         "amount": 150.0,
+        "document_paid": 150.0,
         "reason": None,
     }
 
@@ -208,7 +215,8 @@ def test_a_receipt_paid_across_two_years_is_split_between_them(
         "fair_value": D("30.00"),
         "deductible": D("0.00"),
     }
-    assert first["cash"][0]["date"] == date(2026, 12, 20)
+    # dated the day the money came in, not the day the receipt was written
+    assert first["cash"][0]["date"] == date(2026, 12, 28)
     assert _income_row(client, name, 2026)["total_sales"] == 30.00
     # the rest of the dinner comes off the next year's money: between the
     # two statements the fair value is deducted once, in full, and the
@@ -329,13 +337,208 @@ def test_an_unpaid_receipt_offers_no_acknowledgment_buttons(
     pdf = client.get(f"/api/donors/gifts/invoice/{receipt}/acknowledgment/pdf")
     assert pdf.status_code == 400
 
+    assert _preview(client, "invoice", receipt)["eligible"] is False
+    _window_asks_the_acknowledgment_route()
+
+
+def _window_asks_the_acknowledgment_route():
+    """The receipt's window shows the buttons, and works its deductible
+    portion, from what the acknowledgment route answers: never from the
+    receipt's amount paid, which a credit raises with no money received."""
     view = (JS / "sales_receipts.js").read_text(encoding="utf-8")
+    assert (
+        "ack = await API.get(`/donors/gifts/invoice/${sr.id}/acknowledgment/preview`)"
+        in view
+    )
+    asked = next(ln for ln in view.splitlines() if "acknowledgment/preview" in ln)
+    guard = view[: view.index(asked)].rstrip().splitlines()[-1]
+    assert "Terms.isNonprofit() && sr.status !== 'void'" in guard
     buttons = next(ln for ln in view.splitlines() if "Acknowledgment (PDF)" in ln)
-    assert "Number(sr.amount_paid || 0) > 0" in buttons
-    assert "sr.status !== 'void'" in buttons
+    assert "${ack && ack.eligible ? `<button" in buttons
+    assert "amount_paid" not in buttons
     deductible = next(ln for ln in view.splitlines() if "Deductible portion" in ln)
     assert "sr.total - sr.fair_value_amount" not in deductible
-    assert "sr.amount_paid" in deductible
+    assert "sr.amount_paid" not in deductible
+    assert "Math.max(received - Number(sr.fair_value_amount), 0)" in deductible
+    assert "ack && ack.eligible ? Number(ack.document_paid || 0) : 0" in view
+
+
+def test_a_credit_applied_to_a_receipt_is_not_money_received(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A receipt whose payment was voided and which then had a credit memo
+    applied has an amount paid and no money received. The window showed the
+    Acknowledgment (PDF) button on it (amount paid above zero), the route
+    refused, and the button opened raw JSON; the window's deductible
+    portion was worked from the credit. The window now asks the route."""
+    _nonprofit(client)
+    donor = seed_customer.id
+    made = _receipt(client, donor, fair_value_amount="40.00").json()
+    receipt = made["invoice"]["id"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    memo = client.post(
+        "/api/credit-memos",
+        json={
+            "customer_id": donor,
+            "date": "2026-05-12",
+            "lines": [{"description": "Credit", "quantity": 1, "rate": 50}],
+        },
+    )
+    assert memo.status_code == 201, memo.text
+    applied = client.post(
+        f"/api/credit-memos/{memo.json()['id']}/apply",
+        json={"invoice_id": receipt, "amount": 50},
+    )
+    assert applied.status_code == 200, applied.text
+
+    shown = client.get(f"/api/invoices/{receipt}").json()
+    assert D(str(shown["amount_paid"])) == D("50.00")
+    # the route the button opens, and what the window now asks first
+    pdf = client.get(f"/api/donors/gifts/invoice/{receipt}/acknowledgment/pdf")
+    assert pdf.status_code == 400
+    assert _preview(client, "invoice", receipt) == {
+        "eligible": False,
+        "amount": None,
+        "reason": "Nothing has been received on this donation receipt",
+    }
+    assert _statement(db_session, donor)["cash"] == []
+    _window_asks_the_acknowledgment_route()
+
+    # money on top of the credit: the window's figures are the money's
+    _pay(client, donor, "2026-06-01", "70.00", receipt)
+    shown = client.get(f"/api/invoices/{receipt}").json()
+    assert D(str(shown["amount_paid"])) == D("120.00")
+    answer = _preview(client, "invoice", receipt)
+    assert (answer["eligible"], answer["amount"], answer["document_paid"]) == (
+        True,
+        70.0,
+        70.0,
+    )
+
+
+def test_the_window_gets_a_foreign_receipts_money_in_its_own_currency(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The window prints the receipt's figures in the receipt's currency:
+    the route gives it what was paid in that currency beside the dollars
+    the letter states."""
+    _nonprofit(client)
+    euro = _receipt(
+        client,
+        seed_customer.id,
+        currency="EUR",
+        exchange_rate="1.25",
+        fair_value_amount="40",
+    ).json()["invoice"]
+    answer = _preview(client, "invoice", euro["id"])
+    assert (answer["amount"], answer["document_paid"]) == (187.5, 150.0)
+
+
+# ---------------------------------------------------------------------------
+# The letter, the receipt and the statement date a gift the same day
+# ---------------------------------------------------------------------------
+
+
+def _letter(client, db_session, receipt):
+    """(gift, letter body, IRS sentence) as the acknowledgment PDF and the
+    email are built from them."""
+    from app.models.contacts import Customer
+    from app.services.donor_documents import (
+        gift_irs,
+        load_gift,
+        render_acknowledgment,
+    )
+    from app.services.settings_service import get_all_settings
+
+    db_session.expire_all()
+    company = get_all_settings(db_session)
+    gift = load_gift(db_session, "invoice", receipt)
+    donor = db_session.get(Customer, gift["customer_id"])
+    _subject, body = render_acknowledgment(db_session, company, donor, gift)
+    return gift, body, gift_irs(company, gift)["text"]
+
+
+def test_the_letter_dates_a_gift_the_day_its_money_came_in(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A December receipt whose check came back, made good in January. The
+    giving statement puts it in January's year; the letter thanked the
+    donor for a contribution "on Dec 20", the other tax year."""
+    _nonprofit(client)
+    donor = seed_customer.id
+    made = _receipt(client, donor, date="2025-12-20").json()
+    receipt = made["invoice"]["id"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    _pay(client, donor, "2026-01-05", "150.00", receipt)
+
+    assert _statement(db_session, donor, 2025)["cash"] == []
+    [listed] = _statement(db_session, donor, 2026)["cash"]
+    assert listed["date"] == date(2026, 1, 5)
+
+    gift, body, sentence = _letter(client, db_session, receipt)
+    assert gift["date"] == listed["date"]
+    assert "contribution of $150.00 on Jan 05, 2026" in body
+    assert "Dec 20, 2025" not in body
+    # one day's money: the sentence needs no list of days
+    assert "It was received as" not in sentence
+    # the receipt's own IRS block is handed the same day
+    from app.models.invoices import Invoice
+    from app.services.donor_documents import receipt_irs
+
+    irs = receipt_irs({}, db_session.get(Invoice, receipt))
+    assert irs["date"] == date(2026, 1, 5)
+
+
+def test_a_letter_for_money_that_came_in_over_two_years_says_when(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A receipt paid a cent in December and the rest in January is on two
+    giving statements. The letter stated the whole amount on the receipt's
+    date; it now says how much came in when, the figures the two statements
+    carry, on the letter and on the receipt's own IRS sentence."""
+    _nonprofit(client)
+    donor = seed_customer.id
+    made = _receipt(
+        client,
+        donor,
+        date="2025-12-20",
+        fair_value_amount="40",
+        fair_value_description="Dinner",
+    ).json()
+    receipt = made["invoice"]["id"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    _pay(client, donor, "2025-12-31", "0.01", receipt)
+    _pay(client, donor, "2026-01-01", "100.00", receipt)
+    _pay(client, donor, "2026-01-01", "49.99", receipt)
+
+    first = _statement(db_session, donor, 2025)
+    second = _statement(db_session, donor, 2026)
+    assert first["totals"]["amount"] == D("0.01")
+    assert second["totals"]["amount"] == D("149.99")
+    assert first["cash"][0]["date"] == date(2025, 12, 31)
+    assert second["cash"][0]["date"] == date(2026, 1, 1)
+
+    gift, body, sentence = _letter(client, db_session, receipt)
+    said = "It was received as $0.01 on Dec 31, 2025 and $149.99 on Jan 01, 2026."
+    assert gift["date"] == date(2025, 12, 31)
+    assert "Dec 20, 2025" not in body
+    assert said in sentence and said in body
+    assert "limited to $110.00" in sentence
+    assert sentence.endswith("Please retain this acknowledgment for your tax records.")
+    page = client.get(f"/api/invoices/{receipt}/print-preview").text
+    assert said in page
+
+
+def test_a_receipt_paid_the_day_it_was_written_reads_as_before(
+    client, db_session, seed_accounts, seed_customer
+):
+    _nonprofit(client)
+    made = _receipt(client, seed_customer.id).json()
+    gift, body, sentence = _letter(client, db_session, made["invoice"]["id"])
+    assert gift["date"] == date(2026, 5, 9)
+    assert "contribution of $150.00 on May 09, 2026" in body
+    assert "It was received as" not in sentence
+    assert "Contribution of $150.00 received by" in sentence
 
 
 def test_a_receipt_an_import_wrote_with_no_payment_record_still_counts(
@@ -755,3 +958,27 @@ def test_accrual_average_price_is_unchanged(client, seed_accounts, seed_customer
     )
     [row] = _sales_by_item(client, "accrual")["items"]
     assert (row["quantity"], row["amount"], row["average_price"]) == (4.0, 44.0, 11.0)
+
+
+def test_a_part_paid_receipts_irs_block_is_handed_what_was_received(
+    client, db_session, seed_accounts, seed_customer
+):
+    """What the printed receipt's IRS block is given for a receipt part
+    paid on a later day: the amount received and the day it came in, in
+    the receipt's own currency, beside the sentence worked from them."""
+    from app.models.invoices import Invoice
+    from app.services.donor_documents import receipt_irs
+
+    _nonprofit(client)
+    donor = seed_customer.id
+    made = _receipt(
+        client, donor, fair_value_amount="40.00", fair_value_description="Dinner"
+    ).json()
+    receipt = made["invoice"]["id"]
+    assert client.post(f"/api/payments/{made['payment']['id']}/void").status_code == 200
+    _pay(client, donor, "2026-06-01", "30.00", receipt)
+    db_session.expire_all()
+    irs = receipt_irs({}, db_session.get(Invoice, receipt))
+    assert (irs["amount_received"], irs["deductible_amount"]) == (30.0, 0.0)
+    assert irs["date"] == date(2026, 6, 1)
+    assert "In exchange for this contribution of $30.00" in irs["text"]
