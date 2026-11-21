@@ -2695,6 +2695,16 @@ function _cellText(cell) {
     return cell && !cell.querySelector(_FIELD_SEL) ? cell.textContent.replace(/\s+/g, ' ').trim() : '';
 }
 
+// A column heading's words and whether it marks its fields required: a
+// trailing "*" ("Account *") is the mark, not part of the name, so a field
+// under it is named "Account, line 2" and says it is required the way a
+// form group's field does (_requiredStar), not by a symbol in its name.
+function headingName(text) {
+    const words = String(text || '').replace(/\s+/g, ' ').trim();
+    const m = words.match(/^(.*?)\s*\*$/);
+    return m ? { name: m[1], required: true } : { name: words, required: false };
+}
+
 // A label's trailing "*" marks the field required: hidden from speech, and
 // the field says it is required instead.
 function _requiredStar(label, field) {
@@ -2724,6 +2734,29 @@ function _tieLabel(label, field) {
     _requiredStar(label, field);
 }
 
+// The words of the heading over a field. A heading that marks its column
+// required has the mark hidden from speech once (a screen reader reading
+// the heading itself does not say "star" either) and its field says it is
+// required.
+function _headingOver(h, field) {
+    const head = headingName(_cellText(h));
+    if (!head.required) return head.name;
+    for (let n = h.lastChild; n; n = n.previousSibling) {
+        if (n.nodeType === Node.ELEMENT_NODE && n.getAttribute('aria-hidden') === 'true') break;
+        if (n.nodeType !== Node.TEXT_NODE || !n.textContent.trim()) continue;
+        const m = n.textContent.match(/^(.*?)\s*\*\s*$/s);
+        if (!m) break;
+        n.textContent = m[1] + ' ';
+        const mark = document.createElement('span');
+        mark.setAttribute('aria-hidden', 'true');
+        mark.textContent = '*';
+        n.after(mark);
+        break;
+    }
+    if (!field.required) field.setAttribute('aria-required', 'true');
+    return head.name;
+}
+
 // A table field's name, and whether it is by place ("line N").
 function _gridName(field, places) {
     const cell = field.closest('td');
@@ -2738,7 +2771,7 @@ function _gridName(field, places) {
     if (head) {
         let at = 0;
         for (const h of head.cells) {
-            if (col >= at && col < at + (h.colSpan || 1)) { heading = _cellText(h); break; }
+            if (col >= at && col < at + (h.colSpan || 1)) { heading = _headingOver(h, field); break; }
             at += h.colSpan || 1;
         }
     }
