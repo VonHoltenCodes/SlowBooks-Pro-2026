@@ -7,8 +7,11 @@ and tested in SlowBooks Switchboard's private source repository, package
 `sbplive`; the relay server (`relay/`) is not copied.
 
 - Source: SlowBooks Switchboard's source repository, `sbplive/`
-- Commit: 8bf0f93bb6e9734b8419a08b2fc7b1cfb0f1fb0c (main, 2026-11-19,
-  "sbplive/clearer-answers"): a DELETE's answer says "deactivated" or
+- Commit: e5d2b2dcc4af58842f5701586a2174f7061ce6b7 (main, 2026-11-20,
+  "sbplive/keep-the-apps-tax-note"): a sales document's own `tax_note`
+  from SlowBooks Pro (a missing or expired exemption certificate) is kept,
+  in front of the note about the rate, instead of being written over.
+  Before it: 8bf0f93 ("sbplive/clearer-answers"): a DELETE's answer says "deactivated" or
   "deleted" as the app answered; a payment's answer names the account the
   money went to (Undeposited Funds when no deposit account was given); an
   expense is asked about first and, without the account it was paid from,
