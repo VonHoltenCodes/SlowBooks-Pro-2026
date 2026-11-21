@@ -3271,6 +3271,14 @@ const ReportsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // What stands over the lines of a batch that did not go through. Some
+    // of them may read "… may or may not have been sent." (the message was
+    // handed over and the connection lost), so the heading never says
+    // flatly that they were not sent; it reads the same for one and many.
+    _notSentHeading(count) {
+        return Terms.text(`Not sent, or not confirmed (${count}):`);
+    },
+
     // `notes`: sends that went out though the mail server refused a copy
     // (each "Name: The mail server refused a copy to: …")
     _sendResult(title, headline, errors, notes = []) {
@@ -3283,7 +3291,7 @@ const ReportsPage = {
             ? `<a href="#/settings" class="btn btn-secondary" onclick="closeModal(); try { sessionStorage.setItem('settings_focus', 'settings-h-email-recent-sends'); } catch (e) {}">Recent sends</a>`
             : '';
         openModal(title, `
-            <p>${escapeHtml(headline)}${errors.length ? ` ${errors.length} could not be sent:` : ''}</p>
+            <p>${escapeHtml(headline)}${errors.length ? ` ${escapeHtml(ReportsPage._notSentHeading(errors.length))}` : ''}</p>
             ${errors.length ? `<ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : ''}
             ${notes.length ? `<p>Sent, with a copy the mail server refused:</p>
             <ul style="margin:8px 0 12px 20px;">${notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : ''}
@@ -4523,7 +4531,7 @@ ReportsPage.emailGivingStatements = async function () {
     box.textContent = 'Sending…';
     try {
         const r = await API.post('/donors/giving-statements/batch-email', { year });
-        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? `<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '') +
+        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? ` ${escapeHtml(ReportsPage._notSentHeading(r.errors.length))}<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '') +
             ((r.notes || []).length ? `<ul>${r.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '');
     } catch (err) { box.textContent = err.message; }
 };

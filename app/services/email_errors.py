@@ -208,6 +208,15 @@ _LAST_RESPONSE = re.compile(r"Last response: (\(.*\))\s*$", re.S)
 #   [socket] timed out                      [disconnected] Connection unexpectedly closed
 #   [disconnected after-body] timed out    (lost once the whole message had
 #       been handed over: the server may have taken it)
+#   [disconnected at-mail] Connection unexpectedly closed
+#   [disconnected at-auth 421 4.3.0] 421 4.3.0 Service shutting down
+#   [socket at-rcpt] Connection reset by peer
+#       (the server had greeted us and then ended the connection, at this
+#        step of the conversation: helo, starttls, auth, mail, rcpt or
+#        data. When the last thing it said in that step was a refusal, its
+#        code stands in the tag and the reply is what the row keeps. A row
+#        with no "at-" is a hang-up nothing more is known of, or a wait
+#        that timed out.)
 #   [local] words of our own (a fault before anything was sent)
 #   [address josé@x] words of our own (an address SMTP cannot carry)
 #   [sender books@x; signed-in] 530 5.7.0 Authentication Required
@@ -266,6 +275,59 @@ def _not_smtp_words(rest) -> str:
 
 _SIGNED_IN = "signed-in"
 _AFTER_BODY = "after-body"
+# "at-auth": the step of the conversation at which a server that had
+# greeted us ended the connection
+_LOST_AT = "at-"
+# the steps a connection can be lost at, as the send path names them, and
+# the stage a refusal read in each is classified as
+_STEP_STAGES = {
+    "helo": "helo",
+    "starttls": "response",
+    "auth": "auth",
+    "mail": "sender",
+    "rcpt": "response",
+    "data": "data",
+}
+
+
+def _timed_out(error) -> bool:
+    """Whether a lost connection was a wait that ran out (the server went
+    silent; it did not hang up)."""
+    return isinstance(error, TimeoutError) or isinstance(
+        getattr(error, "__context__", None), TimeoutError
+    )
+
+
+def _lost_tag(lost_at: str, last_reply, error):
+    """(tag, refusal) for a connection the server ended after it had
+    greeted us: "at-<step>", with the code of the refusal that was the
+    last thing read in that step when there was one (then `refusal` is its
+    (code, words)). ("", None) when the step is not known, or the wait
+    timed out."""
+    if lost_at not in _STEP_STAGES or _timed_out(error):
+        return "", None
+    code = _code(last_reply)
+    if _is_reply_code(code) and code >= 400:
+        said = last_reply[1] if len(last_reply) > 1 else ""
+        found = " ".join(p for p in (str(code), _enhanced(said)) if p)
+        return f"{_LOST_AT}{lost_at} {found}", (code, said)
+    return _LOST_AT + lost_at, None
+
+
+def _lost_at(arg: str):
+    """An "at-…" tag as (step, code, enhanced status code), or None."""
+    tokens = (arg or "").split(" ")
+    if not tokens[0].startswith(_LOST_AT):
+        return None
+    step = tokens[0][len(_LOST_AT) :]
+    if step not in _STEP_STAGES:
+        return None
+    code, enhanced = None, ""
+    if len(tokens) > 1 and re.fullmatch(r"\d{3}", tokens[1]):
+        code = int(tokens[1])
+        if len(tokens) > 2 and _ENHANCED.fullmatch(tokens[2]):
+            enhanced = tokens[2]
+    return step, code, enhanced
 
 
 def _tag(text: str):
@@ -314,7 +376,12 @@ def _storable(text: str) -> str:
 
 
 def stored_text(
-    error, stage: str = "local", after_body: bool = False, signed_in: bool = False
+    error,
+    stage: str = "local",
+    after_body: bool = False,
+    signed_in: bool = False,
+    lost_at: str = "",
+    last_reply=None,
 ) -> str:
     """The text an email log row keeps for a failed send, and the only way
     one is made: our tag, then readable text (never str() of an exception,
@@ -322,7 +389,10 @@ def stored_text(
     complaint). The server's reply is kept as it was received. `error` is
     the exception, or words of our own for a send that never reached a
     server (`stage` "setup" for "SMTP not configured"). `signed_in`: the
-    server had accepted our sign-in before this failure."""
+    server had accepted our sign-in before this failure. `lost_at`: the
+    step of the conversation that was under way (after the server's
+    greeting had been read), and `last_reply` the (code, words) last read
+    in that step, for a connection that was then lost."""
     arg = ""
     asks_sign_in = False
     if isinstance(error, MailTLSError) and error.refusal:
@@ -409,6 +479,15 @@ def stored_text(
         words = _plain_cause(_decoded(str(error))) or "Connection closed"
         if after_body:
             arg = _AFTER_BODY
+        else:
+            # a server that had greeted us and then hung up was reached:
+            # the step it hung up at, and the refusal it gave there if it
+            # gave one (a 421 and then a closed connection), which the row
+            # keeps as the reply it is
+            arg, refusal = _lost_tag(lost_at, last_reply, error)
+            if refusal:
+                words = _code_words(*refusal)
+                asks_sign_in = refusal[0] == 530
     elif isinstance(error, OSError) and not isinstance(error, smtplib.SMTPException):
         # "Connection refused", "timed out", "Name or service not known":
         # the system's message, without Python's "[Errno 111]" in front
@@ -419,6 +498,9 @@ def stored_text(
         words = _plain_cause(_decoded(said)) or "Connection failed"
         if after_body:
             arg = _AFTER_BODY
+        elif isinstance(error, ConnectionError):
+            # reset or cut by the server after it had greeted us
+            arg = _lost_tag(lost_at, None, error)[0]
     elif isinstance(error, smtplib.SMTPException):
         said = str(error)
         last = _LAST_RESPONSE.search(said)
@@ -510,6 +592,11 @@ def _holds_reply(stored: str) -> bool:
         if words.lstrip().startswith(_NOT_SMTP):
             # words of ours: what answered did not speak SMTP
             return False
+        if stage == "disconnected":
+            # the refusal a server gave before it hung up (its code stands
+            # in our tag); any other lost connection keeps a plain cause
+            lost = _lost_at(arg)
+            return lost is not None and lost[1] is not None
         return stage in _REPLY_STAGES
     value = _as_value(text)
     if isinstance(value, dict):
@@ -591,6 +678,12 @@ _SIGN_IN_SENTENCE = (
     "The mail server wants a sign-in, and none is set. Enter the username and "
     "password under Settings → Email (SMTP)."
 )
+# the same 530 on a row that keeps no record of whether a sign-in was made
+# (a release before 2.32): true whether or not one is set
+_SIGN_IN_ASKED_SENTENCE = (
+    "The mail server asked for a sign-in before it would take the email. "
+    "Check the username and password under Settings → Email (SMTP)."
+)
 # the same 530 after the server had accepted our sign-in: a sign-in is set
 # and was taken, so neither half of the sentence above would be true
 _SIGN_IN_AGAIN_SENTENCE = (
@@ -657,6 +750,13 @@ _OLD_REFUSED_SENTENCE = "The mail server refused the email."
 _UNREACHABLE_SENTENCE = (
     "The server could not be reached — check the host, port, and the "
     "Use TLS setting."
+)
+# the server had greeted us as a mail server and then ended the connection
+# before the message was handed over: it was reached, so the settings that
+# reached it are not what to change
+_HUNG_UP_SENTENCE = (
+    "The mail server ended the connection before the email was sent. Try "
+    "again; if it keeps happening, ask your mail provider."
 )
 # the whole message was handed to a server we had reached, and the
 # connection was lost (or the server went silent) before it answered: it
@@ -854,6 +954,13 @@ class _Read:
 _CODE_FIRST = re.compile(r"(\d{3})(?:[ -]([245]\.\d{1,3}\.\d{1,3}))?(?=\s|$)")
 
 
+def _untold(kind: str) -> str:
+    """The kind of a failure read from a row of a release before 2.32,
+    which keeps no record of whether a sign-in was made: a 530 there is a
+    sign-in asked for, and no more is known."""
+    return "sign-in-asked" if kind == "sign-in" else kind
+
+
 def _classify_text(text: str) -> _Read:
     text = (text or "").strip()
     tagged = _tag(text)
@@ -869,7 +976,7 @@ def _classify_text(text: str) -> _Read:
             refused.append((str(addr), _code(reply), _enhanced(words)))
             said.append(_text(words))
         kind, names, later, odd = _refused_kind(refused, " ".join(said))
-        return _Read(kind, names, later=later, odd=odd)
+        return _Read(_untold(kind), names, later=later, odd=odd)
     code = _code(value)
     if code is None:
         if text in _NO_SIGN_IN_OFFERED:
@@ -878,9 +985,9 @@ def _classify_text(text: str) -> _Read:
     message = value[1] if len(value) > 1 else ""
     if len(value) == 3 and isinstance(value[2], str):
         # Python's (code, words, sender) of a refused MAIL FROM
-        kind = _stage_kind("sender", code, _enhanced(message), message)
+        kind = _untold(_stage_kind("sender", code, _enhanced(message), message))
         return _Read(kind, [value[2]] if kind == "sender" else [])
-    kind = _stage_kind("response", code, _enhanced(message), message)
+    kind = _untold(_stage_kind("response", code, _enhanced(message), message))
     if kind == "message":
         # Python's tuple was the same for a refused greeting and a refused
         # message: the stage is lost, so the sentence names neither
@@ -903,7 +1010,19 @@ def _classify_tagged(
     if stage in ("disconnected", "socket"):
         if arg == _AFTER_BODY:
             return _Read("lost-after-body")
-        return _Read("unreachable")
+        lost = _lost_at(arg)
+        if lost is None:
+            # nothing answered as a mail server, a wait that timed out, or
+            # a row that does not say how far the conversation had got
+            return _Read("unreachable")
+        step, code, enhanced = lost
+        if code is not None and code >= 400:
+            # the server refused and then hung up: the refusal decides,
+            # as it would have with the connection left open
+            return _Read(
+                _stage_kind(_STEP_STAGES[step], code, enhanced, words, signed_in)
+            )
+        return _Read("hung-up")
     if stage in ("local", "other"):
         return _Read("other")
     if stage == "address":
@@ -922,9 +1041,9 @@ def _classify_tagged(
         return _Read("none-offered")
     after_body = arg.split(" ")[-1] == _AFTER_BODY
     if _is_not_smtp(arg):
-        if stage in ("connect", "helo"):
+        if stage == "connect":
             # nothing that spoke SMTP was ever on the line (a web server's
-            # port, say)
+            # port, say): the greeting itself was not a reply
             return _Read("unreachable")
         # the server had been reached and had answered before this: the
         # message may have been taken when it had all been handed over
@@ -1138,6 +1257,8 @@ def _reading(error, host: str = ""):
         "later": _TRY_LATER_SENTENCE,
         "sign-in": _SIGN_IN_SENTENCE,
         "sign-in-again": _SIGN_IN_AGAIN_SENTENCE,
+        "sign-in-asked": _SIGN_IN_ASKED_SENTENCE,
+        "hung-up": _HUNG_UP_SENTENCE,
         "starttls": _STARTTLS_FIRST_SENTENCE,
         "unreachable": _UNREACHABLE_SENTENCE,
         "old-refusal": _OLD_REFUSED_SENTENCE,
@@ -1183,6 +1304,16 @@ def failure_sentence(error, host: str = "") -> str:
     return _reading(error, host)[1]
 
 
+def _reached(stored: str) -> list:
+    """The addresses of ours a failed send still went to (the copies the
+    server took the message for when it turned the To address away), from
+    our own tag. [] for a send that reached nobody."""
+    tagged = _tag(stored)
+    if not tagged or tagged[0] != "recipients":
+        return []
+    return _tag_recipients(tagged[1])[1]
+
+
 def _copy_note(stored: str) -> str:
     """The note of a send that went out though the server refused a copy:
     who, from our own tag. "" for anything else."""
@@ -1211,16 +1342,22 @@ class LoggedFailure:
     though a copy was refused (else None). `reply`: what the row keeps as
     readable text (the mail server's reply as it was received, or the
     plain cause of a failure that was not a reply), for an administrator;
-    None for anyone else."""
+    None for anyone else. `reached`: the addresses of ours a FAILED send
+    still went to (a copy the server took when it turned the To address
+    away), from our own record of the send; empty when it reached
+    nobody."""
 
-    __slots__ = ("sentence", "reply", "admin", "note", "_is_reply")
+    __slots__ = ("sentence", "reply", "admin", "note", "_is_reply", "reached")
 
-    def __init__(self, sentence, reply, admin: bool, note=None, is_reply=False):
+    def __init__(
+        self, sentence, reply, admin: bool, note=None, is_reply=False, reached=()
+    ):
         self.sentence = sentence
         self.reply = reply
         self.admin = admin
         self.note = note
         self._is_reply = is_reply
+        self.reached = list(reached)
 
     @property
     def unexplained(self) -> bool:
@@ -1282,14 +1419,18 @@ class FailureReader:
     def read(self, row, admin: bool) -> LoggedFailure:
         stored = row.error_message or ""
         sentence = note = None
+        reached = []
         if row.status == "failed":
             sentence = failure_sentence(stored, self.host)
+            reached = _reached(stored)
         elif stored:
             note = _copy_note(stored) or None
         reply = None
         if admin:
             reply = server_words(stored) if stored else row.error_message
-        return LoggedFailure(sentence, reply, admin, note, _holds_reply(stored))
+        return LoggedFailure(
+            sentence, reply, admin, note, _holds_reply(stored), reached
+        )
 
 
 def where_to_see_why(admin: bool) -> str:
@@ -1321,6 +1462,16 @@ def last_send_failure(db, entity_type: str, entity_id, admin: bool):
     if row is None or row.status != "failed":
         return None
     return FailureReader(db).read(row, admin)
+
+
+def sends_that_reached_someone(db, rows) -> set:
+    """The ids of the email-log `rows` that are failed sends which still
+    reached someone: the To address was turned away and a copy took the
+    message. Read from our own record of each send, by the one reader. A
+    scheduled sender asks this before it sends a failed message again, so
+    the copy's reader is not sent it on every run."""
+    reader = FailureReader(db)
+    return {row.id for row in rows if reader.read(row, admin=False).reached}
 
 
 def note_for_last_send(db, entity_type: str, entity_id) -> str:
