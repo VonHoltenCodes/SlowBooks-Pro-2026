@@ -51,6 +51,22 @@ test('Yes, and a company that never set it, show no warning', () => {
     }
 });
 
+// The mailer encrypts only when the saved value is "true" in any case; the
+// API stores whatever it is sent, so the page reads the value the same way.
+test('any saved value the mailer reads as off shows No and the warning', () => {
+    for (const saved of ['False', 'FALSE', 'no', '0', 'off', '']) {
+        const html = SettingsPage._useTlsFieldHtml({ smtp_use_tls: saved });
+        assert.equal(shown(html), WARNING, JSON.stringify(saved));
+        assert.match(html, /<option value="false" selected>No<\/option>/, JSON.stringify(saved));
+        assert.doesNotMatch(html, /<option value="true" selected>/, JSON.stringify(saved));
+    }
+    for (const saved of ['True', 'TRUE']) {
+        const html = SettingsPage._useTlsFieldHtml({ smtp_use_tls: saved });
+        assert.equal(shown(html), '', saved);
+        assert.match(html, /<option value="true" selected>Yes<\/option>/, saved);
+    }
+});
+
 test('the warning is tied to the select and announced politely', () => {
     const html = SettingsPage._useTlsFieldHtml({ smtp_use_tls: 'false' });
     assert.match(html, /<select name="smtp_use_tls" aria-describedby="smtp-tls-off-warning"/);

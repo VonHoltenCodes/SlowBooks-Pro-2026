@@ -2480,8 +2480,15 @@ const SettingsPage = {
     // or nothing. It changes nothing about what is saved or how mail is sent.
     TLS_OFF_WARNING: 'With Use TLS off, your mail password and your mail are sent without encryption.',
 
+    tlsIsOff(saved) {
+        return saved != null && String(saved).toLowerCase() !== 'true';
+    },
+
     _useTlsFieldHtml(s) {
-        const off = s.smtp_use_tls === 'false';
+        // off is whatever the mailer reads as off: any saved value but
+        // "true" in any case ("False", "no" or "0" written through the API
+        // send unencrypted just as "false" does). Never set: on.
+        const off = SettingsPage.tlsIsOff(s.smtp_use_tls);
         return `<div class="form-group"><label>Use TLS</label>
                             <select name="smtp_use_tls" aria-describedby="smtp-tls-off-warning" onchange="SettingsPage.tlsChanged(this)">
                                 <option value="true" ${off ? '' : 'selected'}>Yes</option>
