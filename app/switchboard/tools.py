@@ -8,6 +8,7 @@
 
 import difflib
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -51,9 +52,35 @@ def _kind_path(kind: str) -> str:
 
 
 def _spec(client: ApiClient) -> dict:
-    if client.spec is None:
-        client.spec = client.get("/openapi.json")
-    return client.spec
+    return client.openapi()
+
+
+# ---------------------------------------------------------------------------
+# Which books the call works. The registry sets this around every tool call
+# (registry.Registry.call), in the thread that runs the call, so two calls on
+# two threads never see each other's books. A tool reads it only to name the
+# books in what it tells the assistant to do next.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Called:
+    books: str | None  # the handle; None when the connection names none
+    name: str  # the company's name, as the connection keeps it
+    file: str  # the company's file, "" when not known
+    many: bool  # the connection reaches more than one company
+
+
+CALLED: ContextVar[Called | None] = ContextVar("sbplive_called", default=None)
+
+
+def named_books() -> str | None:
+    """The handle to name in a next step, on a connection of several
+    companies; None when one company needs no naming."""
+    called = CALLED.get()
+    if called is None or not called.many or not called.books:
+        return None
+    return called.books
 
 
 ROLE_PHRASES = {
@@ -94,6 +121,11 @@ def role_of(client: ApiClient) -> str | None:
 def context(client: ApiClient) -> dict:
     """Company and app facts to read before working."""
     out: dict = {}
+    called = CALLED.get()
+    if called is not None and called.books:
+        out["books"] = called.books
+        if called.file:
+            out["company_file"] = called.file
     status = client.get("/api/auth/status")
     out["company"] = status.get("company_name") or ""
     if status.get("accountants_copy"):
@@ -110,12 +142,6 @@ def context(client: ApiClient) -> dict:
     if role:
         out["token_role"] = role
         out["token_role_means"] = "The API token " + ROLE_PHRASES[role] + "."
-    try:
-        out["companies"] = [
-            c.get("name") for c in client.get("/api/companies") if isinstance(c, dict)
-        ]
-    except ApiError:
-        pass
     return out
 
 
@@ -217,13 +243,14 @@ def get_record(client: ApiClient, kind: str, record_id: int):
 
 
 def _reports(client: ApiClient) -> dict:
-    """name -> parameters, for the plain GET reports (no PDF, CSV or id)."""
+    """name -> parameters, for the plain GET reports (no PDF, CSV, print
+    page or id)."""
     out = {}
     for path, item in _spec(client).get("paths", {}).items():
         op = item.get("get")
         if not path.startswith("/api/reports/") or op is None or "{" in path:
             continue
-        if path.endswith(("/pdf", "/csv")):
+        if path.endswith(("/pdf", "/csv", "/print")):
             continue
         out[path[len("/api/reports/") :]] = [
             {
@@ -258,14 +285,37 @@ def report(client: ApiClient, name: str, params: dict | None = None):
 # ---------------------------------------------------------------------------
 
 _KEY_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
+_UNKNOWN = "The outcome is unknown: the request may or may not have reached the books."
 _RETRY_SAME_KEY = (
-    "The outcome is unknown: the request may or may not have reached the "
-    "books. Retry with the same key and the same data; the API books it once."
+    f"{_UNKNOWN} Retry with the same key and the same data; the API books it once."
 )
-_CHECK_FIRST = (
-    "The outcome is unknown: the request may or may not have reached the "
-    "books. Check with list_records or search before retrying."
-)
+_CHECK_FIRST = f"{_UNKNOWN} Check with list_records or search before retrying."
+
+
+def _retry_same_key() -> str:
+    books = named_books()
+    if books is None:
+        return _RETRY_SAME_KEY
+    return (
+        f"{_UNKNOWN} Retry with the same key, the same data and the same books "
+        f"({books}); the API books it once."
+    )
+
+
+def _check_first() -> str:
+    books = named_books()
+    if books is None:
+        return _CHECK_FIRST
+    return (
+        f"{_UNKNOWN} Check with list_records or search, with books: {books}, "
+        "before retrying."
+    )
+
+
+def _with_books(text: str) -> str:
+    """' and books: <handle>' on a connection of several companies."""
+    books = named_books()
+    return f"{text} and books: {books}" if books else text
 
 
 def _write(
@@ -289,7 +339,7 @@ def _write(
         if exc.status == 0:
             raise ValueError(
                 f"{str(exc.detail).rstrip('.')}. "
-                f"{_RETRY_SAME_KEY if key else _CHECK_FIRST}"
+                f"{_retry_same_key() if key else _check_first()}"
             ) from None
         raise
 
@@ -308,15 +358,14 @@ def _keyed(client: ApiClient, path: str, data: dict, key: str):
 
 
 # ---------------------------------------------------------------------------
-# Ask before a bare create (the owner, 2026-11-19: "if you don't ask you
-# don't get"). A create of one of the main records that carries only what
-# the API requires is not sent at first: the answer lists the empty fields
-# worth having, as the app's forms name them, for the assistant to ask the
-# person about. A second call with asked_user creates it; a record that
+# Ask before a bare create. A create of one of the main records that carries
+# only what the API requires is not sent at first: the answer lists the empty
+# fields worth having, as the app's forms name them, for the assistant to ask
+# the person about. A second call with asked_user creates it; a record that
 # already fills at least half of its fields (rounded down, at least one) is
 # created at once. Every create's answer says, in left_blank, what is still
-# empty. The gate is here, in Switchboard, and nowhere in the API: the
-# app's screens, imports and API tokens used directly are unaffected.
+# empty. The gate is here, in Switchboard, and nowhere in the API: the app's
+# screens, imports and API tokens used directly are unaffected.
 # ---------------------------------------------------------------------------
 
 _LINES = "@lines"  # every line has an item or a description
@@ -519,6 +568,18 @@ def ask_first(route: str, data, asked_user: bool, tool: str, known=None, tax=Non
         empty.append(TAX_LABEL)
         rows.append({"label": TAX_LABEL, "field": "tax_rate"})
     labels = ", ".join(empty)
+    books = named_books()
+    if books:
+        again = (
+            f"Then call {tool} again with what they gave, asked_user: true and "
+            f"books: {books}, or with asked_user: true and books: {books} alone "
+            "if they want it created as it is."
+        )
+    else:
+        again = (
+            f"Then call {tool} again with what they gave and asked_user: true, "
+            "or with asked_user: true alone if they want it created as it is."
+        )
     return {
         "created": False,
         "ask_first": True,
@@ -527,25 +588,35 @@ def ask_first(route: str, data, asked_user: bool, tool: str, known=None, tax=Non
         "next": (
             f"Nothing was created yet: {rule.record} with this little on it "
             f"may need checking first. Ask the user whether they have any of "
-            f"these: {labels}. Do not make any up. Then call {tool} again with "
-            f"what they gave and asked_user: true, or with asked_user: true "
-            f"alone if they want it created as it is."
+            f"these: {labels}. Do not make any up. {again}"
         ),
     }
 
 
 # ---------------------------------------------------------------------------
-# Sales tax on a new sales document. The API takes a missing tax_rate as 0%,
-# while the app's own forms start a new invoice, estimate, sales receipt or
-# credit memo at the company's Default Tax Rate (Settings), and a credit memo
-# for an invoice at that invoice's rate. So when the assistant gives no
-# tax_rate, Switchboard does what the form does and says so in the answer
+# Sales tax on a new sales document. The app's own forms start a new invoice,
+# estimate, sales receipt or credit memo at the company's Default Tax Rate
+# (Settings), and a credit memo for an invoice at that invoice's rate. The
+# API does the same from SlowBooks Pro 2.32.0; before 2.32.0 it took a
+# missing tax_rate as 0%. So when the assistant gives no tax_rate,
+# Switchboard sends what the form would and says so in the answer
 # (tax_rate_source, tax_note); a tax_rate the assistant gives, 0 included, is
-# always sent as given. A non-taxable customer or a document marked
-# tax_exempt is charged no tax by the app whatever the rate (the form keeps
-# the default rate on it too). With no default rate (0%) and a taxable
-# customer, "Sales tax rate" is one of the fields to ask about. The API's
-# own default is not changed: that is for every API user to keep.
+# always sent as given.
+#
+# A document can carry a rate and still be charged no tax: the app charges
+# none to a non-taxable customer, on a document marked tax_exempt, or (from
+# 2.32.0) on an invoice, estimate or sales receipt whose job is tax exempt
+# and whose own switch was not sent. The answer then says that no sales tax
+# was charged and why, never that the default rate was applied. The saved
+# document is the evidence: its tax_exempt where the app answers one, and
+# its tax_amount. A credit memo for an invoice has no switch of its own: it
+# gives back no tax when that invoice was exempt or the customer is
+# non-taxable, and its own tax_amount confirms it. With no default rate (0%)
+# and nothing exempt, "Sales tax rate" is one of the fields to ask about.
+#
+# When the company's default cannot be read, no rate is sent and the app
+# decides (0% before 2.32.0, its own default from 2.32.0): the answer says
+# what the saved document carries.
 # ---------------------------------------------------------------------------
 
 SALES_TAX_ROUTES = (
@@ -577,12 +648,17 @@ def _default_percent(client: ApiClient):
     return pct if pct.is_finite() and 0 <= pct <= 100 else None
 
 
+def _record_id(value) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, str)) and value != ""
+
+
 def _exempt_reason(client: ApiClient, data: dict):
-    """Why the app charges this document no tax whatever its rate, or None."""
+    """Why the app charges this document no tax whatever its rate, as far as
+    the request and its customer say, or None."""
     if data.get("tax_exempt") is True:
         return "the document is marked tax exempt"
     cid = data.get("customer_id")
-    if isinstance(cid, bool) or not isinstance(cid, (int, str)) or cid == "":
+    if not _record_id(cid):
         return None
     try:
         customer = client.get(f"/api/customers/{cid}")
@@ -594,11 +670,60 @@ def _exempt_reason(client: ApiClient, data: dict):
     return None
 
 
+def _exempt_job(client: ApiClient, route: str, data: dict):
+    """The reason when the document's job is tax exempt and so decides for
+    it, or None. A job decides only where the document has a switch of its
+    own (a credit memo has none) and the request left the switch out; an app
+    whose jobs have no is_taxable has no exempt jobs."""
+    if route == "/api/credit-memos" or data.get("tax_exempt") is not None:
+        return None
+    jid = data.get("job_id")
+    if not _record_id(jid):
+        return None
+    try:
+        job = client.get(f"/api/jobs/{jid}")
+    except ApiError:
+        return None  # the API says what is wrong with the job
+    if isinstance(job, dict) and job.get("is_taxable") is False:
+        name = job.get("name")
+        return f"the job {name} is tax exempt" if name else "its job is tax exempt"
+    return None
+
+
+def _credited_exempt(client: ApiClient, data: dict):
+    """Why a credit memo for an invoice gives back no tax, or None: its
+    customer is non-taxable, or the invoice it credits is tax exempt
+    (2.32.0 on; an earlier app's invoice has no tax_exempt)."""
+    reason = _exempt_reason(client, {"customer_id": data.get("customer_id")})
+    oid = data.get("original_invoice_id")
+    if reason or not _record_id(oid):
+        return reason
+    try:
+        invoice = client.get(f"/api/invoices/{oid}")
+    except ApiError:
+        return None  # the API says what is wrong with the invoice
+    if isinstance(invoice, dict) and invoice.get("tax_exempt") is True:
+        return "the invoice being credited is tax exempt"
+    return None
+
+
+_UNREAD = (
+    "No tax_rate was given and the company's Default Tax Rate could not be "
+    "read, so no rate was sent"
+)
+
+
 def sales_tax(client: ApiClient, route: str, data):
     """The plan for tax_rate on a new sales document sent without one:
     {"rate": the fraction to send or None (with "shown", the percent),
     "source", "note", "ask"}; None
-    when there is nothing to do (another record, or a tax_rate given)."""
+    when there is nothing to do (another record, or a tax_rate given). A plan
+    with a rate also says why no tax may be charged at it ("exempt", from the
+    request and the customer; "exempt_by_job", for the saved document to
+    confirm) and the note for a document that was taxed ("taxed_note"). A
+    credit memo for an invoice says why it may give back no tax
+    ("credited"); a plan made without the company's default says so
+    ("unread") for the saved document to settle."""
     if route not in SALES_TAX_ROUTES or not isinstance(data, dict):
         return None
     if data.get("tax_rate") is not None:
@@ -613,40 +738,38 @@ def sales_tax(client: ApiClient, route: str, data):
                 "back the way it was charged."
             ),
             "ask": False,
+            "credited": _credited_exempt(client, data),
         }
     pct = _default_percent(client)
-    exempt = _exempt_reason(client, data)
+    certain = _exempt_reason(client, data)
+    by_job = None if certain else _exempt_job(client, route, data)
+    exempt = certain or by_job
     if pct is None:
         return {
             "rate": None,
             "source": "none: the company's default rate could not be read",
-            "note": (
-                "No tax_rate was given and the company's Default Tax Rate "
-                "could not be read, so the document has a 0% sales tax rate. "
-                "Ask the user what rate applies."
-            ),
+            "note": f"{_UNREAD}. Ask the user what rate applies.",
             "ask": exempt is None,
+            "unread": True,
+            "exempt": certain,
+            "exempt_by_job": by_job,
         }
     if pct > 0:
         shown = _percent(pct)
-        if exempt:
-            note = (
-                f"No tax_rate was given, so the company's default rate, {shown}, "
-                f"was used, as SlowBooks Pro's form does; {exempt}, so no sales "
-                "tax is charged."
-            )
-        else:
-            note = (
-                f"No tax_rate was given, so SlowBooks Pro used the company's "
-                f"default sales tax rate, {shown}, as its own form does. Tell "
-                "the user; if this sale is taxed at another rate, change the "
-                "document's tax_rate (a fraction: 0.0159 is 1.59%)."
-            )
+        taxed = (
+            f"No tax_rate was given, so SlowBooks Pro used the company's "
+            f"default sales tax rate, {shown}, as its own form does. Tell "
+            "the user; if this sale is taxed at another rate, change the "
+            "document's tax_rate (a fraction: 0.0159 is 1.59%)."
+        )
         return {
             "rate": (pct / 100).quantize(_RATE_PLACES),
             "shown": shown,
             "source": f"company default ({shown})",
-            "note": note,
+            "note": _no_tax_note(shown, certain) if certain else taxed,
+            "taxed_note": taxed,
+            "exempt": certain,
+            "exempt_by_job": by_job,
             "ask": False,
         }
     if exempt:
@@ -666,6 +789,85 @@ def sales_tax(client: ApiClient, route: str, data):
         ),
         "ask": True,
     }
+
+
+def _no_tax_note(shown: str, reason: str) -> str:
+    return (
+        f"No tax_rate was given, so the document carries the company's "
+        f"default rate, {shown}, as SlowBooks Pro's form does; {reason}, so no "
+        "sales tax is charged. Tell the user that no sales tax was charged "
+        f"and why, not that {shown} was applied."
+    )
+
+
+def _no_tax_reason(route: str, tax: dict, record: dict):
+    """Why a document sent with the default rate was charged no sales tax,
+    or None when it was taxed at that rate. The saved document decides: its
+    tax_exempt where the app answers one (2.32.0 on; a sales receipt's is on
+    its invoice), and a tax_amount that is not zero means it was taxed
+    whatever the request suggested. A job's exemption counts only when the saved
+    document says it is exempt."""
+    saved = record.get("invoice") if route == "/api/sales-receipts" else record
+    saved = saved if isinstance(saved, dict) else {}
+    switch = saved.get("tax_exempt")
+    if switch is True:
+        reason = (
+            tax["exempt"]
+            or tax["exempt_by_job"]
+            or "SlowBooks Pro saved the document as tax exempt"
+        )
+    elif switch is False:
+        reason = None
+    else:
+        reason = tax["exempt"]
+    return reason if reason and _no_tax_on(saved) else None
+
+
+def _no_tax_on(saved: dict) -> bool:
+    """Whether the saved document's tax_amount is zero (or not a number)."""
+    try:
+        return Decimal(str(saved.get("tax_amount") or "0")) == 0
+    except InvalidOperation:
+        return True
+
+
+def _unread_default(route: str, tax: dict, record: dict):
+    """(source, note, the defaulted value or None, whether to ask) for a
+    document created without a rate because the company's default could not
+    be read. The app chose the rate, so the saved document says which."""
+    source = tax["source"]
+    reason = _no_tax_reason(route, tax, record)
+    if reason:
+        note = (
+            f"{_UNREAD}; {reason}, so no sales tax is charged. Tell the user "
+            "that no sales tax was charged and why."
+        )
+        return f"{source}; no sales tax was charged", note, None, False
+    saved = record.get("invoice") if route == "/api/sales-receipts" else record
+    raw = saved.get("tax_rate") if isinstance(saved, dict) else None
+    try:
+        rate = None if raw in (None, "") or isinstance(raw, bool) else Decimal(str(raw))
+    except InvalidOperation:
+        rate = None
+    if rate is None or not rate.is_finite() or not 0 <= rate <= 1:
+        return source, tax["note"], None, True
+    if rate == 0:
+        note = (
+            f"{_UNREAD} and the document has a 0% sales tax rate. Ask the "
+            "user what rate applies."
+        )
+        return source, note, None, True
+    shown = _percent(rate * 100)
+    source = (
+        f"SlowBooks Pro's default ({shown}); the company's default rate could "
+        "not be read"
+    )
+    note = (
+        f"{_UNREAD} and SlowBooks Pro used its own default, {shown}. Tell the "
+        "user; if this sale is taxed at another rate, change the document's "
+        "tax_rate (a fraction: 0.0159 is 1.59%)."
+    )
+    return source, note, f"{shown} (SlowBooks Pro's default)", False
 
 
 def with_tax_rate(data, tax):
@@ -721,20 +923,43 @@ def with_left_blank(route: str, data, answer, tax=None, fallbacks=None):
             defaulted.append({"label": label, "value": value})
     extra: dict = {}
     if tax is not None:
+        source, note = tax["source"], tax["note"]
         if tax["rate"] is not None:
-            defaulted.append(
-                {"label": TAX_LABEL, "value": f"{tax['shown']} (the company's default)"}
+            shown = tax["shown"]
+            value = f"{shown} (the company's default)"
+            reason = _no_tax_reason(route, tax, record)
+            note = tax["taxed_note"]
+            if reason:
+                # the rate is on the document, and no tax was charged at it
+                value = f"{shown} (the company's default; no sales tax was charged)"
+                source = f"company default ({shown}); no sales tax was charged"
+                note = _no_tax_note(shown, reason)
+            defaulted.append({"label": TAX_LABEL, "value": value})
+        elif tax.get("unread"):
+            source, note, value, ask = _unread_default(route, tax, record)
+            if value is not None:
+                defaulted.append({"label": TAX_LABEL, "value": value})
+            elif ask:
+                blank.append(TAX_LABEL)
+        elif tax.get("credited") and "tax_amount" in record and _no_tax_on(record):
+            # the invoice's rate is on the memo, and no tax went back at it
+            source = f"{source}; no sales tax was charged"
+            note = (
+                "No tax_rate was given, so the credit memo carries the rate "
+                "of the invoice being credited, as SlowBooks Pro's form does; "
+                f"{tax['credited']}, so no sales tax is given back. Tell the "
+                "user that no sales tax was credited and why, not that tax "
+                "was given back."
             )
         elif tax["ask"]:
             blank.append(TAX_LABEL)
         # SlowBooks Pro may answer with a note of its own on the document (a
         # missing or expired exemption certificate): it is kept, in front of
         # ours, never written over
-        note = tax["note"]
         theirs = record.get("tax_note")
         if isinstance(theirs, str) and theirs.strip() and theirs.strip() not in note:
             note = f"{theirs.strip()} {note}"
-        extra = {"tax_rate_source": tax["source"], "tax_note": note}
+        extra = {"tax_rate_source": source, "tax_note": note}
     out = {"left_blank": blank, "defaulted": defaulted, **extra}
     if isinstance(answer, dict):
         return {**answer, **out}
@@ -845,14 +1070,14 @@ def paid_from_hold(client: ApiClient, route: str, data, tool: str):
             "Nothing was created yet: an expense needs the account it was paid "
             f"from. SlowBooks Pro's form would start at {label}. Ask the user "
             "whether it was paid from that account or which one, then call "
-            f"{tool} again with paid_from_account_id."
+            f"{tool} again with {_with_books('paid_from_account_id')}."
         )
     else:
         out["next"] = (
             "Nothing was created yet: an expense needs the account it was paid "
             "from, and the company has no bank account to suggest. Ask the "
             f"user which account paid it, then call {tool} again with "
-            "paid_from_account_id."
+            f"{_with_books('paid_from_account_id')}."
         )
     return out
 

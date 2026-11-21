@@ -785,7 +785,7 @@ def test_the_revoked_token_no_longer_reads_the_books(raw, client, db_session):
     from app.main import app
 
     record = _connect(client)
-    bot = TestClient(app)
+    bot = TestClient(app, client=("127.0.0.1", 50000))
     bot.headers["Authorization"] = f"Bearer {record['token']}"
     assert bot.get("/api/customers").status_code == 200
     link.link_path().write_text("")
@@ -852,9 +852,17 @@ def test_disconnect_leaves_a_token_someone_else_named_alike_alone(
     raw, client, db_session
 ):
     """Only the connection's own labels are revoked with an unreadable file:
-    "AI assistant (relay)" and "AI assistant (relay) <n>"."""
-    client.post(
+    "AI assistant (relay)" and "AI assistant (relay) <n>". Settings, API
+    Tokens no longer makes a token under the connection's name, so the
+    look-alike here is one made before that (put in the database itself)."""
+    from app.routes.api_tokens import issue_token
+
+    r = client.post(
         "/api/tokens", json={"label": "AI assistant (relay) spare", "role": "readonly"}
+    )
+    assert r.status_code == 400
+    issue_token(
+        db_session, label="AI assistant (relay) spare", role="readonly", created_by=""
     )
     _connect(client)
     link.link_path().write_text("")
@@ -903,6 +911,34 @@ def test_two_connects_at_once_make_one_record_and_one_token(
     # and once it is done, the press is free again
     r = client.post("/api/switchboard/connect")
     assert r.status_code == 409 and r.json()["detail"] == link.ALREADY
+
+
+def test_a_connect_while_the_record_is_being_changed_waits_then_says_so(
+    raw, client, db_session
+):
+    """Every change to the kept record is made under the record lock: a
+    Connect while another change holds it waits up to the press's deadline,
+    then says so, and asks the relay for nothing."""
+    held, done = threading.Event(), threading.Event()
+
+    def hold():
+        with link._record_lock():
+            held.set()
+            done.wait(10)
+
+    other = threading.Thread(target=hold)
+    other.start()
+    try:
+        assert held.wait(5)
+        r = _plain(client.post("/api/switchboard/connect"))
+        assert r.status_code == 409 and r.json()["detail"] == link.EDIT_BUSY
+    finally:
+        done.set()
+        other.join(10)
+    assert raw.calls == [] and _tokens(db_session) == []
+    assert not link.link_path().exists()
+    assert client.post("/api/switchboard/connect").status_code == 200
+    assert _tokens(db_session) == [("AI assistant (relay)", True)]
 
 
 def test_a_connect_made_by_another_process_meanwhile_wins(raw, client, db_session):
@@ -1137,19 +1173,29 @@ def test_a_kept_file_nested_too_deep_is_damaged_not_a_fault(raw, client, db_sess
 def test_disconnect_revokes_the_token_whatever_it_was_renamed_to(
     raw, client, db_session
 ):
-    """The connection's token is the one whose secret the file holds: an
-    administrator renaming it in Settings, API Tokens does not hide it."""
+    """The connection's token is the one whose secret the file holds: a
+    rename does not hide it. Settings, API Tokens refuses to rename it, so
+    the rename here is made in the database itself (an edited or restored
+    file)."""
     from fastapi.testclient import TestClient
 
     from app.main import app
 
     record = _connect(client)
-    bot = TestClient(app)
+    bot = TestClient(app, client=("127.0.0.1", 50000))
     bot.headers["Authorization"] = f"Bearer {record['token']}"
     assert bot.get("/api/customers").status_code == 200
     renamed = "Assistant on the office phone"
     r = client.put(f"/api/tokens/{record['token_id']}", json={"label": renamed})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 400
+    assert r.json()["detail"] == (
+        "This token belongs to the AI assistant connection; its name can't be "
+        "changed. Nothing was changed."
+    )
+    db_session.query(ApiToken).filter(ApiToken.id == record["token_id"]).update(
+        {"label": renamed}
+    )
+    db_session.commit()
     got = client.post("/api/switchboard/disconnect").json()
     assert got["revoked"] is True and got["deleted"] is True
     db_session.expire_all()
@@ -1167,7 +1213,14 @@ def test_disconnect_revokes_by_the_secret_not_by_a_number_someone_edited(
         "/api/tokens", json={"label": "the receipt service", "role": "readonly"}
     ).json()
     record = _connect(client)
-    link._save(dict(record, token_id=made["id"], token_label="the receipt service"))
+    edited = {"token_id": made["id"], "token_label": "the receipt service"}
+    link._save(
+        dict(
+            record,
+            **edited,
+            companies=[dict(record["companies"][0], **edited)],
+        )
+    )
     assert client.post("/api/switchboard/disconnect").json()["revoked"] is True
     db_session.expire_all()
     rows = {t.label: t.is_active for t in db_session.query(ApiToken).all()}
@@ -1307,7 +1360,10 @@ def test_an_ended_file_is_never_taken_for_another_processs_link(raw, client):
     with pytest.raises(link._AlreadyKept):
         link._clear_ended()
     assert json.loads(link.link_path().read_text()) == record
-    assert [p.name for p in link.link_path().parent.iterdir()] == [link.LINK_FILE]
+    # beside it only the record lock's own file, which is never deleted
+    assert sorted(p.name for p in link.link_path().parent.iterdir()) == sorted(
+        [link.LINK_FILE, link.LOCK_FILE]
+    )
 
 
 def _part_link(**fields):

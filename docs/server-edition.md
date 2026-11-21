@@ -228,10 +228,33 @@ random credential, with the token, in one file in the data folder readable
 by the server's user only. The panel shows the address to add as a
 connector in Claude or Grok, `https://relay.sbplive.com/mcp`, and a
 one-time sign-in code (ten minutes, once) to type on the relay's sign-in
-page. Disconnect closes the connection, unlinks and revokes the token. A
+page. Disconnect closes the connection, unlinks and revokes every company's token. A
 non-administrator sees the state and nothing to press; no API token can
-reach it. The connection belongs to the company it was made in, and on a
-server serving several companies it stays up while that company is served.
+reach it. It is made in one company; an administrator of each other
+company adds it there, with the **Add** button in that company's panel
+("Add Smith Plumbing to the AI connection"), and the assistant names which company's books it works in on
+every call. Showing a sign-in code, adding a company and Disconnect belong
+only to someone who is an administrator of every company on the connection:
+on a server that means signing in with the same username and password as an
+administrator of each of them (the company switch's own check; Disconnect
+skips a company that cannot be opened now only for the person who added it;
+for a connection made in beta.1, the person who made its token).
+A client
+company's administrator who is not one sees only that company, can take it
+off the connection, and never learns the other companies' names or how many
+there are. A company's access ends at once when the administrator who added
+it is deactivated or demoted there; it is added again with **Add** in its own
+panel, by someone who is an administrator of it and of every other company on
+the connection. A token you make whose name starts with "AI assistant"
+(SlowBooks Switchboard's, for example) is held to the same rule. A token reads
+only its own company from the company list and from the sign-in status. The
+sign-in screen itself (no token) still lists every company the server serves
+and their usernames, for the people choosing one: that is why the server
+belongs on a trusted network. The connection stays up while any
+company on it is served; a company that is not served now is said so on the
+panel, and the assistant is told so without anything being sent. On
+PostgreSQL the server serves one company, so the connection reaches only
+that one.
 The relay is free and comes with no guarantee: it may be slow, change, or
 stop, and it may not stay free without donations. A relay that cannot be
 reached never holds the server's start or a request to the books; the

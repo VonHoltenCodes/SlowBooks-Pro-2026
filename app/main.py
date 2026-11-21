@@ -82,6 +82,7 @@ from app.routes import reclassify as reclassify_routes
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
 from app.routes import switchboard as switchboard_routes
+from app.routes import whoami as whoami_routes
 from app.routes import classes as classes_routes
 from app.routes import jobs as jobs_routes
 from app.routes import preferences as preferences_routes
@@ -174,6 +175,7 @@ from app.services.closing_date import (
     password_from_header as _closing_password_from_header,
 )
 from app.services.api_token_service import ADMIN_TOKEN_REFUSAL
+from app.services.api_token_service import is_link_label as _is_link_label
 from app.services.api_token_service import resolve as _resolve_api_token
 from app.services.served_companies import CompanyUnavailable, sentence_of
 from app.services.pdf_service import PdfEngineMissing
@@ -181,6 +183,41 @@ from app.services.pdf_service import PdfEngineMissing
 # An API token's request names the company it works in with this header
 # (#358); a signed-in person's session carries its company instead.
 _COMPANY_HEADER = "X-SlowBooks-Company"
+# ...and every answer to a token says which company's books it came from,
+# so a client holding tokens for several companies can check it was
+# answered from the one it asked (the AI assistant connection does).
+_COMPANY_SERVED_HEADER = "X-SlowBooks-Company-Served"
+# A request with no sign-in whose company header this server cannot honor
+# (repeated, blank, not a company file's name, or a company it does not
+# serve now) is refused before its token is looked up, never answered from
+# another company. The sentence names nothing: no one has signed in yet.
+UNSERVED_COMPANY_REFUSAL = (
+    "This server does not serve that company for this request. Nothing was done."
+)
+# The AI assistant connection's tokens are used by this app's own line to
+# itself, never from another computer: a copied connection file is no use
+# elsewhere on the network.
+LINK_TOKEN_ADDRESS_REFUSAL = (
+    "This token works only for the AI assistant connection on this computer. "
+    "Nothing was done."
+)
+# An AI assistant's token whose maker is no longer an administrator of the
+# company: nobody revoked it, and the sentence says what did happen.
+MAKER_GONE_REFUSAL = (
+    'The API token "{label}" stopped working because the administrator who made '
+    "it is no longer an administrator of this company. Nothing was done. An "
+    "administrator can make a new one under Settings, API Tokens."
+)
+REVOKED_REFUSAL = (
+    'The API token "{label}" was revoked. '
+    "Ask an administrator for a new one under Settings, API Tokens."
+)
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
+# A 401 the gate gives a request's token (it matches nothing here, or it
+# was turned off) carries this, so a program holding the token can tell it
+# from a route's own 401 (a sign-in that failed, a webhook's signature) and
+# stop using only a token the gate refused.
+_TOKEN_REFUSED_HEADER = "X-SlowBooks-Token-Refused"
 
 
 def _payroll_secret_problem(
@@ -1404,12 +1441,94 @@ def _role_refusal(role: str, method: str = "POST", path: str = "") -> str:
 
 async def require_session(request: Request, call_next):
     try:
-        return await _require_session(request, call_next)
+        response = await _require_session(request, call_next)
     except CompanyUnavailable as exc:
         # The session's company cannot be opened now (#358): the gate itself
         # opens it (the company id, the copy's mode) before any route runs,
         # so the sentence is answered here too, as a 503, never a traceback.
-        return JSONResponse(status_code=503, content={"detail": sentence_of(exc)})
+        response = JSONResponse(status_code=503, content={"detail": sentence_of(exc)})
+    served = getattr(request.state, "company_served", None)
+    if served is not None:
+        response.headers[_COMPANY_SERVED_HEADER] = served
+    return response
+
+
+def _from_this_apps_own_address(request: Request) -> bool:
+    """The request comes from this computer's loopback address, or from the
+    one address this app listens on, which is the address the AI assistant
+    connection calls the app at (switchboard_link._app_base_url)."""
+    host = getattr(request.client, "host", None) or ""
+    if host in _LOOPBACK_HOSTS:
+        return True
+    from urllib.parse import urlsplit
+
+    from app.services.switchboard_link import _app_base_url
+
+    own = urlsplit(_app_base_url()).hostname or ""
+    return bool(host) and host == own
+
+
+def api_token_refusal(request: Request):
+    """(the token's principal, None) when the gate lets the request's API
+    token in, else (the principal or None, the response the gate refuses it
+    with). The gate and the sign-in status (/api/auth/status) both ask
+    this, so a token is refused by one rule wherever it is sent."""
+    token_principal = None
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        token_principal = _resolve_api_token(auth_header[7:].strip())
+    if token_principal is not None and token_principal.get("revoked"):
+        # A revoked token says so (#434): the client that holds it is
+        # usually unattended, and "Not authenticated" sent its operator
+        # to the sign-in page. A secret that matches nothing stays vague.
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": REVOKED_REFUSAL.format(label=token_principal["label"])},
+            headers={_TOKEN_REFUSED_HEADER: "1"},
+        )
+    if token_principal is not None and token_principal.get("maker_gone"):
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={
+                "detail": MAKER_GONE_REFUSAL.format(label=token_principal["label"])
+            },
+            headers={_TOKEN_REFUSED_HEADER: "1"},
+        )
+    if token_principal is None:
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": "Not authenticated"},
+            headers=(
+                {_TOKEN_REFUSED_HEADER: "1"}
+                if auth_header.startswith("Bearer ")
+                else None
+            ),
+        )
+    if (
+        token_principal.get("link") or _is_link_label(token_principal.get("label"))
+    ) and not _from_this_apps_own_address(request):
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": LINK_TOKEN_ADDRESS_REFUSAL},
+        )
+    # From here every answer to the token names the company it came
+    # from (require_session adds the header).
+    from app.services import served_companies as _sc
+
+    request.state.company_served = _sc.current_file() or ""
+    if token_principal.get("role") == "admin":
+        # Tokens have not been made as administrators since 2.29.0
+        # (#434), but one made earlier kept working until revoked
+        # (#659). It is refused now, with what to do instead; the
+        # row stays, flagged under Settings, API Tokens, until an
+        # administrator revokes it.
+        return token_principal, JSONResponse(
+            status_code=403,
+            content={
+                "detail": ADMIN_TOKEN_REFUSAL.format(label=token_principal["label"])
+            },
+        )
+    return token_principal, None
 
 
 async def _require_session(request: Request, call_next):
@@ -1479,39 +1598,9 @@ async def _require_session(request: Request, call_next):
         # Scoped API tokens: non-human principals (agents, integrations)
         # authenticate with `Authorization: Bearer sbp_...` and wear a role
         # exactly like a user. Session auth always wins when present.
-        auth_header = request.headers.get("authorization") or ""
-        if auth_header.startswith("Bearer "):
-            token_principal = _resolve_api_token(auth_header[7:].strip())
-        if token_principal is not None and token_principal.get("revoked"):
-            # A revoked token says so (#434): the client that holds it is
-            # usually unattended, and "Not authenticated" sent its operator
-            # to the sign-in page. A secret that matches nothing stays vague.
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": (
-                        f"The API token \"{token_principal['label']}\" was revoked. "
-                        "Ask an administrator for a new one under Settings, API Tokens."
-                    )
-                },
-            )
-        if token_principal is None:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Not authenticated"},
-            )
-        if token_principal.get("role") == "admin":
-            # Tokens have not been made as administrators since 2.29.0
-            # (#434), but one made earlier kept working until revoked
-            # (#659). It is refused now, with what to do instead; the
-            # row stays, flagged under Settings, API Tokens, until an
-            # administrator revokes it.
-            return JSONResponse(
-                status_code=403,
-                content={
-                    "detail": ADMIN_TOKEN_REFUSAL.format(label=token_principal["label"])
-                },
-            )
+        token_principal, refused = api_token_refusal(request)
+        if refused is not None:
+            return refused
         # Tokens cannot manage identities — a leaked bookkeeper token must
         # not be able to mint itself an admin token or a user account.
         if path.startswith(("/api/users", "/api/tokens")):
@@ -1550,6 +1639,8 @@ async def _require_session(request: Request, call_next):
         # get_db reads this to stamp audit attribution ("token:<label>")
         request.state.token_principal = {
             "username": "token:" + token_principal["label"],
+            "label": token_principal["label"],
+            "ends_with_maker": bool(token_principal.get("ends_with_maker")),
             "role": role,
             "allow_backups": allow_backups,
             "allow_payroll": allow_payroll,
@@ -1699,7 +1790,16 @@ class ActingUserContextMiddleware:
         override_token = _closing_date_password.set(override)
         # The company this request works in (#358), here for the same reason
         # as the username: every Session the request opens binds to it.
-        company_token = _served_company.set(_request_company(scope, session))
+        company = _request_company(scope, session)
+        if company is _UNSERVED:
+            _acting_username.reset(token)
+            _acting_source.reset(source_token)
+            _closing_date_password.reset(override_token)
+            response = JSONResponse(
+                status_code=421, content={"detail": UNSERVED_COMPANY_REFUSAL}
+            )
+            return await response(scope, receive, send)
+        company_token = _served_company.set(company)
         try:
             await self.app(scope, receive, send)
         finally:
@@ -1709,23 +1809,51 @@ class ActingUserContextMiddleware:
             _acting_username.reset(token)
 
 
-def _request_company(scope, session) -> str | None:
+# what _request_company answers for a company header the server cannot honor
+_UNSERVED = object()
+
+
+def _request_company(scope, session):
     """The company file a request works in: the one its session chose, or,
     for an API token's request (no sign-in), the one its
     X-SlowBooks-Company header names, where the token is then looked up.
-    None is the company the server was started for."""
+    None is the company the server was started for.
+
+    A request with no sign-in whose header is given more than once, blank,
+    not a company file's name, or names a company this server does not
+    serve now gets _UNSERVED, and is refused: it is never answered from
+    the company the server was started for instead. A header naming that
+    company is honored. A signed-in session ignores the header; a request
+    with no sign-in that carries the header or a token follows these rules
+    whatever company its cookie chose."""
     from app.services import served_companies
+    from app.services.company_service import safe_company_filename
 
     chosen = served_companies.chosen_file(session)
-    if chosen is not None or session.get("authenticated") is True:
+    if session.get("authenticated") is True:
         return chosen
     wanted = _COMPANY_HEADER.lower().encode("latin-1")
-    for name, value in scope.get("headers") or []:
-        if name == wanted:
-            return served_companies.chosen_file(
-                {served_companies.SESSION_FILE_KEY: value.decode("latin-1").strip()}
-            )
-    return None
+    headers = scope.get("headers") or []
+    given = [value for name, value in headers if name == wanted]
+    if not given:
+        # A token's request with no header is the started company's, even
+        # when its cookie chose another company before any sign-in (the
+        # sign-in screen's choice is for the person signing in, not for a
+        # token, which is looked up where it is asked for).
+        bearer = any(
+            name == b"authorization" and value[:7].lower() == b"bearer "
+            for name, value in headers
+        )
+        return None if bearer else chosen
+    if len(given) > 1:
+        return _UNSERVED
+    filename = given[0].decode("latin-1").strip()
+    if not filename or safe_company_filename(filename) != filename:
+        return _UNSERVED
+    if filename == served_companies.started_file():
+        return None
+    chosen = served_companies.chosen_file({served_companies.SESSION_FILE_KEY: filename})
+    return _UNSERVED if chosen is None else chosen
 
 
 # ---- Middleware stack ----
@@ -1857,6 +1985,7 @@ app.include_router(mercury.router)
 app.include_router(users_routes.router)
 app.include_router(api_tokens_routes.router)
 app.include_router(switchboard_routes.router)
+app.include_router(whoami_routes.router)
 app.include_router(tax.router)
 app.include_router(backups.router)
 app.include_router(company_file_routes.router)

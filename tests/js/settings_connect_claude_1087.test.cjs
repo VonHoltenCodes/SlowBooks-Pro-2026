@@ -1,8 +1,8 @@
 // Connect to AI assistant in Settings, Connections (#1087): the panel's states. The
 // words are for everyone; an administrator gets the buttons: Connect to AI assistant
 // when not connected; the connector address with Copy, Show a sign-in code
-// and Disconnect when connected here; nothing to press for a connection
-// made in another company. The code shows with its ten-minute life. A
+// and Disconnect when connected here; Add for a company not on the
+// connection, with no other company's name. The code shows with its ten-minute life. A
 // relay that cannot be reached says so. settings.js loaded alone, with the
 // helpers it calls stubbed.
 const assert = require('node:assert/strict');
@@ -50,7 +50,14 @@ const buttons = html => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].ma
 const state = html => (html.match(/id="claude-relay-state"[^>]*>([^<]*)</) || [])[1];
 
 const ADDRESS = 'https://relay.sbplive.com/mcp';
-const CONNECTED = { state: 'connected', linked: true, this_company: true, company: 'Larkspur Supply', address: ADDRESS, token_label: 'AI assistant (relay)', can_manage: true };
+// connected here, with this company alone on the connection, as its
+// administrator sees it
+const CONNECTED = {
+    state: 'connected', linked: true, on_link: true, this_company: true, company: 'Larkspur Supply',
+    here_file: 'larkspur.db', address: ADDRESS, token_label: 'AI assistant (relay)', can_manage: true,
+    companies: [{ file: 'larkspur.db', name: 'Larkspur Supply', books: 'larkspur~k3f9q2', state: 'ready', here: true }],
+    count_others: 0, can_code: true, can_take_off: true, can_disconnect: true, can_add: false,
+};
 
 test('not connected: the words, and Connect to AI assistant for an administrator only', async () => {
     const f = fixture({ '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true } });
@@ -70,8 +77,12 @@ test('connected: the address with Copy, a code and Disconnect; status only for o
     assert.equal(state(html), 'Connected');
     assert.equal((html.match(/<code id="claude-relay-address">([^<]*)</) || [])[1], ADDRESS);
     assert.ok(html.includes('Larkspur Supply'));
-    assert.deepEqual(buttons(html), ['Copy', 'Show a sign-in code', 'Disconnect']);
-    const g = fixture({ '/switchboard/status': { ...CONNECTED, can_manage: false } });
+    assert.deepEqual(buttons(html), ['Copy', 'Show a sign-in code', 'Disconnect the AI assistant']);
+    // someone who is not an administrator: the state, and no other company
+    const g = fixture({ '/switchboard/status': {
+        ...CONNECTED, can_manage: false, companies: undefined, count_others: undefined,
+        can_code: false, can_take_off: false, can_disconnect: false,
+    } });
     await g.page.loadSwitchboard();
     assert.equal(state(g.panel.innerHTML), 'Connected');
     assert.deepEqual(buttons(g.panel.innerHTML), []);
@@ -117,12 +128,19 @@ test('the relay cannot be reached: said in words', async () => {
     assert.ok(!g.panel.innerHTML.includes(sentence));
 });
 
-test('a connection made in another company: whose it is, nothing to press', async () => {
-    const f = fixture({ '/switchboard/status': { state: 'not_connected', linked: true, this_company: false, company: 'Larkspur Supply', address: '', can_manage: true, sentence: 'The AI assistant is connected to Larkspur Supply, not to this company.' } });
+test('another company is on the connection: this one is offered Add, with no other name', async () => {
+    // an administrator of this company who may add it: the server gives no
+    // other company's name or count
+    const f = fixture({ '/switchboard/status': {
+        state: 'not_connected', linked: true, on_link: false, this_company: false, company: '',
+        here_name: 'Smith Plumbing', address: '', can_manage: true, can_add: true,
+        can_code: false, can_take_off: false, can_disconnect: false,
+    } });
     await f.page.loadSwitchboard();
     assert.equal(state(f.panel.innerHTML), 'Not connected');
-    assert.ok(f.panel.innerHTML.includes('The AI assistant is connected to Larkspur Supply'));
-    assert.deepEqual(buttons(f.panel.innerHTML), []);
+    assert.ok(f.panel.innerHTML.includes("Add Smith Plumbing to the AI assistant connection, and the assistant can work Smith Plumbing&#39;s books as a bookkeeper. Every change it makes is recorded in Smith Plumbing&#39;s audit log as token:AI assistant (relay)."));
+    assert.deepEqual(buttons(f.panel.innerHTML), ['Add Smith Plumbing to the AI connection']);
+    assert.ok(!f.panel.innerHTML.includes('claude-relay-companies'));
 });
 
 test('Disconnect asks first, then draws the panel again', async () => {
@@ -324,5 +342,263 @@ test('a read asked before a press answered does not draw over what the press mad
     stale.resolve(NOT_LINKED);               // it says what was true before the press
     await read;
     assert.equal(state(f.panel.innerHTML), 'Connected');
-    assert.deepEqual(buttons(f.panel.innerHTML).slice(-2), ['Show a sign-in code', 'Disconnect']);
+    assert.deepEqual(buttons(f.panel.innerHTML).slice(-2), ['Show a sign-in code', 'Disconnect the AI assistant']);
+});
+
+// One connection, several companies (2.32.0-beta.2): what the panel says to
+// each person, by what the server gives them.
+const THREE = [
+    { file: 'harbor.db', name: 'Harbor Books', books: 'harbor~q7m2xa', state: 'ready', here: true },
+    { file: 'smith.db', name: 'Smith Plumbing', books: 'smith~k3f9q2', state: 'not_open_here', here: false },
+    { file: 'lake.db', name: 'Lake Dental', books: 'lake~p4ww7n', state: 'refused', here: false },
+];
+const MANAGER = {
+    ...CONNECTED, company: 'Harbor Books', here_file: 'harbor.db', companies: THREE, count_others: 2,
+};
+// The words of a piece of markup: tags are taken out until none is left, so
+// one that only appears once another is removed goes too.
+const text = html => {
+    let out = String(html);
+    let before;
+    do {
+        before = out;
+        out = out.replace(/<[^>]*>/g, '');
+    } while (out !== before);
+    return out.replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+};
+
+test('a manager sees every company, each with its note, and buttons named for their company', async () => {
+    const f = fixture({ '/switchboard/status': MANAGER });
+    await f.page.loadSwitchboard();
+    const html = f.panel.innerHTML;
+    assert.ok(text(html).includes('Connected. The AI assistant can work the books of: Harbor Books (this company), Smith Plumbing (not open on this computer), Lake Dental (turned off in that company).'));
+    assert.ok(text(html).includes('On this computer only the open company answers. When the assistant asks for another, open that company here.'));
+    assert.deepEqual(buttons(html), [
+        'Copy', 'Show a sign-in code', 'Take Harbor Books off the AI connection',
+        'Take Lake Dental off the AI connection', 'Disconnect the AI assistant',
+    ]);
+    // each name is a block keyed by its file, so a refresh keeps a selection in it
+    for (const co of THREE) assert.ok(html.includes(`id="claude-relay-co-${f.page.claudeKey(co.file)}"`), co.file);
+    assert.equal(new Set(buttons(html)).size, buttons(html).length);
+    // on a server, the note says so and the desktop line is not there
+    const g = fixture({ '/switchboard/status': { ...MANAGER, server_edition: true, companies: THREE.map(c => (c.state === 'not_open_here' ? { ...c, state: 'not_served' } : c)) } });
+    await g.page.loadSwitchboard();
+    assert.ok(text(g.panel.innerHTML).includes('Smith Plumbing (not served by this server now)'));
+    assert.ok(!g.panel.innerHTML.includes('claude-relay-desktop'));
+});
+
+test('each state of a company has its note', () => {
+    const f = fixture();
+    const said = {
+        not_open_here: 'not open on this computer', other_window: 'open in another window',
+        not_served: 'not served by this server now', locked: 'locked', refused: 'turned off in that company',
+        maker_gone: 'the person who added it is no longer an administrator there', ready: '',
+    };
+    for (const [st, words] of Object.entries(said)) assert.equal(f.page.claudeNote(st), words, st);
+});
+
+test('the sign-in code says it reaches every company listed', async () => {
+    const f = fixture({ '/switchboard/status': MANAGER, 'POST /switchboard/code': { code: 'shown', expires: null } });
+    await f.page.loadSwitchboard();
+    await f.page.claudeCode();
+    assert.ok(text(f.panel.innerHTML).includes('Anyone who signs an assistant in with this code can work every company listed above.'));
+    // with one company there is no list to point at
+    const g = fixture({ '/switchboard/status': CONNECTED, 'POST /switchboard/code': { code: 'shown', expires: null } });
+    await g.page.loadSwitchboard();
+    await g.page.claudeCode();
+    assert.ok(!g.panel.innerHTML.includes('claude-relay-code-reach'));
+});
+
+test('on the connection without power over it: this company alone, and Take off for its administrator', async () => {
+    const mine = {
+        state: 'connected', linked: true, on_link: true, this_company: true, company: 'Smith Plumbing',
+        here_file: 'smith.db', token_label: 'AI assistant (relay)', address: ADDRESS, can_manage: true,
+        can_take_off: true, can_code: false, can_disconnect: false, can_add: false,
+    };
+    const f = fixture({ '/switchboard/status': mine });
+    await f.page.loadSwitchboard();
+    const html = f.panel.innerHTML;
+    assert.ok(text(html).includes("Smith Plumbing is on this computer's AI assistant connection. The assistant works these books as a bookkeeper; every change is recorded here as token:AI assistant (relay)."));
+    assert.deepEqual(buttons(html), ['Take Smith Plumbing off the AI connection']);
+    assert.ok(!html.includes('Harbor') && !html.includes('Lake'));
+    assert.ok(!html.includes('claude-relay-address'));
+    // a bookkeeper: the same words, nothing to press
+    const g = fixture({ '/switchboard/status': { ...mine, can_manage: false, can_take_off: false } });
+    await g.page.loadSwitchboard();
+    assert.ok(g.panel.innerHTML.includes('claude-relay-on-link'));
+    assert.deepEqual(buttons(g.panel.innerHTML), []);
+});
+
+test('the server says why there is nothing to press: its sentence, no buttons', async () => {
+    for (const sentence of [
+        'An AI assistant connection already exists on this server. Only someone who is an administrator of every company on it can add Lake Dental.',
+        'On PostgreSQL this server serves one company, so the connection reaches only this one.',
+    ]) {
+        const f = fixture({ '/switchboard/status': { state: 'not_connected', linked: true, on_link: false, this_company: false, can_manage: true, sentence } });
+        await f.page.loadSwitchboard();
+        assert.ok(text(f.panel.innerHTML).includes(sentence));
+        assert.deepEqual(buttons(f.panel.innerHTML), []);
+    }
+    const g = fixture({ '/switchboard/status': { state: 'not_connected', linked: true, on_link: false, can_manage: false, sentence: 'Only an administrator can connect an AI assistant.' } });
+    await g.page.loadSwitchboard();
+    assert.ok(g.panel.innerHTML.includes('Only an administrator can connect an AI assistant.'));
+    assert.deepEqual(buttons(g.panel.innerHTML), []);
+});
+
+test('Add asks first in the exact words, then shows the company on the connection', async () => {
+    const offered = {
+        state: 'connected', linked: true, on_link: false, this_company: false, here_name: 'Smith Plumbing',
+        can_manage: true, can_add: true,
+    };
+    const added = { ...MANAGER, company: 'Smith Plumbing', here_file: 'smith.db', results: [{ file: 'smith.db', name: 'Smith Plumbing', result: 'added' }] };
+    const f = fixture({ '/switchboard/status': offered, 'POST /switchboard/add': added });
+    await f.page.loadSwitchboard();
+    await f.page.addClaudeCompany();
+    assert.equal(f.confirms[0], "Add Smith Plumbing? Every assistant already signed in to this connection, and any signed in later, will be able to read and change Smith Plumbing's books as a bookkeeper. You can take it off again here at any time.");
+    assert.deepEqual(f.sent.at(-1), ['POST', '/switchboard/add']);
+    assert.ok(f.panel.innerHTML.includes('claude-relay-companies'));
+    assert.equal(f.toasts.at(-1)[0], 'Smith Plumbing is on the AI assistant connection.');
+});
+
+test('Take off asks first in the exact words and names the file', async () => {
+    const answers = { '/switchboard/status': MANAGER, 'POST /switchboard/take-off': { ...MANAGER, companies: THREE.slice(1), results: [{ file: 'harbor.db', name: 'Harbor Books', result: 'ended' }] } };
+    const f = fixture(answers);
+    await f.page.loadSwitchboard();
+    await f.page.takeClaudeOff('');
+    assert.equal(f.confirms[0], 'Take Harbor Books off? Its token, AI assistant (relay), is turned off at once and the assistant can no longer reach these books. The other companies stay connected.');
+    assert.deepEqual(f.sent.at(-1), ['POST', '/switchboard/take-off']);
+    assert.equal(f.toasts.at(-1)[0], 'Harbor Books is off the AI assistant connection, and its token is turned off.');
+    // a dead entry of another company, by its own button
+    const g = fixture({ '/switchboard/status': MANAGER, 'POST /switchboard/take-off': { ...MANAGER, results: [{ file: 'lake.db', name: 'Lake Dental', result: 'later' }] } });
+    await g.page.loadSwitchboard();
+    await g.page.takeClaudeOff('lake.db');
+    assert.match(g.confirms[0], /^Take Lake Dental off the AI connection\? /);
+    assert.equal(g.toasts.at(-1)[0], 'Lake Dental is off the AI assistant connection. It is not open now; its token will be turned off the next time it is opened.');
+});
+
+test('Take off asked of a client administrator says nothing of other companies', async () => {
+    const mine = {
+        state: 'connected', linked: true, on_link: true, this_company: true, company: 'Smith Plumbing',
+        here_file: 'smith.db', token_label: 'AI assistant (relay) 2', address: ADDRESS, can_manage: true,
+        can_take_off: true, can_code: false, can_disconnect: false, can_add: false,
+    };
+    const f = fixture({ '/switchboard/status': mine, 'POST /switchboard/take-off': { ...mine, on_link: false, this_company: false, results: [{ file: 'smith.db', name: 'Smith Plumbing', result: 'ended' }] } });
+    await f.page.loadSwitchboard();
+    await f.page.takeClaudeOff('');
+    assert.equal(f.confirms[0], 'Take Smith Plumbing off? Its token, AI assistant (relay) 2, is turned off at once and the assistant can no longer reach these books.');
+    // a manager dropping a company whose token is already off there
+    const g = fixture({ '/switchboard/status': MANAGER, 'POST /switchboard/take-off': { ...MANAGER, results: [{ file: 'lake.db', name: 'Lake Dental', result: 'ended' }] } });
+    await g.page.loadSwitchboard();
+    await g.page.takeClaudeOff('lake.db');
+    assert.equal(g.confirms[0], 'Take Lake Dental off the AI connection? Its token is already turned off in that company; this removes it from the connection. The other companies stay connected.');
+});
+
+test('a company whose token\'s maker is no longer an administrator is said to be that, and offered Take off', async () => {
+    const gone = THREE.map(co => (co.file === 'lake.db' ? { ...co, state: 'maker_gone' } : co));
+    const status = { ...MANAGER, companies: gone };
+    const f = fixture({ '/switchboard/status': status, 'POST /switchboard/take-off': { ...status, results: [{ file: 'lake.db', name: 'Lake Dental', result: 'ended' }] } });
+    await f.page.loadSwitchboard();
+    const html = f.panel.innerHTML;
+    assert.ok(text(html).includes('Lake Dental (the person who added it is no longer an administrator there)'));
+    assert.ok(!text(html).includes('turned off in that company'));
+    assert.ok(buttons(html).includes('Take Lake Dental off the AI connection'));
+    await f.page.takeClaudeOff('lake.db');
+    assert.equal(f.confirms[0], 'Take Lake Dental off the AI connection? The person who added it is no longer an administrator there, so that company refuses its token; this removes it from the connection and turns the token off. The other companies stay connected.');
+});
+
+test('Disconnect from several companies asks in the exact words, then says which are not open', async () => {
+    const f = fixture({
+        '/switchboard/status': MANAGER,
+        'POST /switchboard/disconnect': {
+            unlinked: true, revoked: true, deleted: true, slug: 'ztnqj8djvg', sentence: 'x', say: true,
+            results: [
+                { file: 'harbor.db', name: 'Harbor Books', result: 'ended' },
+                { file: 'smith.db', name: 'Smith Plumbing', result: 'ended' },
+                { file: 'lake.db', name: 'Lake Dental', result: 'later' },
+            ],
+        },
+    });
+    await f.page.loadSwitchboard();
+    await f.page.disconnectClaude();
+    assert.equal(f.confirms[0], "Disconnect the AI assistant from all 3 companies? The relay forgets this connection and each company's AI assistant token is turned off: Harbor Books, Smith Plumbing, Lake Dental. A company that is not open now has its token turned off the next time it opens; until then it cannot be used, because its secret is deleted from this computer.");
+    assert.equal(f.page._claude.error, 'Disconnected. Lake Dental is not open now; its token will be turned off the next time it is opened.');
+    const two = f.page.claudeDisconnectQuestion(MANAGER, THREE.slice(0, 2));
+    assert.match(two, /^Disconnect the AI assistant from both companies\? /);
+});
+
+test('a busy connection says so, and the sentence stays', async () => {
+    const busy = Object.assign(new Error('Another change to the AI assistant connection is under way. Try again in a moment.'), { status: 409 });
+    const offered = { state: 'connected', linked: true, on_link: false, here_name: 'Smith Plumbing', can_manage: true, can_add: true };
+    const f = fixture({ '/switchboard/status': offered, 'POST /switchboard/add': busy });
+    await f.page.loadSwitchboard();
+    await f.page.addClaudeCompany();
+    await f.page.loadSwitchboard();
+    assert.ok(f.panel.innerHTML.includes('Another change to the AI assistant connection is under way. Try again in a moment.'));
+});
+
+test('Connect pressed while a connection exists: "Use Add instead" stays while Add is offered', async () => {
+    const already = Object.assign(new Error('An AI assistant connection already exists on this computer. Use Add instead.'), { status: 409 });
+    const answers = { '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true }, 'POST /switchboard/connect': already };
+    const f = fixture(answers);
+    await f.page.loadSwitchboard();
+    answers['/switchboard/status'] = { state: 'connected', linked: true, on_link: false, here_name: 'Smith Plumbing', can_manage: true, can_add: true };
+    await f.page.connectClaude();
+    assert.ok(f.panel.innerHTML.includes('Use Add instead.'));
+    assert.ok(buttons(f.panel.innerHTML).includes('Add Smith Plumbing to the AI connection'));
+});
+
+test('a company name is shown as text, never as markup', async () => {
+    const odd = [{ file: 'x.db', name: '<img src=x onerror=1>', books: 'x~aaaaaa', state: 'refused', here: false }, THREE[0]];
+    const f = fixture({ '/switchboard/status': { ...MANAGER, companies: odd } });
+    await f.page.loadSwitchboard();
+    assert.ok(!f.panel.innerHTML.includes('<img'));
+    assert.ok(f.panel.innerHTML.includes('&lt;img src=x onerror=1&gt;'));
+});
+
+test('Add names the token it will make, " 2" and all', async () => {
+    const offered = {
+        state: 'connected', linked: true, on_link: false, this_company: false, here_name: 'Smith Plumbing',
+        can_manage: true, can_add: true, next_label: 'AI assistant (relay) 2',
+    };
+    const f = fixture({ '/switchboard/status': offered });
+    await f.page.loadSwitchboard();
+    assert.ok(text(f.panel.innerHTML).includes("Every change it makes is recorded in Smith Plumbing's audit log as token:AI assistant (relay) 2."));
+});
+
+test('a manager offered no code is told which companies it waits for', async () => {
+    const f = fixture({ '/switchboard/status': { ...MANAGER, can_code: false, code_needs: ['Lake Dental'] } });
+    await f.page.loadSwitchboard();
+    assert.ok(text(f.panel.innerHTML).includes('A sign-in code reaches every company on the connection, so it is offered only while each of them can answer now and you are an administrator of each. Not now: Lake Dental.'));
+    assert.ok(!buttons(f.panel.innerHTML).includes('Show a sign-in code'));
+    const g = fixture({ '/switchboard/status': MANAGER });
+    await g.page.loadSwitchboard();
+    assert.ok(!g.panel.innerHTML.includes('claude-relay-code-needs'));
+});
+
+test('this company, turned off, is "turned off in this company"', async () => {
+    const mine = THREE.map(c => (c.here ? { ...c, state: 'refused' } : c));
+    const f = fixture({ '/switchboard/status': { ...MANAGER, companies: mine } });
+    await f.page.loadSwitchboard();
+    assert.ok(text(f.panel.innerHTML).includes('Harbor Books (this company; turned off in this company)'));
+    assert.ok(text(f.panel.innerHTML).includes('Lake Dental (turned off in that company)'));
+});
+
+test('a long company name wraps in the list and in its button', async () => {
+    const long = 'L'.repeat(85);
+    const list = THREE.map(c => (c.file === 'lake.db' ? { ...c, name: long } : c));
+    const f = fixture({ '/switchboard/status': { ...MANAGER, companies: list } });
+    await f.page.loadSwitchboard();
+    const html = f.panel.innerHTML;
+    assert.match(html, /id="claude-relay-companies" style="[^"]*overflow-wrap:anywhere/);
+    assert.match(html, /id="claude-take-off-lake_2e_db"[^>]*overflow-wrap:anywhere/);
+});
+
+test('a company turned off here is offered Add again', async () => {
+    const dead = {
+        ...CONNECTED, can_add: true, here_name: 'Larkspur Supply', next_label: 'AI assistant (relay)',
+        companies: [{ ...CONNECTED.companies[0], state: 'refused' }],
+    };
+    const f = fixture({ '/switchboard/status': dead });
+    await f.page.loadSwitchboard();
+    assert.ok(buttons(f.panel.innerHTML).includes('Add Larkspur Supply to the AI connection'));
 });
