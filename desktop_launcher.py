@@ -618,16 +618,17 @@ def launch_company(
         except company_file.CompanyFileLocked as exc:
             raise RuntimeError(str(exc)) from exc
 
-    # A file from before 2.29.0 is not migrated by this build (#769): read
-    # as it lies, refused with one sentence before anything opens it
-    # writable or remembers it as the last company, and recorded where the
-    # wait for the server reads its reasons.
+    # A file from before 2.29.0 (#769), or one last opened by a newer
+    # SlowBooks Pro (W-186), is not migrated by this build: read as it
+    # lies, refused with one sentence before anything opens it writable or
+    # remembers it as the last company, and recorded where the wait for the
+    # server reads its reasons.
     from app.services import migration_floor, startup_progress
 
-    too_old = migration_floor.file_problem(db_path, key)
-    if too_old:
-        startup_progress.refuse(too_old, startup_progress_path())
-        raise migration_floor.BelowMigrationFloor(too_old)
+    refused = migration_floor.file_refusal(db_path, key)
+    if refused:
+        startup_progress.refuse(refused, startup_progress_path())
+        migration_floor.refuse(refused)
 
     # A second launch while the app is already open would lose the fight
     # for the port and fail confusingly -- say what's actually wrong.
@@ -694,6 +695,11 @@ PICKER_HTML = """<!DOCTYPE html>
   body { font-family: "Segoe UI", system-ui, sans-serif; background: #f4f6f8;
          margin: 0; display: flex; justify-content: center; }
   .wrap { max-width: 460px; width: 100%; padding: 40px 24px; }
+  .pw-eye-wrap { position: relative; display: block; }
+  .pw-eye-wrap > input { width: 100%; padding-right: 34px; box-sizing: border-box; }
+  .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #667; cursor: pointer; font-size: 15px; line-height: 1; }
+  .pw-eye[aria-pressed="true"], .pw-eye:hover { color: #1a2b3c; }
+  .pw-eye:focus-visible { outline: 2px solid #a37a29; outline-offset: 1px; }  /* the theme's --focus-ring (#1020) */
   h1 { font-size: 22px; margin: 0 0 4px; color: #1a2b3c; }
   .sub { color: #667; font-size: 13px; margin-bottom: 24px; }
   .company { background: #fff; border: 1px solid #d8dee4; border-radius: 8px;
@@ -703,6 +709,12 @@ PICKER_HTML = """<!DOCTYPE html>
   .company .name { font-weight: 600; color: #1a2b3c; }
   .company .file { font-size: 11px; color: #99a; }
   .company .note { font-size: 12px; color: #a0522d; margin-top: 4px; line-height: 1.4; }
+  .company.missing { cursor: default; }
+  .company.missing:hover { border-color: #d8dee4; box-shadow: none; }
+  .company.missing .name { color: #778; }
+  .company .remove { flex: none; margin-left: 12px; padding: 6px 10px; border: 1px solid #c6ccd4; border-radius: 6px;
+                     background: #e8ecf1; color: #1a2b3c; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .company .remove:focus-visible { outline: 2px solid #a37a29; outline-offset: 1px; }
   .open { color: #2f6fed; font-size: 12px; font-weight: 600; }
   .newco { margin-top: 20px; background: #fff; border: 1px dashed #b9c2cc;
            border-radius: 8px; padding: 16px; }
@@ -726,6 +738,8 @@ PICKER_HTML = """<!DOCTYPE html>
                    color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
   #unlock button.alt { background: #e8ecf1; color: #1a2b3c; }
   #unlock button:disabled { background: #a9bce0; cursor: default; }
+  #unlock .pw-eye, #unlock .pw-eye:disabled { flex: none; padding: 0; border-radius: 4px; background: transparent; color: #667; width: 26px; height: 26px; }
+  #unlock .pw-eye[aria-pressed="true"], #unlock .pw-eye:hover { color: #1a2b3c; }
   #unlock .switch { font-size: 12px; color: #2f6fed; cursor: pointer; background: none; border: 0;
                     padding: 0; margin-top: 10px; text-decoration: underline; flex: none; font-weight: 400; }
 </style>
@@ -747,7 +761,7 @@ PICKER_HTML = """<!DOCTYPE html>
       <input id="unlock-user" autocomplete="username" list="unlock-admins">
       <datalist id="unlock-admins"></datalist>
       <label for="unlock-pass">Password</label>
-      <input id="unlock-pass" type="password" autocomplete="current-password">
+      <span class="pw-eye-wrap"><input id="unlock-pass" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false"><button type="button" class="pw-eye" id="unlock-eye" aria-pressed="false" aria-label="Show password" title="Show password" onclick="toggleEye()"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5C6.5 5 2.3 9.3 1 12c1.3 2.7 5.5 7 11 7s9.7-4.3 11-7c-1.3-2.7-5.5-7-11-7z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg></button></span>
     </div>
     <div id="unlock-recovery" hidden>
       <label for="unlock-key">Recovery key</label>
@@ -763,12 +777,24 @@ PICKER_HTML = """<!DOCTYPE html>
 </div>
 <script>
 var unlocking = null;  // the file waiting for its key
+var EYE_ON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5C6.5 5 2.3 9.3 1 12c1.3 2.7 5.5 7 11 7s9.7-4.3 11-7c-1.3-2.7-5.5-7-11-7z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+var EYE_OFF = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M12 5C6.5 5 2.3 9.3 1 12c1.3 2.7 5.5 7 11 7s9.7-4.3 11-7c-1.3-2.7-5.5-7-11-7z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 20L20 4" stroke="currentColor" stroke-width="2"/></svg>';
+function setEye(show) {  // the show-password eye (#970, #997): the field and the button agree
+  var i = document.getElementById('unlock-pass'), b = document.getElementById('unlock-eye');
+  i.type = show ? 'text' : 'password';
+  b.setAttribute('aria-pressed', show ? 'true' : 'false');
+  b.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  b.title = b.getAttribute('aria-label');
+  b.innerHTML = show ? EYE_OFF : EYE_ON;
+}
+function toggleEye() { setEye(document.getElementById('unlock-pass').type === 'password'); }
 function showUnlock(file, name, admins) {
   unlocking = file;
   document.getElementById('unlock-title').textContent = 'Unlock ' + (name || 'the company file');
   document.getElementById('unlock-admins').innerHTML = (admins || []).map(function (a) { return '<option value="' + esc(a) + '">'; }).join('');
   if ((admins || []).length === 1) document.getElementById('unlock-user').value = admins[0];
   document.getElementById('unlock-pass').value = '';
+  setEye(false);
   document.getElementById('unlock-key').value = '';
   document.getElementById('unlock').hidden = false;
   setStatus('');
@@ -804,10 +830,11 @@ async function unlock() {
   setStatus((result && result.error) || 'Could not unlock the company file.', true);
   btn.disabled = false;
   document.getElementById('unlock-pass').value = '';
+  setEye(false);
   (recovery ? document.getElementById('unlock-key') : document.getElementById('unlock-pass')).focus();
 }
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Enter' && !document.getElementById('unlock').hidden && e.target.closest('#unlock')) unlock();
+  if (e.key === 'Enter' && !document.getElementById('unlock').hidden && e.target.closest('#unlock') && !e.target.closest('.pw-eye')) unlock();  // Enter on the eye only toggles it (#989)
 });
 function setStatus(msg, isError) {
   const el = document.getElementById('status');
@@ -847,22 +874,46 @@ async function refresh() {
   list.innerHTML = info.companies.map(function (c) {
     const last = c.file === info.last_opened ? ' <span class="open">last opened</span>' : '';
     const sample = c.sample ? ' <span class="open">sample</span>' : '';
+    // a company whose file was deleted by hand (#1054): said so, and taken
+    // off the list on request; nothing on disk is touched
+    if (c.missing) {
+      return '<div class="company missing" data-file="' + esc(c.file) + '">' +
+        '<div><div class="name">' + esc(c.name) + '</div>' +
+        '<div class="file">' + esc(c.file) + '</div>' +
+        '<div class="note">Missing: the company file is no longer in the company folder.</div></div>' +
+        '<button type="button" class="remove" data-remove="' + esc(c.file) + '">Remove from list</button></div>';
+    }
     return '<div class="company" data-file="' + esc(c.file) + '">' +
       '<div><div class="name">' + esc(c.name) + sample + last + '</div>' +
       '<div class="file">' + esc(c.file) + '</div>' +
       (c.note ? '<div class="note">' + esc(c.note) + '</div>' : '') + '</div>' +
       '<div class="open">Open &rsaquo;</div></div>';
   }).join('');
-  list.querySelectorAll('.company').forEach(function (el) {
+  list.querySelectorAll('.company:not(.missing)').forEach(function (el) {
     el.onclick = function () { openCompany(el.getAttribute('data-file'), el.querySelector('.name').firstChild.textContent); };
+  });
+  list.querySelectorAll('.company.missing .remove').forEach(function (btn) {
+    btn.onclick = function () { removeFromList(btn.getAttribute('data-remove'), btn.closest('.company').querySelector('.name').textContent); };
   });
   // First launch of the window: straight into the last company. The
   // sign-in screen it lands on offers "Choose a different company", and
-  // Sign out comes back here with auto_open off.
-  const last = info.companies.find(function (c) { return c.file === info.last_opened; });
+  // Sign out comes back here with auto_open off. Once only: the list
+  // drawn again after a Remove from list does not open anything.
+  const last = !autoOpenTried && info.companies.find(function (c) { return c.file === info.last_opened && !c.missing; });
   if (info.auto_open && last) {
     openCompany(last.file, last.name);
   }
+  autoOpenTried = true;
+}
+var autoOpenTried = false;
+async function removeFromList(file, name) {
+  const result = await window.pywebview.api.remove_from_list(file);
+  if (result && result.success) {
+    setStatus('Removed ' + (name || file) + ' from the list. Nothing in the company folder was changed.');
+  } else {
+    setStatus((result && result.error) || 'Could not remove the company from the list.', true);
+  }
+  await refresh();
 }
 async function openCompany(file, name) {
   setBusy(true);
@@ -1331,6 +1382,24 @@ class DocumentViewerApi:
         return _reveal(self._path)
 
 
+# The window's title (W-206): the product's name on the picker, and
+# "<company> — SlowBooks Pro 2026" while a company is open, as the page's
+# own document.title reads (app.js showCompany). WebView2 and macOS's
+# WebKit window never take a page's title, so the page hands the company's
+# name over (set_window_title) and the picker puts the plain one back.
+# Nothing finds the window by its title: a second launch is caught by the
+# port (_server_already_running), the gate's tools find it by its process
+# (Windows) or owner name (macOS), and DevTools targets by the page's title.
+WINDOW_TITLE = "SlowBooks Pro 2026"
+
+
+def window_title_for(company: str = "") -> str:
+    """The title for a company's name: control characters out, the name cut
+    to 100 characters; the plain product name for none."""
+    name = re.sub(r"[\x00-\x1f\x7f]+", " ", str(company or "")).strip()[:100].strip()
+    return f"{name} — {WINDOW_TITLE}" if name else WINDOW_TITLE
+
+
 class PickerApi:
     """js_api bridge, available as window.pywebview.api on both the company
     picker AND the main app window (the same Window object is reused --
@@ -1401,7 +1470,10 @@ class PickerApi:
             import webview
 
             webview.create_window(
-                title or "SlowBooks Pro 2026", html=html, zoomable=True
+                title or "SlowBooks Pro 2026",
+                html=html,
+                zoomable=True,
+                text_select=True,
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -1431,7 +1503,42 @@ class PickerApi:
         try:
             import webview
 
-            webview.create_window(title or "SlowBooks Pro 2026", url, zoomable=True)
+            webview.create_window(
+                title or "SlowBooks Pro 2026", url, zoomable=True, text_select=True
+            )
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True}
+
+    def print_document_pdf(self, title: str, base64_data: str) -> dict:
+        """Print a document's PDF, fetched and base64-encoded by the page,
+        through the Mac's print panel (#1030, 2.32.0 gate NEW-255).
+
+        On a Mac a document's Print prints its saved PDF, not the sheet:
+        WebKit ignores ``break-before: avoid`` and ``break-inside: avoid``,
+        so an invoice whose last rows ended near a sheet's foot printed one
+        more sheet carrying only its footer, or nothing, with no rule that
+        could stop it; the PDF, drawn by WeasyPrint, keeps the footer with
+        the block before it. The panel is the same one the sheet's print
+        opened, with orientation, paper size and scale (NEW-209). On Windows
+        and Linux the sheet prints itself as before (Chromium honours the
+        rules), and this answers ``unsupported`` so the page goes on to it."""
+        if sys.platform != "darwin":
+            return {
+                "success": False,
+                "unsupported": True,
+                "error": "The page prints itself on this system",
+            }
+        import base64
+
+        try:
+            data = base64.b64decode(base64_data)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        if data[:5] != b"%PDF-":
+            return {"success": False, "error": "That is not a PDF"}
+        try:
+            mac_print_pdf(data, str(title or ""))
         except Exception as exc:
             return {"success": False, "error": str(exc)}
         return {"success": True}
@@ -1503,7 +1610,11 @@ class PickerApi:
             except OSError:
                 url, api = dest.as_uri(), None
             webview.create_window(
-                title or "SlowBooks Pro 2026", url, js_api=api, zoomable=True
+                title or "SlowBooks Pro 2026",
+                url,
+                js_api=api,
+                zoomable=True,
+                text_select=True,
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -1643,6 +1754,17 @@ class PickerApi:
     def _set_startup_status(self, text: str) -> None:
         self._startup_status = text
 
+    def set_window_title(self, company: str = "") -> dict:
+        """The open company's name in the window's title (W-206); "" puts
+        the plain product name back."""
+        title = window_title_for(company)
+        try:
+            if self._window is not None:
+                self._window.set_title(title)
+        except Exception:
+            return {"success": False}
+        return {"success": True, "title": title}
+
     def text_size(self) -> dict:
         """The Text size setting for the company picker (#813). The picker
         is the launcher's own page, with no origin, so it cannot read the
@@ -1669,6 +1791,17 @@ class PickerApi:
             "last_opened": company_service.get_last_opened(),
             "auto_open": self._auto_open,
         }
+
+    def remove_from_list(self, filename: str) -> dict:
+        """Take a company whose file is missing off the list (#1054): the
+        list's entry only, never a file; a company whose file is there is
+        refused with a sentence."""
+        from app.services import company_service
+
+        try:
+            return company_service.remove_missing_from_list(str(filename or ""))
+        except Exception as exc:  # surfaced in the picker, not a traceback
+            return {"success": False, "error": str(exc)}
 
     def create_company(self, name: str) -> dict:
         from app.services import company_service
@@ -1702,6 +1835,10 @@ class PickerApi:
             time.sleep(0.15)
             try:
                 if window is not None:
+                    try:
+                        window.set_title(WINDOW_TITLE)  # no company open (W-206)
+                    except Exception:
+                        pass
                     window.load_html(PICKER_HTML)
             except Exception:
                 pass  # the picker is a convenience; the app is still running
@@ -2786,7 +2923,7 @@ def run_window(port: int, log_fh=None) -> int:
     geometry = restore_window_geometry(load_window_geometry(geometry_path), placement)
     api = PickerApi(port, log_fh)
     api._window = webview.create_window(
-        "SlowBooks Pro 2026",
+        WINDOW_TITLE,
         html=PICKER_HTML,
         js_api=api,
         width=geometry["width"],
@@ -2796,6 +2933,12 @@ def run_window(port: int, log_fh=None) -> int:
         maximized=geometry["maximized"],
         min_size=MIN_WINDOW_SIZE,
         zoomable=True,
+        # pywebview's default (False) puts body { user-select: none } on every
+        # page, so no figure, name or sentence could be selected or copied
+        # (W-209); never chosen, only never changed. The app's own CSS keeps
+        # the chrome (sidebar, top bar, buttons, headings of columns) from
+        # selecting instead (style.css, "What can be selected").
+        text_select=True,
     )
     geometry_tracker = WindowGeometryTracker(geometry, screens=screens)
     try:
@@ -2922,9 +3065,9 @@ def _migrate_other_companies(started: str, output=None) -> list[str]:
                 continue
         from app.services import migration_floor
 
-        too_old = migration_floor.file_problem(db_path, key)
-        if too_old:  # #769: from before 2.29.0, left as it is
-            print(f"WARNING: {filename} is not served. {too_old}")
+        refused = migration_floor.file_refusal(db_path, key)
+        if refused:  # from before 2.29.0 (#769) or a newer build's (W-186)
+            print(f"WARNING: {filename} is not served. {refused}")
             skipped.append(filename)
             continue
         try:
@@ -3341,6 +3484,16 @@ def run_smoke_test(port: int = 3999) -> int:
         print("smoke: FAIL the encrypted scratch file did not read back")
         return 1
 
+    # NEW-265: outbound HTTPS with Python's default context (the relay, the
+    # currency rate) finds certificate authorities in the bundle
+    if sys.platform == "darwin":
+        from app.tls_trust import default_context_has_cas
+
+        print(f"smoke: SSL_CERT_FILE={os.environ.get('SSL_CERT_FILE', '')}")
+        if not default_context_has_cas():
+            print("smoke: FAIL a default TLS context loads no certificate authority")
+            return 1
+
     print("smoke: PASS")
     return 0
 
@@ -3536,6 +3689,63 @@ def install_mac_print_panel() -> bool:
     return True
 
 
+def _pdf_is_landscape(document, quartz) -> bool:
+    """Whether a PDFKit document's first page is wider than tall. Anything
+    unexpected reads as portrait, the panel's own start."""
+    try:
+        page = document.pageAtIndex_(0)
+        size = page.boundsForBox_(quartz.kPDFDisplayBoxMediaBox).size
+        return size.width > size.height
+    except Exception:
+        return False
+
+
+def mac_print_pdf(data: bytes, title: str) -> None:
+    """Queue a PDF for the Mac's print panel (#1030): PDFKit draws its pages
+    as they are, at their own size (#1040: scaled down to the printer's
+    imageable area a letter page printed at about 96%, which would also
+    move a pre-printed deposit slip's figures; every document keeps half an
+    inch or more of margin), and the panel offers orientation, paper size and scale
+    as the sheet's print does (install_mac_print_panel). AppKit works on
+    the main thread alone and a js_api call arrives on another, so the
+    panel is queued for the main thread and this returns at once; whatever
+    goes wrong there is written to the launcher's output, never raised
+    into pywebview's bridge thread."""
+    import AppKit
+    import Foundation
+    import Quartz
+    from PyObjCTools import AppHelper
+
+    def run():
+        try:
+            nsdata = Foundation.NSData.dataWithBytes_length_(data, len(data))
+            document = Quartz.PDFDocument.alloc().initWithData_(nsdata)
+            if document is None:
+                raise ValueError("PDFKit could not read the PDF")
+            info = AppKit.NSPrintInfo.sharedPrintInfo().copy()
+            # A landscape PDF (Profit & Loss by month) opens the panel on
+            # Landscape (#1044): the shared print info is portrait, and
+            # autoRotate only turned the page sideways on a portrait sheet.
+            if _pdf_is_landscape(document, Quartz):
+                info.setOrientation_(AppKit.NSPaperOrientationLandscape)
+            operation = document.printOperationForPrintInfo_scalingMode_autoRotate_(
+                info, Quartz.kPDFPrintPageScaleNone, True
+            )
+            operation.setJobTitle_(title or "SlowBooks Pro 2026")
+            panel = operation.printPanel()
+            panel.setOptions_(
+                panel.options()
+                | AppKit.NSPrintPanelShowsOrientation
+                | AppKit.NSPrintPanelShowsPaperSize
+                | AppKit.NSPrintPanelShowsScaling
+            )
+            operation.runOperation()
+        except Exception as exc:
+            print(f"Could not print the PDF: {exc}")
+
+    AppHelper.callAfter(run)
+
+
 def main() -> int:
     # Make every stdio write total BEFORE argparse can print anything.
     # A frozen console=False build launched with redirected stdio (any
@@ -3559,6 +3769,17 @@ def main() -> int:
                 _stream.reconfigure(encoding="utf-8", errors="replace")
             except (AttributeError, OSError, ValueError):
                 pass  # not a TextIOWrapper (test harness, log redirect)
+
+    # Before anything can make an HTTPS connection (the relay's line, the
+    # currency rate): the frozen macOS build's OpenSSL looks for its CAs in
+    # the CI builder's folder; point it at the bundled certifi file instead
+    # (NEW-265). The server child inherits the variable.
+    try:
+        from app.tls_trust import use_bundled_ca_if_needed
+
+        use_bundled_ca_if_needed()
+    except ImportError:
+        pass  # a source run from elsewhere imports app later, after its path
 
     # Not a user flag — the frozen server child (see start_server) and
     # argparse must never meet, so handle it before parsing.

@@ -3,6 +3,7 @@
 <head>
     <title>{{ title }}</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.8in 0.9in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11pt; color: #1a1a2e; line-height: 1.5; }
     .company-logo { display: block; max-height: 60px; max-width: 200px; margin-bottom: 6px; }

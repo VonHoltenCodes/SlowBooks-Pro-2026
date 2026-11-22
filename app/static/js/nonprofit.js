@@ -22,11 +22,8 @@ const ReleasesPage = {
         </tr>`).join('');
         return `
             <div class="page-header">
-                <h2>Releases from Restriction</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Releases from Restriction</h2>${hint("When a restricted fund spends for its purpose, release that much to net assets without donor restrictions. The amount suggested is the fund's spending in the period less what was already released.", 'Releases from Restriction')}</div>
                 <button class="btn btn-primary" onclick="ReleasesPage.showForm()">+ Release</button>
-            </div>
-            <div class="toolbar" style="font-size:11px; color:var(--gray-500);">
-                When a restricted fund spends for its purpose, release that much to net assets without donor restrictions. The amount suggested is the fund's spending in the period less what was already released.
             </div>
             ${releases.length === 0 ? `<div class="empty-state"><p>No releases yet.</p></div>` : `
             <div class="table-container"><table>
@@ -114,11 +111,10 @@ const ReleasesPage = {
                     ${r.memo ? `<div style="color:var(--text-muted)">${escapeHtml(r.memo)}</div>` : ''}
                 </div>
                 <div style="text-align:right">
-                    <div style="font-size:20px;font-weight:700">${formatCurrency(r.amount)}</div>
+                    <div style="font-size:20px;font-weight:700">${formatCurrency(r.amount)} ${hint(`Posted as a debit to Net Assets With Donor Restrictions and a credit to Net Assets Without, both tagged to the ${T('class')}.`, 'Amount')}</div>
                     <div>${r.status === 'void' ? '<span style="color:var(--text-danger);font-weight:600">VOID</span>' : `<button data-destructive class="btn btn-sm btn-secondary" onclick="ReleasesPage.voidEntry(${r.id})">Void</button>`}</div>
                 </div>
             </div>
-            <div style="font-size:11px;color:var(--gray-500)">Posted as a debit to Net Assets With Donor Restrictions and a credit to Net Assets Without, both tagged to the ${T('class')}.</div>
             <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
     },
 
@@ -174,14 +170,11 @@ const AllocationsPage = {
         </tr>`).join('');
         return `
             <div class="page-header">
-                <h2>Functional Allocations</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Functional Allocations</h2>${hint(`Rules split a shared cost across program, management and fundraising (and across ${T('classes')}). Run one at month end on what is still unassigned; use the same rule from the Split button on a bill or journal line.`, 'Functional Allocations')}</div>
                 <div>
                     <button class="btn btn-secondary" onclick="AllocationsPage.showRule()">+ Allocation Rule</button>
                     <button class="btn btn-primary" onclick="AllocationsPage.showRun()">Run a Rule</button>
                 </div>
-            </div>
-            <div class="toolbar" style="font-size:11px; color:var(--gray-500);">
-                Rules split a shared cost across program, management and fundraising (and across ${T('classes')}). Run one at month end on what is still unassigned; use the same rule from the Split button on a bill or journal line.
             </div>
             <h3 style="margin:12px 0 6px; font-size:13px;">Rules</h3>
             ${rules.length === 0 ? `<div class="empty-state"><p>No allocation rules yet.</p></div>` : `
@@ -230,8 +223,7 @@ const AllocationsPage = {
                     <div class="form-group full-width"><label>Notes</label><input name="notes" value="${escapeHtml(rule?.notes || '')}"></div>
                     ${rule ? `<div class="form-group full-width"><label style="font-weight:normal"><input type="checkbox" name="is_active" ${rule.is_active ? 'checked' : ''}> Active</label></div>` : ''}
                 </div>
-                <h3 style="margin:12px 0 8px;font-size:14px;">Targets</h3>
-                <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">Each share lands in a ${T('class')}, a function, or both. Weights are relative (70/20/10, or square feet).</div>
+                <div style="display:flex; gap:4px; align-items:center; margin:12px 0 8px;"><h3 style="margin:0;font-size:14px;">Targets</h3>${hint(`Each share lands in a ${T('class')}, a function, or both. Weights are relative (70/20/10, or square feet).`, 'Targets')}</div>
                 <div class="table-container"><table class="line-items-table">
                     <thead><tr><th scope="col">${T('Class')}</th><th scope="col">Function</th><th scope="col" class="alloc-job-col">${T('Job')} (hours)</th><th scope="col" class="col-qty">Weight</th><th scope="col"></th></tr></thead>
                     <tbody id="rule-targets">${targets.map(t => AllocationsPage.targetHtml(t)).join('')}</tbody>
@@ -416,7 +408,8 @@ const Donors = {
         if (to === null) return;
         try {
             const r = await API.post(`/donors/gifts/${kind}/${id}/acknowledgment/email`, { recipient: to.trim() || null });
-            toast(`Acknowledgment sent to ${r.recipient}`);
+            toast(r.note ? `Acknowledgment sent to ${r.recipient}. ${r.note}` : `Acknowledgment sent to ${r.recipient}`,
+                r.note ? 'warning' : 'success');
         } catch (err) { toast(err.message, 'error'); }
     },
 };

@@ -15,7 +15,7 @@ const EstimatesPage = {
             filter: con ? {
                 id: 'est-status-filter',
                 rowSelector: '.est-row',
-                options: [['pending', 'Pending'], ['accepted', 'Accepted'], ['rejected', 'Lost'], ['converted', 'Converted']],
+                options: [['pending', 'Pending'], ['accepted', 'Accepted'], ['rejected', 'Lost'], ['converted', 'Converted'], ['void', 'Void']],
             } : null,
             headerHtml: `<button class="btn btn-primary" onclick="EstimatesPage.showForm()">+ New Estimate</button>` + capNote,
             empty: `<p>No estimates yet.</p>
@@ -32,8 +32,8 @@ const EstimatesPage = {
                     <td class="amount">${formatCurrency(est.total)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.view(${est.id})">View</button>
-                        <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>
-                        ${con ? EstimatesPage.constructionActionsHtml(est) : (est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : '')}
+                        ${est.status === 'void' ? '' : `<button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>`}
+                        ${est.status === 'void' ? '' : con ? EstimatesPage.constructionActionsHtml(est) : (est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : '')}
                     </td>
                 </tr>`,
         });
@@ -86,6 +86,7 @@ const EstimatesPage = {
                 <strong>Date:</strong> ${formatDate(est.date)}<br>
                 ${est.expiration_date ? `<strong>Expires:</strong> ${formatDate(est.expiration_date)}<br>` : ''}
                 <strong>Status:</strong> ${statusBadge(est.status)}
+                ${EstimatesPage.voidedNoteHtml(est)}
             </div>
             ${bodyHtml}
             ${construction && est.terms ? `<p style="margin-top:12px;white-space:pre-wrap;"><strong>Terms, inclusions and exclusions</strong>\n${escapeHtml(est.terms)}</p>` : ''}
@@ -95,10 +96,11 @@ const EstimatesPage = {
             <div class="form-actions">
                 ${EstimatesPage.acceptButtonHtml(est)}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Save PDF</button>
-                <button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>
+                ${est.status === 'void' ? '' : `<button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>`}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/print-preview','_blank')">Print</button>
                 ${construction && est.status === 'pending' ? `<button class="btn btn-secondary" onclick="EstimatesPage.markLost(${est.id})">Mark lost</button>` : ''}
-                ${est.status !== 'converted' && !(construction && (est.bills_by_pay_app || est.status === 'rejected')) ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
+                ${est.status !== 'converted' && est.status !== 'void' && !(construction && (est.bills_by_pay_app || est.status === 'rejected')) ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
+                ${EstimatesPage.canVoid(est) ? `<button data-destructive class="btn btn-danger" onclick="EstimatesPage.void(${est.id})">Void Estimate</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
         InvoicesPage.loadAttachments('estimate', est.id);
@@ -152,14 +154,14 @@ const EstimatesPage = {
         // the markup rows below are the GC's view; the owner's PDF can spread
         // them into the package prices instead (the form's "Show markup rows")
         const hiddenNote = est.show_markup_rows === false
-            ? '<div style="margin-top:8px;color:var(--gray-500);font-size:12px;">On the owner\'s PDF the markup rows are hidden: each package\'s price carries its share and one subtotal is printed.</div>' : '';
+            ? ' ' + hint('On the owner\'s PDF the markup rows are hidden: each package\'s price carries its share and one subtotal is printed.', 'Markup rows') : '';
         return `<div class="table-container"><table>
                 <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${groupsHtml}</tbody>
             </table></div>
-            ${allowBlock}${altBlock}${upBlock}${hiddenNote}
+            ${allowBlock}${altBlock}${upBlock}
             <div class="invoice-totals">
-                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(t.subtotal)}</span></div>
+                <div class="total-row"><span class="label">Subtotal${hiddenNote}</span><span class="value">${formatCurrency(t.subtotal)}</span></div>
                 ${mRow('General conditions', t.gc_pct, t.gc)}
                 ${mRow('Insurance', t.insurance_pct, t.insurance)}
                 ${mRow('Fee', t.fee_pct, t.fee)}
@@ -205,13 +207,13 @@ const EstimatesPage = {
                 <div class="form-grid">
                     <div class="form-group full-width"><label>Recipient Email *</label>
                         <input name="recipient" type="email" required value="${escapeHtml(email)}"></div>
-                    <div class="form-group"><label>CC <span class="form-hint">Optional. Separate addresses with commas.</span></label>
+                    <div class="form-group"><label>CC ${hint('Optional. Separate addresses with commas.', 'CC')}</label>
                         <input name="cc" placeholder="office@example.com"></div>
-                    <div class="form-group"><label>BCC <span class="form-hint">Optional. Hidden from the recipient.</span></label>
+                    <div class="form-group"><label>BCC ${hint('Optional. Hidden from the recipient.', 'BCC')}</label>
                         <input name="bcc" placeholder="books@example.com"></div>
                     <div class="form-group full-width"><label>Subject</label>
                         <input name="subject" placeholder="Estimate #${escapeHtml(est.estimate_number)}"></div>
-                    <div class="form-group full-width"><label>Message <span class="form-hint">Appears at the top of the email, above the attached PDF.</span></label>
+                    <div class="form-group full-width"><label>Message ${hint('Appears at the top of the email, above the attached PDF.', 'Message')}</label>
                         <textarea name="message"></textarea></div>
                 </div>
                 <div class="form-actions">
@@ -225,14 +227,16 @@ const EstimatesPage = {
         e.preventDefault();
         const form = e.target;
         try {
-            await API.post(`/estimates/${id}/email`, {
+            const res = await API.post(`/estimates/${id}/email`, {
                 recipient: form.recipient.value,
                 cc: form.cc.value.trim() || null,
                 bcc: form.bcc.value.trim() || null,
                 subject: form.subject.value.trim() || null,
                 message: form.message.value,
             });
-            toast('Estimate emailed');
+            // a copy the mail server refused is said with it
+            toast(res && res.note ? `Estimate emailed. ${res.note}` : 'Estimate emailed',
+                res && res.note ? 'warning' : 'success');
             closeModal();
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -440,8 +444,7 @@ const EstimatesPage = {
                 ${f('bond_pct', est.bond_pct, 'Bond')}
             </div>
             <label style="display:block; margin-top:6px;"><input type="checkbox" name="markup_allowances" ${est.markup_allowances ? 'checked' : ''} onchange="EstimatesPage.recalc()"> Apply the markups to allowances too (off by default)</label>
-            <label style="display:block; margin-top:6px;"><input type="checkbox" name="show_markup_rows" ${est.show_markup_rows === false ? '' : 'checked'}> Show the markup rows on the owner's bid</label>
-            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Off, the owner's PDF spreads the markups into each package's price and prints one subtotal. The totals here do not change.</div>`;
+            <label style="display:block; margin-top:6px;"><input type="checkbox" name="show_markup_rows" ${est.show_markup_rows === false ? '' : 'checked'}> Show the markup rows on the owner's bid ${hint("Off, the owner's PDF spreads the markups into each package's price and prints one subtotal. The totals here do not change.", 'Show the markup rows')}</label>`;
     },
 
     // The terms / inclusions / exclusions the owner's PDF prints above the
@@ -625,7 +628,7 @@ const EstimatesPage = {
         const alt = $('#est-bid-alternates');
         if (alt) alt.innerHTML = t.alternates.length
             ? '<strong>Alternates</strong> <span style="color:var(--gray-500)">(add / deduct)</span>' + t.alternates.map(a =>
-                `<div><label><input type="checkbox" ${a.accepted ? 'checked' : ''} onchange="EstimatesPage.toggleAlternate(${a.idx}, this.checked)"> ${escapeHtml(a.desc || '(alternate)')} — ${formatCurrency(a.amount)}${a.accepted ? ' <span style="color:var(--gray-500)">(taken, at cost; markups in the rows above)</span>' : ''}</label></div>`).join('')
+                `<div><label><input type="checkbox" ${a.accepted ? 'checked' : ''} onchange="EstimatesPage.toggleAlternate(${a.idx}, this.checked)"> ${escapeHtml(a.desc || '(alternate)')} — ${formatCurrency(a.amount)}${a.accepted ? ' ' + hint('(taken, at cost; markups in the rows above)', a.desc || '(alternate)') : ''}</label></div>`).join('')
             : '';
         const up = $('#est-bid-unitprices');
         if (up) up.innerHTML = t.unitPrices.length
@@ -675,6 +678,55 @@ const EstimatesPage = {
         try {
             await API.post(`/estimates/${id}/accept`, {});
             toast('Estimate accepted; job budget locked');
+            closeModal();
+            App.refresh();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Void is offered on an estimate that is not void and did not become an
+    // invoice (#1128); the server refuses one a job is built on, in a sentence.
+    canVoid(est) {
+        return est.status !== 'void' && est.status !== 'converted' && !est.converted_invoice_id;
+    },
+
+    // A void estimate's who, when and why, in the open: it is the estimate's state.
+    voidedNoteHtml(est) {
+        if (est.status !== 'void') return '';
+        // stored in UTC; a stamp read back without its zone is UTC too
+        const at = est.voided_at ? String(est.voided_at) : '';
+        const when = at ? formatDate(/(Z|[+-]\d\d:?\d\d)$/i.test(at) ? at : at + 'Z') : '';
+        const by = est.voided_by ? ` by ${escapeHtml(est.voided_by)}` : '';
+        const why = est.void_reason ? `: ${escapeHtml(est.void_reason)}` : '';
+        return `<div class="estimate-voided" role="status" style="margin-top:6px;color:var(--danger, #991b1b);">Voided${when ? ' ' + when : ''}${by}${why}. It is kept with its number and left out of the closing rate.</div>`;
+    },
+
+    // Void asks first, in a dialog of its own: what voiding does, an optional
+    // reason, and Cancel before Void. The dialog opens on the reason, never
+    // on Void (NEW-32).
+    async void(id) {
+        let est;
+        try { est = await API.get(`/estimates/${id}`); }
+        catch (err) { toast(err.message, 'error'); return; }
+        openModal(`Void Estimate #${est.estimate_number}`, `
+            <form id="estimate-void-form" onsubmit="EstimatesPage.confirmVoid(event, ${est.id})">
+                <p style="margin-top:0;">Void estimate #${escapeHtml(est.estimate_number)} for ${escapeHtml(est.customer_name || '')} (${formatCurrency(est.total)})? It stays in the list with its number, marked void, and is left out of the Estimate Closing Rate. It can't be edited, converted or emailed afterwards, and a void can't be undone.</p>
+                <div class="form-group">
+                    <label for="estimate-void-reason">Reason (optional)</label>
+                    <input id="estimate-void-reason" name="reason" maxlength="500" autocomplete="off">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="EstimatesPage.view(${est.id})">Cancel</button>
+                    <button type="submit" data-destructive class="btn btn-danger">Void Estimate</button>
+                </div>
+            </form>`);
+    },
+
+    async confirmVoid(e, id) {
+        e.preventDefault();
+        const reason = (e.target.reason.value || '').trim();
+        try {
+            await API.post(`/estimates/${id}/void`, { reason: reason || null });
+            toast('Estimate voided');
             closeModal();
             App.refresh();
         } catch (err) { toast(err.message, 'error'); }
@@ -737,9 +789,9 @@ const EstimatesPage = {
             ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}${CostTypes.cellHtml('line-cost-type', line.cost_type || null)}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
             ${EstimatesPage.unitCell(line)}
-            ${EstimatesPage.showsCost() ? `<td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" aria-label="Unit cost" oninput="EstimatesPage.recalc()"></td>
-            <td><input class="line-markup" type="number" step="0.0001" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" aria-label="Markup percent" oninput="EstimatesPage.recalc()"></td>` : ''}
-            <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" aria-label="Price" oninput="EstimatesPage.recalc()"></td>
+            ${EstimatesPage.showsCost() ? `<td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" oninput="EstimatesPage.recalc()"></td>
+            <td><input class="line-markup" type="number" step="0.0001" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" oninput="EstimatesPage.recalc()"></td>` : ''}
+            <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="EstimatesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="EstimatesPage.removeLine(${idx})">X</button></td>
@@ -749,13 +801,15 @@ const EstimatesPage = {
     // A commercial-bid line that carries its own markup (made through the
     // API) keeps it: the markup shows under the cost, and its rate shows the
     // marked-up price read-only (#774).
+    // It is named by its line: nameFields puts the number right as the row
+    // lands and whenever the lines change (data-line-name).
     keptMarkupHtml(line) {
         // kept on every company's rows, so a Business or Nonprofit save does
         // not drop the rule that priced the line in construction (#774);
         // only construction prices by it, so only there is it shown
         if (line.markup_pct == null) return '';
         if (!Terms.isConstruction()) return `<input type="hidden" class="line-markup" value="${escapeHtml(line.markup_pct)}">`;
-        return `<label style="display:block; font-size:11px; color:var(--text-muted);">+<input class="line-markup" type="number" step="0.0001" min="-100" max="10000" style="width:64px;" value="${escapeHtml(line.markup_pct)}" aria-label="Markup percent" title="This line's own markup on its cost" oninput="EstimatesPage.recalc()">%</label>`;
+        return `<label style="display:block; font-size:11px; color:var(--text-muted);">+<input class="line-markup" type="number" step="0.0001" min="-100" max="10000" style="width:64px;" value="${escapeHtml(line.markup_pct)}" aria-label="Markup percent, line 1" data-line-name title="This line's own markup on its cost" oninput="EstimatesPage.recalc()">%</label>`;
     },
 
     addLine() {
@@ -767,8 +821,8 @@ const EstimatesPage = {
 
     removeLine(idx) {
         const row = $(`[data-eline="${idx}"]`);
-        if (row) row.remove();
-        EstimatesPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => EstimatesPage.recalc())) EstimatesPage.recalc();
     },
 
     itemSelected(idx) {
@@ -914,6 +968,7 @@ const EstimatesPage = {
             data.terms = form.terms ? form.terms.value : null;
         }
 
+        if (!ZeroTotal.ask('Estimate', EstimatesPage.recalc().total)) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {

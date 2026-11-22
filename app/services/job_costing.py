@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from app.models.accounts import Account, AccountType
 from app.models.cost_codes import CostCode
 from app.services.account_tree import forms_cycle
+from app.services.terminology import said
 from app.models.estimates import Estimate
 from app.models.job_costing import (
     DEFAULT_COST_TYPES,
@@ -166,7 +167,10 @@ def line_cost_type(
         if cost_type not in cost_type_map(db):
             raise HTTPException(
                 status_code=422,
-                detail=f"Unknown cost type '{cost_type}' — add it under Settings → Cost Types",
+                detail=said(
+                    "Unknown cost type '{}' — add it under Settings → Cost Types",
+                    cost_type,
+                ),
             )
         return cost_type
     if cost_code_id:
@@ -174,6 +178,20 @@ def line_cost_type(
         if code:
             return code.cost_type
     return None
+
+
+def refuse_unknown_line_costs(db: Session, lines) -> None:
+    """A sales line's cost code and cost type (#1055), checked before
+    anything is written: a code that is not on the chart, or a type the
+    cost_types table does not have, is refused with a 422 that names it.
+    Lines without them pass, as every sales line did before."""
+    for ln in lines:
+        code_id = getattr(ln, "cost_code_id", None)
+        if code_id is not None and db.get(CostCode, code_id) is None:
+            raise HTTPException(
+                status_code=422, detail=f"Cost code {code_id} was not found"
+            )
+        line_cost_type(db, code_id, getattr(ln, "cost_type", None))
 
 
 # ---------------------------------------------------------------------------
@@ -1395,6 +1413,82 @@ def _is_construction(db: Session) -> bool:
     return terms_from_db(db).is_construction
 
 
+def voided_invoice_line_dims(db: Session, lines) -> dict:
+    """{line id: (cost_code_id, cost_type)} for the lines of an invoice's
+    void posted before the void carried each line's code and type
+    (NEW-262, 2.32.0 gate): read as the line of the invoice it reverses, so
+    a company voided under an older build reads right with no migration.
+
+    `lines` is [(TransactionLine, Transaction, Account)]. A line of an
+    "invoice_void" entry with no code and no type is paired with a line of
+    the invoice's own posting on the same account, its debit and credit
+    swapped and its memo the void's ("VOID: " + the original's), each
+    original line used once. Lines that are alike in all of those but the
+    code read in posting order; any pairing of them nets each row to the
+    same figure, since each void line takes back one original line's
+    amount whole. A line that pairs with nothing (a late fee's, a cost of
+    goods reversal) keeps its own."""
+    from app.models.invoices import Invoice
+
+    void_ids = {
+        txn.source_id
+        for ln, txn, _acct in lines
+        if txn.source_type == "invoice_void"
+        and ln.cost_code_id is None
+        and not ln.cost_type
+    }
+    if not void_ids:
+        return {}
+    rows = (
+        db.query(Invoice.id, Invoice.transaction_id, Invoice.job_id)
+        .filter(Invoice.id.in_(void_ids), Invoice.transaction_id.isnot(None))
+        .all()
+    )
+    postings = {inv_id: txn_id for inv_id, txn_id, _job in rows}
+    if not postings:
+        return {}
+    header_job = {txn_id: job for _inv, txn_id, job in rows}
+    pool: dict = {}
+    for ol in (
+        db.query(TransactionLine)
+        .filter(TransactionLine.transaction_id.in_(set(postings.values())))
+        .order_by(TransactionLine.id)
+    ):
+        if ol.cost_code_id is None and not ol.cost_type:
+            continue
+        # a line on another job than the invoice's: the old void put its
+        # reversal on the invoice's job, which this does not move
+        if ol.job_id is not None and ol.job_id != header_job[ol.transaction_id]:
+            continue
+        key = (
+            ol.transaction_id,
+            ol.account_id,
+            Decimal(str(ol.debit or 0)),
+            Decimal(str(ol.credit or 0)),
+            void_line_memo(ol.description),
+        )
+        pool.setdefault(key, []).append((ol.cost_code_id, ol.cost_type))
+    out = {}
+    for ln, txn, _acct in lines:
+        if (
+            txn.source_type != "invoice_void"
+            or ln.cost_code_id is not None
+            or ln.cost_type
+            or txn.source_id not in postings
+        ):
+            continue
+        key = (
+            postings[txn.source_id],
+            ln.account_id,
+            Decimal(str(ln.credit or 0)),
+            Decimal(str(ln.debit or 0)),
+            ln.description or "",
+        )
+        if pool.get(key):
+            out[ln.id] = pool[key].pop(0)
+    return out
+
+
 def job_cost_tree(
     db: Session,
     job_id: int,
@@ -1409,10 +1503,15 @@ def job_cost_tree(
 
     A contractor's tree reads as of `end_date` throughout: the change
     orders' budgets in effect by then and the commitments as Commitment
-    Status reads them that day. Its revenue is compared by section, not by
-    cost type (a pay application's revenue has no cost type): the type
-    branches carry cost only, and `revenue_sections` puts each section's
-    budgeted and actual revenue beside its budgeted and actual cost."""
+    Status reads them that day.
+
+    Revenue sits on the cost code and type its line or budget names (an
+    invoice line's own, #1055, else the code's type), so every figure in
+    the totals is on a row (#1066); revenue with no code and no type is
+    `unassigned_revenue`, a row of its own. A contractor's revenue is also
+    compared by section: `revenue_sections` puts each section's budgeted and
+    actual revenue beside its budgeted and actual cost, the billed markups
+    spread over the sections."""
     construction = _is_construction(db)
     # a contractor's commitments read as of the end date, as Commitment
     # Status does; other companies keep today's open commitments
@@ -1443,6 +1542,7 @@ def job_cost_tree(
     if end_date:
         q = q.filter(Transaction.date <= end_date)
     lines = q.order_by(Transaction.date, Transaction.id, TransactionLine.id).all()
+    void_dims = voided_invoice_line_dims(db, lines)
 
     # committed = the remaining, unbilled part of each open commitment line
     # (amount − billed_amount), so the number stays "open PO value not yet
@@ -1500,20 +1600,28 @@ def job_cost_tree(
         return ("uncoded", t or "other")
 
     for ln, txn, acct in lines:
-        k = key_for(ln.cost_code_id, ln.cost_type)
+        code_id, line_ct = void_dims.get(ln.id, (ln.cost_code_id, ln.cost_type))
+        k = key_for(code_id, line_ct)
+        is_income = acct.account_type == AccountType.INCOME
+        if is_income and k == ("uncoded", "other") and not ln.cost_type:
+            # revenue with no cost code and no cost type has a row of its
+            # own (#1066), not Other's "No cost code"
+            k = ("revenue_uncoded",)
         f = fig.setdefault(k, _blank())
-        if acct.account_type == AccountType.INCOME:
+        if is_income:
             amt = Decimal(str(ln.credit)) - Decimal(str(ln.debit))
+            # on the code and type the line names (#1055), so every figure
+            # in the Total row is on a row above it (#1066); a contractor's
+            # revenue is compared by section as well
+            f["act_revenue"] += amt
             if construction:
-                section_cell(ln.cost_code_id)["act_revenue"] += amt
-            else:
-                f["act_revenue"] += amt
+                section_cell(code_id)["act_revenue"] += amt
             kind = "income"
         else:
             amt = Decimal(str(ln.debit)) - Decimal(str(ln.credit))
             f["actual"] += amt
             if construction:
-                section_cell(ln.cost_code_id)["actual"] += amt
+                section_cell(code_id)["actual"] += amt
             kind = "cost"
         line_rows.setdefault(k, []).append(
             {
@@ -1550,12 +1658,11 @@ def job_cost_tree(
             f["changes"] += Decimal(str(b.amount))
         else:
             f["original"] += Decimal(str(b.amount))
+        f["est_revenue"] += Decimal(str(b.revenue_amount or 0))
         if construction:
             sc = section_cell(b.cost_code_id)
             sc["budget"] += Decimal(str(b.amount))
             sc["est_revenue"] += Decimal(str(b.revenue_amount or 0))
-        else:
-            f["est_revenue"] += Decimal(str(b.revenue_amount or 0))
 
     # build the code tree per cost type with roll-ups. A code node appears
     # under a type when its subtree carries any figure for that type OR the
@@ -1624,9 +1731,11 @@ def job_cost_tree(
                 },
             }
         )
-    # whole-job budgets (no code, no type) sit outside the type branches
+    # whole-job budgets (no code, no type) sit outside the type branches,
+    # and so does revenue with no code and no type (#1066)
+    unassigned_revenue = fig.get(("revenue_uncoded",), _blank())
     for k in job_level:
-        grand[k] += job_level[k]
+        grand[k] += job_level[k] + unassigned_revenue[k]
 
     def strip(node):
         node.pop("_raw", None)
@@ -1642,9 +1751,6 @@ def job_cost_tree(
             db, job_id, budgets, sections, section_of, start_date, end_date
         )
         revenue_sections = _revenue_sections(sections, code_by_id)
-        for sc in sections.values():
-            grand["est_revenue"] += sc["est_revenue"]
-            grand["act_revenue"] += sc["act_revenue"]
     totals = _finish(grand)
     # A contractor's projected final cost carries the budget nothing has taken
     # up yet, so a trade not bought reads as cost to come, not a saving. It is
@@ -1680,11 +1786,57 @@ def job_cost_tree(
         "end_date": end_date.isoformat() if end_date else None,
         "types": type_nodes,
         "job_level_budget": fin(job_level),
+        "unassigned_revenue": {
+            "figures": fin(unassigned_revenue),
+            "lines": line_rows.get(("revenue_uncoded",), []),
+        },
         "totals": totals,
     }
     if revenue_sections is not None:
         out["revenue_sections"] = revenue_sections
     return out
+
+
+# The figures a cost tree row is judged by for Hide zero balances (#1052):
+# budget (original and changes), committed, actual and the revenue pair.
+_ROW_FIGURES = (
+    "original",
+    "changes",
+    "committed",
+    "actual",
+    "est_revenue",
+    "act_revenue",
+)
+
+
+def _row_has_figures(f: dict) -> bool:
+    return any(abs(f.get(k) or 0) >= 0.005 for k in _ROW_FIGURES)
+
+
+def hide_zero_rows(tree: dict) -> dict:
+    """The cost tree without the cost codes that carry nothing (Hide zero
+    balances, #1052, as #625 on the financial reports): a code with no
+    budget, no committed cost, no actual cost and no revenue is left out,
+    and a cost type left with nothing goes with it. Its totals are the
+    tree's own, untouched, so they read the same either way; a code with a
+    figure keeps its parent, whose roll-up carries it."""
+
+    def keep(node):
+        if not _row_has_figures(node["figures"]):
+            return None
+        return {
+            **node,
+            "children": [k for k in (keep(ch) for ch in node["children"]) if k],
+        }
+
+    types = []
+    for ty in tree["types"]:
+        codes = [k for k in (keep(n) for n in ty["codes"]) if k]
+        un = ty["uncoded"]
+        if not codes and not _row_has_figures(ty["figures"]) and not un["lines"]:
+            continue
+        types.append({**ty, "codes": codes})
+    return {**tree, "types": types, "hide_zero": True}
 
 
 # The schedule-of-values kinds that carry the estimate's markups.
@@ -1776,10 +1928,17 @@ def _spread_markup_revenue(
     unassigned["act_revenue"] -= billed
 
 
+# The section row for what has no cost code. The cost tree above it calls
+# its own row "Revenue with no cost code"; this one carries cost as well as
+# revenue, so it is "No cost code": one phrase for the one thing, where the
+# two tables on the page said "Unassigned" and "Revenue with no cost code".
+NO_COST_CODE = "No cost code"
+
+
 def _revenue_sections(sections: dict, code_by_id: dict) -> list[dict]:
     """The cost tree's revenue by section: each section's budgeted cost,
-    actual cost, budgeted and actual revenue, in code order, the Unassigned
-    row (no code: markup lines, a whole-job budget) last."""
+    actual cost, budgeted and actual revenue, in code order, the No cost
+    code row (markup lines, a whole-job budget) last."""
     out = []
     for sid, f in sections.items():
         if not any(f.values()):
@@ -1789,8 +1948,8 @@ def _revenue_sections(sections: dict, code_by_id: dict) -> list[dict]:
             {
                 "cost_code_id": sid,
                 "code": code.code if code else "",
-                "name": code.name if code else "Unassigned",
-                "label": code.label if code else "Unassigned",
+                "name": code.name if code else NO_COST_CODE,
+                "label": code.label if code else NO_COST_CODE,
                 "budget": float(_q(f["budget"])),
                 "actual": float(_q(f["actual"])),
                 "est_revenue": float(_q(f["est_revenue"])),

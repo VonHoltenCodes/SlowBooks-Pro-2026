@@ -20,30 +20,14 @@ const MigrationPage = {
         ).join('');
         return `
             <div class="page-header">
-                <h2>Migrate Data</h2>
-                <div style="font-size:10px; color:var(--text-muted);">
-                    Bring your accounting history in from another system
-                </div>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Migrate Data</h2>${hint('Bring your accounting history in from another system', 'Migrate Data')}</div>
             </div>
             <div class="card" style="max-width:640px;">
                 <div class="form-group" style="max-width:260px;">
                     <label>Coming from</label>
                     <select id="migration-source" data-write onchange="MigrationPage.reset()">${opts}</select>
                 </div>
-                <p style="font-size:12px; margin:8px 0;">
-                    Export and upload together: the <strong>chart of accounts</strong>
-                    and <strong>general ledger / journals / transactions</strong>
-                    (required), plus a <strong>trial balance</strong> when your system
-                    offers one (recommended — enables balance verification). Files are
-                    recognized by name; CSV, tab-separated and Excel exports all work,
-                    and a <strong>zip</strong> is read as the files inside it. From
-                    QuickBooks Online, upload the Export data zip as downloaded, with
-                    its <strong>A/R Aging Detail</strong> report beside it (Reports →
-                    A/R Aging Detail → Export to Excel) to carry the open invoices and
-                    unapplied payments over, and its <strong>Account List</strong> report
-                    (Reports → Account List → Export to Excel) to give every account its
-                    number, type and description.
-                </p>
+                <p id="migration-hint" style="font-size:12px; margin:8px 0;">${MigrationPage._hint(selected)}</p>
                 <input type="file" id="migration-files" aria-label="Files to import" multiple accept=".csv,.txt,.xlsx,.zip" onchange="MigrationPage.reset()">
                 <div class="form-actions" style="margin-top:12px;" data-write>
                     <button class="btn btn-primary" onclick="MigrationPage.dryRun()">Dry Run</button>
@@ -54,10 +38,41 @@ const MigrationPage = {
             </div>`;
     },
 
+    // What to export and upload, in the chosen source's words: QuickBooks
+    // Online's own Export data zip is the whole upload there, and the
+    // generic "chart of accounts and general ledger" line sent a user to the
+    // Reports page for a General Ledger the import does not read (#910).
+    _hint(key) {
+        if (key === 'qbo_export') {
+            // the hare mark on the From QuickBooks sections only (#979)
+            return `<img class="hare-mark" src="/static/img/hare-mark.png" srcset="/static/img/hare-mark@2x.png 2x" width="22" height="24" alt="" aria-hidden="true">In QuickBooks Online, click the gear → <strong>Export data</strong>; on the
+                    Reports tab set the date range to <strong>All dates</strong>, leave every
+                    report and list switched on, and press Export to Excel. Upload the
+                    <strong>zip</strong> it downloads as it is. Beside it, upload the
+                    <strong>Account List</strong> report (Reports → Account List → Export to Excel)
+                    to give every account its number, type and description, and the
+                    <strong>A/R Aging Detail</strong> report (Reports → A/R Aging Detail →
+                    Export to Excel) to carry the open invoices and unapplied payments over,
+                    and the <strong>A/P Aging Detail</strong> report (Reports → A/P Aging
+                    Detail → Export to Excel) to carry the open bills over.
+                    Reports downloaded one at a time from the Reports page, such as the
+                    General Ledger or a chart of accounts, are not the export and are not read.`;
+        }
+        return `Export and upload together: the <strong>chart of accounts</strong>
+                    and <strong>general ledger / journals / transactions</strong>
+                    (required), plus a <strong>trial balance</strong> when your system
+                    offers one (recommended — enables balance verification). Files are
+                    recognized by name; CSV, tab-separated and Excel exports all work,
+                    and a <strong>zip</strong> is read as the files inside it.`;
+    },
+
     reset() {
         if (MigrationPage._importing) return;
         MigrationPage._dryRunOk = false;
         MigrationPage._dryRunData = null;
+        const hint = $('#migration-hint');
+        const source = $('#migration-source');
+        if (hint && source) hint.innerHTML = MigrationPage._hint(source.value);
         const btn = $('#migration-import-btn');
         if (btn) btn.disabled = true;
         const out = $('#migration-result');

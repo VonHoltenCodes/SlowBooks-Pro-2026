@@ -12,39 +12,35 @@
  * mechanism, at any size, with any name, in any engine's fonts.
  *
  * The bar starts whole and, while it is wider than the window, folds one
- * step at a time (the tb-fold-N classes, style.css "TOP BAR — folding"):
- *   1. the clock and the brand's year go, the spacing tightens;
- *   2. Quick Entry and Bill Quick Entry go (both on the sidebar);
- *   3. New Customer, Create Invoice and Receive Payment go (Alt+N, Alt+P,
- *      and on the sidebar's pages);
- *   4. the sign-in name, About and Contact support move into More;
- *   5. Home and Reports move into More (Dashboard and Reports are also on
- *      the sidebar);
- *   6. the wordmark goes (the sidebar shows it);
- *   7. the theme switch moves into More.
- * More lists, when opened, every control the bar has folded away and the
- * name signed in, so nothing the bar offers is ever out of reach. Sign Out,
+ * step at a time (style.css "TOP BAR — folding"):
+ *   1. the clock goes, the spacing tightens (tb-fold-1);
+ *   2. the Fast Rack's buttons (#912; fast_rack.js) move into More one at a
+ *      time, the last on the rack first (fr-folded on the button), so the
+ *      ones a person put first stay longest; as many steps as the rack has
+ *      buttons, none when it has none;
+ *   3. the sign-in name, About and Contact support move into More
+ *      (tb-fold-who);
+ *   4. the theme switch moves into More (tb-fold-theme).
+ * (The bar has no wordmark to fold since #978: the brand is in the sidebar.)
+ * The bar's data-fold is the number of steps taken (1, then 1 + each rack
+ * button folded, then the two after). More is in the bar from the first
+ * thing it holds; it lists, when opened, every control the bar has folded
+ * away, the rack's by their names in the rack's order, and the name signed
+ * in, so nothing the bar offers is ever out of reach, and last
+ * Customize Fast Rack…, which opens Settings at the rack's block. Sign Out,
  * Back, the search box and the skip link never fold.
  *
  * Measured again when the bar's size changes (the window, the text size)
  * and when what is in it changes (the company's name, the sign-in name,
- * a role hiding buttons), before the next paint, so no fold is ever seen.
+ * a role hiding buttons, the Fast Rack drawn again), before the next
+ * paint, so no fold is ever seen.
  */
 (function () {
     'use strict';
 
-    var STEPS = 7;
-    var MORE_FROM = 4;   // the step from which More is in the bar
-
-    // What More can hold, in the bar's order: [selector, its label there]
-    var FOLDABLE = [
-        ['#topbar .tb-btn[data-nav="#/"]', null],
-        ['#topbar .tb-btn[data-action="CustomersPage.showForm"]', null],
-        ['#topbar .tb-btn[data-action="InvoicesPage.showForm"]', null],
-        ['#topbar .tb-btn[data-action="PaymentsPage.showForm"]', null],
-        ['#topbar .tb-btn[data-nav="#/quick-entry"]', null],
-        ['#topbar .tb-btn[data-nav="#/bill-entry"]', null],
-        ['#topbar .tb-btn[data-nav="#/reports"]', null],
+    // What More can hold after the rack's buttons, in the bar's order:
+    // [selector, its label there]
+    var FOLDABLE_REST = [
         ['#theme-toggle', 'theme'],
         ['#about-btn', null],
         ['#support-btn', null],
@@ -53,15 +49,34 @@
     var bar = document.getElementById('topbar');
     var more = document.getElementById('topbar-more');
     var menu = document.getElementById('topbar-more-menu');
+    var rack = document.getElementById('fast-rack');
     if (!bar || !more || !menu) return;
 
     var level = 0;
     var fitting = false;
     var watcher = null;
 
+    // The rack's buttons, in its order (what the role leaves of them)
+    function rackButtons() {
+        if (!rack) return [];
+        return Array.prototype.filter.call(rack.querySelectorAll('.tb-btn'), function (b) {
+            return !b.hidden && !b.classList.contains('hidden');
+        });
+    }
+
+    // 1 tightens, one step per rack button, then the two after it
+    function steps() { return 1 + rackButtons().length + 2; }
+
     function setLevel(n) {
-        for (var i = 1; i <= STEPS; i++) bar.classList.toggle('tb-fold-' + i, i <= n);
-        more.hidden = n < MORE_FROM;
+        var buttons = rackButtons();
+        var r = buttons.length;
+        var gone = Math.max(0, Math.min(r, n - 1));   // rack buttons folded, from the end
+        bar.classList.toggle('tb-fold-1', n >= 1);
+        buttons.forEach(function (b, i) { b.classList.toggle('fr-folded', i >= r - gone); });
+        if (rack) rack.classList.toggle('fr-all-folded', r > 0 && gone === r);
+        bar.classList.toggle('tb-fold-who', n >= r + 2);
+        bar.classList.toggle('tb-fold-theme', n >= r + 3);
+        more.hidden = n < 2;
     }
 
     function overflows() {
@@ -73,8 +88,9 @@
         fitting = true;
         try {
             var n = 0;
+            var last = steps();
             setLevel(0);
-            while (n < STEPS && overflows()) setLevel(++n);
+            while (n < last && overflows()) setLevel(++n);
             level = n;
             bar.setAttribute('data-fold', String(n));
             if (more.hidden) close(false);
@@ -108,8 +124,12 @@
             who.textContent = 'Signed in as ' + chip.textContent.trim();
             menu.appendChild(who);
         }
-        FOLDABLE.forEach(function (entry) {
-            var el = document.querySelector(entry[0]);
+        var foldable = rackButtons().map(function (b) { return [b, null]; })
+            .concat(FOLDABLE_REST.map(function (entry) {
+                return [document.querySelector(entry[0]), entry[1]];
+            }));
+        foldable.forEach(function (entry) {
+            var el = entry[0];
             if (!folded(el)) return;
             var item = document.createElement('button');
             item.type = 'button';
@@ -124,6 +144,18 @@
             });
             menu.appendChild(item);
         });
+        // last: where the rack is arranged (#912)
+        if (window.FastRack) {
+            var custom = document.createElement('button');
+            custom.type = 'button';
+            custom.className = 'tb-more-item tb-more-customize';
+            custom.textContent = 'Customize Fast Rack…';
+            custom.addEventListener('click', function () {
+                close(false);
+                window.FastRack.customize();
+            });
+            menu.appendChild(custom);
+        }
     }
 
     function open() {

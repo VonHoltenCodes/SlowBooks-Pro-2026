@@ -6,7 +6,10 @@
 import logging
 import re
 import smtplib
-from email.utils import getaddresses
+import ssl
+import time
+import traceback
+from email.utils import getaddresses, parseaddr
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -155,6 +158,214 @@ def _without(addresses: list, taken: list) -> list:
     return [a for a in addresses if a.lower() not in lower]
 
 
+def smtp_tls_context() -> ssl.SSLContext:
+    """The context every TLS connection to the mail server is made with:
+    the certificate verified against the system's (or, on the packaged Mac
+    build, the bundled — app/tls_trust.py) authorities, the host name
+    checked, TLS 1.2 at least. There is no setting that loosens it."""
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
+# One socket wait, and the longest one whole reply may take. smtplib's
+# timeout bounds each read, and a reply may run to any number of "250-…"
+# lines: a server that sends one more often than the timeout would hold a
+# send (and the request, or the batch, behind it) for as long as it liked.
+_SOCKET_TIMEOUT = 30
+_REPLY_TIMEOUT = 60
+
+
+class _ReplyClock:
+    """The reply stream smtplib reads lines from, each read given what is
+    left of the reply's time."""
+
+    def __init__(self, stream, sock, ends: float):
+        self._stream, self._sock, self._ends = stream, sock, ends
+
+    def readline(self, *args):
+        left = self._ends - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("timed out")
+        self._sock.settimeout(min(_SOCKET_TIMEOUT, left))
+        return self._stream.readline(*args)
+
+    def close(self):
+        self._stream.close()
+
+
+_PLAIN_SMTP = smtplib.SMTP
+
+
+class _ReplyBoundSMTP(_PLAIN_SMTP):
+    """smtplib.SMTP with every reply, however many lines, bounded in time
+    (_REPLY_TIMEOUT). A reply that runs over reads as a socket that timed
+    out."""
+
+    def getreply(self):
+        if self.sock is None:
+            return super().getreply()
+        if self.file is None:
+            self.file = self.sock.makefile("rb")
+        stream = self.file
+        self.file = _ReplyClock(stream, self.sock, time.monotonic() + _REPLY_TIMEOUT)
+        try:
+            return super().getreply()
+        finally:
+            # close() and starttls() drop the stream; otherwise it goes
+            # back as it was, and the socket to its usual wait
+            if self.file is not None:
+                self.file = stream
+            if self.sock is not None:
+                try:
+                    self.sock.settimeout(_SOCKET_TIMEOUT)
+                except OSError:
+                    pass
+
+
+def _watch_body(server) -> None:
+    """Sets `server.body_given` True once the whole message has been handed
+    to the server: a connection lost after that may have delivered it.
+    Works on whatever connection a send is made on (smtplib's data() sends
+    the DATA command, then the message)."""
+    send, data = getattr(server, "send", None), getattr(server, "data", None)
+    if not (callable(send) and callable(data)):
+        return
+    sends = [None]
+
+    def watched_send(s):
+        send(s)
+        if sends[0] is not None:
+            sends[0] += 1
+            if sends[0] == 2:
+                server.body_given = True
+
+    def watched_data(msg):
+        sends[0] = 0
+        try:
+            return data(msg)
+        finally:
+            sends[0] = None
+
+    try:
+        server.body_given = False
+        server.send, server.data = watched_send, watched_data
+    except (AttributeError, TypeError):
+        pass
+
+
+# the commands that begin a step of a send, and the name the step is
+# recorded under (EHLO and the HELO that follows a refused EHLO are one)
+_STEPS = {
+    "ehlo": "helo",
+    "helo": "helo",
+    "starttls": "starttls",
+    "auth": "auth",
+    "mail": "mail",
+    "rcpt": "rcpt",
+    "data": "data",
+}
+
+
+def _watch_steps(server) -> None:
+    """Keeps `server.heard`: [the step of the send under way, the reply
+    last read in it]. A server that greeted us and then ended the
+    connection is said to have done that, at that step, and a refusal it
+    gave there before it hung up is not lost. Works on whatever connection
+    a send is made on, as _watch_body does."""
+    putcmd, getreply = getattr(server, "putcmd", None), getattr(
+        server, "getreply", None
+    )
+    if not (callable(putcmd) and callable(getreply)):
+        return
+    heard = ["", None]
+
+    def watched_putcmd(cmd, *args, **kwargs):
+        step = _STEPS.get(str(cmd).strip().lower())
+        answering = heard[0] == "auth" and _reply_code(heard[1]) == 334
+        if step and not answering:
+            # (while the server waits for the rest of a sign-in, what is
+            # sent is an answer to it, whatever it spells)
+            if step != heard[0] or step not in ("helo", "auth"):
+                # each command is judged by its own reply; a sign-in (one
+                # method tried after another) and a greeting (EHLO, then
+                # HELO) are each one step
+                heard[1] = None
+            heard[0] = step
+        return putcmd(cmd, *args, **kwargs)
+
+    def watched_getreply():
+        reply = getreply()
+        heard[1] = reply
+        return reply
+
+    try:
+        server.heard = heard
+        server.putcmd, server.getreply = watched_putcmd, watched_getreply
+    except (AttributeError, TypeError):
+        pass
+
+
+def _reply_code(reply):
+    if isinstance(reply, tuple) and reply and isinstance(reply[0], int):
+        return reply[0]
+    return None
+
+
+def _heard(server):
+    """(step, last reply) as _watch_steps kept them, or ("", None)."""
+    heard = getattr(server, "heard", None)
+    if isinstance(heard, list) and len(heard) == 2 and isinstance(heard[0], str):
+        return heard[0], heard[1]
+    return "", None
+
+
+def _connect(host: str, port: int):
+    """The connection a send is made on. smtplib.SMTP is looked up when
+    called, so whatever stands in for it is used as it is."""
+    made = smtplib.SMTP
+    if made is _PLAIN_SMTP:
+        made = _ReplyBoundSMTP
+    return made(host, port, timeout=_SOCKET_TIMEOUT)
+
+
+def _secure(server: smtplib.SMTP, host: str) -> None:
+    """EHLO → STARTTLS (verified) → EHLO, before anything else is said.
+
+    Raises MailTLSError when the server offers no STARTTLS or the
+    handshake or the certificate check fails; the caller then closes the
+    socket, so neither the login nor the message is ever sent."""
+    from app.services.email_errors import (
+        MailTLSError,
+        no_starttls_text,
+        starttls_refused,
+        tls_failure_text,
+    )
+
+    server.ehlo_or_helo_if_needed()
+    if not server.has_extn("starttls"):
+        logger.warning("Mail server %s did not offer STARTTLS; nothing sent", host)
+        raise MailTLSError(no_starttls_text(host))
+    try:
+        server.starttls(context=smtp_tls_context())
+    except ssl.SSLError as e:
+        # the raw OpenSSL reason, for whoever reads the server log; the
+        # password is not in it (nothing about the login exists yet)
+        logger.warning(
+            "TLS to mail server %s failed (nothing sent): %s: %s",
+            host,
+            type(e).__name__,
+            getattr(e, "verify_message", None) or e,
+        )
+        raise MailTLSError(tls_failure_text(e, host)) from e
+    except smtplib.SMTPResponseException as e:
+        # the reply code alone for the server log; the reply itself is kept
+        # on the email log row, an administrator's
+        logger.warning("Mail server %s refused STARTTLS (%s)", host, e.smtp_code)
+        raise starttls_refused(e, host) from e
+    server.ehlo()
+
+
 def send_email(
     db: Session,
     to_email: str,
@@ -183,7 +394,7 @@ def send_email(
     user = smtp.get("smtp_user", "")
     password = smtp.get("smtp_password", "")
     from_email = smtp.get("smtp_from_email", user)
-    from_name = smtp.get("smtp_from_name", "Slowbooks Pro")
+    from_name = smtp.get("smtp_from_name", "SlowBooks Pro")
     use_tls = smtp.get("smtp_use_tls", "true").lower() == "true"
 
     # Sanitize email headers to prevent injection
@@ -192,6 +403,16 @@ def send_email(
     # Routes taking typed copies check them first and answer 400; a list
     # over the cap reaching here (an always-copy setting, a caller that did
     # not check) is a failed send with the reason logged, never a crash.
+    from app.services.email_errors import (
+        MailLocalError,
+        MailTLSError,
+        RecipientsPartlyRefused,
+        address_letters_error,
+        host_name_error,
+        sign_in_letters_error,
+        stored_text,
+    )
+
     try:
         cc_list, bcc_list = copy_lists(smtp, cc, bcc)
     except ValueError as e:
@@ -201,7 +422,8 @@ def send_email(
             recipient=to_email,
             subject=subject,
             status="failed",
-            error_message=str(e),
+            # copy_lists' own sentence (which field, and the limit)
+            error_message=stored_text(str(e)),
         )
         db.add(log)
         db.commit()
@@ -222,7 +444,7 @@ def send_email(
             bcc=log_bcc,
             subject=subject,
             status="failed",
-            error_message="SMTP not configured",
+            error_message=stored_text("SMTP not configured", stage="setup"),
         )
         db.add(log)
         db.commit()
@@ -246,19 +468,77 @@ def send_email(
         msg.attach(part)
 
     server = None
+    signed_in = False
     try:
+        # An SMTP envelope is ASCII: smtplib would fail on such an address
+        # part-way through the conversation with a codec error. Said
+        # before anything is sent, naming the address.
+        unsendable = [
+            a
+            for a in [from_email, to_email] + cc_list + bcc_list
+            if not (parseaddr(a)[1] or a).isascii()
+        ]
+        if unsendable:
+            # each once (Test Email goes from and to one address)
+            raise address_letters_error(list(dict.fromkeys(unsendable)))
+        try:
+            server = _connect(host, port)
+        except UnicodeError:
+            # a host no connection can be made to ("smtp..example.com": an
+            # empty label), which Python reports as a codec error
+            raise host_name_error() from None
+        _watch_body(server)
+        _watch_steps(server)
         if use_tls:
-            server = smtplib.SMTP(host, port, timeout=30)
-            server.starttls()
-        else:
-            server = smtplib.SMTP(host, port, timeout=30)
+            # verified every time; a failure raises before the login below
+            _secure(server, host)
 
         if user and password:
-            server.login(user, password)
+            if not use_tls:
+                server.ehlo_or_helo_if_needed()
+                if not server.has_extn("auth") and server.has_extn("starttls"):
+                    # sign-in is offered only after STARTTLS (Gmail on 587);
+                    # say so rather than "SMTP AUTH extension not supported
+                    # by server." (W-217). Nothing has been sent.
+                    from app.services.email_errors import sign_in_needs_tls_text
 
-        server.sendmail(from_email, [to_email] + cc_list + bcc_list, msg.as_string())
-        server.quit()
+                    raise MailTLSError(sign_in_needs_tls_text(host))
+            try:
+                server.login(user, password)
+            except UnicodeEncodeError:
+                # SMTP sign-in is ASCII: smtplib fails before it sends
+                # anything, and its error names a character of the password
+                raise sign_in_letters_error() from None
+            signed_in = True
+
+        everyone = [to_email] + cc_list + bcc_list
+        refused = server.sendmail(from_email, everyone, msg.as_string())
+        if not isinstance(refused, dict):
+            refused = {}
+        # The server has taken the message (250 after its body): it is sent,
+        # whatever happens at QUIT. A hang-up or a timeout there must not
+        # turn a delivered email into a failed one that gets sent again.
+        try:
+            server.quit()
+        except Exception:
+            try:
+                server.close()
+            except Exception:
+                pass
         server = None
+
+        # sendmail() raises only when EVERY recipient is refused; the ones
+        # refused among others come back in its answer
+        turned_away = {str(a).lower() for a in refused}
+        partly = None
+        if refused:
+            partly = RecipientsPartlyRefused(
+                refused, [a for a in everyone if a.lower() not in turned_away]
+            )
+        if to_email.lower() in turned_away:
+            # the person it was for did not get it: a failed send, though a
+            # copy went out (the row and the sentence say both)
+            raise partly
 
         log = EmailLog(
             entity_type=entity_type or "",
@@ -269,16 +549,43 @@ def send_email(
             subject=subject,
             status="sent",
         )
+        if partly is not None:
+            # sent, with a copy the server refused: recorded on the row, so
+            # the log never reads as if that address received it
+            log.error_message = stored_text(partly)
         db.add(log)
         db.commit()
         return True
 
     except Exception as e:
+        # how far the conversation had got, before anything more is said
+        lost_at, last_reply = _heard(server)
         if server:
             try:
-                server.quit()
+                if isinstance(e, MailTLSError):
+                    server.close()  # say nothing more to an unverified server
+                else:
+                    server.quit()
             except Exception:
                 pass
+        if not isinstance(
+            e,
+            (
+                smtplib.SMTPException,
+                OSError,
+                MailTLSError,
+                MailLocalError,
+                RecipientsPartlyRefused,
+            ),
+        ):
+            # a fault of ours: its kind and where it was raised, for the
+            # server log; never its text, which may quote what it was
+            # working on
+            logger.error(
+                "Email send failed with %s at:\n%s",
+                type(e).__name__,
+                "".join(traceback.format_tb(e.__traceback__)),
+            )
         log = EmailLog(
             entity_type=entity_type or "",
             entity_id=entity_id or 0,
@@ -287,7 +594,15 @@ def send_email(
             bcc=log_bcc,
             subject=subject,
             status="failed",
-            error_message=str(e),
+            # the stage tagged, then the server's reply as readable text
+            # (or the plain cause), never str(e)
+            error_message=stored_text(
+                e,
+                after_body=getattr(server, "body_given", False) is True,
+                signed_in=signed_in,
+                lost_at=lost_at,
+                last_reply=last_reply,
+            ),
         )
         db.add(log)
         db.commit()
@@ -563,6 +878,72 @@ def render_invoice_email_parts(
             body = _fallback_invoice_body(invoice, company_settings, ctx)
 
     return (subject or tpl_subject or default_subject), _note_paragraph(note) + body
+
+
+def estimate_email_context(estimate, company_settings: dict) -> dict:
+    """What a saved `estimate_email` template can reference (#957).
+
+    The invoice context's shape, for an estimate: the preview and the send
+    both build it here so they cannot drift. No `pay_url` — an estimate is
+    not paid online.
+    """
+    from app.services.terminology import terms_for
+
+    terms = terms_for(company_settings)
+    return {
+        "estimate": estimate,
+        "est": estimate,  # the PDF template's name for it
+        # GHSA-c3v4-f43f-4wqm: redacted here, never the raw settings.
+        "company": customer_facing_company(company_settings),
+        "customer_name": (
+            estimate.customer.name if estimate.customer else terms("Customer")
+        ),
+        # "Estimate" is a protected word in every vocabulary (construction
+        # keeps it, as the PDF's title does); terms() is asked anyway so a
+        # future vocabulary that renames it is honoured in one place.
+        "doc_label": terms("Estimate"),
+        "terms": terms,
+    }
+
+
+def render_estimate_email_parts(
+    db, estimate, company_settings: dict, note: str = None
+) -> tuple[str, str]:
+    """(subject, html_body) for an estimate email (#957).
+
+    The saved template named `estimate_email` under Settings -> Email
+    Templates is used when one exists; otherwise, or when it fails to
+    render, the fixed sentences estimates have sent since 2.31.11. The
+    operator's note is prepended either way, as on an invoice.
+    """
+    import html as _html
+
+    ctx = estimate_email_context(estimate, company_settings)
+    company_name = (ctx["company"].get("company_name") or "").strip()
+    default_subject = f"{ctx['doc_label']} #{estimate.estimate_number}" + (
+        f" from {company_name}" if company_name else ""
+    )
+
+    body = None
+    tpl_subject = None
+    if db is not None:
+        try:
+            tpl_subject, tpl_body = render_template_from_db(db, "estimate_email", ctx)
+            if tpl_body:
+                body = tpl_body
+        except Exception:
+            # A saved template with a bad expression must not stop the mail
+            # going out; fall through to the built-in sentences.
+            logger.exception("saved estimate_email template failed to render")
+            tpl_subject = None
+
+    if body is None:
+        body = (
+            f"<p>Please find {_html.escape(ctx['doc_label'].lower())} "
+            f"#{_html.escape(str(estimate.estimate_number))} attached.</p>"
+        ) + (f"<p>{_html.escape(company_name)}</p>" if company_name else "")
+
+    return (tpl_subject or default_subject), _note_paragraph(note) + body
 
 
 def render_invoice_email(

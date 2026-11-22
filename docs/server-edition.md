@@ -215,8 +215,58 @@ setup this server's address, `https://` from the internet, or a plain
 token's role allows and sends nothing anywhere but this server; for Claude on
 the web, `sbplive serve-http` is a self-hosted door behind your own
 Cloudflare Tunnel ([the self-hosted door](https://github.com/VonHoltenCodes/SlowBooks-Switchboard/blob/main/docs/REMOTE.md)), and nothing is reachable
-from outside unless you set it up. Settings → Connections → Claude and agents
+from outside unless you set it up. Settings → Connections → AI assistants
 has the same links.
+
+**Connect to AI assistant** (v2.32.0, #1087) does it with no second program:
+an administrator presses **Connect to AI assistant** under Settings →
+Connections → AI assistants, and this server links itself to the SlowBooks relay at
+`https://relay.sbplive.com`, makes a bookkeeper API token labelled
+`AI assistant (relay)` and holds the connection open itself. It dials out; no
+port is opened, and there is no account, email or password: linking keeps a
+random credential, with the token, in one file in the data folder readable
+by the server's user only. The panel shows the address to add as a
+connector in Claude or Grok, `https://relay.sbplive.com/mcp`, and a
+one-time sign-in code (ten minutes, once) to type on the relay's sign-in
+page. Disconnect closes the connection, unlinks and revokes every company's token. A
+non-administrator sees the state and nothing to press; no API token can
+reach it. It is made in one company; an administrator of each other
+company adds it there, with the **Add** button in that company's panel
+("Add Smith Plumbing to the AI connection"), and the assistant names which company's books it works in on
+every call. Showing a sign-in code, adding a company and Disconnect belong
+only to someone who is an administrator of every company on the connection:
+on a server that means signing in with the same username and password as an
+administrator of each of them (the company switch's own check; a sign-in
+code is offered only while every one of them can answer now; Disconnect
+skips a company that cannot be opened now only for the person who added it;
+for a connection made in beta.1, the person who made its token). A
+connection reaches up to 200 companies.
+A client
+company's administrator who is not one sees only that company, can take it
+off the connection, and never learns the other companies' names or how many
+there are. A company's access ends at once when the administrator who added
+it is deactivated or demoted there, or that person's sign-in reaches its end
+date; it is added again with **Add** in its own
+panel, by someone who is an administrator of it and of every other company on
+the connection. A token you make whose name starts with "AI assistant"
+(SlowBooks Switchboard's, for example) is held to the same rule. The
+connection's own tokens work only for the connection on this server: one sent
+from another computer is refused, so a copy of the connection file is no use
+elsewhere on the network. When a company turns its token away, the server
+deletes that token's secret from the connection file at once (a moment later
+when another change to the connection is under way). A token reads
+only its own company from the company list and from the sign-in status. The
+sign-in screen itself (no token) still lists every company the server serves
+and their usernames, for the people choosing one: that is why the server
+belongs on a trusted network. The connection stays up while any
+company on it is served; a company that is not served now is said so on the
+panel, and the assistant is told so without anything being sent. On
+PostgreSQL the server serves one company, so the connection reaches only
+that one.
+The relay is free and comes with no guarantee: it may be slow, change, or
+stop, and it may not stay free without donations. A relay that cannot be
+reached never holds the server's start or a request to the books; the
+panel says so and the server keeps trying.
 
 What a token can do:
 
@@ -323,9 +373,18 @@ and two people can work in two companies at the same time.
   up. Nobody else on the network can set up a company nobody has set up yet.
 - **API tokens** belong to the company they were made in. A token's request
   names that company with an `X-SlowBooks-Company: <file>.db` header; without
-  it, the request goes to the company the server was started for. A token
-  is its own principal, not its maker's session: by design it outlives the
-  deactivation of the user who made it, until it is revoked itself.
+  it, the request goes to the company the server was started for. A header
+  the server cannot honor (given twice, blank, not a company file's name, or
+  a company it does not serve now) is refused with "This server does not
+  serve that company for this request. Nothing was done.", never answered
+  from another company. Every answer to a token names the company it came
+  from in an `X-SlowBooks-Company-Served` header, and `GET /api/whoami` says
+  which company, role and label a token works under. A token is its own
+  principal, not its maker's session: by design it outlives the deactivation
+  of the user who made it, until it is revoked itself. The exception is a
+  token whose name starts with "AI assistant" (the AI assistant connection's
+  own, or one made for SlowBooks Switchboard): it stops working when the
+  administrator who made it is no longer an administrator of that company.
 - **Starting the server** brings every company in the list up to this version
   before it serves any of them. A company that cannot be brought up (a failed
   migration, or a file encrypted under its own recovery key, which only opens
@@ -367,7 +426,11 @@ whoever reaches it, and the session cookie travels unencrypted.
   `launcher.log` says so at every start ("SLOWBOOKS_SERVER_EDITION=1:
   serving plain HTTP to the local network").
 - Comfortable for small teams (2–10 people). The database serializes
-  writes; hundreds of concurrent users is not the design target.
+  writes; hundreds of concurrent users is not the design target. The server
+  keeps a pool of 40 database connections for each company it serves, one
+  for each request it can work on at once; a bigger team that sees requests
+  queue can raise it with `SLOWBOOKS_DB_POOL_SIZE=80` in the `.env` beside
+  the other settings, then stop and start the task. It never goes below 40.
 - The update badge appears in-app as usual: opening the app asks
   dl.slowbookspro.com for the latest version, which tells that host the
   install's IP address and version. Set `SLOWBOOKS_UPDATE_CHECK=0` in

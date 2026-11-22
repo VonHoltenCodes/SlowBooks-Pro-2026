@@ -1,0 +1,229 @@
+// #977: helper text behind the tortoise. hint() draws the button and its
+// note; Hints opens one at a time, by click or key, never on hover, and the
+// text is in the page for a screen reader whether or not it is open.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { test } = require('node:test');
+const vm = require('node:vm');
+
+function load() {
+    const listeners = {};
+    const nodes = {};
+    const context = {
+        window: { innerWidth: 1200, innerHeight: 800, addEventListener() {}, removeEventListener() {} },
+        document: {
+            addEventListener: (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); },
+            removeEventListener: (name, fn) => { listeners[name] = (listeners[name] || []).filter((f) => f !== fn); if (!listeners[name].length) delete listeners[name]; },
+            getElementById: (id) => nodes[id] || null,
+        },
+        escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
+        setTimeout,
+    };
+    vm.createContext(context);
+    const js = fs.readFileSync(path.join(__dirname, '../../app/static/js/hint.js'), 'utf8');
+    vm.runInContext(js + '\nthis.hint = hint; this.Hints = Hints;', context);
+    return { context, listeners, nodes };
+}
+
+// a button and its note, as the page would have them after hint() is drawn
+function pair(env, id, right = 300) {
+    const attrs = { 'aria-controls': id, 'aria-expanded': 'false' };
+    const classes = new Set();
+    const note = {
+        hidden: true,
+        classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), has: (c) => classes.has(c) },
+        style: {},
+        // a note 340 wide, at 0,0 when placed there; its button sits where `right` puts it
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 340, height: 60, right: 340, bottom: 60 }),
+        setAttribute() {},
+    };
+    const wrap = { contains: (el) => el === button || el === note };
+    const button = {
+        getAttribute: (k) => attrs[k],
+        setAttribute: (k, v) => { attrs[k] = v; },
+        closest: (sel) => (sel === '[data-hint]' ? button : sel === '.hint-wrap' ? wrap : null),
+        focus() { button.focused = true; },
+        getBoundingClientRect: () => ({ left: right - 340, right: right - 316, top: 100, bottom: 124 }),
+    };
+    env.nodes[id] = note;
+    return { button, note, attrs, wrap };
+}
+
+test('the button names its field, and its text is in the page though hidden', () => {
+    const { context } = load();
+    const html = context.hint('Optional. Separate addresses with commas.', 'CC');
+    assert.match(html, /<button type="button" class="hint-icon" data-hint aria-label="About CC" aria-expanded="false"/);
+    const id = /aria-describedby="(hint-\d+)"/.exec(html)[1];
+    // the note opens from aria-controls; its text (no role, so WebKit
+    // describes from it, NEW-263) describes the button, and names the note
+    // while it is open
+    assert.ok(html.includes(`aria-controls="${id}-note" aria-describedby="${id}"`));
+    assert.ok(html.includes(`<span class="hint-pop" id="${id}-note" role="note" tabindex="-1" hidden>`));
+    assert.ok(html.includes(`<span class="hint-pop-body" id="${id}">`));
+    assert.ok(html.includes('<strong class="hint-pop-title">CC</strong> Optional. Separate addresses with commas.'));
+    // the whole tortoise on the button and, larger, heading the note
+    assert.ok(html.includes('src="/static/img/tortoise-hint.png"') && html.includes('src="/static/img/tortoise-info.png"'));
+    assert.equal((html.match(/alt="" aria-hidden="true"/g) || []).length, 2);
+});
+
+test('a hint with no field name is "About this field", and each has its own id', () => {
+    const { context } = load();
+    const a = context.hint('One.');
+    const b = context.hint('Two.');
+    assert.ok(a.includes('aria-label="About this field"') && !a.includes('hint-pop-title'));
+    assert.notEqual(/id="(hint-\d+)"/.exec(a)[1], /id="(hint-\d+)"/.exec(b)[1]);
+});
+
+test('a field name typed by a user is escaped', () => {
+    const { context } = load();
+    assert.ok(context.hint('x', 'A "quoted" <name>').includes('aria-label="About A &quot;quoted&quot; &lt;name>"'));
+});
+
+test('a click opens the note, a second click closes it, and one is open at a time', () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    const two = pair(env, 'hint-b');
+    const click = env.listeners.click[0];
+    let prevented = 0;
+    click({ target: one.button, preventDefault() { prevented += 1; } });
+    assert.equal(one.note.hidden, false);
+    assert.equal(one.attrs['aria-expanded'], 'true');
+    assert.equal(prevented, 1, 'a hint inside a label does not click the field');
+    click({ target: two.button, preventDefault() {} });
+    assert.equal(one.note.hidden, true);
+    assert.equal(one.attrs['aria-expanded'], 'false');
+    assert.equal(two.note.hidden, false);
+    click({ target: two.button, preventDefault() {} });
+    assert.equal(two.note.hidden, true);
+});
+
+test('a click elsewhere closes it; a click in the note itself does not', () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    const click = env.listeners.click[0];
+    click({ target: one.button, preventDefault() {} });
+    click({ target: { closest: (sel) => (sel === '.hint-pop' ? one.note : null) } });
+    assert.equal(one.note.hidden, false);
+    click({ target: { closest: () => null } });
+    assert.equal(one.note.hidden, true);
+});
+
+test('Escape closes the note, keeps focus on its button, and goes no further', () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    let stopped = 0;
+    env.listeners.keydown[0]({ key: 'Escape', stopPropagation() { stopped += 1; } });
+    assert.equal(one.note.hidden, true);
+    assert.equal(one.button.focused, true);
+    assert.equal(stopped, 1, 'the dialog the hint sits in stays open');
+    // with nothing open, Escape is the dialog's own
+    env.listeners.keydown[0]({ key: 'Escape', stopPropagation() { stopped += 1; } });
+    assert.equal(stopped, 1);
+});
+
+test('Tab out closes it; focus moving within it does not', () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    env.listeners.focusout[0]({ relatedTarget: one.note });
+    assert.equal(one.note.hidden, false);
+    env.listeners.focusout[0]({ relatedTarget: {} });
+    assert.equal(one.note.hidden, true);
+});
+
+// W-189: Tab from the page's last control leaves the page (or wraps to its
+// top) and focusout carries no relatedTarget; where focus went is looked at
+// once the move is over
+test('focus leaving with no relatedTarget closes it once focus is outside', async () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    env.context.document.activeElement = { tagName: 'A', id: 'skip-link' };
+    env.listeners.focusout[0]({ relatedTarget: null });
+    assert.equal(one.note.hidden, false, 'not before the move is over');
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(one.note.hidden, true);
+});
+
+test('no relatedTarget but focus still in the note (the window lost focus): it stays open', async () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    env.context.document.activeElement = one.note;
+    env.listeners.focusout[0]({ relatedTarget: null });
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(one.note.hidden, false);
+});
+
+// NEW-263: a field's note takes focus as it opens, so VoiceOver reads it;
+// closing it from inside puts focus back on its button
+test("a field's note takes focus as it opens and gives it back as it closes", () => {
+    const env = load();
+    const one = pair(env, 'hint-a');
+    let focused = 0;
+    const noteAttrs = { tabindex: '-1' };
+    one.note.getAttribute = (k) => noteAttrs[k] ?? null;
+    one.note.setAttribute = (k, v) => { noteAttrs[k] = v; };
+    one.note.removeAttribute = (k) => { delete noteAttrs[k]; };
+    one.attrs['aria-describedby'] = 'hint-a-text';
+    one.note.focus = () => { focused += 1; env.context.document.activeElement = one.note; };
+    one.note.contains = (el) => el === one.note;
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    assert.equal(focused, 1);
+    assert.equal(noteAttrs['aria-labelledby'], 'hint-a-text', 'named by its text while open');
+    env.listeners.click[0]({ target: { closest: () => null } });
+    assert.equal(one.note.hidden, true);
+    assert.equal(noteAttrs['aria-labelledby'], undefined);
+    assert.equal(one.button.focused, true);
+});
+
+test('a note near the right edge is moved in to stay inside the window', () => {
+    // the placement itself is tested in hint_placement_977.test.cjs
+    const env = load();
+    const edge = pair(env, 'hint-a', 1300);
+    env.listeners.click[0]({ target: edge.button, preventDefault() {} });
+    assert.equal(edge.note.hidden, false);
+    assert.equal(edge.note.style.left, `${1200 - 8 - 340}px`);
+});
+
+test('nothing opens on hover: only click, keydown and focusout are listened for', () => {
+    const env = load();
+    assert.deepEqual(Object.keys(env.listeners).sort(), ['click', 'focusout', 'keydown']);
+    // an open note also follows a scroll (to place itself again), never a hover
+    const one = pair(env, 'hint-a');
+    env.listeners.click[0]({ target: one.button, preventDefault() {} });
+    assert.deepEqual(Object.keys(env.listeners).sort(), ['click', 'focusout', 'keydown', 'scroll']);
+    assert.ok(!Object.keys(env.listeners).some((k) => /mouse|pointer|hover/.test(k)));
+});
+
+test('a hint can carry the id a field already names with aria-describedby', () => {
+    const { context } = load();
+    const html = context.hint('A line this rule matches is added for this vendor.', 'Vendor', 'bank-rule-vendor-hint');
+    assert.ok(html.includes('<span class="hint-pop" id="bank-rule-vendor-hint-note" role="note" tabindex="-1" hidden>'));
+    assert.ok(html.includes('<span class="hint-pop-body" id="bank-rule-vendor-hint">'));
+    assert.ok(html.includes('aria-controls="bank-rule-vendor-hint-note" aria-describedby="bank-rule-vendor-hint"'));
+    // without one the ids still count on, and never repeat a named one
+    const a = context.hint('One.');
+    const b = context.hint('Two.', '', '');
+    assert.match(a, /id="hint-\d+"/);
+    assert.notEqual(/id="(hint-\d+)"/.exec(a)[1], /id="(hint-\d+)"/.exec(b)[1]);
+});
+
+test('setText swaps a note body and keeps the field name at its head', () => {
+    const env = load();
+    const head = { cls: 'hint-pop-title' };
+    const body = {
+        children: [head],
+        querySelector: (sel) => (sel === '.hint-pop-title' ? head : null),
+        set textContent(t) { body.children = [t]; },
+        get firstChild() { return body.children[0]; },
+        insertBefore(node, ref) { body.children.splice(body.children.indexOf(ref), 0, node); },
+    };
+    env.nodes['vendor-bank-rule-hint'] = { querySelector: (sel) => (sel === '.hint-pop-body' ? body : null) };
+    env.context.Hints.setText('vendor-bank-rule-hint', 'Choose the default account first.');
+    assert.deepEqual(body.children, [head, ' Choose the default account first.']);
+    // an id not on the page is no error
+    env.context.Hints.setText('nowhere', 'x');
+});

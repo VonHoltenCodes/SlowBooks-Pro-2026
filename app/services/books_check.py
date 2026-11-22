@@ -19,10 +19,26 @@
 #
 # Accrual basis only in this cut: the agings, the deposits and the payable
 # figures are accrual figures. Cash-basis pairs are a follow-up.
+#
+# THE RULE FOR A DOCUMENT DATED AFTER THE AS-OF DAY: every row reads both of
+# its figures to the as-of day, so such a document is in neither. The list
+# is rebuilt for that day from the documents dated on or before it and what
+# was applied to them by then, and the account is read to the same day.
+# W-242 was the one row that read one figure each way: a customer payment
+# dated next week was on the Make Deposits list, which has no date, and not
+# yet in Undeposited Funds as of today, and the row read "apart" on books
+# that agreed. That row now takes the list as it stood on the as-of day
+# (undeposited_funds.waiting_balance(as_of=...)) and says how much the
+# Make Deposits page shows beyond it. The one exception is inventory: the
+# quantity on hand and the average cost are kept for today only and cannot
+# be rebuilt for a day, so its valuation and the ledger's Inventory are
+# both read whole, as they always were.
 # ============================================================================
 
 from __future__ import annotations
 
+import contextvars
+import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import date
@@ -100,9 +116,43 @@ def _money(amount) -> str:
     return f"-${-amount:,.2f}" if amount < 0 else f"${amount:,.2f}"
 
 
+# What a document behind a difference is called, in words (#928): the one
+# table the JSON (`type_label`), the PDF and the CSV read, so the files a
+# person takes away say what the window says ("Card charge", not "Cc
+# charge"). The window keeps the company's own words for an invoice, a
+# customer and a job (Terms) and reads this for the rest.
+DOCUMENT_WORDS = {
+    "invoice": "Invoice",
+    "customer": "Customer",
+    "job": "Job",
+    "credit_memo": "Credit memo",
+    "bill": "Bill",
+    "bill_payment": "Bill payment",
+    "payment": "Payment",
+    "vendor_credit": "Vendor credit",
+    "deposit": "Deposit",
+    "journal": "Journal entry",
+    "pay_run": "Pay run",
+    "expense": "Expense",
+    "cc_charge": "Card charge",
+    "job_cost": "Job cost",
+    "vendor": "Vendor",
+    "item": "Item",
+}
+
+
+def document_words(kind: str) -> str:
+    words = DOCUMENT_WORDS.get(kind)
+    if words:
+        return words
+    plain = str(kind or "").replace("_", " ")
+    return plain[:1].upper() + plain[1:]
+
+
 def _doc(kind: str, rid, number, amount, why: str) -> dict:
     return {
         "type": kind,
+        "type_label": document_words(kind),
         "id": rid,
         "number": "" if number is None else str(number),
         "amount": None if amount is None else float(_q(_d(amount))),
@@ -184,10 +234,15 @@ def _row(
     diff = _q(sub - ctl)
     if diff == ZERO:
         return Check(
-            key, name, sub_label, ctl_label, sub, ctl, diff, True, t.text(pass_text)
+            key, name, sub_label, ctl_label, sub, ctl, diff, True, _words(t, pass_text)
         )
     docs, more = _cap(docs_fn() if docs_fn else [])
-    sentence = diff_text.format(sub=_money(sub), ctl=_money(ctl), diff=_money(diff))
+    # the distance between the two figures, unsigned: the sentence already
+    # says which is bigger, and "-$80.00 apart" read as a typo (#926); the
+    # Difference column and the JSON's `difference` keep the sign
+    sentence = diff_text.format(
+        sub=_money(sub), ctl=_money(ctl), diff=_money(abs(diff))
+    )
     return Check(
         key,
         name,
@@ -197,15 +252,50 @@ def _row(
         ctl,
         diff,
         False,
-        t.text(sentence),
-        docs,
+        _words(t, sentence),
+        [_doc_words(t, d) for d in docs],
         more,
     )
 
 
+# The chart's account names as they stand while one Books Check runs
+# (#944): the vocabulary pass must leave them as the chart has them. Set by
+# books_check() for its own run and read by _words; a context variable, not
+# a module list, so two checks at once (two sign-ins, the window and a CSV)
+# never read each other's names or clear them mid-run (#951).
+_chart_labels: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "books_check_chart_labels", default=()
+)
+
+
+def _words(t, text: str) -> str:
+    """The company's own words for a sentence, with the article made to fit
+    the word that replaced the key (#933): Terms swaps the noun and left "an
+    invoice" as "an pledge". An account's name is the company's own word
+    from its chart and is put back as the chart has it (#944: a nonprofit's
+    2010 Accrued Job Costs read "Accrued Grant Costs")."""
+    out = re.sub(r"\b([Aa])n (?=[^aeiouAEIOU\W])", r"\1 ", t.text(text))
+    for label in _chart_labels.get():
+        if label and label in text:
+            swapped = t.text(label)
+            if swapped != label and swapped in out:
+                out = out.replace(swapped, label)
+    return out
+
+
+def _doc_words(t, doc: dict) -> dict:
+    """A document's label and reason in the company's words, once, here,
+    so the JSON, the window, the PDF and the CSV share one text (#933)."""
+    return {
+        **doc,
+        "type_label": _words(t, doc.get("type_label") or ""),
+        "why": _words(t, doc.get("why") or ""),
+    }
+
+
 def _not_checked(key, name, sub_label, ctl_label, sentence, t) -> Check:
     return Check(
-        key, name, sub_label, ctl_label, None, None, None, None, t.text(sentence)
+        key, name, sub_label, ctl_label, None, None, None, None, _words(t, sentence)
     )
 
 
@@ -342,21 +432,75 @@ def _strays(db: Session, account_id: int, as_of: date, words: str, receivable: b
             f"move it to a bill or to {control_accounts.ACCRUED_JOB_COSTS} "
             "Accrued Job Costs"
         )
+    # On a QuickBooks Online import given its A/R Aging Detail, the open
+    # invoices and unapplied payments are carried as documents and the
+    # Journal's A/R lines stay unnamed on purpose (#915): the documents are
+    # the receivable, so those lines are not strays, and "move it to an
+    # invoice" would count the balance twice (#919). The same for A/P once
+    # #713 carries the open bills.
+    from app.services.qbo_export_import import SOURCE_TYPE as QBO, has_carried_documents
+
+    covered = receivable and has_carried_documents(db)
     out = []
     for c in lines:
         if c.party_id is not None:
             continue
         txn = c.transaction
-        kind = (txn.source_type or "journal entry").replace("_", " ")
+        if covered and txn.source_type == QBO:
+            continue
         out.append(
             _txn_doc(
                 txn,
                 c.amount if receivable else -c.amount,
-                f"Posted straight to {words} by a {kind} that names no {party}, "
-                f"so no {party}'s balance carries it; {fix}.",
+                f"Posted straight to {words} by {_source_words(txn.source_type)} "
+                f"that names no {party}, so no {party}'s balance carries it; {fix}.",
             )
         )
     return out
+
+
+# What posted a stray entry, in words with its article (#922): the sentence
+# is what a person reads to fix a difference, and the raw source type gave
+# "by a iif import" and "by a manual". Anything not listed is a journal
+# entry, which is what every one of them is underneath.
+_SOURCE_WORDS = {
+    "manual": "a journal entry",
+    "iif_import": "an IIF import",
+    "qb_ledger_import": "a QuickBooks Desktop import",
+    "qbo_export_import": "a QuickBooks Online import",
+    "xero_import": "a Xero import",
+    "myob_import": "a MYOB import",
+    "sage_import": "a Sage 50 import",
+    "wave_import": "a Wave import",
+    "zoho_import": "a Zoho Books import",
+    "gnucash_import": "a GnuCash import",
+    "opening_balance": "the opening balance entry",
+    "bank_entry": "a register entry",
+    "job_cost": "a job cost entry",
+    "functional_allocation": "an allocation",
+    "adjustment": "an inventory adjustment",
+    "item_opening": "an item's opening count",
+    "depreciation": "a depreciation entry",
+    "asset_acquisition": "a fixed asset's acquisition",
+    "asset_disposal": "a fixed asset's disposal",
+    "transfer": "a transfer",
+    "deposit": "a deposit",
+    "check": "a check",
+    "expense": "an expense",
+    "cc_charge": "a credit card charge",
+    "payroll": "a pay run",
+    "pto": "a time-off accrual",
+    "sales_tax_payment": "a sales tax payment",
+    "restriction_release": "a release from restriction",
+    "in_kind_gift": "an in-kind gift",
+    "job_deposit": "a job deposit",
+    "accountants_copy": "the accountant's changes",
+}
+
+
+def _source_words(source_type) -> str:
+    base = (source_type or "manual").removesuffix("_void").removesuffix("_edit")
+    return _SOURCE_WORDS.get(base, "a journal entry")
 
 
 def check_ar_aging(db: Session, as_of: date, t) -> Check:
@@ -403,15 +547,17 @@ def check_ar_aging(db: Session, as_of: date, t) -> Check:
     )
 
 
-def _routed_customer_balances(db: Session) -> dict[int, Decimal]:
+def _routed_customer_balances(db: Session, as_of: date) -> dict[int, Decimal]:
     """Each customer's balance on the A/R Aging row it lands on: a
-    sub-customer billed with its parent (#638) adds to the parent's."""
+    sub-customer billed with its parent (#638) adds to the parent's. As of
+    the check's date, so a future-dated invoice is neither side's yet
+    (#930)."""
     from app.services.contact_balances import customer_balances
     from app.services.sub_customers import billed_with_parent
 
     routed = billed_with_parent(db)
     out: dict[int, Decimal] = defaultdict(lambda: ZERO)
-    for cid, bal in customer_balances(db).items():
+    for cid, bal in customer_balances(db, as_of=as_of).items():
         out[routed.get(cid, cid)] += _d(bal)
     return dict(out)
 
@@ -445,15 +591,20 @@ def check_customer_balances(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    balances = _routed_customer_balances(db)
+    balances = _routed_customer_balances(db, as_of)
     sub = sum(balances.values(), ZERO)
     ctl = _balance(db, [ar_id], as_of, True)
     words = _account_words(db, ar_id)
 
     def documents():
+        from app.models.contacts import Customer
+
         rows = ar_aging_report(db, as_of)["items"]
         aged = {r["customer_id"]: _q(_d(r["total"])) for r in rows}
-        names = {r["customer_id"]: r["customer_name"] for r in rows}
+        # the party by name from its record (#930): a customer with no
+        # aging row has a name all the same
+        names = {cid: name for cid, name in db.query(Customer.id, Customer.name)}
+        names.update({r["customer_id"]: r["customer_name"] for r in rows})
         out = []
         for cid in sorted(set(aged) | set(balances)):
             bal = _q(balances.get(cid, ZERO))
@@ -532,7 +683,7 @@ def check_ap_aging(db: Session, as_of: date, t) -> Check:
         "The A/P Aging total is {sub} and "
         + words
         + " is {ctl}, {diff} apart. Look at the documents below: a bill whose "
-        "balance due drifted from what was paid and credited on it, or a "
+        "balance due drifted from what was paid and credited on it, or an "
         "entry posted straight to the account (a journal entry, a job cost entry) "
         "that names no vendor, which no vendor's balance carries. The "
         "Journal checks further down name a voided document still posting and "
@@ -573,7 +724,7 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    balances = {vid: _d(b) for vid, b in vendor_balances(db).items()}
+    balances = {vid: _d(b) for vid, b in vendor_balances(db, as_of=as_of).items()}
     sub = sum(balances.values(), ZERO)
     ctl = _balance(db, [ap_id], as_of, False)
     words = _account_words(db, ap_id)
@@ -581,7 +732,10 @@ def check_vendor_balances(db: Session, as_of: date, today: date, t) -> Check:
     def documents():
         rows = ap_aging_report(db, as_of)["items"]
         aged = {r["vendor_id"]: _q(_d(r["total"])) for r in rows}
-        names = {r["vendor_id"]: r["vendor_name"] for r in rows}
+        from app.models.contacts import Vendor
+
+        names = {vid: name for vid, name in db.query(Vendor.id, Vendor.name)}
+        names.update({r["vendor_id"]: r["vendor_name"] for r in rows})
         out = []
         for vid in sorted(set(aged) | set(balances)):
             bal = _q(balances.get(vid, ZERO))
@@ -758,9 +912,20 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
             as_of,
             t,
         )
-    sub = waiting_balance(db, uf_id)
+    # Both figures to the as-of day (W-242): what was waiting at the end of
+    # it, beside the account read to it. A payment dated later is on the
+    # Make Deposits list already and in neither figure here, so the row
+    # says how much of that list it leaves out.
+    sub = waiting_balance(db, uf_id, as_of)
     ctl = _balance(db, [uf_id], as_of, True)
     words = _account_words(db, uf_id)
+    # What the dated cut left out is the list's own arithmetic: the Make
+    # Deposits total less this row's figure, so the two always add up to
+    # what that page shows.
+    later = waiting_balance(db, uf_id) - sub
+    not_counting = (
+        f", not counting {_money(later)} dated after today" if later > ZERO else ""
+    )
 
     def documents():
         # A line on 1200 that is not customer money and not a deposit: a
@@ -798,10 +963,12 @@ def check_undeposited_funds(db: Session, as_of: date, today: date, t) -> Check:
         ctl_label,
         sub,
         ctl,
-        f"The payments waiting to be deposited add up to {words}.",
+        f"The payments waiting to be deposited add up to {words}{not_counting}.",
         "The payments waiting to be deposited add up to {sub} and "
         + words
-        + " is {ctl}, {diff} apart. Look at the lines below, posted to the "
+        + " is {ctl}"
+        + not_counting
+        + ", {diff} apart. Look at the lines below, posted to the "
         "account by something other than a customer's payment, and at a "
         "deposit entered by hand that took more than was waiting.",
         documents,
@@ -1093,7 +1260,7 @@ def check_payroll_liabilities(db: Session, as_of: date, t) -> Check:
         owed = run_liabilities(run) + _q(_d(net_held.get(run.transaction_id)))
         accrued += owed
         posted = _q(_d(posted_by_txn.get(run.transaction_id)))
-        label = f"Pay run {run.pay_date.isoformat()}"
+        label = run.pay_date.isoformat()  # the number; "Pay run" is its type (#932)
         if not run.transaction_id:
             run_docs.append(
                 _doc(
@@ -1587,12 +1754,18 @@ def check_voided_live(db: Session, as_of: date, t) -> Check:
         net: dict[int, dict[int, Decimal]] = defaultdict(
             lambda: defaultdict(lambda: ZERO)
         )
+        # the inventory pool's residue, posted under a void's source when a
+        # sale's reversal fills a hole carried at another cost (#647/W-60),
+        # is the pool's revaluation, not the document's posting (#1022)
+        from app.services.inventory_service import RESIDUE_MARK
+
         for ln in (
             db.query(TransactionLine)
             .join(Transaction, TransactionLine.transaction_id == Transaction.id)
             .filter(
                 TransactionLine.transaction_id.in_(list(owner)),
                 Transaction.date <= as_of,
+                ~Transaction.description.contains(RESIDUE_MARK),
             )
         ):
             net[owner[ln.transaction_id]][ln.account_id] += _d(ln.debit) - _d(ln.credit)
@@ -1605,7 +1778,7 @@ def check_voided_live(db: Session, as_of: date, t) -> Check:
             d = by_id[doc_id]
             number = getattr(d, number_attr, None) if number_attr else None
             if kind == "payroll":
-                number = f"Pay run {d.pay_date.isoformat()}"
+                number = d.pay_date.isoformat()  # "Pay run" is its type (#932)
             docs.append(
                 _doc(
                     _DOC_TYPE.get(kind, kind),
@@ -1712,6 +1885,13 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
             BillPayment.date,
         ),
     )
+    # The QuickBooks Online import carries a company's open invoices and
+    # unapplied payments over as documents with no entry of their own, on
+    # purpose: the imported Journal already posted them, and an entry each
+    # would double A/R. They are not missing anything (#914).
+    from app.services.qbo_export_import import is_carried_invoice, is_carried_payment
+
+    carried = {"invoice": is_carried_invoice, "payment": is_carried_payment}
     for kind, model, number_attr, amount_attr, conds, date_col in specs:
         for d in db.query(model).filter(*conds, date_col <= as_of):
             amount = _d(getattr(d, amount_attr))
@@ -1719,6 +1899,8 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
                 continue
             if kind in _CARRIED_KINDS and is_carried_payable(db, d, carried_ap):
                 continue  # on 2000 by the imported history, by design (#713)
+            if kind in carried and carried[kind](db, d):
+                continue
             total += abs(amount)
             docs.append(
                 _doc(
@@ -1739,7 +1921,7 @@ def check_missing_entries(db: Session, as_of: date, t) -> Check:
                 _doc(
                     "pay_run",
                     run.id,
-                    f"Pay run {run.pay_date.isoformat()}",
+                    run.pay_date.isoformat(),  # "Pay run" is its type (#932)
                     run.total_gross,
                     "Processed, but it has no journal entry.",
                 )
@@ -1792,6 +1974,87 @@ def _integrity(key, name, docs, total, pass_text, diff_text, t) -> Check:
 # ── the report ───────────────────────────────────────────────────────────
 
 
+def _label_invoices_by_their_face(db: Session, rows, t) -> None:
+    """An invoice-kind document is named from its own face, as its PDF and
+    its ledger line name it (donor_documents.document_label): Invoice,
+    Pledge, Sales Receipt or Donation Receipt. The company's word alone
+    called a nonprofit's program-fee invoice a Pledge (#940); the sentences
+    keep the company's words (#933)."""
+    from app.services.donor_documents import document_label
+
+    for r in rows:
+        for d in r.documents or []:
+            if d.get("type") != "invoice" or d.get("id") is None:
+                continue
+            inv = db.get(Invoice, d["id"])
+            if inv is not None:
+                d["type_label"] = document_label(inv, t)
+
+
+def tied_accounts(db: Session) -> dict[int, tuple[str, str]]:
+    """{account id: (the Books Check row's control label, what keeps the
+    sub-ledger beside it)} for every account a Books Check row sets beside a
+    sub-ledger: read from the same lookups the rows make, so it cannot drift
+    from them. A line posted to one of these by a document that is not part
+    of its sub-ledger (an invoice line on an item pointed at it, W-196)
+    moves the account and not the sub-ledger, and puts that row out by the
+    line. The retainage rows are a contractor's, but their accounts are
+    tied whatever the company type, so a switch to construction mode finds
+    nothing posted to them out of turn."""
+    from app.services.accrued_job_costs import account_id as accrued_id
+    from app.services.inventory_service import get_inventory_asset_account_id
+    from app.services.retainage_report import PAYABLE_ACCOUNT, RECEIVABLE_ACCOUNT
+    from app.services.undeposited_funds import uf_account_id
+    from app.models.items import Item
+
+    out: dict[int, tuple[str, str]] = {}
+
+    def put(account_id, label, keeper):
+        if account_id is not None and account_id not in out:
+            out[account_id] = (label, keeper)
+
+    put(
+        control_accounts.find(db, "1100"),
+        "Accounts Receivable",
+        "the invoices and customer payments",
+    )
+    put(
+        control_accounts.find(db, "2000"),
+        "Accounts Payable",
+        "the bills and bill payments",
+    )
+    put(
+        uf_account_id(db),
+        "Undeposited Funds",
+        "the customer payments waiting to be deposited",
+    )
+    inventory = db.query(Account).filter(Account.account_number == "1300").first()
+    if inventory is not None:
+        put(inventory.id, "Inventory", "the stock items' quantity and cost")
+    for item in db.query(Item).filter(Item.track_inventory.is_(True)):
+        put(
+            get_inventory_asset_account_id(db, item),
+            "Inventory",
+            "the stock items' quantity and cost",
+        )
+    for acct_id in _payroll_liability_accounts(db):
+        put(acct_id, "Payroll Liabilities", "the pay runs and what was paid of them")
+    put(
+        control_accounts.find(db, "2200"),
+        "Sales Tax Payable",
+        "the sales tax the invoices charge and the tax payments",
+    )
+    put(accrued_id(db), "Accrued Job Costs", "the job cost accruals")
+    for name, keeper in (
+        (RECEIVABLE_ACCOUNT, "the retainage held on pay applications"),
+        (PAYABLE_ACCOUNT, "the retainage held from subcontractors' bills"),
+    ):
+        acct = db.query(Account).filter(Account.name == name).first()
+        if acct is not None:
+            put(acct.id, name, keeper)
+    return out
+
+
 def books_check(db: Session, as_of: Optional[date] = None) -> dict:
     """Every pair, as of a date (today by default): the rows, how many
     differ, and the sentence the dashboard widget shows."""
@@ -1800,6 +2063,27 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
     today = date.today()
     as_of = as_of or today
     t = terms_from_db(db)
+    from app.services.account_label import label_for
+
+    accounts = db.query(Account).all()
+    token = _chart_labels.set(
+        tuple(
+            sorted(
+                {label_for(a, db) for a in accounts}
+                | {a.name for a in accounts if a.name}
+                | {"Accrued Job Costs"},
+                key=len,
+                reverse=True,
+            )
+        )
+    )
+    try:
+        return _books_check_rows(db, as_of, today, t)
+    finally:
+        _chart_labels.reset(token)
+
+
+def _books_check_rows(db: Session, as_of: date, today: date, t) -> dict:
     rows = [
         check_ar_aging(db, as_of, t),
         check_customer_balances(db, as_of, today, t),
@@ -1822,9 +2106,10 @@ def books_check(db: Session, as_of: Optional[date] = None) -> dict:
         check_missing_entries(db, as_of, t),
     ]
     for r in rows:
-        r.name = t.text(r.name)
-        r.subledger_label = t.text(r.subledger_label)
-        r.control_label = t.text(r.control_label)
+        r.name = _words(t, r.name)
+        r.subledger_label = _words(t, r.subledger_label)
+        r.control_label = _words(t, r.control_label)
+    _label_invoices_by_their_face(db, rows, t)
     differences = sum(1 for r in rows if r.ok is False)
     return {
         "as_of": as_of.isoformat(),

@@ -4,7 +4,9 @@ a log with no UI."""
 
 from datetime import datetime, timedelta
 
+import secrets
 import smtplib
+import ssl
 
 import pytest
 
@@ -157,7 +159,16 @@ class _FakeSMTP:
     def __init__(self, *a, **k):
         pass
 
-    def starttls(self):
+    def ehlo_or_helo_if_needed(self):
+        pass
+
+    def has_extn(self, name):
+        return name == "starttls"
+
+    def starttls(self, context=None):
+        assert context.verify_mode == ssl.CERT_REQUIRED
+
+    def ehlo(self):
         pass
 
     def login(self, user, password):
@@ -179,7 +190,7 @@ def test_test_email_failure_states_reason_and_hint(client, monkeypatch):
             "smtp_host": "smtp.gmail.com",
             "smtp_port": "587",
             "smtp_user": "me@gmail.com",
-            "smtp_password": "not-an-app-password",
+            "smtp_password": secrets.token_urlsafe(12),
             "smtp_from_email": "me@gmail.com",
             "smtp_use_tls": "true",
         },
@@ -188,9 +199,16 @@ def test_test_email_failure_states_reason_and_hint(client, monkeypatch):
     r = client.post("/api/settings/test-email")
     assert r.status_code == 502
     detail = r.json()["detail"]
-    assert "535" in detail
-    assert "app password" in detail.lower()
-    assert "Recent sends" in detail
+    # the sentence first (W-216: no raw reply in front of it), then the
+    # mail server's reply as it was received: Test Email is an
+    # administrator's, and the one answer to a send that carries the reply
+    assert detail == (
+        "Test email failed to send. Google will not accept a normal password "
+        "here. Turn on 2-Step Verification on the account and use a "
+        "16-character app password as the SMTP password. The mail server's "
+        "reply: 535 5.7.8 Username and Password not accepted. The full list "
+        "is under Settings → Email (SMTP) → Recent sends."
+    )
     # and the failure is in the list the message points at
     rows = client.get("/api/email-log?status=failed").json()["rows"]
     assert rows and rows[0]["entity_type"] == "settings_test"
@@ -315,7 +333,7 @@ def _failed_letters(client, monkeypatch):
 
 
 @pytest.mark.parametrize("role", ["admin", "bookkeeper"])
-def test_a_failed_collection_letter_says_who_can_see_why(
+def test_a_failed_collection_letter_reads_like_the_other_batch_sends(
     client, db_session, seed_accounts, monkeypatch, role
 ):
     from app.models.invoices import Invoice, InvoiceStatus
@@ -327,11 +345,9 @@ def test_a_failed_collection_letter_says_who_can_see_why(
     if role == "bookkeeper":
         _bookkeeper_login(client, db_session)
     error = _failed_letters(client, monkeypatch)
-    assert error.startswith("Probe Co: the letter could not be emailed.")
-    if role == "admin":
-        assert "Settings → Email (SMTP) → Recent sends" in error
-    else:
-        assert "An administrator can see why under Settings → Recent sends." in error
+    # the same words as every other batch send, for each role (W-218)
+    assert error.startswith("Probe Co: the letter could not be sent")
+    assert "emailed" not in error
 
 
 _TOAST_PROBE = r"""

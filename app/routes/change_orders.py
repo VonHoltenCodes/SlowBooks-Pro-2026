@@ -114,7 +114,16 @@ def _validate_line_refs(db: Session, line) -> str:
 
 
 def _set_lines(db: Session, co: ChangeOrder, lines) -> None:
-    db.query(ChangeOrderLine).filter(ChangeOrderLine.change_order_id == co.id).delete()
+    # one by one, so the audit log keeps a row for each line that left: a
+    # save that removes every line is then in the change order's Activity,
+    # and never read into the next save
+    for old in (
+        db.query(ChangeOrderLine)
+        .filter(ChangeOrderLine.change_order_id == co.id)
+        .order_by(ChangeOrderLine.id)
+        .all()
+    ):
+        db.delete(old)
     db.flush()
     for i, line in enumerate(lines):
         ctype = _validate_line_refs(db, line)

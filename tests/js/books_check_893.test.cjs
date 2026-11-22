@@ -97,5 +97,7 @@ test('the view is registered as-of with its Back label and a card', () => {
     assert.equal(R._backText('books-check', ''), 'Back to Books Check');
     R._pins = [];
     const views = R._cards().map((c) => c.view);
-    assert.equal(views[views.indexOf('trial-balance') + 1], 'books-check');
+    // a books tool (#936): Books tools, alphabetical, after Adjusting Journal Entries
+    assert.equal(R._cards().find((c) => c.view === 'books-check').section, 'books');
+    assert.equal(views[views.indexOf('adjusting-entries') + 1], 'books-check');
 });

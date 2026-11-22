@@ -1572,12 +1572,17 @@ def cost_tree_period(tree: dict) -> str:
     """The period line: Job to date, or the dates the actuals were read for."""
     start, end = tree.get("start_date"), tree.get("end_date")
     if start and end:
-        return f"{start} — {end}"
-    if end:
-        return f"Job to date through {end}"
-    if start:
-        return f"From {start}"
-    return "Job to date"
+        period = f"{start} — {end}"
+    elif end:
+        period = f"Job to date through {end}"
+    elif start:
+        period = f"From {start}"
+    else:
+        period = "Job to date"
+    # Hide zero balances (#1052) says so, as the financial reports do (#625)
+    if tree.get("hide_zero"):
+        period += " (zero balances hidden)"
+    return period
 
 
 def _cost_tree_shows_uncoded(un: dict) -> bool:
@@ -1678,6 +1683,23 @@ def _cost_tree_rows(tree: dict, opened=None) -> list[dict]:
                 "figures": _uncommitted_figures(before),
             }
         )
+    ur = tree.get("unassigned_revenue")
+    if ur and (
+        ur["lines"] or ur["figures"]["est_revenue"] or ur["figures"]["act_revenue"]
+    ):
+        # revenue with no cost code and no cost type (#1066): a row of its
+        # own, so the revenue columns foot to the Total row
+        rows.append(
+            {
+                "kind": "revenue_uncoded",
+                "cost_type": "",
+                "code": "",
+                "name": "Revenue with no cost code",
+                "label": "Revenue with no cost code",
+                "depth": 0,
+                "figures": ur["figures"],
+            }
+        )
     jl = tree["job_level_budget"]
     if jl["original"] or jl["changes"] or jl["est_revenue"]:
         rows.append(
@@ -1699,8 +1721,8 @@ _COST_TREE_NOTE = (
     "for the period."
 )
 
-# A contractor's revenue by section, beside the section's cost (the tree's
-# type branches carry cost only: a pay application's revenue has no type).
+# A contractor's revenue by section, beside the section's cost, with the
+# billed markups spread over the sections their budget went to.
 _REVENUE_SECTION_COLUMNS = [
     {"key": "budget", "label": "Budget", "kind": "money"},
     {"key": "actual", "label": "Actual cost", "kind": "money"},

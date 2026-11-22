@@ -17,7 +17,8 @@ to your SimpleFIN bridge over HTTPS.
 2. On the bridge's site, you connect your bank(s). The bridge handles the
    bank login, MFA, and aggregation.
 3. The bridge gives you a one-time **setup token**. Paste it into
-   **Banking → Bank Feeds (SimpleFIN) → Connect**. Connecting, mapping and
+   **Banking → Bank Feeds (SimpleFIN) → Connect**. Connecting, mapping,
+   refreshing the account list, moving a mapping, updating the token and
    disconnecting are an administrator's; a bookkeeper runs the syncs.
 4. SlowBooks exchanges the token once for a permanent read-only access
    credential, stored encrypted-at-rest in your company file and never
@@ -54,10 +55,44 @@ Synced transactions land in the same review flow as OFX/CSV imports:
   it; *Add all categorised* posts the rule-suggested ones in one click.
 - Pending transactions are ignored until they post (their ids aren't
   stable before that).
+- **A transfer between two of your own accounts** (checking to checking,
+  checking to a card) is a line whose category is the other bank or card
+  account: the Category list keeps those under **Transfer to another
+  account**. **Add** it on one side and the line posts as a transfer, not as
+  income or an expense; when the other account's feed brings in its side of
+  the same amount, that line finds the transfer you posted and offers
+  **Match**, so nothing posts twice. Paying a credit card from checking works
+  the same way, with the card as the category.
 
 The first sync reaches back roughly three months; every later sync re-checks a 7-day
 overlap window before your last sync so late-posting transactions are
-never missed.
+never missed. Each feed keeps its own last sync (since 2.32.0), so a feed
+mapped after the others takes the full three months on its first sync,
+not just the week before theirs.
+
+## New accounts, replacement cards and a new token
+
+- **Refresh accounts** reads the bridge's account list again — balances
+  only, no transactions, and it works before anything is mapped. An
+  account the bridge reports that imports nowhere is marked **New — not
+  mapped**; a mapped account the bridge no longer reports stays in the
+  table marked **Gone from SimpleFIN**, so its mapping is not lost
+  silently. A sync updates the list the same way.
+- **Move this mapping to…** (on any mapped row) is for a card the bank
+  reissued: the new card usually arrives as a new SimpleFIN account. Pick
+  it and, in one step, the old account stops importing and the new one
+  imports into the same SlowBooks account, with the old one's **Reverse
+  signs** choice. The new account's first sync reaches back the usual
+  three months; anything already imported is skipped. Mapping the new card
+  beside the old one in the **Imports into** list is still refused (two
+  feeds into one account would bring its lines in twice).
+- **Update token…** takes a fresh setup token for the connection you
+  already have — when the bridge refuses the stored credential, or after
+  you set the connection up again at your provider. Every mapping, Reverse
+  signs choice and sync date is kept. A mapped account the new connection
+  doesn't report is named when you save and shown as **Gone from
+  SimpleFIN**: move its mapping to its new account, or set it to not
+  imported.
 
 **Older history.** **Fetch older history…** reaches back 3, 6 or 12 months
 (the API takes `POST /api/simplefin/sync {"history_months": N}`, up to 24).
@@ -77,6 +112,17 @@ sample transactions to play with. Disconnect afterward to clear it.
 
 ## Notes & troubleshooting
 
+- **"SimpleFIN did not answer within 120 seconds."** The bridge refreshes
+  every institution behind your token on one request, and a slow night can
+  take longer than that. Try the sync again; if it keeps happening, set
+  `SLOWBOOKS_SIMPLEFIN_TIMEOUT=240` (seconds) in the `.env` beside the app's
+  other settings and restart. The default is 120 seconds, and the floor is 10.
+- **"Could not reach the SimpleFIN bridge: the connection was not answered…"**
+  is a different thing: the bridge's address never answered the connection
+  at all (the time named is what was measured, not the setting). Check the
+  bridge address in Settings → Connections → SimpleFIN and that this
+  computer can reach the internet; raising the timeout does not help here.
+
 - **Setup tokens are single-use.** If a connect attempt fails and the
   token was consumed, generate a fresh token on the bridge site.
 - **Desktop installs work fully** — the sync is outbound HTTPS polling;
@@ -91,7 +137,11 @@ sample transactions to play with. Disconnect afterward to clear it.
   review when the clearing-account option is on ([setup-stripe.md](setup-stripe.md)).
 - **Disconnecting** (Banking → Bank Feeds → Disconnect) forgets the
   credential, mapping, and cache. Transactions already imported stay in
-  your registers.
+  your registers. To replace only the credential, use **Update token…**
+  instead: it keeps the mappings.
+- **"The SimpleFIN bridge refused the stored credentials"** means the
+  access credential was revoked or expired at the provider. Get a fresh
+  setup token there and use **Update token…**.
 - **Coverage** is whatever your bridge supports — the reference bridge
   covers most US and Canadian institutions.
 - If a mapped account stops appearing in syncs, the bank connection

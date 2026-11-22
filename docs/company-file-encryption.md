@@ -19,12 +19,12 @@ company runs:
   **Settings → Users and security → Company File Encryption → Turn on…**, or
   the *Encrypt this company file* box on first-run setup. The dialog asks
   two things and nothing else: the **company's name, typed exactly as
-  Settings shows it** (the button stays grey, and the line under the box
+  Settings shows it** (the button stays gray, and the line under the box
   says so, until it matches), and **the password you sign in with**, not
   a new one. Then it does the work below.
 - **On a server** (Docker, a cloud host, or Windows started with
   `--serve-lan`), nobody is at a window to unlock the file when the server
-  starts, so the button stays grey until an operator sets
+  starts, so the button stays gray until an operator sets
   `COMPANY_FILE_ENCRYPTION_SECRET` in the server's `.env`
   (`C:\ProgramData\SlowBooksPro\.env` on a Windows server; the Docker
   `.env` otherwise) and stops and starts the server. *Turn on…* then asks

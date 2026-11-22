@@ -31,6 +31,8 @@ const ctx = {
   App: { navigate: async (hash) => { navigated.push(hash); }, stayPut: () => { stayed.push(ctx.location.hash); ctx.location.hash = '#/settings'; } },
 };
 vm.createContext(ctx);
+// the section notes' helper (#977), loaded before settings.js as on the page
+vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);
 vm.runInContext(fs.readFileSync('app/static/js/settings.js', 'utf8') + '\nthis.SettingsPage = SettingsPage;', ctx);
 const S = ctx.SettingsPage;
 

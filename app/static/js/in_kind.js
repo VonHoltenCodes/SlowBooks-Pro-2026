@@ -23,11 +23,8 @@ const InKindPage = {
         </tr>`).join('');
         return `
             <div class="page-header">
-                <h2>In-Kind Gifts</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>In-Kind Gifts</h2>${hint("Donated property and services. The value you enter is the donor's estimate for the books; the acknowledgment letter describes the gift without a dollar figure.", 'In-Kind Gifts')}</div>
                 <button class="btn btn-primary" onclick="InKindPage.showForm()">+ In-Kind Gift</button>
-            </div>
-            <div class="toolbar" style="font-size:11px; color:var(--gray-500);">
-                Donated property and services. The value you enter is the donor's estimate for the books; the acknowledgment letter describes the gift without a dollar figure.
             </div>
             ${gifts.length === 0 ? `<div class="empty-state"><p>No in-kind gifts yet.</p></div>` : `
             <div class="table-container"><table>
@@ -85,14 +82,27 @@ const InKindPage = {
 
     addLine() { $('#ik-lines').insertAdjacentHTML('beforeend', InKindPage.lineHtml(InKindPage._lineCount++)); },
 
+    // A line's quantity and fair value as they are read everywhere: by the
+    // running total, by the $0.00 question and by the gift that is posted.
+    // A quantity left blank (or not a number) is 1, as it always posted.
+    lineValues(row) {
+        return {
+            quantity: parseFloat(row.querySelector('.ik-qty')?.value) || 1,
+            fair_value: parseFloat(row.querySelector('.ik-fv')?.value) || 0,
+        };
+    },
+
+    // Draws each line's amount and the total, and returns the total.
     recalc() {
         let total = 0;
         $$('#ik-lines tr').forEach(row => {
-            const amt = (parseFloat(row.querySelector('.ik-qty')?.value) || 0) * (parseFloat(row.querySelector('.ik-fv')?.value) || 0);
+            const v = InKindPage.lineValues(row);
+            const amt = v.quantity * v.fair_value;
             total += amt;
             const cell = row.querySelector('.ik-amount'); if (cell) cell.textContent = formatCurrency(amt);
         });
         const t = $('#ik-total'); if (t) t.textContent = `Total: ${formatCurrency(total)}`;
+        return total;
     },
 
     async save(e) {
@@ -102,11 +112,12 @@ const InKindPage = {
         $$('#ik-lines tr').forEach(row => {
             lines.push({
                 description: row.querySelector('.ik-desc')?.value || '',
-                quantity: parseFloat(row.querySelector('.ik-qty')?.value) || 1,
-                fair_value: parseFloat(row.querySelector('.ik-fv')?.value) || 0,
+                ...InKindPage.lineValues(row),
                 debit_account_id: parseInt(row.querySelector('.ik-debit')?.value) || null,
             });
         });
+        // the total the form shows decides the $0.00 question
+        if (!ZeroTotal.ask('In-Kind Gift', InKindPage.recalc())) return;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {

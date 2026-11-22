@@ -3,6 +3,7 @@
 <head>
     <title>Application for Payment</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
@@ -14,24 +15,49 @@
     .doc-number { font-size: 12pt; color: #666; margin-top: 4px; }
     .meta-table { width: 100%; margin-bottom: 16px; }
     .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; }
-    .meta-label { font-weight: 700; color: #4a4a6a; width: 120px; }
-    .cert { float: right; width: 300px; margin-bottom: 16px; }
-    .cert table { width: 100%; }
+    .meta-label { font-weight: 700; color: #4a4a6a; width: 120px; white-space: nowrap; }
+    .meta-table td.nw { white-space: nowrap; }
+    .cert { float: right; margin-bottom: 16px; }
+    /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .cert table { width: 300px; margin-left: auto; }
     .cert td { padding: 3px 8px; font-size: 9pt; }
     /* nowrap: a negative amount breaks after its minus sign otherwise, leaving "-" alone on a line. */
     .cert td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .cert .label { font-weight: 700; color: #4a4a6a; }
+    .cert .label { font-weight: 700; color: #4a4a6a; white-space: nowrap; }
     .cert .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     h2.sheet { clear: both; font-size: 11pt; color: #003366; margin: 22px 0 8px 0; text-transform: uppercase; letter-spacing: 0.03em; }
     table.cont { width: 100%; border-collapse: collapse; }
-    table.cont th { background: #003366; color: white; padding: 5px 6px; font-size: 7.5pt; text-transform: uppercase; text-align: left; letter-spacing: 0.02em; }
-    table.cont th.r { text-align: right; }
-    table.cont td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
-    table.cont td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    table.cont tr.totals td { font-weight: 700; border-top: 2px solid #003366; }
-    table.cont tr { page-break-inside: avoid; }
+    table.cont > thead > tr > th { background: #003366; color: white; padding: 5px 6px; font-size: 7.5pt; text-transform: uppercase; text-align: left; letter-spacing: 0.02em; }
+    table.cont > thead > tr > th.r { text-align: right; }
+    table.cont > tbody > tr > td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
+    table.cont > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* The description has the rest of the table's width and wraps in it, so
+       the figures' columns are as wide as their figures and headings and
+       stay where they are whatever the text. */
+    table.cont > tbody > tr > td.desc { width: 100%; max-width: 0.5in; }
+    /* An item number is on one line in a column as wide as that line and
+       no wider than this, and a longer one wraps there
+       (_print_text.html has the rule). */
+    table.cont > tbody > tr > td.item { max-width: 0.75in; }
+    table.cont > tbody > tr.totals > td { font-weight: 700; border-top: 2px solid #003366; }
+    /* Ten columns of six- and seven-figure amounts, which never wrap, ran
+       the line detail past the right margin (W-226: 3 pt at six figures,
+       45 pt at seven). Its figures take less room as they grow, so the
+       table, and its Totals row, end at the margin whatever the amounts. */
+    table.cont.figures-6 > thead > tr > th, table.cont.figures-6 > tbody > tr > td { padding-left: 4px; padding-right: 4px; }
+    table.cont.figures-6 > tbody > tr > td { font-size: 8pt; }
+    table.cont.figures-7 > thead > tr > th, table.cont.figures-7 > tbody > tr > td { padding-left: 3px; padding-right: 3px; }
+    table.cont.figures-7 > thead > tr > th { font-size: 6.5pt; }
+    table.cont.figures-7 > tbody > tr > td { font-size: 7pt; }
+    table.cont > tbody > tr { page-break-inside: avoid; }
+    /* The last line, the Totals row, the note and the footer are one
+       unbreakable group of the line table (#1047, as #1039 for the invoice):
+       the Totals row never starts a page with no line above it, on
+       WeasyPrint's PDF and on Chromium's print alike. */
+    table.cont > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.cont > tbody.doc-tail > tr.doc-end > td { padding: 0; border-bottom: 0; font-size: 10pt; }
     .note { font-size: 8pt; color: #4a4a6a; margin: 6px 0 0 0; }
-    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
+    .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -55,13 +81,13 @@
 
     <table class="meta-table"><tr>
         <td class="meta-label">Owner:</td><td>{{ header.owner }}</td>
-        <td class="meta-label">Application no:</td><td>{{ app.application_no }}</td>
+        <td class="meta-label">Application no:</td><td class="nw">{{ app.application_no }}</td>
     </tr><tr>
         <td class="meta-label">Project:</td><td>{{ header.job_name }}</td>
-        <td class="meta-label">Period to:</td><td>{{ app.period_to | fdate }}</td>
+        <td class="meta-label">Period to:</td><td class="nw">{{ app.period_to | fdate }}</td>
     </tr><tr>
-        <td class="meta-label">Date:</td><td>{{ app.date | fdate }}</td>
-        <td class="meta-label">Status:</td><td>{{ app.status | title }}</td>
+        <td class="meta-label">Date:</td><td class="nw">{{ app.date | fdate }}</td>
+        <td class="meta-label">Status:</td><td class="nw">{{ app.status | title }}</td>
     </tr></table>
 
     {# The summary of the payment application. #}
@@ -86,7 +112,9 @@
     </table></div>
 
     <h2 class="sheet">Line detail</h2>
-    <table class="cont">
+    {# the largest figure the line detail prints decides how much room each gets (W-226) #}
+    {% set widest = [totals.scheduled_total, totals.previous_total, totals.this_period_total, totals.stored_total, totals.completed_to_date, totals.balance_to_finish_total] | map('float') | map('abs') | max %}
+    <table class="cont{% if widest >= 1000000 %} figures-7{% elif widest >= 10000 %} figures-6{% endif %}">
         <thead><tr>
             <th style="width:36px;">Item</th>
             <th>Description</th>
@@ -101,9 +129,10 @@
         </tr></thead>
         <tbody>
         {% for line in pa.lines %}
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
             <tr>
-                <td>{{ line.item_no or '' }}</td>
-                <td>{{ line.description or '' }}</td>
+                <td class="item">{{ (line.item_no or '') | own_width }}</td>
+                <td class="desc">{{ line.description | desc }}</td>
                 <td class="r">{{ line.scheduled_value | currency }}</td>
                 <td class="r">{{ line.previous | currency }}</td>
                 <td class="r">{{ line.this_period | currency }}</td>
@@ -116,6 +145,7 @@
                 <td class="r">{{ line.retainage | currency }}</td>
             </tr>
         {% endfor %}
+        {% if not pa.lines %}</tbody><tbody class="doc-tail">{% endif %}
             {# A body row, not a tfoot: a footer repeats on every printed page. #}
             <tr class="totals">
             <td></td><td>Totals</td>
@@ -129,12 +159,14 @@
             {% set retainage_column = pa.lines | sum(attribute='retainage') %}
             <td class="r">{{ retainage_column | currency }}</td>
         </tr>
-        </tbody>
-    </table>
+        <tr class="doc-end"><td colspan="10">
     {# The whole equation: column total, less released, equals retainage to date. #}
     {% set released_to_date = totals.previous_released + totals.release_retainage %}
     {% if released_to_date %}<p class="note">The retainage column is before releases: its total of {{ retainage_column | currency }}, less retainage released to date of {{ released_to_date | currency }}, equals retainage to date of {{ totals.retainage_to_date | currency }}.</p>{% endif %}
 
     <div class="footer">{{ app.number }} · {{ header.job_name }}</div>
+        </td></tr>
+        </tbody>
+    </table>
 </body>
 </html>

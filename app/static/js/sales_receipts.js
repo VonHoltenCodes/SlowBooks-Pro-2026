@@ -44,6 +44,17 @@ const SalesReceiptsPage = {
         ).join('');
 
         const payment = await SalesReceiptsPage._findPayment(sr);
+        // Nonprofit: the acknowledgment route says whether this receipt is a
+        // gift (money received on it by payments that are not void) and for
+        // how much. The receipt's amount paid is not that: a credit applied
+        // to the receipt raises it with no money received.
+        let ack = null;
+        if (Terms.isNonprofit() && sr.status !== 'void') {
+            try { ack = await API.get(`/donors/gifts/invoice/${sr.id}/acknowledgment/preview`); } catch (e) { ack = null; }
+        }
+        const received = Terms.isNonprofit()
+            ? (ack && ack.eligible ? Number(ack.document_paid || 0) : 0)
+            : Number(sr.amount_paid || 0);
 
         openModal(`${T('Sales Receipt')} #${sr.invoice_number}`, `
             <div style="margin-bottom:12px;">
@@ -63,7 +74,7 @@ const SalesReceiptsPage = {
                 <div class="total-row"><span class="label">Tax</span><span class="value">${money(sr.tax_amount)}</span></div>
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(sr.total)}</span></div>
                 ${sr.fair_value_amount ? `<div class="total-row"><span class="label">Fair value of goods/services${sr.fair_value_description ? ` (${escapeHtml(sr.fair_value_description)})` : ''}</span><span class="value">${money(sr.fair_value_amount)}</span></div>
-                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${money(sr.total - sr.fair_value_amount)}</span></div>` : ''}
+                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${money(Math.max(received - Number(sr.fair_value_amount), 0))}</span></div>` : ''}
             </div>
             ${sr.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(sr.notes)}</p>` : ''}
             ${InvoicesPage.attachmentsPanelHtml('invoice', sr.id)}
@@ -71,7 +82,7 @@ const SalesReceiptsPage = {
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/invoices/${sr.id}/print-preview','_blank')">Print</button>
-                ${Terms.isNonprofit() && sr.status !== 'void' ? `<button class="btn btn-secondary" onclick="window.open('/api/donors/gifts/invoice/${sr.id}/acknowledgment/pdf','_blank')">Acknowledgment (PDF)</button>
+                ${ack && ack.eligible ? `<button class="btn btn-secondary" onclick="window.open('/api/donors/gifts/invoice/${sr.id}/acknowledgment/pdf','_blank')">Acknowledgment (PDF)</button>
                 <button class="btn btn-secondary" onclick="Donors.emailAcknowledgment('invoice', ${sr.id})">Email Acknowledgment</button>` : ''}
                 ${sr.status !== 'void' ? `<button data-destructive class="btn btn-danger" onclick="SalesReceiptsPage.void(${sr.id})">Void Receipt</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
@@ -129,6 +140,8 @@ const SalesReceiptsPage = {
         const classGroup = await classFormGroupHtml(null);
         // narrowed to the customer's jobs; a blank customer is the walk-in
         const jobGroup = await jobFormGroupHtml(null, 'sr-customer-select');
+        // construction: a line's cost code and type (#1055)
+        if (SalesReceiptsPage.costCells()) await SalesCost.load();
 
         SalesReceiptsPage.lineCount = sr.lines.length;
         SalesReceiptsPage._items = items;
@@ -194,18 +207,17 @@ const SalesReceiptsPage = {
                             oninput="SalesReceiptsPage.recalc()"></div>
                     ${Terms.isNonprofit() ? `
                     <div class="form-group full-width" style="border-top:1px solid var(--gray-200); padding-top:8px; margin-top:4px;">
-                        <label>Goods or services provided in exchange?</label>
+                        <label>Goods or services provided in exchange? ${hint('Leave blank for a pure gift. The receipt states the deductible portion (IRS Pub. 1771).', 'Goods or services provided in exchange')}</label>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">
                             <input name="fair_value_amount" class="money" type="number" step="0.01" min="0" placeholder="Fair value ($)" style="width:140px;">
                             <input name="fair_value_description" maxlength="200" placeholder="e.g. gala dinner" style="flex:1; min-width:180px;">
                         </div>
-                        <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Leave blank for a pure gift. The receipt states the deductible portion (IRS Pub. 1771).</div>
                     </div>` : ''}
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th>
+                        <th scope="col">Item</th><th scope="col">Description</th>${SalesReceiptsPage.costCells() ? SalesCost.headHtml() : ''}<th scope="col" class="col-qty">Qty</th>
                         <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>
                     </tr></thead>
                     <tbody id="sr-lines">
@@ -362,11 +374,16 @@ const SalesReceiptsPage = {
         $('#sr-customer-select').value = '';
     },
 
+    // The line's cost code and type cells (#1055), the shared helper in
+    // utils.js; a bare page without it draws none.
+    costCells() { return typeof SalesCost !== 'undefined'; },
+
     lineRowHtml(idx, line, items) {
-        return `<tr data-line="${idx}">
+        return `<tr data-line="${idx}"${SalesReceiptsPage.costCells() ? ' ' + SalesCost.dataAttrs(line) : ''}>
             <td><select class="line-item" onchange="SalesReceiptsPage.itemSelected(${idx})">
                 ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
+            ${SalesReceiptsPage.costCells() ? SalesCost.cellHtml(line) : ''}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="SalesReceiptsPage.recalc()">${SalesLines.onHandHtml(line.item_id, items)}</td>
             <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="SalesReceiptsPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="SalesReceiptsPage.recalc()"></td>
@@ -384,8 +401,8 @@ const SalesReceiptsPage = {
 
     removeLine(idx) {
         const row = $(`[data-line="${idx}"]`);
-        if (row) row.remove();
-        SalesReceiptsPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => SalesReceiptsPage.recalc())) SalesReceiptsPage.recalc();
     },
 
     itemSelected(idx) {
@@ -397,6 +414,8 @@ const SalesReceiptsPage = {
 
     recalc() {
         TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'), $('#sales-receipt-form'));
+        // the cost code and type show while a job is chosen (#1055)
+        if (SalesReceiptsPage.costCells()) SalesCost.sync($('#sales-receipt-form'), $('#sr-lines'));
         const cur = $('#sales-receipt-form [name="currency"]')?.value;
         const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value, cur);
         SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total'], cur);
@@ -418,6 +437,7 @@ const SalesReceiptsPage = {
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                ...(SalesReceiptsPage.costCells() ? SalesCost.fromRow(row, form) : {}),
                 line_order: i,
             });
         });
@@ -441,6 +461,7 @@ const SalesReceiptsPage = {
             lines,
         };
 
+        if (!ZeroTotal.ask(T('Sales Receipt'), SalesReceiptsPage.recalc().total)) return;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {

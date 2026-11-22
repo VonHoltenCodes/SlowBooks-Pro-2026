@@ -1,4 +1,4 @@
-# Slowbooks Pro 2026
+# SlowBooks Pro 2026
 
 **A personal bookkeeping application raised from the ashes of QuickBooks 2003 Pro.**
 
@@ -16,7 +16,7 @@ required** (Docker remains an optional path for Linux servers).
 [slowbookspro.com](https://www.slowbookspro.com) ·
 [🐢 Support SlowBooks Pro](https://ko-fi.com/Y7G628VSJ3)
 
-![Slowbooks Pro 2026 Edition and Server Edition](screenshots/hero-abouts.png)
+![SlowBooks Pro 2026 Edition and Server Edition](screenshots/hero-abouts.png)
 
 *One free product, two shapes: your desktop — or the whole office from one PC.*
 
@@ -241,7 +241,7 @@ Production checklist: **[docs/release-checklist.md](docs/release-checklist.md)**
 | [docs/operations.md](docs/operations.md) | Backups, restore, key rotation, monitoring |
 | [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Payroll / HR module reference |
 | [docs/release-checklist.md](docs/release-checklist.md) | Production deployment checklist |
-| [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md) | Real certs in front of Slowbooks (Caddy, nginx, Traefik) |
+| [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md) | Real certs in front of SlowBooks (Caddy, nginx, Traefik) |
 | [docs/cloud-hosting.md](docs/cloud-hosting.md) | Your own books on a cloud server: VPS, Docker, Caddy, backups off the box, what it does and does not give you |
 | [docs/working-with-your-accountant.md](docs/working-with-your-accountant.md) | The Accountant role, adjusting entries, the package, the IIF round trip and the Accountant's Copy |
 | [docs/security-hardening.md](docs/security-hardening.md) | Security pass — what changed, why, how it's tested |

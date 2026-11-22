@@ -320,6 +320,8 @@ def test_browser_back_from_an_open_report_closes_it(browser, company, books):
         page.wait_for_function(f"!({MODAL_SHOWN})()")
         # the Report Center, usable: a card opens its report
         assert page.locator("#page-content .card-grid .card").count() > 5
+        # P&L by Class is under the folded All reports (#794, #936)
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         page.get_by_text("P&L by Class", exact=True).click(timeout=5000)
         page.wait_for_selector("#report-content table")
         assert page.evaluate(TITLE) == "P&L by Class"
@@ -386,6 +388,8 @@ def test_a_three_deep_chain_goes_back_twice_through_history_and_keeps_the_preset
     # losing the preset, and Back from there landed on the class P&L.
     page, handled = _open_at(browser, company, "#/reports")
     try:
+        # under the folded All reports (#794, #936)
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         page.get_by_text("P&L by Class", exact=True).click()
         page.wait_for_selector("#report-content thead a")
         by_class = _hash(page)
@@ -906,6 +910,24 @@ def test_the_classes_list_and_a_class_page_refuse_from_after_to_typed(
         page.close()
 
 
+def _mark_register_bar(page):
+    page.evaluate(
+        "() => { document.getElementById('reg-start').closest('.toolbar')"
+        ".dataset.beforeChange = '1'; }"
+    )
+
+
+def _register_redrawn(page):
+    """The register drawn again after a change of its dates: its date bar
+    is a new one, without the mark. A date typed before the redraw went
+    into the old bar, which the redraw then replaced (#1095: seen on CI,
+    where settle()'s quiet moment came before the redraw)."""
+    page.wait_for_function(
+        "() => { const s = document.getElementById('reg-start');"
+        " return !!s && !s.closest('.toolbar').dataset.beforeChange; }"
+    )
+
+
 def test_a_register_refuses_from_after_to_typed_before_touching_its_address(
     browser, company, books
 ):
@@ -943,14 +965,18 @@ def test_a_register_refuses_from_after_to_typed_before_touching_its_address(
         assert page.locator("#page-content tbody tr").count() == rows
 
         # only a To in use: From typed past it is refused, and "to" is kept
+        _mark_register_bar(page)
         page.get_by_role("button", name="Clear", exact=True).click()
         page.wait_for_function(
             "() => document.getElementById('reg-start').value === ''"
         )
+        _register_redrawn(page)
         settle(page, handled)
+        _mark_register_bar(page)
         page.fill("#reg-end", "2026-08-31")
         page.dispatch_event("#reg-end", "change")
         page.wait_for_function("() => location.hash.includes('end_date=2026-08-31')")
+        _register_redrawn(page)
         settle(page, handled)
         page.fill("#reg-start", "2026-09-01")
         page.dispatch_event("#reg-start", "change")

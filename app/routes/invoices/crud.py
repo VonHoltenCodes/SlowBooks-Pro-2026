@@ -5,17 +5,23 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
+from app.services.settings_service import default_sales_tax_rate
 from app.database import get_db
 from app.routes._helpers import clamp_pagination, reject_null_updates
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.items import Item
 from app.models.contacts import Customer
 from app.services.sub_customers import INVOICE_ADDRESS_FIELDS, invoice_addresses
-from app.services.tax_exemption import refresh_certificate_copy, settle_tax_exempt
+from app.services.tax_exemption import (
+    note_certificate,
+    refresh_certificate_copy,
+    settle_tax_exempt,
+)
 from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.accounting import (
     _q,
 )
+from app.services.invoice_po_links import linked_purchase_orders
 from app.services.numbering import next_invoice_number
 from app.services.pay_applications import (
     invoice_is_release_only,
@@ -55,6 +61,7 @@ from app.services.jobs_service import (
     refuse_other_customers_jobs,
     refuse_other_customers_jobs_on_edit,
 )
+from app.services.job_costing import refuse_unknown_line_costs
 from app.services.terminology import document_reference, terms_from_db
 from app.services.audit import audited_bulk_delete
 
@@ -140,6 +147,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
     resp.pay_application_number = pay_application_number(db, inv)
     resp.release_only = invoice_is_release_only(inv)
     resp.retainage_lines = invoice_retainage_lines(inv, resp.pay_application_number)
+    resp.linked_purchase_orders = linked_purchase_orders(db, inv.id)
     fill_last_emailed(db, [resp])
     return resp
 
@@ -186,10 +194,15 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     due_date = data.due_date or _due_date_from_terms(db, data.date, data.terms)
     refuse_due_before_date(data.date, due_date)
     refuse_negative_lines(db, data.lines)
+    refuse_unknown_line_costs(db, data.lines)
     # the Tax exempt switch: as sent, else the job's, else the customer's
     # (#864); on, no line is taxed
     exempt = settle_tax_exempt(db, data.tax_exempt, customer, data.job_id)
     resolve_line_taxable(db, data.lines, customer, exempt)
+    # No rate sent: the company's Default Tax Rate, as the form starts one
+    # (#1129); a rate sent, 0 included, is kept.
+    if data.tax_rate is None:
+        data.tax_rate = default_sales_tax_rate(db)
     subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
     confirm_zero_total(total, data.allow_zero_total, noun)
     _check_fair_value(data.fair_value_amount, total)
@@ -293,6 +306,7 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
             job_id=line_data.job_id,
             class_id=line_data.class_id,
             cost_code_id=line_data.cost_code_id,
+            cost_type=line_data.cost_type,
             is_taxable=(
                 line_data.is_taxable if line_data.is_taxable is not None else True
             ),
@@ -334,6 +348,9 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     DocumentTerms(db, "invoice").fill(resp, invoice)
     resp.customer_name = cust_name
     resp.warnings = stock_warnings
+    note_certificate(
+        db, resp, customer, invoice.date, invoice.job_id, bool(invoice.tax_exempt)
+    )
     return resp
 
 
@@ -509,6 +526,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         # Validate the proposed total before changing headers, lines or journals.
         if data.lines is not None:
             refuse_negative_lines(db, data.lines, invoice)
+            refuse_unknown_line_costs(db, data.lines)
             customer = db.get(
                 Customer, update_data.get("customer_id", invoice.customer_id)
             )
@@ -695,6 +713,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                         class_id=line_data.class_id,
                         job_id=line_data.job_id,
                         cost_code_id=line_data.cost_code_id,
+                        cost_type=line_data.cost_type,
                         is_taxable=(
                             line_data.is_taxable
                             if line_data.is_taxable is not None
@@ -797,5 +816,13 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
     resp.warnings = stock_warnings
+    note_certificate(
+        db,
+        resp,
+        invoice.customer,
+        invoice.date,
+        invoice.job_id,
+        bool(invoice.tax_exempt),
+    )
     fill_last_emailed(db, [resp])
     return resp

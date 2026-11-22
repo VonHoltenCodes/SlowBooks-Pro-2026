@@ -353,6 +353,8 @@ function newWindow(role, answers = {}) {
   };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync('app/static/js/payment_terms.js', 'utf8') + '\nthis.PaymentTerms = PaymentTerms;', ctx);
+  // the section notes' helper (#977), loaded before settings.js as on the page
+  vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);
   for (const name of PAGES) {
     const src = fs.readFileSync(`app/static/js/${name}.js`, 'utf8');
     const obj = /^const ([A-Z]\w*) = \{/m.exec(src)[1];
@@ -383,6 +385,8 @@ const label = (el) => {
 function controls(root, prefix) {
   const shown = {}, offered = {};
   for (const el of root.querySelectorAll('button, a.btn, input, select, textarea')) {
+    // a tortoise opens its note and asks the server nothing (#977)
+    if ('data-hint' in el.attrs) continue;
     const section = el.closest('.settings-section, .iif-section');
     const heading = section && section.querySelector('h3');
     const where = prefix || (heading ? heading.textContent.replace(/\s+/g, ' ').replace(/^[^\w]+/, '').trim() : '');
@@ -460,7 +464,8 @@ async function migrate(role, late) {
   const link = sidebar.querySelector('a[data-page="migrate"]');
   return {
     text: page.textContent.replace(/\s+/g, ' ').trim(),
-    buttons: page.querySelectorAll('button, a.btn').filter(visible).map(b => b.textContent.trim()),
+    // a tortoise opens its note and asks the server nothing (#977)
+    buttons: page.querySelectorAll('button, a.btn').filter(b => !('data-hint' in b.attrs)).filter(visible).map(b => b.textContent.trim()),
     sidebar_link_shown: visible(link),
   };
 }

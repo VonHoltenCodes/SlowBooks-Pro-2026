@@ -1,5 +1,7 @@
 # Migrating from QuickBooks
 
+![A hare with a Q-shaped ear: the mark SlowBooks Pro puts on its From QuickBooks pages](img/hare-mark.png)
+
 SlowBooks imports QuickBooks data two ways, depending on which
 QuickBooks you're leaving:
 
@@ -40,6 +42,14 @@ QuickBooks Online's own export is enough, and needs no Intuit app at all.
 3. In SlowBooks: sidebar → **Migrate Data** → source **QuickBooks Online
    export** → upload the zip (or the workbooks inside it, or those saved as
    CSV) → **Dry run**, read the result, then **Import**.
+
+The zip is the export. Reports downloaded one at a time from the Reports
+page, such as the General Ledger or a chart of accounts report, are not
+it: the import reads the **Journal** inside the zip and leaves the General
+Ledger alone (it repeats the Journal by account), and the dry run says so
+when they come without the zip. The three reports it does read beside the
+zip are the Account List, the A/R Aging Detail and the A/P Aging Detail,
+below.
 
 What comes across:
 
@@ -106,7 +116,8 @@ journals are skipped and only the open invoices come across.
 The payables side works the same way with QuickBooks Online's **A/P Aging
 Detail** report (Reports → Standard reports → What you owe → Accounts
 payable aging detail → Export → Export to Excel; the file is named
-`<Company>_A_P_Aging_Detail_Report.xlsx`), uploaded with the zip. The
+`<Company>_A_P Aging Detail Report.xlsx`), uploaded with the zip as it
+downloads. The
 Journal's bills, bill payments and vendor credits land on 2000 Accounts
 Payable, so 2000 holds what is owed; the report brings the documents behind
 it. Each open **Bill** comes across as a bill with its vendor, number, date,
@@ -117,15 +128,22 @@ credit; each **Bill Payment (Check)** or **Bill Payment (Credit Card)** not
 yet applied as a bill payment applied to no bill. They post nothing of their
 own (the history already put their balance on 2000), so A/P Aging equals
 2000, every vendor's balance is their aging row, and Pay Bills offers the
-bills. The vendor column is read under QuickBooks' Vendor display name,
+bills. A bill the report gives no number gets the number SlowBooks Pro
+would give it, from the vendor and the date. The report's aging headings,
+its "Total for" rows and its TOTAL row are not carried; they are formulas
+in the download, and the rows themselves are what comes across. The vendor
+column is read under QuickBooks' Vendor display name,
 Vendor or Vendor full name, or the Supplier spellings some regions use; a
 vendor the report names that the Vendor list lacks is created. The dry run
 counts the bills, credits and payments, the vendors matched and created,
 and the total open balance, checks the total against what the Journal
-leaves on 2000, and lists by its row number every row it does not carry (a
+leaves on 2000 and says how far apart they are, and lists by its row number every row it does not carry (a
 transaction type other than those three, or an open balance the wrong way
 round for its type) and refuses an unreadable row by its number. A report
 with nothing open (its header and no rows) carries nothing and is no error.
+A report beside an export whose Balance Sheet has no Accounts Payable
+account is refused, with nothing imported: check that the report and the
+zip come from the same company.
 A void of a carried bill, vendor credit or bill payment moves its amount
 between 2000 and QuickBooks' own payable account ("Accounts Payable (A/P)",
 made then), so A/P Aging still equals 2000; a carried bill's lines and
@@ -179,19 +197,25 @@ two trial balances match.
 
 The simplest way to bring every transaction across: in QuickBooks Desktop,
 **Reports > Accountant & Taxes > Transaction Detail by Account**, set the
-dates to **one year** (see *One year per file* below), and save it as CSV:
-**Excel → Create New Worksheet → Create a comma separated values (.csv)
-file → Export** (keep the report's default columns).
-In **Customize Report → Filters → Account**, choose **All accounts**.
-That is a filter, not a column: do **not** add an **Account** column. The
-account-grouped report already names each account above its transactions.
-An account-grouped report with that added column is refused before import;
-export it again with the default columns and the All accounts filter.
+dates to **one year** (see *One year per file* below). Then, under
+**Customize Report → Display**, tick **Debit** and **Credit** (Amount and
+Balance may stay): QuickBooks' default for this report is one signed Amount
+column, and the import reads the two columns, where each line's debit or
+credit is explicit (#965). Under **Customize Report →
+Filters → Account**, choose **All accounts**. Save it as CSV: **Excel →
+Create New Worksheet → Create a comma separated values (.csv) file →
+Export**. A default export with Amount is refused as an unrecognized
+layout; export it again with Debit and Credit.
+The Account filter is a filter, not a column: do **not** add an **Account**
+column. The account-grouped report already names each account above its
+transactions. An account-grouped report with that added column is refused
+before import; export it again without it and with the All accounts filter.
 The refusal says:
 
 > This appears to be Transaction Detail by Account with an added Account column.
-> Nothing was imported. Export again using the default columns; set Customize
-> Report > Filters > Account > All accounts rather than adding an Account column.
+> Nothing was imported. Export again without the Account column, with Debit and
+> Credit ticked under Customize Report > Display; set Customize Report > Filters >
+> Account > All accounts rather than adding an Account column.
 
 Import your lists IIF first, then upload the report under
 **Interoperability → Import from Report CSV**. Every deposit, check,
@@ -475,9 +499,10 @@ Desktop does not export transactions to IIF natively. Two other options:
   1. **Reports → Custom Reports → Transaction Detail**
   2. Set the date range to **All**.
   3. **Filters** tab → *Transaction Type* → **Sales Receipt**.
-  4. Keep the report's **default columns** — the importer needs at
-     least Date, Num, Name, Account, Split, Debit, and Credit (Memo,
-     Item, Qty, and Sales Price are used when present).
+  4. Under **Customize Report → Display**, tick **Debit** and **Credit**
+     (Amount may stay) — the importer needs at least Date, Num, Name,
+     Account, Split, Debit, and Credit (Memo, Item, Qty, and Sales Price
+     are used when present).
   5. **Excel → Create New Worksheet → Create a comma separated values
      (.csv) file → Export** (or Print → Print to: File → Comma delimited
      file).
@@ -498,8 +523,9 @@ The same report, filtered to **Invoice** instead of Sales Receipt:
 
 1. **Reports → Custom Reports → Transaction Detail**, date range **All**.
 2. **Filters** tab → *Transaction Type* → **Invoice**.
-3. **Customize Report → Display → Columns**: keep the defaults and add
-   **Open Balance** (and **Due Date** if you want due dates). Without
+3. **Customize Report → Display → Columns**: tick **Debit** and **Credit**
+   (Amount may stay) and add **Open Balance** (and **Due Date** if you want
+   due dates). Without
    Open Balance the importer cannot tell a paid invoice from an open one,
    so every invoice comes in open and the import says how many did; upload
    the report again with the column and the invoices here that have

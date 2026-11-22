@@ -18,6 +18,7 @@ function body(names) {
     const tbody = {
         children: [],
         get lastElementChild() { return this.children[this.children.length - 1] || null; },
+        removeChild(node) { this.children = this.children.filter(c => c !== node); },
         insertBefore(node, ref) {
             this.children = this.children.filter(c => c !== node);
             const at = ref ? this.children.indexOf(ref) : this.children.length;
@@ -79,4 +80,46 @@ test('insert: the focus lands on the new row\'s first control after the picker p
     await new Promise(r => setTimeout(r, 5));
     assert.equal(focused, box);
     LineOrder.focusFirst(null);  // nothing to focus is fine
+});
+
+test('a grid with no Remove line of its own gets one, and a removed line hands the keyboard on (NEW-278)', () => {
+    const LineOrder = module_();
+    assert.match(LineOrder.cellHtml(true), /data-line-order="remove" aria-label="Remove line" title="Remove line"/);
+    assert.doesNotMatch(LineOrder.cellHtml(), /data-line-order="remove"/);
+    const t = body(['a', 'b', 'c']);
+    assert.equal(LineOrder.removeRow(t.children[1]).name, 'c');
+    assert.deepEqual(names(t), ['a', 'c']);
+    // the last row hands it to the one above
+    assert.equal(LineOrder.removeRow(t.children[1]).name, 'a');
+    assert.deepEqual(names(t), ['a']);
+});
+
+// A row that belongs to the line above it (the nonprofit Split chooser,
+// data-line-part) is not a line: it has no place, moves with its line, and
+// goes when its line is removed.
+test('a row that belongs to a line moves and goes with it, and is not counted', () => {
+    const LineOrder = module_();
+    const t = body(['a', 'a-part', 'b', 'c']);
+    t.children[1].hasAttribute = name => name === 'data-line-part';
+    const row = name => t.children.find(r => r.name === name);
+    assert.deepEqual(Array.from(LineOrder.rows(t), r => r.name), ['a', 'b', 'c']);
+    assert.equal(LineOrder.lineOf(row('a-part')).name, 'a');
+    assert.equal(LineOrder.moveRow(row('a'), 1), true);
+    assert.deepEqual(names(t), ['b', 'a', 'a-part', 'c']);
+    assert.equal(LineOrder.moveRow(row('c'), -1), true);
+    assert.deepEqual(names(t), ['b', 'c', 'a', 'a-part']);
+    assert.equal(LineOrder.moveRow(row('a'), 1), false);
+    // a new line goes under the line and what belongs to it
+    LineOrder._opts.set(t, { add: () => t.children.push(t.make('new')) });
+    LineOrder.insertBelow(t, row('c'));
+    assert.deepEqual(names(t), ['b', 'c', 'new', 'a', 'a-part']);
+    // a drop on the part lands after its line; a drop of the line takes the part along
+    LineOrder.moveNextTo(row('b'), row('a-part'), false);
+    assert.deepEqual(names(t), ['c', 'new', 'a', 'a-part', 'b']);
+    LineOrder.moveNextTo(row('a'), row('c'), false);
+    assert.deepEqual(names(t), ['a', 'a-part', 'c', 'new', 'b']);
+    assert.equal(LineOrder.moveNextTo(row('a'), row('a-part'), true), false);
+    // removed with its line; the line below takes the place
+    assert.equal(LineOrder.removeRow(row('a')).name, 'c');
+    assert.deepEqual(names(t), ['c', 'new', 'b']);
 });

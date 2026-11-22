@@ -237,6 +237,11 @@ SWEEP = r"""(root) => {
     'button, a[href], input, select, textarea, summary, [onclick], [onchange], [oninput], [onblur]');
   for (const el of controls) {
     if (el.matches('form, label')) continue;
+    // A field's tortoise (hint(), [data-hint], #977) opens its help note:
+    // it sends nothing and reads nothing of the books, and it goes with the
+    // section it explains, so where a sign-in may not see a section it may
+    // not see its help either. Neither a write offered nor a read lost.
+    if (el.matches('[data-hint]')) continue;
     if (!el.getClientRects().length || getComputedStyle(el).visibility === 'hidden') continue;
     if (el.disabled || el.closest('fieldset:disabled')) continue;
     if (el.matches('input, textarea') && el.readOnly) continue;
@@ -548,6 +553,11 @@ def _reads(controls):
 # Reads that are the administrator's alone: a backup is the whole company,
 # password hashes and payroll records included (the server refuses the rest).
 ADMIN_ONLY_READS = ("/api/backups/download/",)
+# The rows of the sign-in's own Fast Rack (#912, Settings -> My
+# Preferences): each sign-in's list holds what it may use, so a read-only
+# one has fewer rows to move or remove than the administrator's. Its own
+# Add, Reset and Save are still compared.
+OWN_RACK_ROWS = ("FastRack.move(", "FastRack.remove(")
 
 
 def _lost_reads(admin, reader):
@@ -558,7 +568,7 @@ def _lost_reads(admin, reader):
         lost = sorted(
             k
             for k in _reads(controls) - shown
-            if not any(ref in str(k) for ref in ADMIN_ONLY_READS)
+            if not any(ref in str(k) for ref in ADMIN_ONLY_READS + OWN_RACK_ROWS)
         )
         if lost:
             out[where] = lost
@@ -824,16 +834,87 @@ def test_a_bookkeeper_on_a_first_page_of_settings(browser, company, books, db_se
         )
         page.wait_for_function(OPEN)
         settle(page, handled)
+        # a field's tortoise image (/static/img/tortoise-*.png, #977) is a
+        # file, not a request about settings; only the API calls are counted
         sent = handled[before:]
         assert sent and all(
-            p.startswith(("/api/email-templates/", "/api/invoices?")) for p in sent
+            p.startswith(("/api/email-templates/", "/api/invoices?", "/static/"))
+            for p in sent
         ), sent
+        assert any(p.startswith("/api/email-templates/") for p in sent), sent
         assert page.evaluate("() => document.querySelectorAll('.toast').length") == 0
         page.evaluate("() => closeModal()")
         _visit(page, handled, "#/reports")
         assert (page.evaluate("location.hash"), asked) == ("#/reports", [])
     finally:
         page.close()
+
+
+# Forms a read-only sign-in opens locked, each with a field's tortoise
+LOCKED_FORMS_WITH_HINTS = [
+    ("#/items", "ItemsPage.showForm({loaf})"),
+    ("#/jobs", "JobsPage.showForm({job})"),
+    ("#/bank-rules", "BankRulesPage.showForm({bank_rule})"),
+]
+
+
+def test_a_read_only_sign_in_opens_a_fields_note_in_a_locked_form(
+    browser, company, books, db_session
+):
+    """A field's tortoise (hint(), [data-hint], #977) only opens its note,
+    so lockForms leaves it enabled in a form it locks: a read-only sign-in
+    reads the help of a form it cannot change (#1094 review). Clicked, the
+    note opens, sends nothing to the server, and Escape closes the note,
+    not the dialog."""
+    reader = _reader(company, db_session)
+    page, handled = _signed_in(browser, reader, "readonly")
+    opened = []
+    try:
+        # the welcome splash is up over the page, and a real click is wanted
+        page.evaluate(
+            "() => { const s = document.getElementById('splash');"
+            " if (s) s.classList.add('hidden'); }"
+        )
+        for route, opener in LOCKED_FORMS_WITH_HINTS:
+            _visit(page, handled, route.format(**books))
+            page.evaluate("() => closeModal()")
+            page.evaluate(f"async () => {{ await {opener.format(**books)}; }}")
+            page.wait_for_function(OPEN)
+            settle(page, handled)
+            state = page.evaluate("""() => {
+                const form = document.querySelector('#modal-body form');
+                const fields = [...form.querySelectorAll('input, select, textarea')];
+                const hints = [...form.querySelectorAll('button[data-hint]')]
+                    .filter(b => b.getClientRects().length > 0);
+                return {
+                    note: !!form.querySelector('.readonly-note'),
+                    open_fields: fields.filter(f => !f.disabled).length,
+                    hints: hints.length,
+                    disabled_hints: hints.filter(b => b.disabled).length,
+                };
+            }""")
+            assert state["note"] and state["open_fields"] == 0, (opener, state)
+            assert state["disabled_hints"] == 0, (opener, state)
+            if not state["hints"]:
+                continue
+            # the first one drawn
+            button = page.locator("#modal-body form button[data-hint]:visible").first
+            before = len(handled)
+            button.click()
+            assert button.get_attribute("aria-expanded") == "true", opener
+            note = page.locator(f"#{button.get_attribute('aria-controls')}")
+            assert note.is_visible() and note.inner_text().strip(), opener
+            settle(page, handled)
+            asked = [p for p in handled[before:] if not p.startswith("/static/")]
+            assert asked == [], (opener, asked)
+            page.keyboard.press("Escape")
+            assert button.get_attribute("aria-expanded") == "false", opener
+            assert not note.is_visible() and page.evaluate(OPEN), opener
+            opened.append(opener)
+        page.evaluate("() => closeModal()")
+    finally:
+        page.close()
+    assert opened, "no locked form drew a tortoise"
 
 
 # --- a construction job's pay applications ------------------------------

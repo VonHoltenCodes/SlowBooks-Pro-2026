@@ -21,7 +21,10 @@ credit memo posts to bad debt, not income, and is left out too; so is a
 credit memo line of zero or less, which its journal skips. The account is
 the item's as it is now: an item re-pointed after a sale reads at its new
 account. Income the report cannot show (a journal entry to an income
-account, a deposit's income line) is the rest of the P&L's figure.
+account, a deposit's income line) is the rest of the P&L's figure. On the
+cash basis money received and not yet applied to an invoice is income on
+the P&L (Unapplied Cash Payment Income) that no item sold: it has a row of
+its own under the items, in the total (W-194).
 
 Amounts are in home currency, each line at its document's booked rate,
 rounded per line (contact_balances.home_amount), the conversion the
@@ -56,7 +59,6 @@ from app.models.credit_memos import CreditMemo, CreditMemoStatus
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.items import InventoryMovement, Item
 from app.models.jobs import Job
-from app.models.accounts import Account, AccountType
 from app.models.vendor_credits import (
     VendorCredit,
     VendorCreditStatus,
@@ -122,25 +124,119 @@ def _item_meta(db: Session) -> dict:
 
 
 def _posts_to_income(db: Session):
-    """A test of whether a sales line posts to an income account: the
-    item's income account, else the default income account (4000), the
-    account the invoice and credit memo journals credit. Looked up once."""
-    from app.services.accounting import get_default_income_account_id
-    from app.services.control_accounts import MissingControlAccount
+    """A test of whether a sales line posts to an income account
+    (sales_income.posts_to_income, the one rule every sales figure reads)."""
+    from app.services.sales_income import posts_to_income
 
-    income = {
-        a.id
-        for a in db.query(Account.id).filter(Account.account_type == AccountType.INCOME)
+    return posts_to_income(db)
+
+
+# ── The cash basis (#1062) ────────────────────────────────────────────────
+
+# a quantity's share, to the places a line's quantity keeps
+_QTY_Q = Decimal("0.0001")
+
+
+def _basis(db: Session, basis) -> str:
+    """The basis the report runs on: `basis`, else the company default."""
+    from app.services import cash_basis
+
+    return cash_basis.resolve_basis(db, basis if isinstance(basis, str) else None)
+
+
+def _cash_sales(db: Session, start_date, end_date, customer_id, to_income):
+    """The invoice lines a cash-basis Sales by Item counts (#1062): for each
+    invoice its payments recognized income of in the period, [(invoice,
+    line, amount, share)], where `amount` is the line's part of what was
+    recognized and `share` the part of the invoice that was (for the
+    quantity and the cost). What was recognized is read from the cash lines
+    the payments wrote (cash_basis.recognized_sales), the ones the cash
+    Profit and Loss reads, and spread over the invoice's income lines by
+    cash_basis.prorate, the rounding cent on the largest, so an invoice's
+    amounts add up to it exactly. Credit memos count on the accrual basis
+    only, as on the P&L, so none is here."""
+    from app.services import cash_basis
+
+    recognized = {
+        inv_id: got["income"]
+        for inv_id, got in cash_basis.recognized_sales(db, start_date, end_date).items()
+        if got["income"] != 0
     }
-    try:
-        default_ok = get_default_income_account_id(db) in income
-    except MissingControlAccount:
-        default_ok = False
-    item_ok = {
-        it.id: (it.income_account_id in income if it.income_account_id else default_ok)
-        for it in db.query(Item.id, Item.income_account_id)
-    }
-    return lambda item_id: item_ok.get(item_id, default_ok) if item_id else default_ok
+    if not recognized:
+        return []
+    invoices = (
+        db.query(Invoice)
+        .options(joinedload(Invoice.lines), joinedload(Invoice.customer))
+        .filter(Invoice.id.in_(list(recognized)))
+        .order_by(Invoice.date, Invoice.id)
+    )
+    if customer_id is not None:
+        invoices = invoices.filter(Invoice.customer_id == customer_id)
+    out = []
+    for inv in invoices.all():
+        lines = [ln for ln in inv.lines if to_income(ln.item_id)]
+        pool = [
+            {"amount": home_amount(ln.amount, inv.exchange_rate), "at": i}
+            for i, ln in enumerate(lines)
+        ]
+        total = sum((p["amount"] for p in pool), Decimal("0"))
+        if total == 0:
+            continue
+        got = recognized[inv.id]
+        share = got / total
+        for part in cash_basis.prorate(pool, got, total):
+            out.append((inv, lines[part["at"]], part["amount"], share))
+    return out
+
+
+# The cash basis's row for money received and not yet applied to an
+# invoice (W-194): the cash Profit and Loss counts it as income
+# (Unapplied Cash Payment Income) on the payment's date, and no item sold
+# it, so it has a row of its own under the items, in the total, and the
+# total ties to the cash P&L's income from sales.
+UNAPPLIED_ROW = "Payments received, not yet applied"
+UNAPPLIED_KEY = "unapplied"
+
+
+def _unapplied_amount(db, start_date, end_date, customer_id, class_id, job_id):
+    """The unapplied row's amount on the cash basis, or None for no row:
+    none when nothing is unapplied, and none when the report is narrowed to
+    a class or a job, since money not applied to an invoice has neither."""
+    if class_id is not None or job_id is not None:
+        return None
+    from app.services import cash_basis
+
+    got = cash_basis.unapplied_cash_income(db, start_date, end_date)
+    if customer_id is not None:
+        got = {k: v for k, v in got.items() if k == customer_id}
+    total = sum(got.values(), Decimal("0"))
+    return total if total != 0 else None
+
+
+def _unapplied_lines(db, start_date, end_date, customer_id, class_id, job_id):
+    """The payments behind the unapplied row, one line each."""
+    if class_id is not None or job_id is not None:
+        return []
+    from app.services import cash_basis
+
+    out = []
+    for p, amount in cash_basis.unapplied_cash_payments(db, start_date, end_date):
+        if customer_id is not None and p.customer_id != customer_id:
+            continue
+        out.append(
+            {
+                "date": p.date.isoformat(),
+                "doc_type": "Payment",
+                "number": p.reference or p.check_number or "",
+                "party": p.customer.name if p.customer else None,
+                "description": "Not applied to an invoice yet",
+                "quantity": None,
+                "rate": None,
+                "amount": float(amount),
+                "link": {"type": "payment", "id": p.id},
+            }
+        )
+    return out
 
 
 # ── Sales by Item ─────────────────────────────────────────────────────────
@@ -153,11 +249,13 @@ def _sales_by_item(
     customer_id: Optional[int] = None,
     class_id: Optional[int] = None,
     job_id: Optional[int] = None,
+    basis: Optional[str] = None,
 ) -> dict:
     start_date, end_date = _default_dates(db, start_date, end_date)
     _require(db, Customer, customer_id, "customer")
     _require(db, TxnClass, class_id, "class")
     _require(db, Job, job_id, "job")
+    basis = _basis(db, basis)
     meta = _item_meta(db)
     to_income = _posts_to_income(db)
 
@@ -169,6 +267,17 @@ def _sales_by_item(
     )
     if customer_id is not None:
         invoices = invoices.filter(Invoice.customer_id == customer_id)
+    if basis == "cash":
+        sold = _cash_sales(db, start_date, end_date, customer_id, to_income)
+    else:
+        sold = [
+            (inv, line, home_amount(line.amount, inv.exchange_rate), None)
+            for inv in invoices.all()
+            for line in inv.lines
+            if to_income(line.item_id)
+        ]
+    # an invoice's part on the cash basis, for its cost of goods
+    shares: dict = {}
 
     # Per item_id (None groups the no-item lines): quantity, amount, count,
     # and the invoice and credit memo ids behind it (for COGS from movements).
@@ -180,29 +289,40 @@ def _sales_by_item(
             {
                 "quantity": Decimal("0"),
                 "amount": Decimal("0"),
+                # the cash basis's average price is worked from these, the
+                # paid part of each line before any rounding
+                "exact_quantity": Decimal("0"),
+                "exact_amount": Decimal("0"),
                 "line_count": 0,
                 "inv_ids": set(),
                 "cm_ids": set(),
             },
         )
 
-    for inv in invoices.all():
-        for line in inv.lines:
-            if not to_income(line.item_id):
-                continue
-            if not _dim_ok(
-                (line.class_id, line.job_id),
-                (inv.class_id, inv.job_id),
-                class_id,
-                job_id,
-            ):
-                continue
-            b = bucket(line.item_id)
-            b["quantity"] += Decimal(str(line.quantity or 0))
-            b["amount"] += home_amount(line.amount, inv.exchange_rate)
-            b["line_count"] += 1
-            if line.item_id:
-                b["inv_ids"].add(inv.id)
+    for inv, line, amount, share in sold:
+        if not _dim_ok(
+            (line.class_id, line.job_id),
+            (inv.class_id, inv.job_id),
+            class_id,
+            job_id,
+        ):
+            continue
+        b = bucket(line.item_id)
+        qty = Decimal(str(line.quantity or 0))
+        b["quantity"] += qty if share is None else (qty * share).quantize(_QTY_Q)
+        b["amount"] += amount
+        if share is not None:
+            b["exact_quantity"] += qty * share
+            b["exact_amount"] += (
+                Decimal(str(line.amount or 0))
+                * Decimal(str(inv.exchange_rate or 1))
+                * share
+            )
+        b["line_count"] += 1
+        if line.item_id:
+            b["inv_ids"].add(inv.id)
+            if share is not None:
+                shares[inv.id] = share
 
     memos = (
         db.query(CreditMemo)
@@ -216,7 +336,7 @@ def _sales_by_item(
     if customer_id is not None:
         memos = memos.filter(CreditMemo.customer_id == customer_id)
 
-    for cm in memos.all():
+    for cm in memos.all() if basis != "cash" else []:
         # A credit memo's lines carry no class/job of their own, so the
         # header's is the only value to test against the narrowing.
         if not _dim_ok((None, None), (cm.class_id, cm.job_id), class_id, job_id):
@@ -238,6 +358,7 @@ def _sales_by_item(
             for item_id, b in rows.items()
             if item_id and meta.get(item_id, (None, None, False))[2]
         },
+        shares if basis == "cash" else None,
     )
 
     items = []
@@ -249,7 +370,18 @@ def _sales_by_item(
         )
         qty = b["quantity"]
         amount = b["amount"]
-        avg_price = float(amount / qty) if qty != 0 else None
+        if basis == "cash":
+            # The paid part of a quantity is rounded to four places and the
+            # paid part of an amount to the cent, for the columns; dividing
+            # one rounded figure by the other gave an average a few cents
+            # off the only price the item sold at (3 at 1,333.33, a third
+            # paid: 1,333.37). The average is the paid part of what the
+            # lines billed over the paid part of what they sold, neither
+            # rounded first, so it is the price itself.
+            exact = b["exact_quantity"]
+            avg_price = float(_q(b["exact_amount"] / exact)) if exact != 0 else None
+        else:
+            avg_price = float(amount / qty) if qty != 0 else None
         cogs = None
         gross_margin = None
         margin_pct = None
@@ -282,6 +414,15 @@ def _sales_by_item(
         Decimal("0"),
     )
     total_amount = sum((Decimal(str(r["amount"])) for r in items), Decimal("0"))
+    # cash basis: money received and not applied to an invoice yet, on its
+    # own row outside the items, in the total (W-194)
+    unapplied = (
+        _unapplied_amount(db, start_date, end_date, customer_id, class_id, job_id)
+        if basis == "cash"
+        else None
+    )
+    if unapplied is not None:
+        total_amount += unapplied
     total_cogs = sum(
         (Decimal(str(r["cogs"])) for r in items if r["cogs"] is not None),
         Decimal("0"),
@@ -298,10 +439,13 @@ def _sales_by_item(
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
+        "basis": basis,
         "customer_id": customer_id,
         "class_id": class_id,
         "job_id": job_id,
         "items": items,
+        "unapplied_label": UNAPPLIED_ROW if unapplied is not None else None,
+        "unapplied_amount": float(unapplied) if unapplied is not None else None,
         "total_quantity": float(total_quantity),
         "total_amount": float(total_amount),
         "total_cogs": float(total_cogs),
@@ -330,7 +474,7 @@ def _cm_line_counts(line, to_income) -> bool:
     return Decimal(str(line.amount or 0)) > 0 and to_income(line.item_id)
 
 
-def _items_cogs(db: Session, ids_by_item: dict) -> dict:
+def _items_cogs(db: Session, ids_by_item: dict, shares: Optional[dict] = None) -> dict:
     """item_id -> COGS, for every tracked item at once: one read of the
     movements of the report's invoices and credit memos (in chunks), not
     each item's whole history. `ids_by_item` maps an item to its
@@ -340,7 +484,11 @@ def _items_cogs(db: Session, ids_by_item: dict) -> dict:
     one at the cost its entry put back (#641), so −Σ(quantity × unit_cost)
     is the cost of what the documents, as they stand, shipped, each movement
     rounded to the cent its entry posted: sell 5, edit to 3 and take 1 back
-    on a credit memo and it is the cost of 2, the P&L's COGS."""
+    on a credit memo and it is the cost of 2, the P&L's COGS.
+
+    `shares` (the cash basis, #1062) maps an invoice to the part of it its
+    payments recognized in the period: a sale's cost counts in that part,
+    as the cash P&L prorates the cost of goods with the income."""
     out = {item_id: Decimal("0") for item_id in ids_by_item}
     all_inv_ids = sorted(set().union(*(inv for inv, _cm in ids_by_item.values())))
     all_cm_ids = sorted(set().union(*(cm for _inv, cm in ids_by_item.values())))
@@ -383,7 +531,11 @@ def _items_cogs(db: Session, ids_by_item: dict) -> dict:
                 # sign kept
                 qty = Decimal(str(qty or 0))
                 cost = _q(abs(qty) * Decimal(str(unit_cost or 0)))
+                if shares is not None and source_type != _RETURN_COGS_SOURCE:
+                    cost = cost * shares.get(source_id, Decimal("1"))
                 out[item_id] += cost if qty < 0 else -cost
+    if shares is not None:
+        out = {item_id: _q(cost) for item_id, cost in out.items()}
     return out
 
 
@@ -395,14 +547,36 @@ def _sales_lines(
     customer_id: Optional[int] = None,
     class_id: Optional[int] = None,
     job_id: Optional[int] = None,
+    basis: Optional[str] = None,
 ) -> dict:
     """The document lines behind one Sales by Item row, for the drill-down.
-    `item_key` is an item id, or None for the "No item" row."""
+    `item_key` is an item id, or None for the "No item" row. On the cash
+    basis (#1062) each line is its part of what the period's payments
+    recognized of its invoice, as the row counts it."""
     start_date, end_date = _default_dates(db, start_date, end_date)
     _require(db, Customer, customer_id, "customer")
     _require(db, TxnClass, class_id, "class")
     _require(db, Job, job_id, "job")
+    basis = _basis(db, basis)
     to_income = _posts_to_income(db)
+    if item_key == UNAPPLIED_KEY:
+        return {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "basis": basis,
+            "item_id": UNAPPLIED_KEY,
+            "lines": (
+                _unapplied_lines(
+                    db, start_date, end_date, customer_id, class_id, job_id
+                )
+                if basis == "cash"
+                else []
+            ),
+        }
+    if basis == "cash":
+        return _cash_sales_lines(
+            db, start_date, end_date, item_key, customer_id, class_id, job_id, to_income
+        )
 
     invoices = (
         db.query(Invoice)
@@ -475,6 +649,47 @@ def _sales_lines(
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
+        "basis": basis,
+        "item_id": item_key,
+        "lines": lines,
+    }
+
+
+def _cash_sales_lines(
+    db, start_date, end_date, item_key, customer_id, class_id, job_id, to_income
+) -> dict:
+    lines = []
+    for inv, line, amount, share in _cash_sales(
+        db, start_date, end_date, customer_id, to_income
+    ):
+        if line.item_id != item_key:
+            continue
+        if not _dim_ok(
+            (line.class_id, line.job_id),
+            (inv.class_id, inv.job_id),
+            class_id,
+            job_id,
+        ):
+            continue
+        qty = (Decimal(str(line.quantity or 0)) * share).quantize(_QTY_Q)
+        lines.append(
+            {
+                "date": inv.date.isoformat(),
+                "doc_type": "Sales Receipt" if inv.is_sales_receipt else "Invoice",
+                "number": inv.invoice_number,
+                "party": inv.customer.name if inv.customer else None,
+                "description": line.description,
+                "quantity": float(qty),
+                "rate": float(line.rate or 0),
+                "amount": float(amount),
+                "link": {"type": _LINK_TYPE["invoice"], "id": inv.id},
+            }
+        )
+    lines.sort(key=lambda line_row: line_row["date"])
+    return {
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "basis": "cash",
         "item_id": item_key,
         "lines": lines,
     }
@@ -695,11 +910,14 @@ def _item_key(item_id: Optional[str]):
     other value is the integer item id."""
     if item_id is None or str(item_id).lower() in ("", "none", "null"):
         return None
+    if str(item_id).lower() == UNAPPLIED_KEY:
+        return UNAPPLIED_KEY
     try:
         key = int(item_id)
     except ValueError:
         raise HTTPException(
-            status_code=400, detail="item_id must be an integer or none"
+            status_code=400,
+            detail="item_id must be an integer, none or unapplied",
         )
     # an id past a 64-bit integer cannot exist; refused rather than left to
     # overflow the database bind (#855)
@@ -713,6 +931,11 @@ def _item_key(item_id: Optional[str]):
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 
+_BASIS_QUERY = Query(
+    default=None,
+    description="accrual or cash; omitted, the company's default report basis",
+)
+
 
 @router.get("/sales-by-item")
 def sales_by_item(
@@ -722,9 +945,12 @@ def sales_by_item(
     class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
 ):
     """What sold, by item (#435). See module docstring for the tie to the P&L."""
-    return _sales_by_item(db, start_date, end_date, customer_id, class_id, job_id)
+    return _sales_by_item(
+        db, start_date, end_date, customer_id, class_id, job_id, basis
+    )
 
 
 @router.get("/sales-by-item/lines")
@@ -736,10 +962,18 @@ def sales_by_item_lines(
     class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
 ):
     """The documents behind one Sales by Item row (item_id=none for No item)."""
     return _sales_lines(
-        db, start_date, end_date, _item_key(item_id), customer_id, class_id, job_id
+        db,
+        start_date,
+        end_date,
+        _item_key(item_id),
+        customer_id,
+        class_id,
+        job_id,
+        basis,
     )
 
 
@@ -813,10 +1047,13 @@ def sales_by_item_pdf(
     class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
 ):
     from app.services.ledger_exports import sales_by_item_sections
 
-    data = _sales_by_item(db, start_date, end_date, customer_id, class_id, job_id)
+    data = _sales_by_item(
+        db, start_date, end_date, customer_id, class_id, job_id, basis
+    )
     return _pdf_response(
         sales_by_item_sections(data), db, _filename("Sales-by-Item", data, "pdf")
     )
@@ -831,10 +1068,13 @@ def sales_by_item_csv_route(
     class_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     job_id: Optional[int] = Query(default=None, ge=BIGINT_MIN, le=BIGINT_MAX),
     db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
 ):
     from app.services.ledger_exports import sales_by_item_csv
 
-    data = _sales_by_item(db, start_date, end_date, customer_id, class_id, job_id)
+    data = _sales_by_item(
+        db, start_date, end_date, customer_id, class_id, job_id, basis
+    )
     return _csv_download(
         sales_by_item_csv(data, _company_name(db)),
         _filename("Sales-by-Item", data, "csv"),

@@ -47,6 +47,11 @@ from app.services.accounting import _q, create_journal_entry, quantize_to
 
 logger = logging.getLogger(__name__)
 
+# The phrase every residue entry carries in its description (#647, #1022):
+# the pool's own revaluation posted under a document's source, which Books
+# Check's void row leaves out of that document's postings.
+RESIDUE_MARK = " - Inventory set to quantity x average cost: "
+
 COST_Q = Decimal("0.0001")
 # The memo of a reversal piece that matched no sale posting (a legacy or
 # hand-made ledger): it names nothing, and must not count as pre-release
@@ -123,7 +128,11 @@ def _sale_entry_accounts(db: Session, movement: InventoryMovement) -> tuple:
 
 
 def _pool_after(
-    old_qty: Decimal, old_avg: Decimal, quantity: Decimal, unit_cost: Decimal
+    old_qty: Decimal,
+    old_avg: Decimal,
+    quantity: Decimal,
+    unit_cost: Decimal,
+    sale_ahead: bool = False,
 ) -> tuple[Decimal, Decimal, Decimal]:
     """What a movement leaves of an item's pool: (quantity, average cost,
     residue).
@@ -178,6 +187,15 @@ def _pool_after(
         new_avg = quantize_to(max(value_left, Decimal("0")) / new_qty, COST_Q)
         if value_left < 0:
             residue = value_left
+    elif sale_ahead and quantity < 0 and new_qty < 0 and old_qty <= 0 and old_avg == 0:
+        # a sale ahead of its receipt with nothing in the pool to carry it
+        # (#1008): the oversold units are costed at a figure of their own
+        # (the latest purchase cost, else the item's cost), and the hole
+        # carries it as its average, weighted with any units already sold
+        # ahead at zero, so the ledger's Inventory and quantity x average
+        # stay one figure and the receipt that fills the hole posts only
+        # the distance from it (W-60).
+        new_avg = quantize_to((abs(quantity) * unit_cost) / abs(new_qty), COST_Q)
     else:
         new_avg = old_avg
         if quantity < 0 and new_qty < 0:
@@ -196,6 +214,7 @@ def _append_movement(
     transaction_id: Optional[int] = None,
     memo: Optional[str] = None,
     reverses_movement_id: Optional[int] = None,
+    sale_ahead: bool = False,
 ) -> InventoryMovement:
     """Write one movement row and update the denormalized Item cache.
 
@@ -207,7 +226,9 @@ def _append_movement(
     # never this row's.
     old_qty = Decimal(str(item.quantity_on_hand or 0))
     old_avg = Decimal(str(item.avg_cost or 0))
-    new_qty, new_avg, _residue = _pool_after(old_qty, old_avg, quantity, unit_cost)
+    new_qty, new_avg, _residue = _pool_after(
+        old_qty, old_avg, quantity, unit_cost, sale_ahead=sale_ahead
+    )
 
     item.quantity_on_hand = new_qty
     item.avg_cost = new_avg
@@ -386,6 +407,28 @@ def record_opening_quantity(
     )
 
 
+def provisional_sale_cost(db: Session, item: Item) -> Decimal:
+    """The cost a sale is carried at when the pool holds nothing to cost it
+    (#1008): the latest cost stock came in at (a purchase, a customer return
+    or an opening quantity with a cost), else the item's own cost field,
+    else zero. A sale ahead of the bill used to post cost of goods at $0 and
+    leave it for the receipt to make up."""
+    last = (
+        db.query(InventoryMovement.unit_cost)
+        .filter(
+            InventoryMovement.item_id == item.id,
+            InventoryMovement.quantity > 0,
+            InventoryMovement.unit_cost > 0,
+        )
+        .order_by(InventoryMovement.id.desc())
+        .first()
+    )
+    if last and last[0]:
+        return quantize_to(Decimal(str(last[0])), COST_Q)
+    cost = Decimal(str(item.cost or 0))
+    return quantize_to(cost, COST_Q) if cost > 0 else Decimal("0")
+
+
 def record_sale(
     db: Session,
     item: Item,
@@ -415,6 +458,11 @@ def record_sale(
         return None
 
     unit_cost = Decimal(str(item.avg_cost or 0))
+    sale_ahead = False
+    if unit_cost <= 0 and Decimal(str(item.quantity_on_hand or 0)) <= 0:
+        # nothing in the pool to cost the sale: a figure of its own (#1008)
+        unit_cost = provisional_sale_cost(db, item)
+        sale_ahead = unit_cost > 0
     cogs_amount = _q(quantity * unit_cost)
 
     txn_id = None
@@ -458,6 +506,7 @@ def record_sale(
         source_id=source_id,
         transaction_id=txn_id,
         memo=memo,
+        sale_ahead=sale_ahead,
     )
 
 
@@ -1137,8 +1186,7 @@ def _post_residue(
     txn = create_journal_entry(
         db,
         txn_date or _date.today(),
-        f"{memo or 'Inventory'} - Inventory set to quantity x average cost: "
-        f"{item.name}",
+        f"{memo or 'Inventory'}{RESIDUE_MARK}{item.name}",
         lines,
         source_type=source_type,
         source_id=source_id,

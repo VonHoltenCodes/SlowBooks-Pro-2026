@@ -23,11 +23,11 @@ and job-cost tables are described in their own sections below the table.
 | `transaction_lines` | Journal entry splits (debit OR credit); `cleared` / `reconciliation_id` on bank-account lines |
 | `accounts.bank_kind` | `bank` / `credit_card` — which chart accounts the register, pickers and transfers use |
 | `bank_accounts` | A bank feed: the statement identity of a ledger account (`account_id`); `legacy_balance` = the pre-2.10 register balance until posted or dismissed |
-| `bank_transactions` | Statement lines (feeds, OFX/CSV imports) with `match_status` and the ledger line they match (`transaction_line_id`) |
+| `bank_transactions` | Statement lines (feeds, OFX/CSV imports) with `match_status` and the ledger line they match (`transaction_line_id`); `pick_*` hold what the To review row picked until the line is added (#904), `pick_memo` its memo (#1049, migration `f1049c2a7e5b`) |
 | `reconciliations` | Reconciliation sessions over a ledger account's lines (`account_id`, `beginning_balance`, `cleared_total`) |
 | `settings` | Company settings key-value store |
 | `audit_log` | Automatic change tracking for all entities |
-| `purchase_orders` | Purchase order headers |
+| `purchase_orders` | Purchase order headers; `invoice_id` (nullable FK `invoices.id`, ON DELETE SET NULL, indexed) is the customer invoice the order fills, one invoice to many POs, a plain reference that posts nothing (#986, migration `e986b4d2a7c3`) |
 | `purchase_order_lines` | PO line items with received quantities |
 | `bills` | Vendor bills (AP mirror of invoices) |
 | `bill_lines` | Bill line items with expense account tracking |
@@ -50,7 +50,7 @@ and job-cost tables are described in their own sections below the table.
 | `pay_stubs` | Individual pay stubs with withholding breakdowns |
 | `qbo_mappings` | Which local record a QuickBooks Online record became, written by the connector retired in 2.23.2; read so those documents still void and edit right |
 | `attachments` | File attachments linked to invoices, bills, etc. |
-| `bank_rules` | Pattern-matching rules for auto-categorizing bank imports |
+| `bank_rules` | Pattern-matching rules for auto-categorizing bank imports; a rule may name a category, vendor, class and job (#675), and a customer for money in and a memo (`customer_id`, `memo`, #1075, migration `a1075c4d8e2f`); a star the bank prints is written `\*` in a pattern, `*` alone is the wildcard (migration `c1064a5e7b2d` escaped the stars of rules made before it, NEW-259) |
 | `budgets` | Budget amounts by account and period |
 | `email_templates` | Customizable email templates |
 | `inventory_movements` | Per-item qty/cost ledger (purchases, sales, adjustments) |
@@ -86,11 +86,14 @@ and job-cost tables are described in their own sections below the table.
 
 The terms list. `name` (String(50), unique; what a document's own `terms`
 column holds, so free text from before the list still reads), `kind`
-(`standard` · `date_driven`), `net_days` (standard: due this many days after
-the date), `due_day` and `cutoff_days` (date-driven: due on that day of the
+(`standard` · `date_driven` · `end_of_month`, #1091; no check constraint, so
+the third kind took no migration), `net_days` (standard: due this many days
+after the date; end-of-month: this many days after the last day of the
+date's month), `due_day` and `cutoff_days` (date-driven: due on that day of the
 month, the next month's when the document is dated fewer than `cutoff_days`
 before it), `discount_percent` (Numeric(5,2)) with `discount_days`
-(standard) or `discount_day` (date-driven), and `is_active`. `invoices`,
+(standard, or end-of-month counted from the month's end) or `discount_day`
+(date-driven), and `is_active`. `invoices`,
 `bills`, `recurring_invoices` and `memorized_transactions` gain
 `payment_term_id` (FK payment_terms, nullable): the entry their terms named
 when the person picked them, whose rule gives their discount; NULL for text

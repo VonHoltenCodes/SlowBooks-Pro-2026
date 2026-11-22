@@ -82,7 +82,7 @@ def account_to_iif_type(acct: Account) -> str:
 
 
 def item_to_iif_type(item: Item) -> str:
-    """Map Slowbooks ItemType to IIF INVITEMTYPE."""
+    """Map SlowBooks ItemType to IIF INVITEMTYPE."""
     return {
         "service": "SERV",
         "product": "PART",

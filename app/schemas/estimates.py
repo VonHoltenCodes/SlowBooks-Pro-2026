@@ -13,6 +13,7 @@ from pydantic import (
 from app.models.estimates import EstimateStatus
 from app.schemas.common import (
     StrictModel,
+    NewTaxRate,
     TaxRate,
     choice_error,
     TaxRateOut,
@@ -208,7 +209,7 @@ class EstimateCreate(StrictModel):
     customer_id: int
     date: dt_date
     expiration_date: Optional[dt_date] = None
-    tax_rate: TaxRate = Decimal("0")
+    tax_rate: NewTaxRate = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -349,6 +350,15 @@ class EstimateLost(StrictModel):
     reason: Optional[str] = Field(default=None, max_length=500)
 
 
+class EstimateVoid(StrictModel):
+    """Void an estimate made in error (#1128); the reason is optional and is
+    kept on the estimate."""
+
+    # its length is checked in words by the route (W-202), as a To review
+    # memo's is (W-191)
+    reason: Optional[str] = None
+
+
 def totals_from_dict(data: dict) -> EstimateTotals:
     """Build the totals model from estimate_totals()'s dict, so the response
     carries a real EstimateTotals (not a raw dict Pydantic would re-serialize
@@ -376,6 +386,10 @@ class EstimateResponse(BaseModel):
     terms: Optional[str] = None
     accepted_at: Optional[datetime] = None
     decided_at: Optional[datetime] = None
+    # who voided it, when and why (#1128); none on a live estimate
+    voided_at: Optional[datetime] = None
+    voided_by: Optional[str] = None
+    void_reason: Optional[str] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -402,6 +416,12 @@ class EstimateResponse(BaseModel):
     # says how many), and the sentences Accept answers with.
     uncoded_lines: int = 0
     warnings: list[str] = []
+    # On the answer to a create or an update only: the exemption certificate
+    # behind an exempt sale (the tax-exempt customer's, or the exempt job's)
+    # is missing, or expired as of the document's date
+    # (services/tax_exemption.certificate_warning). The sale is exempt all
+    # the same; this is for the person to be told. Null otherwise.
+    tax_note: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

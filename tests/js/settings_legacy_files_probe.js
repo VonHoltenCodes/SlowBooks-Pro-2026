@@ -48,6 +48,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('app/static/js/payment_terms.js', 'utf8') + '\nthis.PaymentTerms = PaymentTerms;', ctx);
+// the section notes' helper (#977), loaded before settings.js as on the page
+vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);
 vm.runInContext(fs.readFileSync('app/static/js/settings.js', 'utf8') + '\nthis.SettingsPage = SettingsPage;', ctx);
 const S = ctx.SettingsPage;
 

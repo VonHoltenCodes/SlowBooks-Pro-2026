@@ -19,7 +19,32 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.api_tokens import ApiToken
 from app.models.users import ROLE_ADMIN, ROLE_BOOKKEEPER, VALID_ROLES
-from app.services.api_token_service import generate_token, hash_token
+from app.services.api_token_service import (
+    generate_token,
+    hash_token,
+    is_ai_label,
+    is_link_label,
+    looks_like_link_label,
+    maker_gone,
+)
+
+# The AI assistant connection's tokens carry its own label, which the gate
+# reads them by: no other token may take it, and theirs may not lose it.
+LINK_LABEL_LOCKED = (
+    "This token belongs to the AI assistant connection; its name can't be "
+    "changed. Nothing was changed."
+)
+LINK_LABEL_TAKEN = (
+    "That name belongs to the AI assistant connection's tokens. Choose another "
+    "name. Nothing was changed."
+)
+# A token named for an AI assistant ends when its maker stops being an
+# administrator here; renamed to something else, it would not.
+AI_LABEL_KEPT = (
+    'An AI assistant\'s token must keep a name that starts with "AI assistant": '
+    "such a token stops working when the administrator who made it is no longer "
+    "one here. Nothing was changed."
+)
 
 
 def _utc_iso(stamp):
@@ -42,7 +67,7 @@ def _require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Admin role required")
 
 
-def _out(t: ApiToken) -> dict:
+def _out(t: ApiToken, db: Session) -> dict:
     return {
         "id": t.id,
         "label": t.label,
@@ -60,6 +85,10 @@ def _out(t: ApiToken) -> dict:
         # An administrator's token from before 2.29.0 is refused on every
         # request (#659); the list says so, so it gets revoked and replaced.
         "refused": bool(t.is_active and t.role == ROLE_ADMIN),
+        # An AI assistant's token stops working when the administrator who
+        # made it is no longer one here; it is still active, and the list
+        # says why it does not work.
+        "maker_gone": maker_gone(db, t),
     }
 
 
@@ -96,10 +125,40 @@ def _check_grants(role: str, allow_payroll: bool, allow_imports: bool) -> None:
         )
 
 
+def issue_token(
+    db: Session,
+    *,
+    label: str,
+    role: str,
+    created_by: str,
+    allow_backups: bool = False,
+    allow_payroll: bool = False,
+    allow_imports: bool = False,
+) -> tuple:
+    """Make and keep one token: (the row, the secret). The one way a token
+    is made, for Settings, API Tokens and for Connect to AI assistant (#1087); the
+    caller has checked the label is free and the role is not admin."""
+    secret = generate_token()
+    row = ApiToken(
+        label=label,
+        token_hash=hash_token(secret),
+        token_hint=secret[:10],
+        role=role,
+        is_active=True,
+        allow_backups=allow_backups,
+        allow_payroll=allow_payroll,
+        allow_imports=allow_imports,
+        created_by=created_by,
+    )
+    db.add(row)
+    db.commit()
+    return row, secret
+
+
 @router.get("")
 def list_tokens(request: Request, db: Session = Depends(get_db)):
     _require_admin(request)
-    return [_out(t) for t in db.query(ApiToken).order_by(ApiToken.id).all()]
+    return [_out(t, db) for t in db.query(ApiToken).order_by(ApiToken.id).all()]
 
 
 @router.post("", status_code=201)
@@ -108,6 +167,8 @@ def create_token(payload: TokenCreate, request: Request, db: Session = Depends(g
     label = payload.label.strip()
     if payload.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+    if looks_like_link_label(label):
+        raise HTTPException(status_code=400, detail=LINK_LABEL_TAKEN)
     if payload.role == ROLE_ADMIN:
         # A token is a program, not a person. Roles are its only scope
         # (#434), and the one that reaches settings, closing dates and
@@ -125,21 +186,16 @@ def create_token(payload: TokenCreate, request: Request, db: Session = Depends(g
     _check_grants(payload.role, payload.allow_payroll, payload.allow_imports)
     if db.query(ApiToken).filter(ApiToken.label == label).first():
         raise HTTPException(status_code=409, detail="Label already exists")
-    secret = generate_token()
-    row = ApiToken(
+    row, secret = issue_token(
+        db,
         label=label,
-        token_hash=hash_token(secret),
-        token_hint=secret[:10],
         role=payload.role,
-        is_active=True,
+        created_by=request.session.get("username") or "operator",
         allow_backups=payload.allow_backups,
         allow_payroll=payload.allow_payroll,
         allow_imports=payload.allow_imports,
-        created_by=request.session.get("username") or "operator",
     )
-    db.add(row)
-    db.commit()
-    out = _out(row)
+    out = _out(row, db)
     # The one and only time the secret leaves the server.
     out["token"] = secret
     return out
@@ -166,6 +222,12 @@ def update_token(
         )
     if payload.label is not None:
         label = payload.label.strip()
+        if label != row.label and is_link_label(row.label):
+            raise HTTPException(status_code=400, detail=LINK_LABEL_LOCKED)
+        if label != row.label and looks_like_link_label(label):
+            raise HTTPException(status_code=400, detail=LINK_LABEL_TAKEN)
+        if is_ai_label(row.label) and not is_ai_label(label):
+            raise HTTPException(status_code=400, detail=AI_LABEL_KEPT)
         clash = (
             db.query(ApiToken)
             .filter(ApiToken.label == label, ApiToken.id != token_id)
@@ -184,4 +246,4 @@ def update_token(
     if payload.allow_imports is not None:
         row.allow_imports = payload.allow_imports
     db.commit()
-    return _out(row)
+    return _out(row, db)

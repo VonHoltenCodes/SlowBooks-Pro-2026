@@ -93,7 +93,6 @@ const VendorCreditsPage = {
         PendingFiles.reset();  // files attached before the first save (#881)
         openModal('New Vendor Credit', `
             <form id="vc-form" onsubmit="VendorCreditsPage.save(event)">
-                <p class="form-hint">Enter the credit as a positive amount. It reduces what you owe this vendor, and you choose which bill it settles afterwards.</p>
                 <div class="form-grid">
                     <div class="form-group"><label>Vendor *</label>
                         <select name="vendor_id" required><option value="">Select...</option>${vendOpts}</select></div>
@@ -107,7 +106,7 @@ const VendorCreditsPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Credit Lines</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Account</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Account</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount ${hint('Enter the credit as a positive amount. It reduces what you owe this vendor, and you choose which bill it settles afterwards.', 'Amount')}</th></tr></thead>
                     <tbody id="vc-lines">${VendorCreditsPage.lineHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="VendorCreditsPage.addLine()">+ Add Line</button>
@@ -124,7 +123,7 @@ const VendorCreditsPage = {
                     <button type="submit" class="btn btn-primary">Create Vendor Credit</button>
                 </div>
             </form>`, { onClose: () => PendingFiles.discard() });
-        typeof LineOrder !== 'undefined' && LineOrder.attach('#vc-lines', { add: () => VendorCreditsPage.addLine(), changed: () => VendorCreditsPage.recalc() });
+        typeof LineOrder !== 'undefined' && LineOrder.attach('#vc-lines', { add: () => VendorCreditsPage.addLine(), changed: () => VendorCreditsPage.recalc(), remove: true });
     },
 
     lineHtml(idx) {
@@ -209,6 +208,7 @@ const VendorCreditsPage = {
     async save(e) {
         e.preventDefault();
         const form = e.target;
+        if (!ZeroTotal.ask('Vendor Credit', VendorCreditsPage.recalc())) return;
         if (VendorCreditsPage.recalc() <= 0) {
             toast('Enter the amount of the credit: a quantity and rate on at least one line.', 'error');
             return;

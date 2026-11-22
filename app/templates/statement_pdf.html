@@ -3,6 +3,7 @@
 <head>
     <title>Statement</title>
 <style>
+{% include '_print_text.html' %}
     {# The paper follows the pdf_paper_size setting, as the report PDFs do (#807). #}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
@@ -17,27 +18,37 @@
     .customer-name { font-size: 14pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
     .customer-info { font-size: 9pt; color: #333; }
     table.activity { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    table.activity th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
-    table.activity th.r { text-align: right; }
-    table.activity td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.activity td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.activity > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.activity > thead > tr > th.r { text-align: right; }
+    table.activity > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.activity > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; }
     /* Date, type, number and the amounts never wrap; Description takes the
        rest of the width and wraps inside it. */
-    table.activity th, table.activity td.nw, table.activity td.r { white-space: nowrap; }
-    table.activity td.desc { width: 100%; }
-    table.activity tr:nth-child(even) { background: #f7f9fb; }
+    table.activity > thead > tr > th, table.activity > tbody > tr > td.nw, table.activity > tbody > tr > td.r { white-space: nowrap; }
+    table.activity > tbody > tr > td.desc { width: 100%; max-width: 0.9in; }
+    /* a number is on one line in a column as wide as that line and no
+       wider than this, and a longer one wraps there */
+    table.activity > tbody > tr > td.number { max-width: 1.1in; }
+    table.activity > tbody > tr.alt { background: #f7f9fb; }
+    /* The last line, the summary and the footer are one unbreakable group of
+       the activity table (#1047, as #1039 for the invoice): the summary never
+       starts a page with no line above it, on WeasyPrint's PDF and on
+       Chromium's print alike. */
+    table.activity > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.activity > tbody.doc-tail > tr.doc-end > td { padding: 0; border-bottom: 0; }
     .aging-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
     .aging-table th { background: #4a4a6a; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: right; }
     .aging-table th:first-child { text-align: left; }
     .aging-table td { padding: 5px 8px; font-size: 10pt; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
     .aging-table td:first-child { text-align: left; }
-    .summary { float: right; width: 260px; margin-top: 16px; }
-    .summary table { width: 100%; }
+    .summary { margin-left: auto; margin-top: 16px; break-inside: avoid; page-break-inside: avoid; }
+    /* the table is 260px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .summary table { width: 260px; margin-left: auto; }
     .summary td { padding: 3px 8px; font-size: 10pt; white-space: nowrap; }
     .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
     .summary .label { font-weight: 700; color: #4a4a6a; }
     .summary .grand { font-size: 14pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
-    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
+    .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -89,17 +100,18 @@
            (routes/reports/receivables.statement_activity). #}
         {% macro money(v) %}{% if v < 0 %}-{{ (-v) | currency }}{% else %}{{ v | currency }}{% endif %}{% endmacro %}
         {% for line in activity.lines %}
-            <tr>
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if loop.index is even %} class="alt"{% endif %}>
                 <td class="nw">{{ line.date | fdate }}</td>
                 <td class="nw">{{ line.type }}</td>
-                <td class="nw">{{ line.number }}</td>
-                <td class="desc">{{ line.description }}</td>
+                <td class="number">{{ line.number | own_width }}</td>
+                <td class="desc">{{ line.description | desc }}</td>
                 <td class="r"{% if line.amount < 0 %} style="color: #006600;"{% endif %}>{{ money(line.amount) }}</td>
                 <td class="r">{{ money(line.balance) }}</td>
             </tr>
         {% endfor %}
-        </tbody>
-    </table>
+        {% if not activity.lines %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="6">
 
     <div class="summary">
         <table>
@@ -111,6 +123,9 @@
         </table>
     </div>
 
-    <div class="footer">Generated by Slowbooks Pro 2026</div>
+    <div class="footer">Generated by SlowBooks Pro 2026</div>
+        </td></tr>
+        </tbody>
+    </table>
 </body>
 </html>

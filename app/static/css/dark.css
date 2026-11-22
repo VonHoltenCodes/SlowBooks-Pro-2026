@@ -1,5 +1,5 @@
 /* ============================================================================
- * Slowbooks Pro 2026 — Dark Mode Skin
+ * SlowBooks Pro 2026 — Dark Mode Skin
  * Feature 12: Toggle between QB2003 Blue theme and dark mode
  * Overrides CSS custom properties when [data-theme="dark"] is set on <html>
  * ============================================================================ */
@@ -96,8 +96,6 @@
     --focus-ring: var(--qb-gold);   /* the theme's own: 6.4:1 against the bar (style.css sets a light one) */
 }
 
-[data-theme="dark"] .topbar-brand { color: #e0e4ec; }
-[data-theme="dark"] .topbar-brand span { color: var(--qb-gold); }
 [data-theme="dark"] .tb-btn { color: var(--text-secondary); }
 [data-theme="dark"] #topbar .skip-link--bar:hover { background: rgba(255,255,255,0.08); border-color: #4a4e58; color: #e0e4ec; }
 [data-theme="dark"] .tb-btn:hover { background: rgba(255,255,255,0.08); border-color: #4a4e58; color: #e0e4ec; }
@@ -128,7 +126,6 @@
     --focus-halo: #080c14;   /* the keyboard's ring meets the sidebar's own dark: 9.1:1 */
 }
 
-[data-theme="dark"] .sidebar-header h1 { color: #e0e4ec; }
 [data-theme="dark"] .sidebar-edition { color: var(--qb-gold); }
 [data-theme="dark"] .nav-section { color: #7a8498; }
 [data-theme="dark"] .nav-link { color: #b0bcc8; }
@@ -175,6 +172,17 @@
 
 [data-theme="dark"] tbody tr:nth-child(even) { background: #181a22; }
 [data-theme="dark"] tbody tr:hover { background: #222838; }
+/* the hovered row's status text (W-227): the dark theme's own values back
+   (style.css darkens them for the light hover blue), and its light grey,
+   4.12:1 on #222838, a step lighter */
+[data-theme="dark"] tbody tr:hover {
+    --danger:     #e46969;   /* 4.57 */
+    --qb-red:     #e46969;
+    --qb-orange:  #e08050;   /* 5.16 */
+    --success:    #4caf7a;   /* 5.40 */
+    --warning:    #e0a840;   /* 6.89 */
+    --text-light: #8f98aa;   /* 5.07 */
+}
 /* the pay-run view's Employee column keeps its own ground (style.css) */
 [data-theme="dark"] .pay-run-table tbody tr:nth-child(even) td:first-child { background: #181a22; }
 [data-theme="dark"] .pay-run-table tbody tr:hover td:first-child { background: #222838; }
@@ -635,3 +643,17 @@
 [data-theme="dark"] .table--frozen tbody tr:nth-child(even) td:first-child { background: #181a22; }
 [data-theme="dark"] .table--frozen tbody tr:hover td:first-child { background: #222838; }
 [data-theme="dark"] .budget-variance__acct { color: var(--qb-navy); }
+
+/* Helper text behind the tortoise (#977) */
+[data-theme="dark"] .hint-icon:hover, [data-theme="dark"] .hint-icon[aria-expanded="true"] { background: #2a2f3a; border-color: #4a5160; }
+[data-theme="dark"] .hint-pop { background: #232833; color: #e6e8ee; border-color: #4a5160; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5); }
+
+/* Find on this screen (find.js): the see-through boxes over the light
+   text on the dark ground, a match gold, the current one orange */
+[data-theme="dark"] {
+    --find-match-bg: rgba(255, 200, 0, 0.3);
+    --find-current-bg: rgba(255, 140, 30, 0.5);
+    --find-current-edge: #ffa94d;
+    --find-match-ring: #d4a72c;
+    --find-current-ring: #ffa94d;
+}

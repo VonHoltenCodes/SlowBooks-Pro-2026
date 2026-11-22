@@ -54,7 +54,9 @@ PRINT_SCRIPT = (
 
 def print_html(html_str: str) -> str:
     """A document's HTML with the on-load print script the document
-    previews use."""
+    previews use. The footer needs nothing from the shell: every
+    template draws it once, in the flow at the end, kept with the block
+    before it (#1025, #1028, #1030)."""
     if "</body>" in html_str:
         return html_str.replace("</body>", PRINT_SCRIPT + "</body>", 1)
     return html_str + PRINT_SCRIPT

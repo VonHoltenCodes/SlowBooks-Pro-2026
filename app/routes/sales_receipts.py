@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.services.settings_service import default_sales_tax_rate
 from app.database import get_db
 from app.models.accounts import Account
 from app.models.contacts import Customer
@@ -98,6 +99,10 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     # would reject after the invoice already exists: a $0 payment is
     # refused by the payments route, and a bad deposit account would only
     # surface when its journal posts.
+    # No rate sent: the company's Default Tax Rate, as the form starts one
+    # (#1129); a rate sent, 0 included, is kept.
+    if data.tax_rate is None:
+        data.tax_rate = default_sales_tax_rate(db)
     _, _, total = _compute_totals(data.lines, data.tax_rate)
     if total <= 0:
         raise HTTPException(
@@ -198,4 +203,5 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
         payment=pay_resp,
         customer_name=invoice_out.customer_name,
         warnings=inv_resp.warnings,
+        tax_note=inv_resp.tax_note,
     )

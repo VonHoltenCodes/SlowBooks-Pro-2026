@@ -70,11 +70,21 @@ def test_a_rate_the_user_states_wins(client, seed_customer, invoice):
     assert Decimal(r.json()["tax_amount"]) == Decimal("0.00")
 
 
-def test_without_an_invoice_the_api_default_is_still_no_tax(
+def test_without_an_invoice_the_api_starts_at_the_company_rate(
     client, seed_accounts, seed_customer
 ):
+    # as the form does (#1129): it was 0% whatever the company's rate
     r = _memo(client, seed_customer.id)
     assert r.status_code == 201, r.text
+    assert Decimal(r.json()["tax_amount"]) == Decimal("0.00")  # a new company: 0%
+    r = client.put("/api/settings", json={"default_tax_rate": "8.25"})
+    assert r.status_code == 200, r.text
+    r = _memo(client, seed_customer.id)
+    assert r.status_code == 201, r.text
+    assert Decimal(r.json()["tax_rate"]) == Decimal("0.0825")
+    assert Decimal(r.json()["tax_amount"]) == Decimal("1.40")
+    # 0 sent is kept
+    r = _memo(client, seed_customer.id, tax_rate=0)
     assert Decimal(r.json()["tax_amount"]) == Decimal("0.00")
 
 

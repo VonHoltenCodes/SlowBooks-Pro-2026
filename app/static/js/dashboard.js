@@ -52,7 +52,7 @@ const DashboardPage = {
         const editing = DashboardPage._editing;
         return `
             <div class="page-header">
-                <h2>${DashboardPage._title()}</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>${DashboardPage._title()}</h2>${editing ? hint('Use the arrows to reorder, × to hide. Your layout is remembered for your login.', 'Customize') : ''}</div>
                 <div style="display:flex; gap:8px; align-items:center;">
                     ${editing ? `
                         <button class="btn btn-sm btn-secondary" onclick="DashboardPage.showAdd()">+ Add a card</button>
@@ -62,7 +62,6 @@ const DashboardPage = {
                     : `<button class="btn btn-sm btn-secondary" data-write onclick="DashboardPage.startEdit()" title="Choose which cards show and in what order">Customize</button>`}
                 </div>
             </div>
-            ${editing ? '<div style="font-size:11px;color:var(--gray-500);margin-bottom:8px;">Use the arrows to reorder, × to hide. Your layout is remembered for your login.</div>' : ''}
             <div id="dash-grid" class="dash-grid">${DashboardPage._gridHtml()}</div>`;
     },
 
@@ -168,19 +167,35 @@ const DashboardPage = {
     renderers: {
         _default(d) { return `<pre style="font-size:11px;white-space:pre-wrap">${escapeHtml(JSON.stringify(d, null, 1))}</pre>`; },
 
+        // The total is the A/R Aging's (named journal entries included); the
+        // count is overdue invoices, and the label says so (#943): the two
+        // cards read different pools and each says which.
         receivables(d) {
+            // the label names what it counts (#952): on a nonprofit, pledges
+            // and invoices apart (a program-fee invoice is an invoice on its
+            // own face); on a business, invoices
+            const word = (n, one, many) => `${n} overdue ${n === 1 ? one : many}`;
+            let label;
+            if (Terms.isNonprofit() && (d.overdue_pledges || d.overdue_invoices)) {
+                const parts = [];
+                if (d.overdue_pledges) parts.push(word(d.overdue_pledges, 'pledge', 'pledges'));
+                if (d.overdue_invoices) parts.push(word(d.overdue_invoices, 'invoice', 'invoices'));
+                label = parts.join(', ');
+            } else {
+                label = word(d.overdue_count, T('invoice'), T('invoices'));
+            }
             return `<div class="card-value">${formatCurrency(d.total)}</div>
-                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${d.overdue_count} overdue</div>`;
+                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${label}</div>`;
         },
         active_customers(d) { return `<div class="card-value">${d.count}</div>`; },
         payables(d) {
             return `<div class="card-value">${formatCurrency(d.total)}</div>
-                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${d.overdue_count} overdue</div>`;
+                <div style="font-size:11px;color:${d.overdue_count ? 'var(--qb-red)' : 'var(--gray-500)'}">${d.overdue_count} overdue ${d.overdue_count === 1 ? 'bill' : 'bills'}</div>`;
         },
         overdue_invoices(d) {
             if (!d.count) return '<div style="color:var(--gray-500);font-size:12px">Nothing overdue.</div>';
             return `<table class="data-table" style="font-size:12px"><thead><tr><th scope="col">#</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Due</th><th scope="col" class="amount">Days</th></tr></thead>
-                <tbody>${d.items.map(i => `<tr class="clickable" onclick="InvoicesPage.view(${i.id})"><td>${escapeHtml(i.invoice_number)}</td><td>${escapeHtml(i.customer)}</td><td class="amount">${formatCurrency(i.balance_due)}</td><td class="amount" style="color:var(--qb-red)">${i.days_overdue}</td></tr>`).join('')}</tbody></table>
+                <tbody>${d.items.map(i => `<tr class="clickable" onclick="InvoicesPage.view(${i.id})"><td>${Terms.isNonprofit() && i.label ? `${escapeHtml(i.label)} ` : ''}${escapeHtml(i.invoice_number)}</td><td>${escapeHtml(i.customer)}</td><td class="amount">${formatCurrency(i.balance_due)}</td><td class="amount" style="color:var(--qb-red)">${i.days_overdue}</td></tr>`).join('')}</tbody></table>
                 ${d.count > d.items.length ? `<div style="font-size:11px;margin-top:4px"><a href="#/invoices">${d.count} overdue in all →</a></div>` : ''}`;
         },
         bank_balances(d) {
@@ -238,7 +253,7 @@ const DashboardPage = {
         recent_invoices(d) {
             if (!d.items.length) return '<div style="color:var(--gray-500);font-size:12px">No invoices yet.</div>';
             return `<table class="data-table" style="font-size:12px"><thead><tr><th scope="col">#</th><th scope="col">${T('Customer')}</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col" class="amount">Total</th></tr></thead>
-                <tbody>${d.items.map(i => `<tr class="clickable" onclick="InvoicesPage.view(${i.id})"><td>${escapeHtml(i.invoice_number)}</td><td>${escapeHtml(i.customer)}</td><td>${escapeHtml(i.date)}</td><td>${escapeHtml(i.status)}</td><td class="amount">${formatCurrency(i.total)}</td></tr>`).join('')}</tbody></table>`;
+                <tbody>${d.items.map(i => `<tr class="clickable" onclick="InvoicesPage.view(${i.id})"><td>${Terms.isNonprofit() && i.label ? `${escapeHtml(i.label)} ` : ''}${escapeHtml(i.invoice_number)}</td><td>${escapeHtml(i.customer)}</td><td>${escapeHtml(i.date)}</td><td>${escapeHtml(i.status)}</td><td class="amount">${formatCurrency(i.total)}</td></tr>`).join('')}</tbody></table>`;
         },
         recent_payments(d) {
             if (!d.items.length) return '<div style="color:var(--gray-500);font-size:12px">No payments yet.</div>';
@@ -273,7 +288,7 @@ const DashboardPage = {
                     <tr><td>− Payables due within 30 days</td><td class="amount">${formatCurrency(d.ap_due_30)}</td></tr>
                     <tr style="font-weight:700"><td>30-day forecast</td><td class="amount" style="color:${d.forecast_30 < 0 ? 'var(--text-danger)' : 'var(--text-success)'}">${formatCurrency(d.forecast_30)}</td></tr>
                 </tbody></table>
-                <div style="font-size:10px;color:var(--gray-500);margin-top:4px">Assumes customers pay on the due date.</div>`;
+                <div style="font-size:10px;color:var(--gray-500);margin-top:4px">Assumes ${T('customers')} pay on the due date.</div>`;
         },
         open_pos(d) {
             if (!d.count) return '<div style="color:var(--gray-500);font-size:12px">No open purchase orders.</div>';

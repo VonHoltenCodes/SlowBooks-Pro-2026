@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Slowbooks Pro 2026</title>
+    <title>SlowBooks Pro 2026</title>
     <!-- First, before every other script: when the scripts cannot run in
          this web engine, it puts what to do where a white page would be
          (boot_check.js; tests/test_boot_check.py keeps it first). -->
@@ -20,13 +20,11 @@
          ================================================================ -->
     <div id="splash" class="splash-overlay">
         <div class="splash-box">
-            <div class="splash-title">Slowbooks Pro</div>
+            <div class="splash-title">SlowBooks Pro</div>
             <div class="splash-subtitle">2026 Edition</div>
             <div class="splash-divider"></div>
             <div class="splash-info">
-                <strong>Free &amp; source-available</strong> &mdash; no caps, no subscriptions<br>
-                Born as an independent replacement for QuickBooks&nbsp;Pro&nbsp;2003<br>
-                after Intuit&rsquo;s activation servers died.
+                <strong>Free &amp; source-available</strong> &mdash; no caps, no subscriptions
             </div>
             <div class="splash-info" id="splash-version" hidden></div>
             <div class="splash-whatsnew" id="splash-whatsnew" hidden>
@@ -52,9 +50,8 @@
                 <p id="splash-artists-note" hidden></p>
             </div>
             <div class="splash-legal">
-                Independent reimplementation built from published SDK<br>
-                documentation (QBFC 5.0) and 14 years as a paying customer.<br>
-                Not affiliated with Intuit Inc.
+                Not affiliated with, endorsed by or sponsored by Intuit Inc.,<br>
+                Mercury Technologies, Inc., SimpleFIN, or any AI provider.
             </div>
             <div class="splash-legal">
                 Need a hand? <a href="#" id="splash-support-link">Contact support</a> from
@@ -79,7 +76,6 @@
                  per computer (app.js App.setSidebarHidden). Not shown on a
                  phone-width window, where the sidebar stays as it was. -->
             <button class="tb-btn tb-sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Hide sidebar" aria-pressed="false" aria-keyshortcuts="[" title="Hide the sidebar ([)"><span aria-hidden="true">&#9776;</span></button>
-            <div class="topbar-brand">Slowbooks Pro <span>2026</span></div>
             <!-- Back, within the app: enabled while an app page is behind
                  (app.js App.canGoBack); the desktop window has no Back of
                  its own. Shortcut and title are set per platform at start.
@@ -90,14 +86,19 @@
             <!-- whose books: filled from Settings → company name (app.js loadCompanySettings) -->
             <div class="topbar-company" id="topbar-company" title="Company file in use"></div>
             <div class="tb-sep"></div>
-            <button class="tb-btn" data-nav="#/">Home</button>
-            <button class="tb-btn" data-action="CustomersPage.showForm">New Customer</button>
-            <button class="tb-btn" data-action="InvoicesPage.showForm">Create Invoice</button>
-            <button class="tb-btn" data-action="PaymentsPage.showForm">Receive Payment</button>
-            <button class="tb-btn" data-nav="#/quick-entry">Quick Entry</button>
-            <button class="tb-btn" data-nav="#/bill-entry">Bill Quick Entry</button>
-            <div class="tb-sep"></div>
-            <button class="tb-btn" data-nav="#/reports">Reports</button>
+            <!-- The Fast Rack (#912): the buttons each sign-in chooses and
+                 orders (Settings → My Preferences → Fast Rack). These are the
+                 shipped set, shown until App.init has read the sign-in's own
+                 list and drawn it in their place (fast_rack.js). -->
+            <div class="fast-rack" id="fast-rack" role="group" aria-label="Fast Rack">
+                <button class="tb-btn fr-btn" type="button" data-rack-id="home" data-nav="#/"><span class="fr-line">Home</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="new_customer" data-action="CustomersPage.showForm"><span class="fr-line">New</span> <span class="fr-line">Customer</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="create_invoice" data-action="InvoicesPage.showForm"><span class="fr-line">Create</span> <span class="fr-line">Invoice</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="receive_payment" data-action="PaymentsPage.showForm"><span class="fr-line">Receive</span> <span class="fr-line">Payment</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="quick_entry" data-nav="#/quick-entry"><span class="fr-line">Quick</span> <span class="fr-line">Entry</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="bill_entry" data-nav="#/bill-entry"><span class="fr-line">Bill</span> <span class="fr-line">Quick Entry</span></button>
+                <button class="tb-btn fr-btn" type="button" data-rack-id="reports" data-nav="#/reports"><span class="fr-line">Reports</span></button>
+            </div>
             <div class="tb-sep"></div>
             <input type="text" id="global-search" class="tb-search" placeholder="Search customers, invoices...">
             <div id="search-results" class="search-dropdown hidden"></div>
@@ -119,7 +120,12 @@
         <div id="main-area">
             <nav id="sidebar" aria-label="Main menu">
                 <div class="sidebar-header">
-                    <h1>Slowbooks Pro</h1>
+                    <!-- The brand, once in the app (#978): the designer's lockup
+                         with white lettering for the sidebar's dark ground,
+                         the turtle as drawn, inline so it is
+                         crisp at every text size and needs no request.
+                         Regenerate from the brand assets, never by hand. -->
+                    <h1 class="sidebar-brand"><svg class="sidebar-logo" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SlowBooks Pro" focusable="false" width="160" height="46" viewBox="40.61 80.54 217.7 62.65"><path fill="#fff" d="M148.3,107.85c-.45-.39-.99-.73-1.61-1-.62-.28-1.3-.49-2.05-.66l-1.53-.37c-.52-.12-.99-.27-1.4-.45-.42-.18-.74-.4-.98-.66-.24-.27-.36-.6-.36-1s.11-.72.33-1.02c.22-.3.54-.53.96-.7s.92-.25,1.5-.25c.87,0,1.56.2,2.08.59s.81.94.87,1.64h3.32c-.02-1.01-.29-1.91-.81-2.67-.52-.77-1.24-1.36-2.17-1.79s-2.02-.64-3.27-.64-2.33.21-3.28.64c-.95.43-1.7,1.02-2.24,1.78-.55.76-.82,1.65-.82,2.66,0,1.22.4,2.2,1.21,2.95s1.95,1.29,3.42,1.64l1.83.45c.64.14,1.17.31,1.61.5.43.19.76.41.98.68.22.26.33.59.33.97,0,.42-.13.79-.38,1.12-.26.32-.61.58-1.08.76s-1,.27-1.62.27-1.21-.1-1.7-.3c-.5-.2-.89-.5-1.18-.89-.29-.39-.46-.88-.48-1.45h-3.35c.02,1.2.31,2.21.86,3.03.55.82,1.33,1.45,2.33,1.87,1,.42,2.18.63,3.55.63s2.54-.21,3.51-.62c.97-.41,1.71-1,2.23-1.77.52-.76.78-1.66.78-2.69,0-.68-.12-1.29-.36-1.83-.24-.53-.59-1-1.04-1.39Z"/><rect fill="#fff" x="152.01" y="99.08" width="3.36" height="16.81"/><path fill="#fff" d="M167.02,104.06c-.92-.54-2.01-.81-3.25-.81s-2.34.27-3.27.81-1.63,1.29-2.13,2.26c-.5.97-.75,2.1-.75,3.39s.25,2.4.75,3.37c.5.97,1.21,1.72,2.13,2.26s2.01.81,3.27.81,2.33-.27,3.25-.81,1.63-1.29,2.13-2.26c.5-.97.75-2.09.75-3.37s-.25-2.42-.75-3.39c-.5-.97-1.21-1.72-2.13-2.26ZM166.17,111.65c-.21.57-.52,1.01-.92,1.34s-.9.48-1.48.48-1.09-.16-1.49-.48c-.4-.32-.71-.77-.91-1.34-.21-.57-.31-1.22-.31-1.96s.1-1.4.31-1.96c.21-.56.51-1.01.92-1.33.41-.32.9-.48,1.49-.48s1.08.16,1.48.48c.4.32.71.77.92,1.33.21.56.32,1.22.32,1.96s-.11,1.39-.32,1.96Z"/><path fill="#fff" d="M184.94,107.98c-.2.86-.4,1.77-.6,2.74-.14.65-.27,1.34-.4,2.05-.14-.72-.29-1.41-.44-2.06-.23-.97-.44-1.87-.65-2.72l-1.12-4.55h-3.09l-1.15,4.55c-.21.85-.43,1.76-.66,2.73-.15.64-.3,1.33-.44,2.03-.13-.71-.27-1.4-.41-2.05-.21-.97-.42-1.87-.62-2.71l-1.09-4.55h-3.53l3.71,12.45h3.43l1.4-4.84c.14-.47.28-.99.41-1.56.13-.57.26-1.14.39-1.73.03-.13.06-.24.08-.37.03.13.06.24.08.37.13.59.26,1.16.4,1.73s.27,1.09.41,1.56l1.39,4.84h3.44l3.73-12.45h-3.59l-1.09,4.55Z"/><path fill="#fff" d="M202.41,107.72c-.56-.33-1.16-.52-1.81-.55v-.15c.59-.13,1.11-.36,1.56-.68.45-.32.81-.72,1.07-1.22.26-.5.39-1.07.39-1.73,0-.84-.21-1.59-.63-2.24-.42-.65-1.04-1.16-1.87-1.53-.83-.37-1.85-.55-3.08-.55h-6.69v16.81h7.11c1.27,0,2.34-.2,3.2-.6.86-.4,1.51-.96,1.95-1.66s.65-1.5.65-2.4c0-.82-.17-1.53-.51-2.12s-.79-1.06-1.35-1.39ZM194.81,101.87h2.84c.8,0,1.41.19,1.85.57.44.38.65.89.65,1.51,0,.44-.11.83-.33,1.16-.22.33-.52.58-.9.75-.38.17-.82.26-1.32.26h-2.8v-4.25ZM200.03,112.5c-.47.39-1.2.58-2.18.58h-3.03v-4.55h3.11c.58,0,1.08.1,1.5.3.42.2.74.48.97.85.23.36.34.78.34,1.25,0,.65-.24,1.17-.71,1.56Z"/><path fill="#fff" d="M215.37,104.06c-.92-.54-2.01-.81-3.25-.81s-2.34.27-3.27.81-1.63,1.29-2.13,2.26c-.5.97-.75,2.1-.75,3.39s.25,2.4.75,3.37c.5.97,1.21,1.72,2.13,2.26s2.01.81,3.27.81,2.33-.27,3.25-.81,1.63-1.29,2.13-2.26c.5-.97.75-2.09.75-3.37s-.25-2.42-.75-3.39c-.5-.97-1.21-1.72-2.13-2.26ZM214.52,111.65c-.21.57-.52,1.01-.92,1.34s-.9.48-1.48.48-1.09-.16-1.49-.48c-.4-.32-.71-.77-.91-1.34-.21-.57-.31-1.22-.31-1.96s.1-1.4.31-1.96c.21-.56.51-1.01.92-1.33.41-.32.9-.48,1.49-.48s1.08.16,1.48.48c.4.32.71.77.92,1.33.21.56.32,1.22.32,1.96s-.11,1.39-.32,1.96Z"/><path fill="#fff" d="M229.37,104.06c-.92-.54-2.01-.81-3.26-.81s-2.34.27-3.27.81-1.63,1.29-2.13,2.26c-.5.97-.75,2.1-.75,3.39s.25,2.4.75,3.37c.5.97,1.21,1.72,2.13,2.26s2.01.81,3.27.81,2.33-.27,3.26-.81c.92-.54,1.63-1.29,2.13-2.26.5-.97.75-2.09.75-3.37s-.25-2.42-.75-3.39c-.5-.97-1.21-1.72-2.13-2.26ZM228.52,111.65c-.21.57-.52,1.01-.92,1.34s-.9.48-1.48.48-1.09-.16-1.49-.48c-.4-.32-.71-.77-.91-1.34-.21-.57-.31-1.22-.31-1.96s.1-1.4.31-1.96c.2-.56.51-1.01.92-1.33.4-.32.9-.48,1.49-.48s1.08.16,1.48.48c.4.32.71.77.92,1.33.21.56.32,1.22.32,1.96s-.11,1.39-.32,1.96Z"/><polygon fill="#fff" points="246.07 103.44 242.16 103.44 238.03 108.22 237.86 108.22 237.86 99.08 234.5 99.08 234.5 115.89 237.86 115.89 237.86 111.91 238.83 110.82 242.35 115.89 246.31 115.89 241.37 108.84 246.07 103.44"/><path fill="#fff" d="M254.7,108.68l-2.26-.45c-.56-.11-.97-.28-1.22-.49s-.37-.48-.37-.8c0-.38.18-.68.55-.92s.83-.36,1.39-.36c.61,0,1.1.14,1.46.42.36.28.6.64.7,1.09l3.01-.42c-.12-.71-.4-1.33-.85-1.86-.45-.53-1.04-.93-1.78-1.22-.74-.29-1.61-.43-2.62-.43s-1.97.16-2.76.47-1.4.76-1.83,1.34-.65,1.26-.65,2.05c0,.94.3,1.71.9,2.3.6.6,1.5,1.02,2.71,1.26l2.16.43c.53.11.93.27,1.2.48.27.21.4.47.4.8,0,.38-.19.69-.55.93-.37.24-.87.37-1.51.37-.68,0-1.22-.15-1.62-.44-.41-.29-.68-.73-.82-1.3l-3.17.43c.13.79.44,1.47.93,2.03.49.56,1.13.99,1.92,1.29s1.69.44,2.7.44c1.09,0,2.05-.17,2.89-.51.84-.34,1.49-.82,1.97-1.43.47-.61.71-1.33.71-2.15,0-.89-.29-1.62-.89-2.18-.59-.56-1.49-.95-2.71-1.2Z"/><path fill="#fff" d="M190.63,120.55c-.78-.41-1.71-.62-2.81-.62h-5.66v14.47h2.97v-4.78h2.63c1.11,0,2.05-.2,2.84-.61.78-.41,1.38-.97,1.8-1.7s.63-1.57.63-2.53-.21-1.8-.62-2.53-1.01-1.3-1.78-1.71ZM189.7,126.05c-.19.36-.49.65-.88.85s-.88.31-1.46.31h-2.23v-4.82h2.22c.59,0,1.08.1,1.47.3.39.2.68.48.88.83.19.36.29.78.29,1.26s-.1.9-.29,1.26Z"/><path fill="#fff" d="M200.39,123.56c-.62,0-1.16.17-1.61.5s-.78.83-.97,1.48h-.1v-1.85h-2.81v10.72h2.89v-6.04c0-.47.1-.87.29-1.21s.46-.61.81-.8c.35-.19.73-.28,1.16-.28.23,0,.46.01.7.03.24.02.43.05.55.09v-2.56c-.12-.02-.27-.04-.44-.06-.17-.01-.33-.02-.49-.02Z"/><path fill="#fff" d="M211.93,126.17c-.43-.83-1.04-1.48-1.84-1.94-.79-.46-1.73-.69-2.8-.69s-2.02.23-2.81.69c-.79.46-1.41,1.11-1.84,1.94-.43.83-.64,1.8-.64,2.92s.21,2.07.64,2.9c.43.83,1.04,1.48,1.84,1.94.79.46,1.73.69,2.81.69s2.01-.23,2.8-.69c.79-.46,1.4-1.11,1.84-1.94.43-.83.65-1.8.65-2.9s-.22-2.09-.65-2.92ZM209.36,130.76c-.18.49-.45.87-.79,1.15s-.77.42-1.28.42-.94-.14-1.29-.42c-.35-.28-.61-.66-.79-1.15-.18-.49-.27-1.05-.27-1.69s.09-1.2.27-1.69c.18-.48.44-.87.79-1.15.35-.28.78-.42,1.28-.42s.93.14,1.28.42c.35.28.61.66.79,1.15.18.49.27,1.05.27,1.69s-.09,1.2-.27,1.69Z"/><rect fill="#fff" x="218.5" y="126.67" width="39.81" height="1.21"/><rect fill="#fff" x="136.42" y="126.67" width="39.81" height="1.21"/><path fill="#257321" d="M111.85,99.91c2.05.93,4.39,1.96,6.7,1.92.98-.02,2.03-.42,3.01-.45-2.74,2.74-7.54,1.37-9.71-1.47ZM125.77,96.52c-.26-.23-1.14-.49-1.62-.87-.76-.59-1.2-1.56-2.25-1.73-1.89-.31-2.69,1.2-3.94,2.16-3.34,2.59-9.19,2.15-11.82-1.27-.49-.64-1.44-2.94-1.75-3.1-.46-.24-1.77-.22-2.32-.18-.72.06-3.86.95-4.05.88-.17-.3.29-1.02.79-1.42,1.6-1.12,3.39-2,5.18-2.79l.07-.35c.79-.32,1.49-.51,2.32-.69,4.69-.96,9.82-1.12,14.6-1.22.49-.5-1.18-2.04-1.54-2.35-7.94-6.69-24.6-1.86-24.06,9.48.23,4.81,2.37,6.45.13,11.75-6.01,14.17-32.24,20.52-46.12,21.14-2.29.1-5.54-.33-7.64.01-.84.13-1.06.82-.33,1.34,2.37,1.69,6.94,2.35,9.82,2.62l-1.2,1.97c-.34.58-1.8,3.87-2.49,5.9,4.59-1.66,9.42-3.02,14.46-4.08.97-1.13,1.5-2.69,2.57-3.76,2.48-.08,4.99-.3,7.46-.63,1.35-.18,8.02-1.25,8.69-1.9.4-.39.93-1.56,1.41-2.13,3.08-3.67,8.97-5.21,12.95-2.06.41.32.86,1.11,1.4,1.11,1.51.01,6.26-4.21,7.37-5.45,2.76-3.11,3.51-5.89,5.48-9.23,1.94-3.28,5.3-2.05,8.44-2.73,3.42-.76,7.85-3.62,8.21-7.39.06-.55.11-2.75-.21-3.03Z"/><path fill="#257321" d="M95.51,133.47c7.9.4,15.7,1.94,23.25,4.2,3.19.95,6.51,2.06,9.56,3.39.18.08.59.14.6.36-3.84-.78-7.69-1.59-11.58-2.18-17.51-2.67-35.39-2.6-52.93-.45-8.02.98-15.94,2.53-23.79,4.39l2.95-1.39c11.12-4.67,23.08-7.17,35.1-8.19,1.26-.11,2.52-.15,3.78-.15l13.06.02Z"/><path fill="#257321" d="M95.95,131.2c-.15-.01-.29-.01-.43-.02l-13.15-.02c-.3,0-.58,0-.87.01.59-1.64,1.14-3.32,2.14-4.78,3.24-4.75,11.07-5.71,12.39.89.26,1.3.15,2.62-.08,3.92Z"/><path fill="#257321" d="M84,102.16c1.21-.05,8.45.34,8.94,1.13.32.51-1.22,2.77-1.58,3.29-4.71,6.63-14.43,10.9-22.05,13.12-1.48.43-3.81,1.19-5.26,1.36-.62.08-.79.07-.73-.58.99-10.88,10.19-17.89,20.68-18.32Z"/><path fill="#257321" d="M63.21,97.47c1.01-.04,4.81,2.72,5.74,3.48.41.34,2.21,1.87,2.36,2.21.06.13.07.19.05.33-.07.47-2.39,1.93-2.93,2.39-2.01,1.73-3.53,3.9-4.85,6.18-3.59.27-6.96.79-10.41,1.8-.56.16-3.49,1.31-3.72,1.15s-.13-.45-.08-.68c.17-.85,1.15-2.86,1.58-3.72,1.82-3.72,4.6-7.52,7.78-10.18.68-.57,3.81-2.93,4.49-2.95Z"/><path fill="#257321" d="M64.17,97.26c-.32-.48,1.43-1.17,1.81-1.34,8.08-3.78,18.04-3.68,25.46,1.52.83.58,3.49,2.27,1.66,3.05-6.32-1.17-12.69-.57-18.7,1.65-.47-.03-1.96-1.27-2.53-1.6-1.45-.86-3-1.58-4.57-2.2-.44-.17-3.03-.94-3.12-1.08Z"/><path fill="#c93" d="M113.88,87.45c3.01-.12,7.18-.31,10.12-.05,1.85.16,2.36,2.05,2.68,3.65.19.97.67,5.08-1.14,4.53s-2.32-4.08-5.35-2.71c-1.96.88-2.25,3.09-4.94,3.74-4.48,1.08-8.3-.69-9.5-5.23-.38-1.44-.97-3.02.9-3.37,2.03-.38,5.12-.47,7.24-.56Z"/><path fill="#257321" d="M117.56,134.93c-3.97-1.11-7.88-1.99-11.72-2.63-.72-.81-1.17-2.32-1.62-3.2-.41-.78-2.43-3.67-2.36-4.21l5.66-6.41c.18-.06.38-.05.55-.02,1.13.16,4.05,3.78,4.77,4.81,1.7,2.45,3.1,5.55,3.96,8.41.42,1.42.73,2.51.76,3.26Z"/><path fill="#257321" d="M57.07,114.67c1.36-.07,3.52-.2,4.82-.05.16.02.34,0,.44.14l-.82,6.86c-3.17.66-6.41,1.22-9.64,1.54-.79.08-5.48.54-5.75.16-.47-.67.79-1.99,1.09-2.6.47-.95,1.26-4.31,1.79-4.69.56-.4,3.12-.79,3.94-.92,1.35-.2,2.76-.37,4.12-.44Z"/><path fill="#c93" d="M104.05,87.85l.44,2.79c-1.94.06-4.26.39-6,1.28-.24.12-.5.09-.47.49-.61-.2.09-1.24.45-1.53,1.11-.91,4.2-2.47,5.58-3.03Z"/></svg></h1>
                     <div class="sidebar-edition">2026 Edition · <span id="app-version">…</span></div>
                     <!-- The update notice lives here, at the top, because in
                          the footer it was only seen by someone who scrolled
@@ -257,8 +263,8 @@
                          system browser (same path as the update badge). -->
                     <a href="https://ko-fi.com/Y7G628VSJ3"
                        target="_blank" rel="noopener" class="footer-link">Donate &rarr;</a>
-                    <span id="app-version-footer">Slowbooks Pro 2026</span><br>
-                    &copy; 2026 Slowbooks
+                    <span id="app-version-footer">SlowBooks Pro 2026</span><br>
+                    &copy; 2026 SlowBooks
                 </div>
             </nav>
 
@@ -295,6 +301,7 @@
     <script src="/static/js/topbar_fit.js"></script>
     <script src="/static/js/api.js"></script>
     <script src="/static/js/utils.js"></script>
+    <script src="/static/js/hint.js"></script>
     <script src="/static/js/combobox.js"></script>
     <script src="/static/js/line_order.js"></script>
     <script src="/static/js/terms.js"></script>
@@ -366,6 +373,10 @@
     <script src="/static/js/budgets.js"></script>
     <!-- Contact support form (uses API / openModal / toast; standalone of App) -->
     <script src="/static/js/support.js"></script>
+    <!-- The Fast Rack's catalog and drawing (#912), read by App.init -->
+    <script src="/static/js/fast_rack.js"></script>
+    <script src="/static/js/password_eye.js"></script>
+    <script src="/static/js/find.js"></script>
     <!-- App must be last -->
     <script src="/static/js/app.js"></script>
     <!-- Static-page event wiring (replaces what used to be inline onclick=) -->

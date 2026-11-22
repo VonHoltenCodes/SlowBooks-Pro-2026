@@ -5,13 +5,14 @@
 #
 # A term is read from the terms list first (app/models/payment_terms.py),
 # then from the text the app has always understood: "Net N" and the
-# due-on-receipt words. Anything else keeps the old 30 days, and the
+# due-on-receipt words, and end-of-month text ("Net 75 EOM", #1091). Anything else keeps the old 30 days, and the
 # document says so in a sentence (terms_note) instead of quietly.
 # ============================================================================
 
 from __future__ import annotations
 
 import calendar
+import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -20,7 +21,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.payment_terms import DATE_DRIVEN, STANDARD, PaymentTerm
+from app.services.terminology import said
+from app.models.payment_terms import DATE_DRIVEN, END_OF_MONTH, STANDARD, PaymentTerm
 
 # What a document without a rule it understands has always been given.
 FALLBACK_DAYS = 30
@@ -147,6 +149,10 @@ class Rule:
             if (due - on).days < (self.cutoff_days or 0):
                 due = _day_in(*_next_month(due.year, due.month), self.due_day)
             return due
+        if self.kind == END_OF_MONTH:
+            # N days after the last day of the document's month, whatever
+            # day of it the document is dated (#1091)
+            return month_end(on) + timedelta(days=self.net_days or 0)
         return on + timedelta(days=self.net_days or 0)
 
     def discount_date(self, on: date) -> Optional[date]:
@@ -178,12 +184,21 @@ class Rule:
                 return None
             last = _day_in(due.year, due.month, self.discount_day)
             return last if on <= last <= due else None
+        if self.kind == END_OF_MONTH:
+            # counted from where the due date is counted: D days after the
+            # month's end, as a standard term's D days run from its date
+            return month_end(on) + timedelta(days=self.discount_days or 0)
         return on + timedelta(days=self.discount_days or 0)
 
 
 def _day_in(year: int, month: int, day: int) -> date:
     """Day `day` of the month, or its last day when the month is shorter."""
     return date(year, month, min(day, calendar.monthrange(year, month)[1]))
+
+
+def month_end(on: date) -> date:
+    """The last day of the month `on` is in."""
+    return date(on.year, on.month, calendar.monthrange(on.year, on.month)[1])
 
 
 def _next_month(year: int, month: int) -> tuple[int, int]:
@@ -244,14 +259,35 @@ def main_days(text: Optional[str]) -> Optional[int]:
     return days if abs(days) <= MAX_TEXT_DAYS else None
 
 
+# End-of-month text (#1091): "Net 75 EOM", "75 days EOM", "75 EOM",
+# "Net EOM" and "EOM" (no number: the last day of the month), read after
+# NFKC, with case and every run of whitespace aside (clean_name).
+_EOM_TEXT = re.compile(r"(?:net ?)?(?:([0-9]+) ?(?:days? ?)?)?eom")
+
+
+def eom_days(text: Optional[str]) -> Optional[int]:
+    """The days after the month's end that end-of-month text names, or None
+    when the text isn't end-of-month text. Text main read ("Net 30") never
+    gets here: read_text asks main_days first."""
+    m = _EOM_TEXT.fullmatch(clean_name(text).lower())
+    if m is None:
+        return None
+    days = int(m.group(1) or 0)
+    return days if days <= MAX_TEXT_DAYS else None
+
+
 def read_text(text: Optional[str]) -> Optional[Rule]:
-    """The rule the old parser read from the text (main_days), or None when
-    it read none. Every reader of a document not tied to a term uses this,
+    """The rule the old parser read from the text (main_days), else the
+    end-of-month rule its text names (eom_days), or None when it reads as
+    neither. Every reader of a document not tied to a term uses this,
     never the list, so a term added later can't reach it."""
     days = main_days(text)
-    if days is None:
-        return None
-    return Rule(name=text.strip(), net_days=days)
+    if days is not None:
+        return Rule(name=text.strip(), net_days=days)
+    days = eom_days(text)
+    if days is not None:
+        return Rule(name=text.strip(), kind=END_OF_MONTH, net_days=days)
+    return None
 
 
 def rule_for(db: Session, text: Optional[str]) -> Optional[Rule]:
@@ -383,8 +419,11 @@ def due_date_for(db: Session, on: date, text: Optional[str]) -> date:
     except OverflowError:
         raise HTTPException(
             status_code=422,
-            detail=f'"{(text or "").strip()}" from {on.isoformat()} runs past '
-            "the calendar; date the document earlier.",
+            detail=said(
+                '"{}" from {} runs past the calendar; date the document earlier.',
+                (text or "").strip(),
+                on.isoformat(),
+            ),
         )
 
 
@@ -397,6 +436,12 @@ def describe(rule: Rule) -> str:
                 ", the next month's when dated fewer than "
                 f"{_days(rule.cutoff_days)} before it"
             )
+    elif rule.kind == END_OF_MONTH:
+        words = (
+            f"Due {_days(rule.net_days)} after the end of the month"
+            if rule.net_days
+            else "Due on the last day of the month"
+        )
     elif not rule.net_days:
         words = "Due on receipt"
     else:
@@ -408,6 +453,13 @@ def describe(rule: Rule) -> str:
             if rule.discount_day > rule.due_day:
                 # day 25 for a term due on the 10th is the month before
                 words += " of the month before it's due"
+        elif rule.kind == END_OF_MONTH:
+            words += (
+                f"; {pct} off if paid within {_days(rule.discount_days)} after "
+                "the end of the month"
+                if rule.discount_days
+                else f"; {pct} off if paid by the end of the month"
+            )
         else:
             words += f"; {pct} off if paid within {_days(rule.discount_days)}"
     return words
@@ -729,9 +781,11 @@ def picked_term_id(
     if _key(term.name) != _key(text):
         raise HTTPException(
             status_code=409,
-            detail=(
-                f'The terms "{(text or "").strip()}" are not "{term.name}", so '
-                "they can't be tied to it. Change the terms or the term picked."
+            detail=said(
+                'The terms "{}" are not "{}", so they can\'t be tied to it. '
+                "Change the terms or the term picked.",
+                (text or "").strip(),
+                term.name,
             ),
         )
     return term.id

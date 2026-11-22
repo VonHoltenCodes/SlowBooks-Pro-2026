@@ -2,7 +2,9 @@
 
 A company in a credit-reduction state owes extra FUTA on its FUTA taxable
 wages: for the 2025 return, California 1.2% and the U.S. Virgin Islands
-4.5% (Schedule A (Form 940) for 2025). The company's state comes from
+4.5% (Schedule A (Form 940) for 2025); for 2026, California 1.5% and the
+Virgin Islands nothing, having repaid its advances (the Department of
+Labor's final 2026 determination, #809). The company's state comes from
 Settings (company_state), else the EMPLOYER_STATE setting; any other
 employer's 940 keeps the figures it always had.
 """
@@ -66,6 +68,48 @@ def test_schedule_a_2025_rates():
     assert credit_reduction_rate(2025, None) == D("0")
 
 
+def test_schedule_a_2026_rates():
+    # DOL final 2026 determination (November 10, 2026): California 1.5%
+    # (BCR add-on waived), the Virgin Islands repaid before November 10.
+    assert FUTA_CREDIT_REDUCTION[2026] == {"CA": D("0.015")}
+    assert credit_reduction_rate(2026, "CA") == D("0.015")
+    assert credit_reduction_rate(2026, "ca") == D("0.015")
+    assert credit_reduction_rate(2026, "VI") == D("0")
+    assert credit_reduction_rate(2026, "WA") == D("0")
+    assert credit_reduction_rate(2026, None) == D("0")
+
+
+def test_california_employer_2026_940_carries_the_credit_reduction(client, db_session):
+    set_setting(db_session, "company_state", "CA")
+    db_session.commit()
+    emp = _employee(client, "CA")
+    # FUTA wages 7,000 (the base), 0.6% = 42.00; Schedule A line CA:
+    # 7,000 x 0.015 = 105.00; line 12 = 147.00
+    _run(client, emp["id"], "2026-01-09", 4000)
+    _run(client, emp["id"], "2026-01-23", 4000)
+
+    f = compute_940(db_session, 2026)
+    assert f["futa_taxable_wages"] == D("7000.00")
+    assert f["total_futa_tax"] == D("42.00")
+    assert f["credit_reduction_state"] == "CA"
+    assert f["credit_reduction_rate"] == D("0.015")
+    assert f["credit_reduction"] == D("105.00")
+    assert f["total_futa_tax_after_adjustments"] == D("147.00")
+
+
+def test_virgin_islands_employer_2026_940_has_no_reduction(client, db_session):
+    set_setting(db_session, "company_state", "VI")
+    db_session.commit()
+    emp = _employee(client, "VI")
+    _run(client, emp["id"], "2026-01-09", 4000)
+    _run(client, emp["id"], "2026-01-23", 4000)
+
+    f = compute_940(db_session, 2026)
+    assert f["total_futa_tax"] == D("42.00")
+    assert "credit_reduction" not in f
+    assert "total_futa_tax_after_adjustments" not in f
+
+
 def test_california_employer_940_carries_the_credit_reduction(client, db_session):
     set_setting(db_session, "company_state", "CA")
     db_session.commit()
@@ -99,7 +143,12 @@ def test_other_employers_940_is_unchanged(client, db_session):
     assert "total_futa_tax_after_adjustments" not in f
 
 
-def test_a_year_without_a_schedule_a_row_has_no_reduction(client, db_session):
+def test_a_year_without_a_schedule_a_row_has_no_reduction(
+    client, db_session, monkeypatch
+):
+    # Payroll tables exist for 2025 and 2026 only, so the year without a row
+    # is 2026 with its row taken out for this test.
+    monkeypatch.delitem(FUTA_CREDIT_REDUCTION, 2026)
     set_setting(db_session, "company_state", "CA")
     db_session.commit()
     emp = _employee(client, "CA")

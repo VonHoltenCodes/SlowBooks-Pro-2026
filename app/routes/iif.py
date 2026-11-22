@@ -218,7 +218,7 @@ async def import_iif(
     sub_customers: bool = Form(False),
     db: Session = Depends(get_db),
 ):
-    """Upload and import an IIF file into Slowbooks.
+    """Upload and import an IIF file into SlowBooks.
 
     Processes accounts, customers, vendors, items, and transactions.
     Skips duplicates and collects per-row errors. ``retitle_names``: import

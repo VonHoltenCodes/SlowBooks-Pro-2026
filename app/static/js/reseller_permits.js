@@ -83,7 +83,9 @@ const ResellerPermitsPage = {
 
         return `
             <div class="page-header">
-                <h2>Reseller Permits</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Reseller Permits</h2>${hint(`Reseller permit verification is manual — click "Open WA lookup" (or your state's lookup) to
+                check the permit on the official state site, then click "Mark verified" here to record that you did.
+                Most states have no public real-time API.`, 'Reseller Permits')}</div>
                 <button class="btn btn-primary" onclick="ResellerPermitsPage.showForm()">+ Add Permit</button>
             </div>
             ${expiringStrip}
@@ -100,12 +102,7 @@ const ResellerPermitsPage = {
                     </tr></thead>
                     <tbody>${tableBody}</tbody>
                 </table>
-            </div>
-            <p style="font-size:12px;color:var(--text-muted);margin-top:12px">
-                Reseller permit verification is manual — click "Open WA lookup" (or your state's lookup) to
-                check the permit on the official state site, then click "Mark verified" here to record that you did.
-                Most states have no public real-time API.
-            </p>`;
+            </div>`;
     },
 
     async showForm(id = null) {
@@ -301,12 +298,6 @@ const ResellerPermitsPage = {
         // attribute is read as text, never as code.
         openModal(`Verify ${permit.jurisdiction} Permit`, `
             <div style="font-size:13px;line-height:1.6">
-                <p style="margin:0 0 12px 0;color:var(--text-muted)">
-                    Round-trip: click <strong>Open lookup</strong>, the official state site opens
-                    in a popup, verify there, then come back and record the outcome here.
-                    Your <em>Mark verified</em> click is the audit trail — it stamps who and when.
-                </p>
-
                 <table class="data-table" style="margin-bottom:14px">
                     <tr>
                         <td style="width:30%"><strong>Permit #</strong></td>
@@ -343,7 +334,9 @@ const ResellerPermitsPage = {
                 </table>
 
                 <div class="note--plain" style="padding:12px;border-radius:4px;margin-bottom:14px">
-                    <strong>Step 1.</strong> ${lookupBtn}
+                    <strong>Step 1.</strong> ${hint(`Round-trip: click <strong>Open lookup</strong>, the official state site opens
+                    in a popup, verify there, then come back and record the outcome here.
+                    Your <em>Mark verified</em> click is the audit trail — it stamps who and when.`, 'Step 1')} ${lookupBtn}
                 </div>
 
                 <div style="margin-bottom:8px"><strong>Step 2.</strong> Record what you found:</div>

@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_ as sqla_and_, or_ as sqla_or_
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
+from app.models.accounts import Account
 from app.models.items import Item, InventoryMovement
 from app.schemas.items import (
     ItemCreate,
@@ -23,6 +25,157 @@ from app.services.inventory_service import (
 )
 
 router = APIRouter(prefix="/api/items", tags=["items"])
+
+
+# The accounts an item's income or expense account may not be (#1038): the
+# ones whose figure a sub-ledger keeps. An invoice line crediting Accounts
+# Receivable would take the sale off what the customer owes while the
+# invoice still says it is owed; the others the same way for the bills,
+# the deposits and the stock. A bank or card account is left out too: money
+# into or out of it is a deposit, a payment or a charge, not an item. Any
+# other balance-sheet account is allowed (a security deposit credits a
+# liability), as the bill line allows it (#766, W-143).
+_ITEM_ACCOUNT_CONTROLS = {
+    "1100": "which only invoices and customer payments post to",
+    "2000": "which only bills and bill payments post to",
+    "1200": "which holds customer payments until they are deposited",
+    "1300": "which only an inventory item's purchases and sales post to",
+}
+_ACCOUNT_FIELDS = {
+    "income_account_id": "income",
+    "expense_account_id": "expense or cost of goods",
+    "asset_account_id": "inventory asset",
+}
+
+
+def _other_items_on(db: Session, account_id: int, item=None):
+    """The first item (other than `item`) whose income or expense account is
+    `account_id`, or None: an invoice or bill line on it posts to the
+    account without the stock moving."""
+    q = db.query(Item).filter(
+        sqla_or_(
+            Item.income_account_id == account_id,
+            Item.expense_account_id == account_id,
+        )
+    )
+    if item is not None and getattr(item, "id", None) is not None:
+        q = q.filter(Item.id != item.id)
+    return q.order_by(Item.name).first()
+
+
+def item_account_problem(
+    db: Session, field: str, account: Account, tied: dict, item=None
+):
+    """Why `account` cannot be the item's `field` account, as the sentence
+    the API answers with, or None when it can.
+
+    Income and expense (#1038, W-196): not a bank or card account, not one
+    a sub-ledger keeps (Accounts Receivable, Accounts Payable, Undeposited
+    Funds, Inventory) and not any other account a Books Check row ties to
+    a sub-ledger.
+
+    The inventory asset account (W-207): an Other Current Asset account
+    that is not a bank, Accounts Receivable, Undeposited Funds or any other
+    tied account except an inventory one (1300 Inventory, or an account
+    another stock item already keeps its stock in), and that no item
+    invoices or buys through as its income or expense account. Every
+    purchase and sale of the item posts to it beside the stock's quantity
+    and cost, so anything else that moves it puts Books Check's Inventory
+    row out, and the stock moving it puts the other row out."""
+    from app.services.control_accounts import is_control
+
+    what = _ACCOUNT_FIELDS[field]
+    number = str(account.account_number or "")
+    named = f"{number} {account.name}".strip()
+    start = f"An item's {what} account can't be {named}"
+    detail = getattr(account.detail_type, "value", account.detail_type)
+    if account.bank_kind:
+        kind = "card" if account.bank_kind == "credit_card" else "bank"
+        return (
+            f"{start}, a {kind} account: money into or out of it is "
+            "a deposit, a payment or a charge. Choose another account."
+        )
+    asset_field = field == "asset_account_id"
+    where = _ITEM_ACCOUNT_CONTROLS.get(number)
+    if (
+        where
+        and is_control(number, account.account_type)
+        and not (asset_field and number == "1300")
+    ):
+        return f"{start}, {where}; choose another account."
+    if detail == "accounts_receivable":
+        return (
+            f"{start}, an accounts receivable account, which only "
+            "invoices and customer payments post to; choose another account."
+        )
+    if detail == "accounts_payable":
+        return (
+            f"{start}, an accounts payable account, which only bills "
+            "and bill payments post to; choose another account."
+        )
+    if asset_field and detail != "other_current_asset":
+        return (
+            f"{start}: an item's stock is kept in an Other Current Asset "
+            "account, such as 1300 Inventory. Choose another account."
+        )
+    # Every other account a Books Check row ties to a sub-ledger (W-196):
+    # Sales Tax Payable, Accrued Job Costs, the payroll liabilities, the
+    # retainage accounts, an item's own inventory account. A line on one
+    # moves the account and not what it is tied to. The inventory accounts
+    # are what an item's asset account is for, so that field takes them.
+    if account.id in tied:
+        label, keeper = tied[account.id]
+        if not (asset_field and label == "Inventory"):
+            return (
+                f"{start}: Books Check ties it to {keeper}, and a line "
+                f"on an item would put its {label} row out by the line. Choose "
+                "another account."
+            )
+    if asset_field:
+        other = _other_items_on(db, account.id, item)
+        if other is not None:
+            return (
+                f"{start}: the item {other.name} posts its sales or purchases "
+                "to it, which would move it without the stock and put Books "
+                "Check's Inventory row out. Choose another account."
+            )
+    return None
+
+
+def _refuse_item_accounts(db: Session, fields: dict, item=None) -> None:
+    """Refuse (422), in a sentence, an income, expense or inventory asset
+    account an item may not post through. An account the item already has
+    is not refused, so an item imported that way can still be edited."""
+    tied = None
+    for field in _ACCOUNT_FIELDS:
+        account_id = fields.get(field)
+        if account_id is None or (
+            item is not None and getattr(item, field) == account_id
+        ):
+            continue
+        account = db.get(Account, account_id)
+        if account is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"The {_ACCOUNT_FIELDS[field]} account chosen is not in "
+                "the chart of accounts; choose another account.",
+            )
+        if tied is None:
+            tied = refused_item_accounts(db)
+        problem = item_account_problem(db, field, account, tied, item)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
+
+
+def refused_item_accounts(db: Session) -> dict[int, tuple[str, str]]:
+    """{account id: (Books Check label, what it is tied to)}: the accounts
+    an item may not newly post to beyond the ones refused by number, type or
+    detail above, read from Books Check itself (books_check.tied_accounts)
+    so the two cannot drift. GET /api/items/refused-accounts gives the form
+    the same list, so it never offers them."""
+    from app.services.books_check import tied_accounts
+
+    return tied_accounts(db)
 
 
 def item_name_key(name) -> str:
@@ -53,10 +206,11 @@ def _refuse_duplicate_name(db: Session, name, exclude_id=None) -> None:
     if clash:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f'There is already an item named "{clash.name}". Use that '
-                "item, give this one a different name, or make the other "
-                "one inactive first."
+            detail=said(
+                'There is already an item named "{}". Use that item, give '
+                "this one a different name, or make the other one inactive "
+                "first.",
+                clash.name,
             ),
         )
 
@@ -86,7 +240,7 @@ def _refuse_duplicate_code(db: Session, code, exclude_id=None) -> None:
     if clash:
         raise HTTPException(
             status_code=409,
-            detail=f"Item code {code} is already used by {clash.name}.",
+            detail=said("Item code {} is already used by {}.", code, clash.name),
         )
 
 
@@ -185,6 +339,36 @@ def low_stock_items(db: Session = Depends(get_db)):
     return out
 
 
+@router.get("/refused-accounts")
+def refused_accounts(
+    field: str = Query("income_account_id"), db: Session = Depends(get_db)
+):
+    """The accounts the item form does not offer for an item's income or
+    expense account beyond the bank, card, receivable, payable, Undeposited
+    Funds and Inventory accounts it already leaves out: each with the reason
+    the server gives when one is sent (W-196).
+
+    `field=asset_account_id`: every account the inventory asset account
+    may not be, each with the sentence the server refuses it with (W-207)."""
+    tied = refused_item_accounts(db)
+    if field == "asset_account_id":
+        out = []
+        for account in db.query(Account).order_by(Account.account_number):
+            problem = item_account_problem(db, field, account, tied)
+            if problem:
+                out.append({"account_id": account.id, "reason": problem})
+        return out
+    if field not in _ACCOUNT_FIELDS:
+        raise HTTPException(
+            status_code=422,
+            detail="Ask for the income, expense or inventory asset account's list.",
+        )
+    return [
+        {"account_id": aid, "books_check_row": label, "tied_to": keeper}
+        for aid, (label, keeper) in sorted(tied.items())
+    ]
+
+
 @router.get("/valuation")
 def inventory_valuation(db: Session = Depends(get_db)):
     """Total inventory value (sum of qty * avg_cost across tracked items)."""
@@ -255,6 +439,7 @@ def create_item(data: ItemCreate, db: Session = Depends(get_db)):
     _refuse_duplicate_name(db, data.name)
     _refuse_duplicate_code(db, data.code)
     fields = data.model_dump()
+    _refuse_item_accounts(db, fields)
     if fields.get("is_taxable") is None:
         fields["is_taxable"] = new_lines_taxable(db)
     # as_of dates the opening entry only; it is not an Item column.
@@ -299,6 +484,7 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db)):
         _refuse_duplicate_name(db, new_name, item.id)
     if update_data.get("code"):
         _refuse_duplicate_code(db, update_data["code"], item.id)
+    _refuse_item_accounts(db, update_data, item)
     for key, val in update_data.items():
         setattr(item, key, val)
     db.commit()

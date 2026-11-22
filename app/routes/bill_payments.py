@@ -8,6 +8,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.bills import Bill, BillStatus, BillPayment, BillPaymentAllocation
 from app.models.contacts import Vendor
@@ -282,8 +283,19 @@ def create_bill_payment(
                 detail=f"Bill {bill.bill_number} belongs to a different vendor.",
             )
         if alloc_data.amount > float(bill.balance_due):
+            # in the words Receive payment uses for an invoice (W-192); the
+            # same bill twice is met here with what the first left due
             raise HTTPException(
-                status_code=400, detail="Allocation exceeds bill balance"
+                status_code=400,
+                detail=(
+                    f"${_q(Decimal(str(alloc_data.amount))):,.2f} is more than "
+                    f"the ${Decimal(str(bill.balance_due)):,.2f} still due on "
+                    + (
+                        f"bill {bill.bill_number}."
+                        if bill.bill_number
+                        else f"the bill of {bill.date:%b %d, %Y}."
+                    )
+                ),
             )
         discount = _q(alloc_data.discount)
         paying = _q(Decimal(str(alloc_data.amount)))
@@ -463,7 +475,7 @@ def add_discount(
     if request is not None and request.query_params:
         key = next(iter(request.query_params.keys()))
         raise HTTPException(
-            status_code=422, detail=f"'{key}' is not a parameter this accepts."
+            status_code=422, detail=said("'{}' is not a parameter this accepts.", key)
         )
     replay = request_keys.reserve(
         db,

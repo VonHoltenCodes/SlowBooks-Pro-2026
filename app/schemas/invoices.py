@@ -14,11 +14,13 @@ from pydantic import (
 from app.models.invoices import InvoiceStatus
 from app.schemas.common import (
     StrictModel,
+    NewTaxRate,
     TaxRate,
     TaxRateOut,
     check_line_fits,
     check_line_size,
     check_lines_fit,
+    clean_line_cost_type,
     validate_non_negative_line,
     quantity_text,
 )
@@ -60,9 +62,15 @@ class InvoiceLineCreate(StrictModel):
     job_id: Optional[int] = None
     class_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    # The revenue's cost type (#1055): one item split on the invoice per
+    # cost code and type. Blank takes the cost code's own type; the income
+    # account is the item's either way.
+    cost_type: Optional[str] = None
     # None = default from the item (its taxable flag) and the customer
     is_taxable: Optional[bool] = None
     line_order: int = 0
+
+    _cost_type = field_validator("cost_type")(clean_line_cost_type)
 
     @model_validator(mode="after")
     def _check_non_negative(self):
@@ -87,6 +95,7 @@ class InvoiceLineResponse(BaseModel):
     job_id: Optional[int] = None
     class_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    cost_type: Optional[str] = None
     is_taxable: bool = True
     line_order: int
 
@@ -120,7 +129,7 @@ class InvoiceCreate(StrictModel):
     # The Ship To's country; left out, the customer's ship country, as a
     # ship street left out is the customer's (2.31.1 gate, round 3).
     ship_to_country: Optional[str] = Field(None, max_length=100)
-    tax_rate: TaxRate = Decimal("0")
+    tax_rate: NewTaxRate = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -228,6 +237,16 @@ class RetainageLine(BaseModel):
     amount: Decimal
 
 
+class LinkedPurchaseOrder(BaseModel):
+    """A purchase order that fills the invoice (#986): a plain reference."""
+
+    id: int
+    po_number: str
+    vendor_name: Optional[str] = None
+    status: str
+    total: Decimal = Decimal("0")
+
+
 class InvoiceResponse(BaseModel):
     id: int
     invoice_number: str
@@ -278,6 +297,9 @@ class InvoiceResponse(BaseModel):
     # no lines bills (the release, the retainage given back by a lower
     # percent, or held), the rows printed in place of an empty table (#815).
     retainage_lines: list[RetainageLine] = []
+    # Filled by GET /invoices/{id} only: the purchase orders that fill this
+    # invoice (#986), oldest first. Nothing posts on a link.
+    linked_purchase_orders: list[LinkedPurchaseOrder] = []
     # The newest send of this invoice that went out (#780), from the email
     # log: when, and to whom. Read-only and null until one has; a failed
     # send leaves them as they were. Filled by the list, the read, an edit,
@@ -296,6 +318,12 @@ class InvoiceResponse(BaseModel):
     # sale took past what was on hand ("Widget: 2 on hand; this sale takes
     # it to -4."). The sale posted; this says what it did. Empty otherwise.
     warnings: list[str] = []
+    # On the answer to a create or an update only: the exemption certificate
+    # behind an exempt sale (the tax-exempt customer's, or the exempt job's)
+    # is missing, or expired as of the document's date
+    # (services/tax_exemption.certificate_warning). The sale is exempt all
+    # the same; this is for the person to be told. Null otherwise.
+    tax_note: Optional[str] = None
     # On a void: where the balance went, as a sentence (an invoice the
     # QuickBooks Online import carried over, #704).
     notice: Optional[str] = None

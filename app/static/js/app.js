@@ -271,18 +271,18 @@ const App = {
         if (typeof n === 'number' && n < App._nShown) history.forward(); else history.back();
     },
     isMac() { return typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform || ''); },
-    // The desktop window (desktop_shim.js), where Ctrl+F (⌘F) is the app's
-    // search; in a browser it stays the browser's find in page (#695).
+    // The desktop window (desktop_shim.js), where Ctrl+F (⌘F) opens Find
+    // on this screen (find.js); in a browser it stays the browser's find
+    // in page (#695).
     inDesktopShell() { return !!(window.SlowbooksDesktop && window.SlowbooksDesktop.inShell && window.SlowbooksDesktop.inShell()); },
-    // The search box names its keys to a screen reader: Ctrl+K (⌘K) and /,
-    // and Ctrl+F (⌘F) in the desktop window. Again once pywebview is ready,
-    // which on a Mac is after the page has drawn.
+    // The search box names its keys to a screen reader: Ctrl+K (⌘K) and /.
+    // Ctrl+F (⌘F) was one in the desktop window until the window had a
+    // find bar of its own; the bar's box names it now.
     labelSearchKeys() {
         const search = $('#global-search');
         if (!search) return;
         const mod = App.isMac() ? 'Meta' : 'Control';
-        const keys = [`${mod}+K`, ...(App.inDesktopShell() ? [`${mod}+F`] : []), '/'];
-        search.setAttribute('aria-keyshortcuts', keys.join(' '));
+        search.setAttribute('aria-keyshortcuts', `${mod}+K /`);
     },
     // What a toolbar button says about its shortcut: the hover reads
     // "Enter Bill (Alt+B)" — "(⌥B)" on a Mac, where Alt is Option — and a
@@ -1037,8 +1037,12 @@ const App = {
         if ((App.isAdmin() && !App.inCopy) || !page) return;
         if (App.isLocked()) {
             // the toolbar's shortcuts to new documents, and batch entry
+            // (the shipped ones index.html has; the Fast Rack, once drawn,
+            // leaves out what the role may not use: fast_rack.js allowed)
             document.querySelectorAll('#topbar .tb-btn[data-action], #topbar .tb-btn[data-nav="#/quick-entry"], #topbar .tb-btn[data-nav="#/bill-entry"]')
                 .forEach(b => b.classList.add('hidden'));
+            const rack = document.getElementById('fast-rack');
+            if (rack && rack.dataset.rendered && typeof FastRack !== 'undefined') FastRack.render();
             // the sidebar's pages that only enter things (Batch Payments...)
             App.hideWriteControls(document.getElementById('sidebar'));
         }
@@ -1123,7 +1127,7 @@ const App = {
         'InvoicesPage.void', 'InvoicesPage.markSent', 'InvoicesPage.duplicate', 'InvoicesPage.uploadAttachment',
         'InvoicesPage.deleteAttachment', 'InvoicesPage.showApplyCredit', 'InvoicesPage.showWriteOff',
         'InvoicesPage.emailInvoice', 'InvoicesPage.copyPaymentLink', 'InvoicesPage.checkPaymentStatus',
-        'EstimatesPage.convert', 'EstimatesPage.accept', 'EstimatesPage.markLost', 'EstimatesPage.emailEstimate',
+        'EstimatesPage.convert', 'EstimatesPage.accept', 'EstimatesPage.markLost', 'EstimatesPage.void', 'EstimatesPage.confirmVoid', 'EstimatesPage.emailEstimate',
         'FieldTickets.del', 'FieldTickets.voidTicket', 'FieldTickets.deleteAttachment', 'FieldTickets.upload',
         'SalesReceiptsPage.void', 'CreditMemosPage.void', 'CreditMemosPage.showApply',
         'CreditMemosPage.doApply', 'PaymentsPage.void', 'PaymentsPage.doVoid', 'PaymentsPage.showApplyCredit', 'DepositsPage.voidDeposit',
@@ -1158,7 +1162,8 @@ const App = {
         'BankingPage.finishReconcile', 'BankingPage.abandonReconcile', 'BankingPage.matchLine', 'BankingPage.showMatch',
         'BankingPage.excludeLine', 'BankingPage.findMatches', 'BankingPage.addAll', 'BankingPage.postLegacy',
         'BankingPage.dismissLegacy', 'BankingPage.syncSimpleFIN', 'BankingPage.disconnectSimpleFIN',
-        'BankingPage.showSimpleFINHistory', 'BankRulesPage.deleteRule', 'BankRulesPage.applyAll', 'TaxPage.showPaySalesTax',
+        'BankingPage.showSimpleFINHistory', 'BankingPage.refreshSimpleFIN', 'BankingPage.showSimpleFINMove',
+        'BankingPage.showSimpleFINUpdateToken', 'BankRulesPage.deleteRule', 'BankRulesPage.applyAll', 'TaxPage.showPaySalesTax',
         'ReportsPage.sendCollectionLetters', 'ReportsPage.batchEmailStatements', 'ReportsPage.emailGivingStatements',
         'ReportsPage.applyLateFees', 'ReportsPage.deleteSaved', 'ReportsPage.voidDuplicate',
         'ReportsPage.dismissDuplicate', 'ReportsPage.restoreDuplicate', 'IIFPage.importFile',
@@ -1222,6 +1227,8 @@ const App = {
             form.querySelectorAll('button').forEach(b => {
                 if (/closeModal\(/.test(b.getAttribute('onclick') || '')) return;
                 if (b.hasAttribute('data-readonly-ok')) return;
+                // a tortoise only opens its note (#977): reading is never locked
+                if (b.hasAttribute('data-hint')) return;
                 b.disabled = true;
                 b.style.opacity = '0.5';
                 b.style.cursor = 'not-allowed';
@@ -1286,8 +1293,9 @@ const App = {
     },
 
     // Each artist by their credit line, the pieces and where each is used,
-    // the name linked when a link was given; an empty list shows the file's
-    // note and a link to the repo. Everything through escapeHtml: the file
+    // the name linked when a link was given; then the file's note, a request
+    // to donate, with the project's donation link (the Artists heading only
+    // when an artist is credited). Everything through escapeHtml: the file
     // ships with the app, but a credit is text, not markup.
     renderArtists(data) {
         const box = $('#splash-artists');
@@ -1308,16 +1316,19 @@ const App = {
                     .join(', ');
                 return `<li><strong>${name}</strong>${pieces ? `: ${pieces}` : ''}</li>`;
             }).join('');
-            note.innerHTML = '';
         } else {
             list.innerHTML = '';
-            const repo = String(data.repo || '');
-            note.innerHTML = escapeHtml(data.note || '')
-                + (repo ? ` ${linked(repo, repo.replace(/^https?:\/\//, ''))}` : '');
         }
+        // the request to donate, under the credits or on its own (NEW-268:
+        // it linked the art repository by its lower-case-b name)
+        const donate = String(data.donate || '');
+        note.innerHTML = escapeHtml(data.note || '')
+            + (/^https:\/\//.test(donate) ? ` ${linked(donate, data.donate_text || 'Donate')}` : '');
+        const title = box.querySelector('.splash-artists-title');
+        if (title) title.hidden = !artists.length;
         list.hidden = !artists.length;
-        note.hidden = !!artists.length;
-        box.hidden = false;
+        note.hidden = !note.innerHTML;
+        box.hidden = !artists.length && note.hidden;
     },
 
     // Theme toggle — Feature 12: Dark Mode
@@ -1429,9 +1440,9 @@ const App = {
         try { preview = await API.get('/accounts/unused-seeded'); } catch (err) { toast(err.message, 'error'); return; }
         const rows = preview.removable.map(a => `<li>${accountLabel(a, null, ' ')}</li>`).join('');
         const kept = preview.kept.map(a => `<li>${accountLabel(a, null, ' ')} <span style="color:var(--gray-500);">— ${escapeHtml(a.reason)}</span></li>`).join('');
+        const about = hint('Every new company starts with a seeded chart of accounts. When a real chart is imported the seeded accounts stay beside it. These seeded accounts have never been used and can go now; any with postings, sub-accounts, a register or a job in the settings stay.', 'Seeded accounts');
         openModal('Remove unused seeded accounts', `
-            <p style="font-size:12px; margin-bottom:8px;">Every new company starts with a seeded chart of accounts. When a real chart is imported the seeded accounts stay beside it. These seeded accounts have never been used and can go now; any with postings, sub-accounts, a register or a job in the settings stay.</p>
-            ${preview.removable.length ? `<p style="font-size:12px; margin-bottom:4px;"><strong>${preview.removable.length} to remove:</strong></p><ul style="font-size:12px; columns:2; margin:0 0 8px 16px;">${rows}</ul>` : '<p style="font-size:12px;">Nothing to remove: every seeded account is in use or already gone.</p>'}
+            ${preview.removable.length ? `<p style="font-size:12px; margin-bottom:4px;"><strong>${preview.removable.length} to remove:</strong> ${about}</p><ul style="font-size:12px; columns:2; margin:0 0 8px 16px;">${rows}</ul>` : `<p style="font-size:12px;">Nothing to remove: every seeded account is in use or already gone. ${about}</p>`}
             ${preview.kept.length ? `<details style="font-size:11px; margin-bottom:8px;"><summary>${preview.kept.length} seeded account(s) stay</summary><ul style="margin:4px 0 0 16px;">${kept}</ul></details>` : ''}
             <div class="form-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1585,7 +1596,7 @@ const App = {
         let html = `
             ${skipLinkHtml('#accounts-filter', 'Skip to the account filter')}
             <div class="page-header">
-                <h2 id="accounts-heading">Chart of Accounts</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2 id="accounts-heading">Chart of Accounts</h2>${hint("An account's name opens its register: the bank register for a bank or card account, this year's transactions for the rest.", 'Chart of Accounts')}</div>
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                     <input type="search" id="accounts-filter" aria-label="Filter accounts" placeholder="Filter by number or name" value="${escapeHtml(App._accountsFilter)}" style="width:200px;" oninput="App.filterAccounts(this.value)">
                     <span id="accounts-filter-note" role="status" style="font-size:11px; color:var(--gray-500);"></span>
@@ -1595,7 +1606,6 @@ const App = {
                     <button class="btn btn-primary" onclick="App.showAccountForm()">New Account</button>
                 </div>
             </div>
-            <p style="font-size:11px; color:var(--gray-500); margin:-4px 0 8px;">An account's name opens its register: the bank register for a bank or card account, this year's transactions for the rest.</p>
             <nav aria-labelledby="accounts-heading"><div class="table-container"><table>
                 <thead><tr>${numbers ? '<th scope="col" style="width:80px;">Number</th>' : ''}<th scope="col">Name</th><th scope="col" style="width:160px;">Type</th><th scope="col" class="amount" style="width:100px;">Balance</th><th scope="col" style="width:190px;">Actions</th></tr></thead>
                 <tbody>`;
@@ -1691,16 +1701,14 @@ const App = {
                             title="Optional. Digits, like 6150; a sub-account can use 6150.1 or 6150-01."></div>
                     <div class="form-group"><label>Name *</label>
                         <input name="name" required value="${escapeHtml(acct.name)}"></div>
-                    <div class="form-group"><label>Type *</label>
+                    <div class="form-group"><label>Type * ${hint("A bank or card account gets a register. A sub-account shares its parent's detail type, except under a bank, card, or a 1100 or 2000 parent, where it is set on its own.", 'Type', 'account-type-hint')}</label>
                         <select name="detail_type" data-was="${escapeHtml(acct.detail_type || '')}" aria-describedby="account-type-hint" onchange="App.accountTypeChanged()"${locked ? ' disabled' : ''}>
                             ${picker}
-                        </select>
-                        <span id="account-type-hint" class="hint">A bank or card account gets a register. A sub-account shares its parent's detail type, except under a bank, card, or a 1100 or 2000 parent, where it is set on its own.</span></div>
-                    <div class="form-group"><label for="account-parent">Sub-account of</label>
+                        </select></div>
+                    <div class="form-group"><label for="account-parent">Sub-account of ${hint(App._accountStandsAlone(acct) ? 'The books post to it, so it stays a top-level account.' : 'Accounts of the same type. A sub-account is listed under its parent.', 'Sub-account', 'account-parent-hint')}</label>
                         <select name="parent_id" id="account-parent" data-was="${acct.parent_id == null ? '' : Number(acct.parent_id)}" aria-describedby="account-parent-hint" onchange="App.accountParentChanged()">
                             ${App._accountParentOptions(acct.parent_id)}
                         </select>
-                        <span id="account-parent-hint" class="hint">${App._accountStandsAlone(acct) ? 'The books post to it, so it stays a top-level account.' : 'Accounts of the same type. A sub-account is listed under its parent.'}</span>
                         <span id="account-parent-status" class="hint" role="status"></span></div>
                     <div class="form-group full-width"><label>Description</label>
                         <textarea name="description">${escapeHtml(acct.description || '')}</textarea></div>
@@ -1860,7 +1868,7 @@ const App = {
     showChartImport() {
         openModal('Import Chart of Accounts', `
             <form onsubmit="App.previewChartImport(event)">
-                <p class="hint" style="margin-bottom:10px;">
+                <div class="form-group"><label for="chart-import-file">File ${hint(`
                     A CSV in the columns the export writes (Number, Name, Type, optional Parent and
                     Description), any spreadsheet with those headers, or hledger's account list
                     (<code>hledger accounts</code>, <code>accounts --types</code>, or
@@ -1868,10 +1876,8 @@ const App = {
                     name and renamed to the file's names; the control accounts the software posts to by
                     number are kept and renamed, never duplicated.
                     <a href="/static/downloads/chart-of-accounts-template.csv" download>Download a template</a>
-                    with the columns and a few example rows.
-                </p>
-                <div class="form-group"><label>File</label>
-                    <input type="file" name="file" accept=".csv,.txt,.journal" required></div>
+                    with the columns and a few example rows.`, 'File')}</label>
+                    <input type="file" id="chart-import-file" name="file" accept=".csv,.txt,.journal" required></div>
                 <div class="form-group">
                     <label style="display:flex; gap:8px; align-items:flex-start; font-weight:normal;">
                         <input type="checkbox" name="replace" style="margin-top:2px;">
@@ -2139,8 +2145,7 @@ const App = {
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
                 <div class="settings-section">
-                    <h3>Export</h3>
-                    <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Download data as CSV files.</p>
+                    <div class="settings-h-row"><h3>Export</h3>${hint('Download data as CSV files.', 'Export')}</div>
                     <div style="display:flex; flex-direction:column; gap:8px;">
                         <a href="/api/csv/export/customers" class="btn btn-secondary" download>Export ${T('Customers')}</a>
                         <a href="/api/csv/export/vendors" class="btn btn-secondary" download>Export Vendors</a>
@@ -2155,18 +2160,16 @@ const App = {
                     </div>
                 </div>
                 <div class="settings-section" data-write>
-                    <h3>Import</h3>
-                    <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Upload CSV files to import data.</p>
+                    <div class="settings-h-row"><h3>Import</h3>${hint('Upload CSV files to import data.', 'Import')}</div>
                     <form id="csv-import-form" onsubmit="App.importCSV(event)">
-                        <div class="form-group"><label>Entity Type</label>
-                            <select name="entity_type" id="csv-entity" onchange="App.csvImportHelp(this.value)">
+                        <div class="form-group"><label for="csv-entity">Entity Type ${hint(App._csvImportHelpHtml('customers'), 'Entity Type', 'csv-import-help')}</label>
+                            <select name="entity_type" id="csv-entity" aria-describedby="csv-import-help" onchange="App.csvImportHelp(this.value)">
                                 <option value="customers">${T('Customers')}</option>
                                 <option value="vendors">Vendors</option>
                                 <option value="items">Items</option>
                                 <option value="accounts">Chart of Accounts</option>
                                 <option value="invoices">${T('Invoices')}</option>
                             </select></div>
-                        <div class="hint" id="csv-import-help" aria-live="polite" style="font-size:11px; margin-bottom:10px;">${App._csvImportHelpHtml('customers')}</div>
                         <div class="form-group"><label>CSV File</label>
                             <input type="file" name="file" accept=".csv" required></div>
                         <button type="submit" class="btn btn-primary">Import</button>
@@ -2237,9 +2240,15 @@ const App = {
             + `<a href="/static/downloads/${spec.template}" download>Download a template</a>.`;
     },
 
+    // The columns follow the type, inside the Entity Type note (#977): its
+    // body's markup swapped (a list and a template link, so not
+    // Hints.setText's plain words), the field's name kept at its head
     csvImportHelp(entity) {
-        const help = $('#csv-import-help');
-        if (help) help.innerHTML = App._csvImportHelpHtml(entity);
+        const body = $('#csv-import-help');  // the note's text: hint()'s id names it
+        if (!body) return;
+        const head = body.querySelector('.hint-pop-title');
+        body.innerHTML = App._csvImportHelpHtml(entity);
+        if (head) body.insertBefore(head, body.firstChild);
     },
 
     async importCSV(e) {
@@ -2327,8 +2336,11 @@ const App = {
             API.get('/items?active_only=true'),
             API.get('/settings'),
             PaymentTerms.load(),
+            // the company's classes, for the line Class cell (#1051)
+            App.qeLineClasses() ? Nonprofit.loadFunds() : null,
         ]);
         App._qeCustomers = customers;
+        App._qeClassId = null;
         App._qeItems = items;
         App._qeLineCount = 1;
         // Sales tax as on the New Invoice form (#802): the company's rate to
@@ -2351,10 +2363,8 @@ const App = {
                 <h2>Quick Entry Mode</h2>
                 <div style="font-size:10px; color:var(--text-muted);">
                     Batch invoice entry — for entering paper invoices quickly
+                    ${hint('Enter invoice details and press <strong>Save &amp; Next</strong> (or Ctrl+Enter) to save and immediately start a new invoice.', 'Quick Entry Mode')}
                 </div>
-            </div>
-            <div class="quick-entry-info" style="background:var(--primary-light); padding:8px 12px; margin-bottom:12px; border:1px solid var(--qb-gold); font-size:11px;">
-                Enter invoice details and press <strong>Save & Next</strong> (or Ctrl+Enter) to save and immediately start a new invoice.
             </div>
             <form id="qe-form" onsubmit="App.saveQuickEntry(event)">
                 <div class="form-grid">
@@ -2384,7 +2394,7 @@ const App = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Sales Tax</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th>${App.qeLineClasses() ? Nonprofit.classHeadHtml() : ''}<th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Sales Tax</th></tr></thead>
                     <tbody id="qe-lines">${App._qeLineHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="App.qeAddLine()">+ Add Line</button>
@@ -2483,6 +2493,19 @@ const App = {
     },
 
     _qeLineCount: 1,
+    // A Class on each line (#1051), drawn where the company has a class of
+    // its own (Nonprofit.lineClassShown, the invoice form's rule). Quick
+    // Entry has no header class, so the empty choice is "No class". A new
+    // line, and the next invoice's first line, start with the class of the
+    // line above: the last one chosen.
+    _qeClassId: null,
+    qeLineClasses() { return typeof Nonprofit !== 'undefined' && !!Nonprofit.classCellHtml; },
+    qeLastClass() {
+        const rows = $$('#qe-lines tr');
+        const last = rows[rows.length - 1];
+        return last && App.qeLineClasses() ? Nonprofit.fundFromRow(last, 'line-class') : null;
+    },
+
     // One Quick Entry line. Its Tax box starts as a new invoice line's does
     // (TaxDefault) and follows the item picked; the last cell shows the tax
     // the line will be charged (#802).
@@ -2494,6 +2517,7 @@ const App = {
             <tr data-qeline="${idx}">
                 <td><select class="line-item" onchange="App.qeItemSelected(${idx})">${ItemQuickAdd.options(App._qeItems)}</select></td>
                 <td><input class="line-desc" value=""></td>
+                ${App.qeLineClasses() ? Nonprofit.classCellNoHeaderHtml('line-class', App._qeClassId) : ''}
                 <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
                 <td><input class="line-rate money" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>
                 <td class="col-amount line-amount">$0.00</td>
@@ -2503,6 +2527,7 @@ const App = {
     },
 
     qeAddLine() {
+        App._qeClassId = App.qeLastClass();
         const idx = App._qeLineCount++;
         $('#qe-lines').insertAdjacentHTML('beforeend', App._qeLineHtml(idx));
         App.qeRecalc();
@@ -2563,6 +2588,7 @@ const App = {
                     description: row.querySelector('.line-desc')?.value || '',
                     quantity: qty, rate: rate, line_order: i,
                     is_taxable: box ? box.checked : null,
+                    class_id: App.qeLineClasses() ? Nonprofit.fundFromRow(row, 'line-class') : null,
                 });
             }
         });
@@ -2584,15 +2610,28 @@ const App = {
         if (!App.qeInvoiceData(form)) { toast('Add at least one line item', 'error'); return; }
         // "+ New Customer" still open with a name typed: Save & Next adds the
         // customer first, then the invoice
+        // lines that add up to $0.00: asked first, as the invoice form asks
+        // (ZeroTotal), and before anything is sent, a new customer included;
+        // Yes saves it, No leaves the entry as typed and adds nothing
+        let zero = ZeroTotal.ask(T('Invoice'), App.qeRecalc().total);
+        if (!zero) return;
         if (form.customer_id.value === '__new__') {
             if (!(await App.qeSaveNewCustomer())) return;
         }
         // read after the customer is settled: a non-taxable one's lines go
         // with their Tax boxes off
-        App.qeRecalc();
-        const data = App.qeInvoiceData(form);
+        const total = App.qeRecalc().total;
+        const entry = App.qeInvoiceData(form);
+        if (ZeroTotal.isZero(total) && !zero.allow_zero_total) {
+            zero = ZeroTotal.ask(T('Invoice'), total);
+            if (!zero) return;
+        }
         try {
-            const inv = await API.post('/invoices', { ...data, pending_attachments: PendingFiles.ids() });
+            const inv = await SalesLines.sendAllowingZero(flags => {
+                const data = { ...entry, ...flags };
+                return API.post('/invoices', { ...data, pending_attachments: PendingFiles.ids() });
+            }, zero);
+            if (!inv) return;
             // the files are the invoice's now; the next one starts with none
             PendingFiles.saved();
             PendingFiles.render();
@@ -2604,6 +2643,7 @@ const App = {
             toast(`${T('Invoice')} #${inv.invoice_number} created`);
             // Reset form for next entry; the tax rate stays as typed
             form.po_number.value = '';
+            App._qeClassId = App.qeLastClass();
             $('#qe-lines').innerHTML = App._qeLineHtml(0);
             App._qeLineCount = 1;
             App.qeRecalc();
@@ -2784,6 +2824,27 @@ const App = {
         location.reload();
     },
 
+    // The desktop window's own title bar (W-206): WebView2 and macOS's
+    // WebKit never take document.title, so the launcher is handed the
+    // company's name (it builds "<company> — SlowBooks Pro 2026" the same
+    // way). In a browser there is no bridge, and the tab shows
+    // document.title already.
+    setWindowTitle(name) {
+        const send = () => {
+            const api = window.pywebview && window.pywebview.api;
+            if (api && typeof api.set_window_title === 'function') {
+                try { Promise.resolve(api.set_window_title(name)).catch(() => {}); } catch (e) { /* best effort */ }
+                return true;
+            }
+            return false;
+        };
+        try {
+            if (!send() && typeof window.addEventListener === 'function') {
+                window.addEventListener('pywebviewready', send, { once: true });
+            }
+        } catch (e) { /* the title is a convenience */ }
+    },
+
     showCompany(s) {
         App.settings = s || {};
         App.applyHiddenMenu(App.settings);
@@ -2792,7 +2853,8 @@ const App = {
         const companyEl = $('#status-company');
         if (companyEl) companyEl.textContent = `Company: ${name}`;
         // the window / tab title and the topbar brand say whose books these are
-        document.title = `${name} — Slowbooks Pro 2026`;
+        document.title = `${name} — SlowBooks Pro 2026`;
+        App.setWindowTitle(name);
         const brand = $('#topbar-company');
         if (brand) brand.textContent = name;
     },
@@ -2818,20 +2880,27 @@ const App = {
             const t = [...a.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
             if (t) t.textContent = ' ' + T(t.textContent.trim());
         });
-        $$('#topbar .tb-btn[data-action]').forEach(b => { b.textContent = T(b.textContent.trim()); });
-        // The bar's buttons that have a shortcut name it, as the pages' own
-        // buttons do: the hover reads "Quick Entry (Alt+Q)", a screen reader
-        // hears the ARIA token (2.31.1 gate W-87: Alt+Q was labelled nowhere).
-        for (const [sel, letter] of [
-            ['[data-nav="#/"]', 'H'],
-            ['[data-action="InvoicesPage.showForm"]', 'N'],
-            ['[data-action="PaymentsPage.showForm"]', 'P'],
-            ['[data-nav="#/quick-entry"]', 'Q'],
-        ]) {
-            const b = document.querySelector('#topbar .tb-btn' + sel);
-            if (!b) continue;
-            b.title = `${b.textContent.trim()} (${App.isMac() ? '⌥' : 'Alt+'}${letter})`;
-            b.setAttribute('aria-keyshortcuts', 'Alt+' + letter);
+        // The Fast Rack (#912), drawn from the sign-in's own list in the
+        // company's words; its buttons that have a shortcut name it, as the
+        // pages' own buttons do: the hover reads "Quick Entry (Alt+Q)", a
+        // screen reader hears the ARIA token (2.31.1 gate W-87: Alt+Q was
+        // labelled nowhere). Without fast_rack.js (the probes), the shipped
+        // buttons index.html has are labelled in place.
+        if (typeof FastRack !== 'undefined') {
+            FastRack.render();
+        } else {
+            $$('#topbar .tb-btn[data-action]').forEach(b => { b.textContent = T(b.textContent.trim()); });
+            for (const [sel, letter] of [
+                ['[data-nav="#/"]', 'H'],
+                ['[data-action="InvoicesPage.showForm"]', 'N'],
+                ['[data-action="PaymentsPage.showForm"]', 'P'],
+                ['[data-nav="#/quick-entry"]', 'Q'],
+            ]) {
+                const b = document.querySelector('#topbar .tb-btn' + sel);
+                if (!b) continue;
+                b.title = `${b.textContent.trim()} (${App.isMac() ? '⌥' : 'Alt+'}${letter})`;
+                b.setAttribute('aria-keyshortcuts', 'Alt+' + letter);
+            }
         }
         const search = $('#global-search');
         if (search) search.placeholder = Terms.text(search.placeholder);
@@ -3122,23 +3191,31 @@ const App = {
             // Escape: close modal (not the Escape that closes a date
             // field's calendar: utils.js escapeLeavesPicker, NEW-33)
             if (e.key === 'Escape' && !escapeLeavesPicker(e)) { closeModal(); }
+            // Ctrl+F (⌘F) in the desktop window, which has no find bar of
+            // its own: Find on this screen (find.js), over a dialog too,
+            // where it finds in the dialog. In a browser it is the
+            // browser's find in page, left alone (#695). Ctrl+G (⌘G) and
+            // F3, with Shift for back, step through the matches while the
+            // bar is open; its own keys (Escape, Enter) stay in the bar.
+            if (window.FindBar && App.inDesktopShell()) {
+                if (FindBar.isFindKey(e)) { e.preventDefault(); FindBar.open(); return; }
+                const step = FindBar.isOpen() ? FindBar.stepKey(e) : 0;
+                if (step) { e.preventDefault(); FindBar.enter(step); return; }
+            }
             // Ctrl+K (⌘K on a Mac, which did nothing: NEW-41) or /: focus
             // search (when not in an input). Not while a dialog is open: it
             // is modal, the search lies under its overlay, and its hits
             // opened behind the dialog where they could be neither read nor
             // clicked (macOS gate NEW-45). Close the dialog, then search.
-            // Ctrl+F (⌘F) too in the desktop window, which has no find bar
-            // for it to open (#695); in a browser it is the browser's.
-            const desktopFind = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F') && App.inDesktopShell();
-            if (((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') || desktopFind || (e.key === '/' && !e.target.closest('input,textarea,select'))) {
+            if (((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') || (e.key === '/' && !e.target.closest('input,textarea,select'))) {
                 const overlay = $('#modal-overlay');
-                if (overlay && !overlay.classList.contains('hidden')) { if (e.key === 'k' || desktopFind) e.preventDefault(); return; }
+                if (overlay && !overlay.classList.contains('hidden')) { if (e.key === 'k') e.preventDefault(); return; }
                 const search = $('#global-search');
                 if (search) { search.focus(); e.preventDefault(); }
             }
         });
 
-        // the search box's keys, once the desktop window says it is one
+        // the search box's keys, once the desktop window is ready
         window.addEventListener('pywebviewready', () => App.labelSearchKeys());
 
         // Close search dropdown on click outside
@@ -3164,7 +3241,12 @@ const App = {
         // to replace): the first page waited for neither, so a sign-in that
         // must set its password got the dashboard's 403 painted over the
         // form (2.24.0 round 2, NEW-149 on the Mac).
-        Promise.all([App.loadCompanySettings(), App.initSystemInfo()]).then(() => {
+        // The Fast Rack's list (#912) is read alongside: the bar is drawn
+        // from it once the role and the company's kind are known
+        // (applyTerminology), before the first page; until then the shipped
+        // buttons show. It never rejects.
+        const rack = typeof FastRack !== 'undefined' ? FastRack.load() : null;
+        Promise.all([App.loadCompanySettings(), App.initSystemInfo(), rack]).then(() => {
             App.applyTerminology();
             App.renderOpenTabs();  // the session's open screens (#336)
             App.navigate(location.hash || '#/');

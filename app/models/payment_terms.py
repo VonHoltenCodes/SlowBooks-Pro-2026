@@ -2,8 +2,10 @@
 # Payment Terms — the terms list (#664), QuickBooks' shape
 #
 # A term is a name and a rule. A standard term is due N days after the
-# document's date; a date-driven term is due on a day of the month. Either
-# may offer an early-payment discount: P% if paid within D days (standard)
+# document's date; a date-driven term is due on a day of the month; an
+# end-of-month term is due N days after the last day of the document's month
+# (#1091: "Net 75 EOM"). Any may offer an early-payment discount: P% if paid
+# within D days (standard), within D days of the month's end (end-of-month)
 # or by day D of the month (date-driven). Documents keep the term's NAME in
 # their own `terms` column, so free text from before the list, or from an
 # import, still reads; app/services/payment_terms.py is the one parser.
@@ -15,7 +17,10 @@ from app.database import Base
 
 STANDARD = "standard"
 DATE_DRIVEN = "date_driven"
-KINDS = (STANDARD, DATE_DRIVEN)
+# 12 characters, what the kind column holds (String(12), no check
+# constraint), so the third kind needs no migration (#1091).
+END_OF_MONTH = "end_of_month"
+KINDS = (STANDARD, DATE_DRIVEN, END_OF_MONTH)
 
 
 class PaymentTerm(Base):
@@ -26,6 +31,8 @@ class PaymentTerm(Base):
     name = Column(String(50), nullable=False, unique=True)
     kind = Column(String(12), nullable=False, default=STANDARD)
     # Standard: due this many days after the document's date (0 = on receipt).
+    # End-of-month: due this many days after the last day of the document's
+    # month (0 = that last day).
     net_days = Column(Integer, nullable=True)
     # Date-driven: due on this day of the month (past a short month's end,
     # its last day), moved to the next month when the document is dated
@@ -33,8 +40,8 @@ class PaymentTerm(Base):
     due_day = Column(Integer, nullable=True)
     cutoff_days = Column(Integer, nullable=False, default=0)
     # The early-payment discount, optional: the percent, and by when —
-    # days after the date (standard) or a day of the due date's month
-    # (date-driven).
+    # days after the date (standard), days after the month's end
+    # (end-of-month) or a day of the due date's month (date-driven).
     discount_percent = Column(Numeric(5, 2), nullable=True)
     discount_days = Column(Integer, nullable=True)
     discount_day = Column(Integer, nullable=True)

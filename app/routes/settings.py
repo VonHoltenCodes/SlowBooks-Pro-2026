@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.services.terminology import Sentence, said
 from app.database import get_db
 from app.models.settings import DEFAULT_SETTINGS
 from app.schemas.common import StrictModel
@@ -400,7 +401,9 @@ def _deposit_bank_account(db: Session, value, label: str):
     if acct is None:
         raise HTTPException(
             status_code=422,
-            detail=f"{label}: no account {text} in the chart. Nothing was saved.",
+            detail=said(
+                label + ": no account {} in the chart. Nothing was saved.", text
+            ),
         )
     if acct.bank_kind != "bank":
         raise HTTPException(
@@ -512,10 +515,11 @@ def update_settings(
         if other:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"Another company file ({other}) is already named "
-                    f"'{incoming['company_name'].strip()}'. Choose a name that "
-                    "tells the two apart."
+                detail=said(
+                    "Another company file ({}) is already named '{}'. Choose "
+                    "a name that tells the two apart.",
+                    other,
+                    incoming["company_name"].strip(),
                 ),
             )
     # Check every value before writing any: one refused field must not leave
@@ -546,7 +550,8 @@ def update_settings(
     if problems:
         raise HTTPException(
             status_code=422,
-            detail=" ".join(problems) + " Nothing was saved.",
+            # each problem keeps what was typed in it as typed (said)
+            detail=Sentence(" ").join(problems) + " Nothing was saved.",
         )
     _guard_clearing_accounts(db, cleaned)
     _guard_payroll_accounts(db, cleaned)
@@ -594,7 +599,7 @@ def update_settings(
 
 
 @router.post("/test-email")
-def test_email(db: Session = Depends(get_db)):
+def test_email(request: Request, db: Session = Depends(get_db)):
     """Feature 8: Send a test email to verify SMTP settings."""
     settings = get_all_settings(db)
     if not settings.get("smtp_host"):
@@ -605,35 +610,27 @@ def test_email(db: Session = Depends(get_db)):
         sent = send_email(
             db=db,
             to_email=settings.get("smtp_from_email") or settings.get("smtp_user", ""),
-            subject="Slowbooks Pro 2026 — Test Email",
-            html_body="<p>This is a test email from Slowbooks Pro 2026. SMTP is configured correctly.</p>",
+            subject="SlowBooks Pro 2026 — Test Email",
+            html_body="<p>This is a test email from SlowBooks Pro 2026. SMTP is configured correctly.</p>",
             entity_type="settings_test",
         )
         if not sent:
-            # send_email() swallows the SMTP error and logs it; read that row
-            # back so the failure can say the reason itself (#447) instead of
-            # sending the user off to find a log that had no UI.
-            from app.models.email_log import EmailLog
-            from app.services.email_errors import (
-                explain_send_failure,
-                failure_sentence,
-            )
+            # send_email() swallows the SMTP error and logs it; the answer
+            # says the reason itself (#447): the sentence and, Test Email
+            # being an administrator's, the mail server's reply as it was
+            # received, read through the one reader of the log
+            from app.routes._roles import reads_mail_server_words
+            from app.services.email_errors import failed_test_email_detail
 
-            row = (
-                db.query(EmailLog)
-                .filter(EmailLog.entity_type == "settings_test")
-                .order_by(EmailLog.id.desc())
-                .first()
+            detail = failed_test_email_detail(
+                db, reads_mail_server_words(request), settings.get("smtp_host", "")
             )
-            error_text = row.error_message if row else ""
-            reason, _ = explain_send_failure(error_text, settings.get("smtp_host", ""))
-            detail = "Test email failed to send."
-            if reason:
-                detail += f" {reason}"
-            detail += " " + failure_sentence(error_text, settings.get("smtp_host", ""))
-            detail += " The full list is under Settings → Email (SMTP) → Recent sends."
             raise HTTPException(status_code=502, detail=detail)
-        return {"status": "sent"}
+        from app.services.email_errors import sent_answer
+
+        # with a note when the server refused a copy (an Always CC or
+        # Always BCC address it does not take)
+        return sent_answer(db, "settings_test", None)
     except HTTPException:
         # Don't let the catch-all below rewrite our own 502 into a 500.
         raise

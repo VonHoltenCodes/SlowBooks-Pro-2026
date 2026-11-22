@@ -1,7 +1,7 @@
 """The skip link's home in the top bar (2.31.8), in a real browser.
 
 "Skip to main content" showed, on the keyboard's focus, as a large blue
-box at the window's top left, over the menu button, the Slowbooks Pro
+box at the window's top left, over the menu button, the SlowBooks Pro
 wordmark and Back. It is now a small icon button at the start of the top
 bar, always there and quiet, styled like the bar's other controls: named
 "Skip to main content" with a tooltip saying so, still the first Tab stop on
@@ -42,7 +42,6 @@ FOCUSED = """() => {
         box: box(a),
         bar: box(bar),
         others: ['sidebar-toggle', 'back-btn'].map(id => document.getElementById(id))
-            .concat([document.querySelector('#topbar .topbar-brand')])
             .filter(el => el && el.offsetWidth > 0)
             .map(el => ({ id: el.id || el.className, box: box(el) })),
         ring: getComputedStyle(document.getElementById('back-btn')).getPropertyValue('--focus-ring').trim(),

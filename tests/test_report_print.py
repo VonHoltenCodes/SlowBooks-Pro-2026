@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.routes import reports
-from app.routes._print import PRINT_SCRIPT
+from app.routes._print import PRINT_SCRIPT, print_html
 from app.services import pdf_service
 from tests.test_reconciliation_report import completed  # noqa: F401  fixture
 
@@ -44,6 +44,7 @@ TITLES = {
     "/api/reports/pledges/print": "Pledge Report",
     "/api/reports/possible-duplicates/print": "Possible Duplicates",
     "/api/reports/sales-by-item/print": "Sales by Item",
+    "/api/reports/income-by-customer/print": "Income by Customer",
     "/api/reports/purchases-by-item/print": "Purchases by Item",
     "/api/reports/profit-loss-detail/print": "Profit &amp; Loss Detail",
     "/api/reports/wip-schedule/print": "WIP Schedule",
@@ -147,10 +148,9 @@ def test_each_print_page_is_the_pdfs_html_with_the_print_script(client, urls, re
         assert page.headers["content-type"].startswith("text/html"), print_url
         assert PRINT_SCRIPT in page.text, print_url
         assert TITLES[path] in page.text, print_url
-        # the same rendering as the PDF, the script added
-        assert page.text == rendered[0].replace(
-            "</body>", PRINT_SCRIPT + "</body>", 1
-        ), print_url
+        # the same rendering as the PDF, the print shell added (the script,
+        # and the footer in the flow, #1025)
+        assert page.text == print_html(rendered[0]), print_url
         # the print page renders no PDF
         assert len(rendered) == 1, print_url
 

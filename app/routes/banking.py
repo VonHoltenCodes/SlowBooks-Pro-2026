@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.services.accounting import _q
 from app.services.check_numbers import refuse_duplicate
@@ -42,7 +43,9 @@ from app.schemas.banking import (
     StatementAdd,
     FeedAddAll,
     FeedExcludeAll,
+    StatementPayBills,
     StatementPayout,
+    StatementReceivePayment,
     StatementVendors,
     StatementCategory,
     StatementMatch,
@@ -106,6 +109,23 @@ def _feed_out(ba: BankAccount, balances: dict) -> dict:
 def _feeds_out(db: Session, rows: list) -> list[dict]:
     balances = gl_balances(db, [b.account_id for b in rows if b.account_id])
     return [_feed_out(b, balances) for b in rows]
+
+
+# The most a To review memo holds (#1049): the memo of the entry it posts,
+# as a bank rule's memo (bank_rules.MEMO_MAX).
+MEMO_MAX = 500
+
+
+def _review_memo(memo: str | None) -> None:
+    """A memo typed on a To review line, or given with a payment from one,
+    is refused past MEMO_MAX in a sentence, the way a rule's memo is
+    (W-191: the validator's own text came back)."""
+    n = len((memo or "").strip())
+    if n > MEMO_MAX:
+        raise HTTPException(
+            status_code=422,
+            detail=f"A memo can be at most {MEMO_MAX} characters; this one has {n}.",
+        )
 
 
 @router.get("/overview")
@@ -317,9 +337,21 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
         else {}
     )
     vendors = entry_vendors(db, rows)
+    # the names of the vendors review rows picked (#904), to draw them with
+    picked_ids = {r.pick_vendor_id for r in rows if r.pick_vendor_id}
+    picked_vendors = (
+        {v.id: v.name for v in db.query(Vendor).filter(Vendor.id.in_(picked_ids)).all()}
+        if picked_ids
+        else {}
+    )
     # A payout suggestion (#584) is offered only on an unmatched deposit, so
     # the settings read and the per-provider lookup stay off the common path.
     settings = get_all_settings(db)
+    # the class, job and vendor the line's rule gives it, to draw the row
+    # with what Add posts
+    from app.services.bank_rules_engine import rule_picks
+
+    by_rule = rule_picks(db, rows)
 
     def _payout(r):
         if r.match_status != "unmatched" or not r.amount or r.amount <= 0:
@@ -346,6 +378,20 @@ def _statement_out(rows: list, db: Session) -> list[dict]:
             "vendor_id": vendors[r.id].id if r.id in vendors else None,
             "vendor_name": vendors[r.id].name if r.id in vendors else None,
             "suggested_payout": _payout(r),
+            "pick_class_id": r.pick_class_id,
+            "pick_job_id": r.pick_job_id,
+            "pick_vendor_id": r.pick_vendor_id,
+            "pick_vendor_name": picked_vendors.get(r.pick_vendor_id),
+            "pick_customer_id": r.pick_customer_id,
+            "pick_payee": r.pick_payee,
+            "pick_memo": r.pick_memo,
+            "rule_class_id": by_rule.get(r.id, {}).get("class_id"),
+            "rule_job_id": by_rule.get(r.id, {}).get("job_id"),
+            "rule_vendor_id": by_rule.get(r.id, {}).get("vendor_id"),
+            "rule_vendor_name": by_rule.get(r.id, {}).get("vendor_name"),
+            "rule_customer_id": by_rule.get(r.id, {}).get("customer_id"),
+            "rule_customer_name": by_rule.get(r.id, {}).get("customer_name"),
+            "rule_memo": by_rule.get(r.id, {}).get("memo"),
         }
         for r in rows
     ]
@@ -390,13 +436,19 @@ def _statement_line(db: Session, txn_id: int) -> BankTransaction:
 
 
 @router.get("/transactions/{txn_id}/candidates")
-def statement_candidates(txn_id: int, db: Session = Depends(get_db)):
-    """Ledger lines this statement line could be matched to."""
+def statement_candidates(txn_id: int, days: str = "30", db: Session = Depends(get_db)):
+    """Ledger lines this statement line could be matched to: within 30
+    days of its date, or `days` 90, 365 or all (#1050)."""
     from app.services import bank_matching as m
 
+    if days not in m.MATCH_RANGES:
+        raise HTTPException(
+            status_code=422,
+            detail="Pick a range of 30 days, 90 days, a year or all dates",
+        )
     bt = _statement_line(db, txn_id)
     acct = m._feed_account(db, bt)
-    return m.candidate_lines(db, acct.id, bt.amount, bt.date)
+    return m.candidate_lines(db, acct.id, bt.amount, bt.date, m.MATCH_RANGES[days])
 
 
 @router.post("/transactions/{txn_id}/match", response_model=BankTransactionResponse)
@@ -429,6 +481,7 @@ def statement_add(
     from app.services import bank_matching as m
 
     data = data or StatementAdd()
+    _review_memo(data.memo)
     bt = _statement_line(db, txn_id)
     splits = None
     if data.splits:
@@ -484,7 +537,7 @@ def statement_payout(txn_id: int, data: StatementPayout, db: Session = Depends(g
 
     if data.provider not in PROVIDER_NAMES:
         raise HTTPException(
-            status_code=400, detail=f"Unknown payment provider: {data.provider}"
+            status_code=400, detail=said("Unknown payment provider: {}", data.provider)
         )
     # Allowed while clearing is on, and after it is turned off until the
     # clearing balance is paid out.
@@ -553,6 +606,39 @@ def statement_payout(txn_id: int, data: StatementPayout, db: Session = Depends(g
     return _statement_out([bt], db)[0]
 
 
+@router.post(
+    "/transactions/{txn_id}/receive-payment", response_model=BankTransactionResponse
+)
+def statement_receive_payment(
+    txn_id: int, data: StatementReceivePayment, db: Session = Depends(get_db)
+):
+    """A customer payment from a money-in line (#1056), applied to open
+    invoices and matched to the line, so the line leaves To review and the
+    register shows the payment once."""
+    from app.services.bank_feed_payments import receive_payment
+
+    _review_memo(data.memo)
+    bt = receive_payment(db, _statement_line(db, txn_id), data)
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
+@router.post("/transactions/{txn_id}/pay-bills", response_model=BankTransactionResponse)
+def statement_pay_bills(
+    txn_id: int, data: StatementPayBills, db: Session = Depends(get_db)
+):
+    """A bill payment from a money-out line (#1056), applied to open bills
+    and matched to the line."""
+    from app.services.bank_feed_payments import pay_bills
+
+    _review_memo(data.memo)
+    bt = pay_bills(db, _statement_line(db, txn_id), data)
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
 @router.post("/transactions/vendors")
 def statement_vendors(data: StatementVendors, db: Session = Depends(get_db)):
     """Make the payees of these added feed lines vendors, or link them to
@@ -568,10 +654,19 @@ def statement_vendors(data: StatementVendors, db: Session = Depends(get_db)):
 def statement_set_category(
     txn_id: int, data: StatementCategory, db: Session = Depends(get_db)
 ):
-    """Save the category picked for a statement line in the review list."""
+    """Save the category picked for a statement line in the review list,
+    and the class, job and name picked beside it (#904): each field sent is
+    saved, one left out is left as it was."""
     from app.services import bank_matching as m
 
-    bt = m.set_category(db, _statement_line(db, txn_id), data.category_account_id)
+    bt = _statement_line(db, txn_id)
+    sent = data.model_fields_set
+    _review_memo(data.memo)
+    if "category_account_id" in sent:
+        bt = m.set_category(db, bt, data.category_account_id)
+    picks = {k: getattr(data, k) for k in m.PICKS if k in sent}
+    if picks:
+        bt = m.set_picks(db, bt, picks)
     db.commit()
     db.refresh(bt)
     return _statement_out([bt], db)[0]
@@ -613,14 +708,16 @@ def feed_add_all(
         # a class or job a row picked must exist and be live, as one Add
         # checks; refused before anything posts (2.31.4 gate, W-95)
         require_dimensions(db, p.class_id, p.job_id, p.customer_id)
+        _review_memo(p.memo)
         picks[p.id] = {
             "class_id": p.class_id,
             "job_id": p.job_id,
             "vendor_id": p.vendor_id,
             "customer_id": _entry_customer(db, p.customer_id),
             "payee": p.payee or None,
+            "memo": (p.memo or "").strip() or None,
         }
-    out = m.add_all(db, ba, picks)
+    out = m.add_all(db, ba, picks, only=data.line_ids if data else None)
     db.commit()
     return out
 

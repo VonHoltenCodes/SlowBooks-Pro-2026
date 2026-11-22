@@ -357,4 +357,4 @@ def test_a_rename_saved_in_settings_reaches_the_shell_at_once():
     assert saved["shell_copy"] == "Harbor Light Bakery & Cafe"
     assert saved["status"] == "Company: Harbor Light Bakery & Cafe"
     assert saved["topbar"] == "Harbor Light Bakery & Cafe"
-    assert saved["title"] == "Harbor Light Bakery & Cafe — Slowbooks Pro 2026"
+    assert saved["title"] == "Harbor Light Bakery & Cafe — SlowBooks Pro 2026"

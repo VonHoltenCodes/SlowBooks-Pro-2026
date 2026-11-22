@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Analytics Engine
+# SlowBooks Pro 2026 — Analytics Engine
 # Built 2026-04-14; integrated 2026-04-15.
 #
 # Net-new for 2026 — QuickBooks 2003's "Company Snapshot" was a handful of
@@ -88,16 +88,26 @@ class AnalyticsEngine:
         if end_date is None:
             end_date = date.today()
 
+        from app.services.sales_income import non_income_by_invoice
+
         rows = (
-            self.db.query(Customer.name, Invoice.subtotal, Invoice.exchange_rate)
+            self.db.query(
+                Customer.name, Invoice.id, Invoice.subtotal, Invoice.exchange_rate
+            )
             .join(Invoice, Invoice.customer_id == Customer.id)
             .filter(Invoice.date >= start_date, Invoice.date <= end_date)
             .filter(Invoice.status == InvoiceStatus.PAID)
             .all()
         )
+        # a security deposit's line is not revenue (W-195)
+        other = non_income_by_invoice(self.db, [r[1] for r in rows])
         out: dict = {}
-        for name, subtotal, rate in rows:
-            out[name] = out.get(name, Decimal(0)) + home_amount(subtotal, rate)
+        for name, inv_id, subtotal, rate in rows:
+            out[name] = (
+                out.get(name, Decimal(0))
+                + home_amount(subtotal, rate)
+                - other.get(inv_id, Decimal(0))
+            )
         return {name: float(amount) for name, amount in out.items()}
 
     def revenue_trend(self, months: int = 12):
@@ -429,8 +439,12 @@ class AnalyticsEngine:
         """
         from app.services.contact_balances import home_amount
 
+        from app.services.sales_income import non_income_by_invoice
+
         rows = (
-            self.db.query(Customer.name, Invoice.subtotal, Invoice.exchange_rate)
+            self.db.query(
+                Customer.name, Invoice.id, Invoice.subtotal, Invoice.exchange_rate
+            )
             .outerjoin(
                 Invoice,
                 (Invoice.customer_id == Customer.id)
@@ -438,10 +452,14 @@ class AnalyticsEngine:
             )
             .all()
         )
+        # a security deposit's line is not revenue (W-195)
+        other = non_income_by_invoice(self.db, [r[1] for r in rows])
         out: dict = {}
-        for name, subtotal, rate in rows:
+        for name, inv_id, subtotal, rate in rows:
             out[name] = out.get(name, Decimal(0)) + (
-                home_amount(subtotal, rate) if subtotal is not None else Decimal(0)
+                home_amount(subtotal, rate) - other.get(inv_id, Decimal(0))
+                if subtotal is not None
+                else Decimal(0)
             )
         return {name: {"revenue": float(amount)} for name, amount in out.items()}
 

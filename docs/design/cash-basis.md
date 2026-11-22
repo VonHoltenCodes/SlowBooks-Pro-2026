@@ -485,7 +485,7 @@ the journal form's basis choice (see the step 3 PR).
     made it a few lines.
 
 12. **Step 2a calls.** Fund Balances and the one-class P&L page keep
-    their step-1 behaviour (accrual; the class P&L page through the
+    their step-1 behavior (accrual; the class P&L page through the
     P&L's own `class_id`); a nonprofit's Fund Balances tracks restricted
     gifts as posted. The other job reports (a job's own page, Job Budget vs
     Actual) stay accrual. `job_profitability` takes `basis` for the report;

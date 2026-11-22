@@ -11,15 +11,34 @@ row comes across as a document on 2000 with no posting of its own (the
 history put the balance there), so A/P Aging equals 2000 and every vendor's
 balance is their aging row.
 
-The books here are invented: three vendors, three open bills (one partly
-paid), a vendor credit and a bill payment not applied, 1,025.00 owed in
-all. The report is in the layout of a real download (the company, the
-title, the period, a blank row, the header from the first column, a
-section per aging bucket with its total row, TOTAL, the time it was run).
+QuickBooks Online writes the report in two shapes, both seen in real
+downloads. A company with bills open (exported 2026-11-22, five bills):
+the company, the title and the period, a blank row, then the header with
+an EMPTY first column (Date, Transaction type, Num, Vendor display name,
+Due date, Past due, Amount, Open balance from column B); a section per
+aging bucket, its heading in column A ("31 - 60 days past due", "1 - 30
+days past due", "CURRENT"), each row's Date in column B, Num an empty
+string, the dates as text, Past due negative for a bill not yet due, and
+the section closed by a "Total for <bucket>" row whose Amount and Open
+balance are formulas (=H10+H11+H12); a TOTAL row of formulas; three blank
+rows and the time it was run. REAL_LAYOUT below is that file cell for
+cell with invented vendors and amounts. A company with nothing open
+(exported 2026-11-13) writes the header from the FIRST column and no
+rows.
+
+The real downloads hold only bills. The partly paid bill, the vendor
+credit and the unapplied bill payment in AGING_ROWS are invented to
+exercise what the import does with those types; no real export has shown
+them yet.
+
+The books here are invented: three vendors on the list, three open bills
+(one partly paid), a vendor credit and a bill payment not applied,
+1,025.00 owed in all.
 """
 
 import csv
 import io
+import secrets
 import zipfile
 from decimal import Decimal
 
@@ -240,6 +259,10 @@ def _vendors(label="Vendor") -> str:
     )
 
 
+# The header-from-the-first-column shape with rows of every type the import
+# carries. Only the bills are of a kind a real download has shown; the
+# partly paid bill (B-101), the vendor credit and the bill payment are
+# invented to exercise what the import does with them.
 AGING_ROWS = [
     ["31 - 60 days past due"],
     [
@@ -381,6 +404,9 @@ def _books_check(client) -> dict:
         "Supplier_A_P_Aging_Detail.xlsx",
         "AP Aging.xlsx",
         "Payables aging.xlsx",
+        # as QuickBooks Online names the download, and a second copy of it
+        "Fieldstone Renovations_A_P Aging Detail Report.xlsx",
+        "Fieldstone Renovations_A_P Aging Detail Report(1).xlsx",
     ],
 )
 def test_the_report_is_told_apart_by_name(name):
@@ -412,6 +438,228 @@ def test_the_reports_rows_read_as_bills_credits_and_payments():
 def test_an_aging_file_named_only_aging_is_placed_by_its_title():
     placed = qbo._place_agings({"ar_aging": _aging()})
     assert "ap_aging" in placed and "ar_aging" not in placed
+
+
+# ── the report as a real download writes it ───────────────────────────────
+
+# Row by row, as the 2026-11-22 download (five bills, nothing else): the
+# header from column B, the buckets' headings and totals in column A, the
+# totals as formulas with no figure of their own, Num an empty string, the
+# dates as text, Past due below zero for the bill not yet due. The vendors
+# and amounts are invented; three vendors are on the Vendor list, two are
+# not. The bills come to 1,025.00, what the Journal leaves on A/P.
+REAL_LAYOUT = [
+    ["Fieldstone Renovations"],
+    ["A/P Aging Detail Report"],
+    ["All Dates"],
+    [],
+    [None] + HEADER,
+    ["31 - 60 days past due"],
+    [None, "09/14/2026", "Bill", "", "Harbor Paint Supply", "10/14/2026"]
+    + [39, 112.4, 112.4],
+    ["Total for 31 - 60 days past due"] + [None] * 6 + ["=H7", "=I7"],
+    ["1 - 30 days past due"],
+    [None, "10/22/2026", "Bill", "", "Ridge Lumber Co", "10/28/2026"]
+    + [25, 318.0, 318.0],
+    [None, "10/28/2026", "Bill", "", "Copperline Electric", "10/28/2026"]
+    + [25, 207.6, 207.6],
+    [None, "10/21/2026", "Bill", "", "Quill Trade Goods", "10/31/2026"]
+    + [22, 237.0, 237.0],
+    ["Total for 1 - 30 days past due"] + [None] * 6 + ["=H10+H11+H12", "=I10+I11+I12"],
+    ["CURRENT"],
+    [None, "10/26/2026", "Bill", "", "Saltmarsh Waste Hauling", "11/25/2026"]
+    + [-3, 150.0, 150.0],
+    ["Total for CURRENT"] + [None] * 6 + ["=H15", "=I15"],
+    ["TOTAL"] + [None] * 6 + ["=H8+H13+H16", "=I8+I13+I16"],
+    [],
+    [],
+    [],
+    [" Sunday, November 22, 2026 03:41 PM GMTZ"],
+]
+
+
+def _real_workbook(rows=None) -> bytes:
+    """REAL_LAYOUT as an .xlsx: the formulas as formulas (openpyxl stores
+    no computed value for them), the merged title and footer cells."""
+    openpyxl = pytest.importorskip("openpyxl")
+    book = openpyxl.Workbook()
+    sheet = book.active
+    for row in REAL_LAYOUT if rows is None else rows:
+        sheet.append(row)
+    for n in (1, 2, 3, len(REAL_LAYOUT if rows is None else rows)):
+        sheet.merge_cells(f"A{n}:H{n}")
+    out = io.BytesIO()
+    book.save(out)
+    return out.getvalue()
+
+
+def _as_uploaded(content: bytes) -> str:
+    """The workbook as the upload reads it."""
+    from app.routes.migration import _sheet_as_csv
+
+    return _sheet_as_csv(content)
+
+
+def _real_files(rows=None):
+    files = _files(aging=False)
+    files.append(
+        (
+            "files",
+            (
+                "Fieldstone Renovations_A_P Aging Detail Report(1).xlsx",
+                io.BytesIO(_real_workbook(rows)),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        )
+    )
+    return files
+
+
+def test_the_real_layout_reads_as_five_bills():
+    items, errors, notes = qbo.parse_ap_aging(_as_uploaded(_real_workbook()))
+    assert errors == [] and notes == []
+    assert [
+        (i["kind"], i["row"], i["date"].isoformat(), i["num"], i["vendor"], i["open"])
+        for i in items
+    ] == [
+        ("bill", 7, "2026-09-14", "", "Harbor Paint Supply", Decimal("112.40")),
+        ("bill", 10, "2026-10-22", "", "Ridge Lumber Co", Decimal("318")),
+        ("bill", 11, "2026-10-28", "", "Copperline Electric", Decimal("207.60")),
+        ("bill", 12, "2026-10-21", "", "Quill Trade Goods", Decimal("237")),
+        ("bill", 15, "2026-10-26", "", "Saltmarsh Waste Hauling", Decimal("150")),
+    ]
+    assert [i["due_date"].isoformat() for i in items] == [
+        "2026-10-14",
+        "2026-10-28",
+        "2026-10-28",
+        "2026-10-31",
+        "2026-11-25",
+    ]
+    assert all(i["amount"] == i["open"] for i in items)
+    assert sum((i["open"] for i in items), Decimal("0")) == Decimal("1025.00")
+
+
+@pytest.mark.parametrize(
+    "header",
+    [HEADER, [""] + HEADER],
+    ids=["from the first column", "after an empty first column"],
+)
+def test_a_header_with_no_rows_is_no_open_bills(header):
+    # the 2026-11-13 download of a company with nothing open: the header
+    # from the first column; the other shape, header only, is read the same
+    text = _csv(
+        [["Fieldstone Renovations"], ["A/P Aging Detail Report"], ["All Dates"]]
+        + [[""], header, [""], [""], [""], [FOOTER]]
+    )
+    assert qbo.parse_ap_aging(text) == ([], [], [])
+
+
+def test_the_totals_as_formulas_are_left_alone():
+    # the bucket totals and TOTAL are formulas with no figure: not read, as
+    # the A/R Aging Detail reader leaves its own; a wrong formula is not an
+    # error, the rows are what is carried
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[16][8] = "=I8"
+    rows[12][8] = "=I10"
+    items, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [] and len(items) == 5
+
+
+def test_a_total_given_as_a_figure_is_checked_against_the_rows():
+    # a workbook saved again with figures where the formulas were: TOTAL is
+    # checked against the rows, as on the A/R side; a bucket's total is not
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[12][8] = 1.0  # Total for 1 - 30 days past due, wrong
+    rows[16][8] = 1025.0
+    items, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [] and len(items) == 5
+    rows[16][8] = 999.0
+    _, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [
+        "The A/P Aging Detail report's TOTAL (999.00) is not the sum of its "
+        "rows: export it again"
+    ]
+
+
+def test_the_real_layout_imports_its_bills_onto_2000(client, db_session, seed_accounts):
+    data = client.post("/api/migration/qbo_export/dry-run", files=_real_files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert (data["open_bills"], data["vendor_credits"]) == (5, 0)
+    assert data["unapplied_bill_payments"] == 0
+    assert data["aging_vendors_matched"] == 3 and data["aging_vendors_created"] == 2
+    assert data["open_payables_total"] == 1025.0
+    said = " ".join(data["warnings"])
+    assert "come to 1,025.00, what the Journal leaves on Accounts Payable (A/P)" in said
+    for name in ("Copperline Electric", "Saltmarsh Waste Hauling"):
+        assert f"{name} is on the A/P Aging Detail report but not on" in said
+
+    data = client.post("/api/migration/qbo_export/import", files=_real_files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert data["imported_open_bills"] == 5
+    bills = db_session.query(Bill).order_by(Bill.date, Bill.id).all()
+    assert [(b.vendor.name, b.total, b.balance_due) for b in bills] == [
+        ("Harbor Paint Supply", Decimal("112.40"), Decimal("112.40")),
+        ("Quill Trade Goods", Decimal("237.00"), Decimal("237.00")),
+        ("Ridge Lumber Co", Decimal("318.00"), Decimal("318.00")),
+        ("Saltmarsh Waste Hauling", Decimal("150.00"), Decimal("150.00")),
+        ("Copperline Electric", Decimal("207.60"), Decimal("207.60")),
+    ]
+    # the report gives no number: each takes the product's own default
+    assert all(b.bill_number for b in bills)
+    assert len({b.bill_number for b in bills}) == 5
+    assert all(b.transaction_id is None for b in bills)
+    assert db_session.query(VendorCredit).count() == 0
+    assert db_session.query(BillPayment).count() == 0
+    aging = client.get("/api/reports/ap-aging").json()
+    assert Decimal(str(aging["totals"]["total"])) == Decimal("1025.00")
+    assert _journal_ap(db_session) == Decimal("1025.00")
+    rows = _books_check(client)
+    for key in ("ap_aging", "vendor_balances", "journal_entries"):
+        assert rows[key]["status"] == "pass", rows[key]
+
+
+def test_a_report_above_what_the_journal_leaves_says_so(
+    client, db_session, seed_accounts
+):
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[14][7] = rows[14][8] = 250.0  # 100.00 more than the Journal's A/P
+    data = client.post(
+        "/api/migration/qbo_export/dry-run", files=_real_files(rows)
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    said = [w for w in data["warnings"] if "more than the 1,025.00" in w]
+    assert len(said) == 1, data["warnings"]
+    assert "come to 1,125.00, 100.00 more than the 1,025.00" in said[0]
+
+
+def test_a_report_with_no_payable_in_the_export_is_refused(
+    client, db_session, seed_accounts
+):
+    # the report beside an export whose Balance Sheet has no Accounts
+    # Payable (another company's, say): refused, nothing written
+    files = _real_files()
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as archive:
+        for name, text in (
+            ("Balance_sheet.xlsx", BALANCE_SHEET.replace("Accounts Payable", "Loans")),
+            ("Profit_and_loss.xlsx", PROFIT_AND_LOSS),
+            ("Journal.xlsx", _journal().replace("Accounts Payable", "Loans")),
+            ("Trial_balance.xlsx", TRIAL_BALANCE.replace("Accounts Payable", "Loans")),
+            ("Vendors.xlsx", _vendors()),
+        ):
+            archive.writestr(name, _workbook(text))
+    files[0] = (
+        "files",
+        ("Export.zip", io.BytesIO(zipped.getvalue()), "application/zip"),
+    )
+    data = client.post("/api/migration/qbo_export/import", files=files).json()
+    assert data["ok"] is False
+    assert any(
+        e.startswith("The A/P Aging Detail report lists 5 open items (1,025.00)")
+        and "has no Accounts Payable account" in e
+        for e in data["errors"]
+    ), data["errors"]
+    assert data["imported_journals"] == 0 and db_session.query(Bill).count() == 0
 
 
 # ── the import ─────────────────────────────────────────────────────────────
@@ -642,7 +890,8 @@ def file_app(tmp_path, monkeypatch):
     app.dependency_overrides[get_db] = file_get_db
     try:
         c = TestClient(app)
-        r = c.post("/api/auth/setup", json={"password": "test-password-123"})
+        # a throwaway sign-in made up per run, never one written down
+        r = c.post("/api/auth/setup", json={"password": secrets.token_urlsafe(16)})
         assert r.status_code == 200, r.text
         yield c, engine
     finally:

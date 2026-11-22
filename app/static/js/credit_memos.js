@@ -161,6 +161,18 @@ const CreditMemosPage = {
         return row.querySelector('.line-class-fund') ? Nonprofit.fundFromRow(row, 'line-class') : null;
     },
 
+    // A replaced memo's line job, cost code and type, sent back while the
+    // memo stays on the same customer (a job is its customer's); a new line,
+    // or a memo moved to another customer, carries none.
+    lineJobFromRow(row, form) {
+        if (!row.dataset.customerId || row.dataset.customerId !== form.customer_id.value) return {};
+        return {
+            job_id: row.dataset.jobId ? parseInt(row.dataset.jobId) : null,
+            cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
+            cost_type: row.dataset.costType || null,
+        };
+    },
+
     // One credit line, priced from the item the way an invoice line is.
     lineRowHtml(idx) {
         return `<tr data-cmline="${idx}">
@@ -183,8 +195,8 @@ const CreditMemosPage = {
 
     removeLine(idx) {
         const row = $(`[data-cmline="${idx}"]`);
-        if (row) row.remove();
-        CreditMemosPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => CreditMemosPage.recalc())) CreditMemosPage.recalc();
     },
 
     itemSelected(idx) {
@@ -265,6 +277,12 @@ const CreditMemosPage = {
             if (tax) tax.checked = taxed;
             const cls = row.querySelector('select.line-class');
             if (cls && l.class_id) cls.value = String(l.class_id);
+            // the form has no job or cost code cells: what the line carries
+            // (set over the API, #640, #1055) goes back with the change
+            row.dataset.jobId = l.job_id == null ? '' : String(l.job_id);
+            row.dataset.costCodeId = l.cost_code_id == null ? '' : String(l.cost_code_id);
+            row.dataset.costType = l.cost_type || '';
+            row.dataset.customerId = String(cm.customer_id);
         });
         if (!(cm.lines || []).length) CreditMemosPage.addLine();
         CreditMemosPage.recalc();
@@ -283,6 +301,7 @@ const CreditMemosPage = {
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 class_id: CreditMemosPage.lineClassFromRow(row),
+                ...CreditMemosPage.lineJobFromRow(row, form),
                 line_order: i,
             });
         });
@@ -295,12 +314,16 @@ const CreditMemosPage = {
             class_id: classIdFromForm(form),
             lines,
         };
+        // no lines, or lines that add up to $0.00: asked first (ZeroTotal)
+        const zero = ZeroTotal.ask('Credit Memo', CreditMemosPage.recalc().total);
+        if (!zero) return;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form, { rows: '#cm-lines tr', cls: 'line-class' }))) return;
         try {
-            // $0.00 asks "Save it anyway?" first (SalesLines.sendAllowingZero)
+            // the server's own $0.00 question, should it still ask, is put
+            // the same way (SalesLines.sendAllowingZero)
             const saved = await SalesLines.sendAllowingZero(flags =>
-                API.post('/credit-memos' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), { ...data, ...flags }));
+                API.post('/credit-memos' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), { ...data, ...flags }), zero);
             if (!saved) return;
             if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Credit memo voided and replaced by credit memo ${saved.memo_number || `#${saved.id}`}`);
             else toastPosted('Credit memo created');

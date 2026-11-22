@@ -20,6 +20,7 @@ from datetime import date as dt_date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
@@ -52,7 +53,9 @@ def _resolve_provider(name: str):
     try:
         return get_provider(name)
     except KeyError:
-        raise HTTPException(status_code=400, detail=f"Unknown payment provider: {name}")
+        raise HTTPException(
+            status_code=400, detail=said("Unknown payment provider: {}", name)
+        )
 
 
 def _require_provider(db: Session, name: str):
@@ -269,7 +272,7 @@ def record_payout(
 
     if provider_name not in PROVIDER_NAMES:
         raise HTTPException(
-            status_code=400, detail=f"Unknown payment provider: {provider_name}"
+            status_code=400, detail=said("Unknown payment provider: {}", provider_name)
         )
     display = DISPLAY_NAMES[provider_name]
     # Allowed while clearing is on, and after it is turned off until the

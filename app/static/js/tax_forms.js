@@ -96,8 +96,7 @@ const TaxFormsPage = {
             </div>
 
             <div class="card" style="margin-bottom:16px;padding:16px">
-                <h3 id="taxforms-h-1099-nec-1096-contractors">1099-NEC / 1096 (Contractors)</h3>
-                <p style="font-size:12px;color:var(--gray-500);margin:0 0 8px;">Vendors marked "1099 Vendor: Yes" with type NEC on the Vendors page. A 1099-NEC is required for anyone paid $2,000 or more in the year from 2026 ($600 or more through 2025); the 1096 sends them to the IRS.</p>
+                <div style="display:flex; gap:4px; align-items:center;"><h3 id="taxforms-h-1099-nec-1096-contractors">1099-NEC / 1096 (Contractors)</h3>${hint('Vendors marked "1099 Vendor: Yes" with type NEC on the Vendors page. A 1099-NEC is required for anyone paid $2,000 or more in the year from 2026 ($600 or more through 2025); the 1096 sends them to the IRS.', '1099-NEC / 1096 (Contractors)')}</div>
                 <div class="form-grid" role="group" aria-labelledby="taxforms-h-1099-nec-1096-contractors">
                     <div class="form-group">
                         <label>Year</label>
@@ -115,8 +114,7 @@ const TaxFormsPage = {
             </div>
 
             <div class="card" style="margin-bottom:16px;padding:16px">
-                <h3 id="taxforms-h-form-history">Form history</h3>
-                <p style="font-size:12px;color:var(--gray-500);margin:0 0 8px;">Every W-2, W-3, 940 and 941 generated from these books, newest first. Check re-figures a form from today's books and says whether it still matches the one that was generated; the hash is the one printed in the form's footer.</p>
+                <div style="display:flex; gap:4px; align-items:center;"><h3 id="taxforms-h-form-history">Form history</h3>${hint("Every W-2, W-3, 940 and 941 generated from these books, newest first. Check re-figures a form from today's books and says whether it still matches the one that was generated; the hash is the one printed in the form's footer.", 'Form history')}</div>
                 <div class="form-grid" role="group" aria-labelledby="taxforms-h-form-history">
                     <div class="form-group" style="grid-column:1 / -1">
                         <label for="audit-hash">Find a form by its footer: the hash's 16 characters (or the full 64), or the audit ID</label>

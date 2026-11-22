@@ -28,14 +28,11 @@ const BenefitsPage = {
         } catch (err) { body = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`; }
         return `
             <div class="page-header">
-                <h2>Benefits & Deductions</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Benefits & Deductions</h2>${hint(`A benefit is a code with a rule. Pre-tax codes apply in sequence order and each one changes the taxable base for the next.
+                Rates are dated and resolve against the pay-period end date; processed pay runs keep the rules they used.
+                Garnishments live on the <a href="#/hr/deductions">Garnishments</a> page.`, 'Benefits & Deductions')}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">${tabs}</div>
             </div>
-            <p style="font-size:12px;color:var(--gray-400);margin:0 0 12px;">
-                A benefit is a code with a rule. Pre-tax codes apply in sequence order and each one changes the taxable base for the next.
-                Rates are dated and resolve against the pay-period end date; processed pay runs keep the rules they used.
-                Garnishments live on the <a href="#/hr/deductions">Garnishments</a> page.
-            </p>
             <div id="benefits-body">${body}</div>`;
     },
 
@@ -277,9 +274,8 @@ const BenefitsPage = {
         </tr>`).join('');
         return `
             <div style="margin-bottom:12px;"><button class="btn btn-primary" onclick="BenefitsPage.showGroupForm()">+ Add Group</button></div>
-            <p style="font-size:12px;color:var(--gray-400);">A group is a template: every employee in it gets the group's codes. An enrollment on the employee overrides the group for that code.</p>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Group</th><th scope="col">Codes</th><th scope="col" class="amount">Members</th><th scope="col">Actions</th></tr></thead>
+                <thead><tr><th scope="col">Group ${hint("A group is a template: every employee in it gets the group's codes. An enrollment on the employee overrides the group for that code.", 'Group')}</th><th scope="col">Codes</th><th scope="col" class="amount">Members</th><th scope="col">Actions</th></tr></thead>
                 <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:var(--gray-400);">No groups yet</td></tr>'}</tbody>
             </table></div>`;
     },

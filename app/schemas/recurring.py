@@ -13,6 +13,7 @@ from app.services.recurring_service import FREQUENCIES
 
 from app.schemas.common import (
     StrictModel,
+    NewTaxRateFloat,
     TaxRateFloat,
     check_line_fits,
     validate_non_negative_line,
@@ -82,7 +83,7 @@ class RecurringCreate(StrictModel):
     terms: str = "Net 30"
     # An explicit pick of a list entry (#664). 1..2**63-1.
     payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
-    tax_rate: TaxRateFloat = 0
+    tax_rate: NewTaxRateFloat = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -114,6 +115,12 @@ class RecurringResponse(BaseModel):
     id: int
     customer_id: int
     customer_name: Optional[str] = None
+    # On the answer to a create or an update only: the exemption certificate
+    # behind an exempt sale (the tax-exempt customer's, or the exempt job's)
+    # is missing, or expired as of its next invoice's date
+    # (services/tax_exemption.certificate_warning). The sale is exempt all
+    # the same; this is for the person to be told. Null otherwise.
+    tax_note: Optional[str] = None
     frequency: str
     start_date: date
     end_date: Optional[date] = None

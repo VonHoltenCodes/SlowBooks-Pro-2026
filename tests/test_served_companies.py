@@ -426,3 +426,29 @@ def test_serve_lan_brings_every_company_up_to_date(tmp_path, monkeypatch):
     monkeypatch.setattr(desktop_launcher, "migrate", fake_migrate)
     assert desktop_launcher._migrate_other_companies("alpha.db") == ["charlie.db"]
     assert migrated == ["bravo.db"]
+
+
+def test_every_served_company_gets_the_started_companys_pool(served, monkeypatch):
+    """#966 (2.32.0 round 11, W-169): the second company's engine carried
+    SQLAlchemy's default 5 + 10 pool while the started company's had the
+    thread pool's 40, so sixty requests at once to it failed with 500s and
+    SLOWBOOKS_DB_POOL_SIZE never reached it."""
+    monkeypatch.delenv("SLOWBOOKS_DB_POOL_SIZE", raising=False)
+    engine = served_companies.open_engine("bravo.db")
+    try:
+        assert engine.pool.size() == 40
+        assert engine.pool._max_overflow == 10
+    finally:
+        engine.dispose()
+    monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", "80")
+    engine = served_companies.open_engine("bravo.db")
+    try:
+        assert engine.pool.size() == 80
+    finally:
+        engine.dispose()
+    monkeypatch.setenv("SLOWBOOKS_DB_POOL_SIZE", "5")
+    engine = served_companies.open_engine("bravo.db")
+    try:
+        assert engine.pool.size() == 40  # never below the thread pool
+    finally:
+        engine.dispose()

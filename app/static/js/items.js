@@ -117,6 +117,38 @@ const ItemsPage = {
         return html;
     },
 
+    // The accounts of `types` (active, and the one the item already uses),
+    // then the balance-sheet accounts a bill line may post to (#1038):
+    // liabilities, assets and equity, never a bank or card account nor
+    // Accounts Receivable, Accounts Payable, Undeposited Funds or
+    // Inventory, whose figures the invoices, bills, deposits and items
+    // keep. PurchaseAccounts.isBalanceSheet is that one rule.
+    // `refused` is the server's list of the other accounts Books Check ties
+    // to a sub-ledger (Sales Tax Payable, Accrued Job Costs, the payroll
+    // liabilities, retainage, W-196): not offered either, but the one the
+    // item already uses stays, as an import may have given it one.
+    withOtherAccounts(accounts, types, keepId, refused = new Set()) {
+        const keep = Number(keepId);
+        const own = pickerAccounts(accounts, types, keepId)
+            .filter(a => !refused.has(Number(a.id)) || Number(a.id) === keep);
+        const ids = new Set(own.map(a => Number(a.id)));
+        return own.concat((accounts || []).filter(a => !ids.has(Number(a.id))
+            && a.is_active !== false && PurchaseAccounts.isBalanceSheet(a)
+            && !refused.has(Number(a.id))));
+    },
+    // The income accounts, then everything else under Other accounts, as
+    // the bill line's picker groups them.
+    incomeOptions(accounts, selectedId) {
+        const opt = a => `<option value="${a.id}" ${selectedId && a.id == selectedId ? 'selected' : ''}>`
+            + `${accountLabel(a)}</option>`;
+        const income = accounts.filter(a => a.account_type === 'income');
+        const rest = accounts.filter(a => a.account_type !== 'income');
+        let html = '';
+        if (income.length) html += `<optgroup label="${T('Income')}">${income.map(opt).join('')}</optgroup>`;
+        if (rest.length) html += `<optgroup label="Other accounts">${rest.map(opt).join('')}</optgroup>`;
+        return html;
+    },
+
     async showForm(id = null) {
         let item = { name:'', code:'', item_type:'service', description:'', rate:0, cost:0,
             income_account_id:'', expense_account_id:'', is_taxable: TaxDefault.on(),
@@ -126,13 +158,27 @@ const ItemsPage = {
         if (id) item = await API.get(`/items/${id}`);
 
         const accounts = await API.get('/accounts');
+        let refused = new Set();
+        try { refused = new Set((await API.get('/items/refused-accounts')).map(r => Number(r.account_id))); } catch (e) { refused = new Set(); }
         // Income means income accounts only — the list used to offer COGS
         // and expense accounts too, and a business's 4400 In-Kind
         // Contributions (W-L13). The account an item already uses stays
         // listed, so saving the form never drops it.
-        const incomeAccts = pickerAccounts(accounts, ['income'], item.income_account_id);
-        const expenseAccts = pickerAccounts(accounts, ['expense','cogs'], item.expense_account_id);
-        const assetAccts = pickerAccounts(accounts, ['asset'], item.asset_account_id);
+        // Both also offer, as Other accounts, the balance-sheet accounts a
+        // bill line offers (#1038): a security deposit invoiced through an
+        // item credits a liability, not income.
+        const incomeAccts = ItemsPage.withOtherAccounts(accounts, ['income'], item.income_account_id, refused);
+        const expenseAccts = ItemsPage.withOtherAccounts(accounts, ['expense','cogs'], item.expense_account_id, refused);
+        // The inventory asset account (W-207): the server's list of every
+        // account it would refuse there (a bank, Accounts Receivable,
+        // Undeposited Funds, retainage, any account not an Other Current
+        // Asset, one an item sells or buys through), so the list offers
+        // only the ones a stock item's purchases and sales can post to. The
+        // one the item already uses stays.
+        let refusedAsset = new Set();
+        try { refusedAsset = new Set((await API.get('/items/refused-accounts?field=asset_account_id')).map(r => Number(r.account_id))); } catch (e) { refusedAsset = new Set(); }
+        const assetAccts = pickerAccounts(accounts, ['asset'], item.asset_account_id)
+            .filter(a => !refusedAsset.has(Number(a.id)) || Number(a.id) === Number(item.asset_account_id));
         const acctLabel = a => accountLabel(a);
 
         // Phase 11 inventory only makes sense for tangible items.
@@ -164,7 +210,7 @@ const ItemsPage = {
                     <div class="form-group"><label>${T('Income')} Account</label>
                         <select name="income_account_id">
                             <option value="">-- None --</option>
-                            ${incomeAccts.map(a => `<option value="${a.id}" ${item.income_account_id==a.id?'selected':''}>${acctLabel(a)}</option>`).join('')}
+                            ${ItemsPage.incomeOptions(incomeAccts, item.income_account_id)}
                         </select></div>
                     <div class="form-group"><label>Expense or COGS Account</label>
                         <select name="expense_account_id">
@@ -176,12 +222,10 @@ const ItemsPage = {
                         Taxable</label></div>
                     <div class="form-group full-width" id="neg-price-group" style="${canDiscount ? '' : 'display:none;'}"><label>
                         <input type="checkbox" name="allows_negative_price" id="neg-price-chk" ${item.allows_negative_price ? 'checked' : ''}>
-                        Discount or concession: may carry a negative price</label>
-                        <div style="font-size:10px; color:var(--text-muted);">A line on this item can be entered at a negative price on an invoice or sales receipt, and the amount comes off the item's income account. Every other item's price stays at zero or more; a refund belongs on a credit memo.</div></div>
+                        Discount or concession: may carry a negative price ${hint("A line on this item can be entered at a negative price on an invoice or sales receipt, and the amount comes off the item's income account. Every other item's price stays at zero or more; a refund belongs on a credit memo.", 'Discount or concession')}</label></div>
                     ${id ? `<div class="form-group"><label>
                         <input type="checkbox" name="is_active" ${item.is_active !== false ? 'checked' : ''}>
-                        Active</label>
-                        <div style="font-size:10px; color:var(--text-muted);">An inactive item stays on the documents that use it but is left out of every item picker.</div></div>` : ''}
+                        Active ${hint('An inactive item stays on the documents that use it but is left out of every item picker.', 'Active')}</label></div>` : ''}
                 </div>
 
                 <fieldset id="inv-fieldset" style="margin-top:16px; padding:10px 14px; border:1px solid var(--panel-border); border-radius:4px; ${trackable ? '' : 'display:none;'}">
@@ -189,11 +233,8 @@ const ItemsPage = {
                     <div class="form-group">
                         <label>
                             <input type="checkbox" name="track_inventory" id="track-inv-chk" ${item.track_inventory?'checked':''}>
-                            Track inventory for this item
+                            Track inventory for this item ${hint('Posting an invoice or bill that uses this item will adjust quantity on hand and post to the asset account below.', 'Track inventory')}
                         </label>
-                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                            Posting an invoice or bill that uses this item will adjust quantity on hand and post to the asset account below.
-                        </div>
                     </div>
                     <div id="inv-detail-grid" class="form-grid" style="${showInv ? '' : 'display:none;'}">
                         <div class="form-group"><label>Quantity on Hand
@@ -216,7 +257,7 @@ const ItemsPage = {
                                 <option value="">-- Default (Inventory 1300) --</option>
                                 ${assetAccts.map(a => `<option value="${a.id}" ${item.asset_account_id==a.id?'selected':''}>${acctLabel(a)}</option>`).join('')}
                             </select></div>
-                        ${id ? `<div class="form-group"><label>Avg Cost <span style="font-size:10px;color:var(--text-muted)">(weighted, computed from movements)</span></label>
+                        ${id ? `<div class="form-group"><label>Avg Cost ${hint('Weighted, computed from movements.', 'Avg Cost')}</label>
                             <div style="padding:8px 10px; border:1px solid var(--panel-border); border-radius:4px; background:transparent; color:var(--text-primary); font-variant-numeric:tabular-nums;">${formatCurrency(item.avg_cost || 0)}</div></div>` : ''}
                     </div>
                 </fieldset>
@@ -443,7 +484,7 @@ const ItemsPage = {
                         </select>
                     </div>
                     <div class="form-group">
-                        <label id="adjust-qty-label">Quantity to add *</label>
+                        <label for="adjust-qty"><span id="adjust-qty-label">Quantity to add *</span> ${hint('Enter a quantity to see the resulting balance.', 'Quantity')}</label>
                         <input name="quantity" id="adjust-qty" type="number" step="1" min="0" required>
                     </div>
                     <div class="form-group" id="adjust-cost-wrap">
@@ -459,8 +500,7 @@ const ItemsPage = {
                     </div>
                     <div class="form-group full-width" id="adjust-preview"
                          style="font-size:12px; color:var(--text-muted); padding:8px 10px;
-                                background:var(--gray-100,#f7f7fa); border-radius:4px;">
-                        Enter a quantity to see the resulting balance.
+                                background:var(--gray-100,#f7f7fa); border-radius:4px; display:none;">
                     </div>
                 </div>
                 <div class="form-actions">
@@ -491,6 +531,7 @@ const ItemsPage = {
             else if (mode === 'remove') { delta = -qty; newQty = currentQty - qty; }
             else { delta = qty - currentQty; newQty = qty; }
             const sign = delta >= 0 ? '+' : '';
+            preview.style.display = '';
             preview.innerHTML =
                 `Delta: <strong>${sign}${delta.toLocaleString()}</strong>` +
                 ` &nbsp;&middot;&nbsp; New on-hand: <strong>${newQty.toLocaleString()}</strong>`;
@@ -589,7 +630,7 @@ const ItemsPage = {
                 </table></div>
                 <div style="margin:8px 0;">
                     <button type="button" class="btn btn-sm btn-secondary" onclick="ItemsPage.addAdjustLine()">+ Add line</button>
-                    <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">A unit cost applies to stock added; left blank, the item's average cost is used.</span>
+                    ${hint("A unit cost applies to stock added; left blank, the item's average cost is used.", 'Unit cost')}
                 </div>
                 <div id="adjust-many-problems" role="alert" style="font-size:12px; color:var(--text-danger);"></div>
                 <div class="form-actions">

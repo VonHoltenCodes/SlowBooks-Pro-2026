@@ -5,6 +5,37 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**One AI assistant connection reaches every company you add to it.** Connect to AI assistant was tied to the company it was made in, so an accountant with many client companies needed one connection per client. Now the connection is made in one company, and an administrator of each other company adds it there with **Add** (the button names the company, and asks first, since every assistant already signed in can then work those books too). Each company gets a bookkeeper token of its own, made in its own books, and every change the assistant makes is in that company's audit log as `token:AI assistant (relay)`. The assistant names which company's books it works in on every call; with more than one company on the connection, a call that names none is refused and nothing is done. On a server serving several companies, showing a sign-in code (only while every company on the connection can answer now), adding a company and Disconnect belong only to someone who is an administrator of every company on the connection (Disconnect skips a company that cannot be opened now only for the person who added it; for a connection made in beta.1, the person who made its token); that person's panel lists every company, with a note when one cannot answer now. Anyone else sees only their own company: its administrator can take it off the connection (its token is turned off at once, and the others stay connected) and never sees the other companies' names or how many there are. On the desktop, an administrator of the open company may add it while it is not on the connection (or when that company turns its token away), and once it is on, sees every company on it and may show a sign-in code and Disconnect. Disconnect turns off every company's token; one that is not open then has its token turned off the next time it opens. A company's access ends at once when the administrator who added it is deactivated or demoted there, or that person's sign-in reaches its end date, for a connection made before this change too; the same holds for any token whose name starts with "AI assistant" (SlowBooks Switchboard's, for example), which must keep that start, and API Tokens says on its row why it stopped working. The connection's own tokens work only for the connection on this computer, cannot be renamed, and no other token may take their name. When a company turns its token away, the connection deletes that token's secret from this computer at once, or a moment later when another change to the connection is under way (#1210). An API token now reads only its own company from the company list and the sign-in status, a company header the server cannot honor is refused instead of answered from another company, and `GET /api/whoami` says which company, role and label a token works under. On the desktop only the open company answers; on PostgreSQL the connection reaches only the one company the server serves. A connection made in beta.1 keeps working as a one-company connection, with nothing to redo.
+
+**Long words stay on the page (#1209).** A word longer than its space on a printed document, form or report (a web address, a tracking number, a name typed with no spaces) took the width from what was beside it, and put Qty, Rate, Amount and the totals off the paper. It now breaks inside the word, and a description never takes room from the figures. A deposit slip's Received from, Check # / Ref and Method, a customer statement's Number, a giving statement's Reference and a pay application's Item are on one line while they fit and wrap in their own column when they do not; a check's payee (check on top), a pre-printed deposit slip's check numbers and account name, and a mailing label's lines are cut with an ellipsis. On a report, a reference that is one long number (a wire's trace number) or numbers with commas or points in it wraps in its column instead of printing over the description or pushing the General Ledger's Balance past the margin, while an amount up to thirteen figures and cents prints whole on one line, its minus sign with it. The line at the top of a document's later pages wraps inside the top margin when its number is long, and a deposit's long account name or Slip # wraps beside the date so Items stays inside its box. A long last line written without spaces, or broken after a hyphen, is divided between its page and the totals' page at a line of the text.
+
+**Round 23: Connect says so when the relay is away, one Activity line for a void, the company in the title, text you can select.**
+- **On the Mac, Connect reaches the relay (NEW-265, #1140).** The signed macOS build's OpenSSL looked for its certificate authorities in the build machine's folder, so every HTTPS call made with Python's default context (the relay, the currency rate) failed "CERTIFICATE_VERIFY_FAILED". At start-up the frozen macOS build now points that default at the certifi file it carries, only when nothing else is set and the defaults are missing; verification stays on, and Windows and Linux keep their system stores. The macOS smoke test checks a default context loads certificate authorities.
+- **Connect with the relay out of reach (W-208, #1141).** A press waits ten seconds at most (it was up to half a minute), then says "The relay could not be reached. SlowBooks Pro is working normally; try again in a few minutes." until Dismiss or the next press, with Connect offered again and nothing half-made; the OS's text goes to the log. A relay answering a server error (just updated, or busy) says "The relay was just updated or is busy. Try again in a couple of minutes." on Connect, Show a sign-in code and Disconnect, and that Disconnect undoes nothing, so it can be pressed again.
+- **The relay name a Disconnect could not delete is kept (NEW-269, #1142).** It is kept in a file readable by this user only, with what the deletion needs, shown on the panel after a restart, and the deletion is retried quietly (30 seconds, doubling to 30 minutes) until the relay has it; Dismiss hides the notice while the retry goes on.
+- **A void reason over 500 characters** is refused through the API with "A void reason can be at most 500 characters; this one has 501." (W-202, #1143).
+- **Activity shows a void once (W-203, #1144):** "Voided by Pat: Entered twice." for an estimate, a pay application or a change order, with no "Edited by" entry of raw fields beside it; a stamp such as an approval's time is no longer listed as "Approved at set to <ISO time>".
+- **The window's title names the open company (W-206, #1145):** "<company> — SlowBooks Pro 2026", as the page's own title, updated on a rename or a switch, and "SlowBooks Pro 2026" on the picker.
+- **Text in the desktop window selects (W-209, #1146).** pywebview's default put `user-select: none` on every page; figures, names, numbers, report cells, notes and sentences now select and copy, while the sidebar, the top bar, buttons, tabs and column headings do not.
+- **About asks for a donation (NEW-268, #1147):** the Artists box's note, which linked the art repository, is a short request to support the project, linking its Ko-fi page.
+- The end-of-month discount refusal reads "The discount must be taken by the due date: 0 to 30 days after the end of the month."
+
+**The name reads SlowBooks Pro everywhere.** The screens, the window title, the splash and About, sign-in and setup, printed and PDF documents ("Generated by SlowBooks Pro 2026"), the customer portal and pay page, the test email, the guides and the README now spell the name with a capital B, as the logo does. Nothing a program or an install depends on changed: file and folder names, the data folder, the installers' names, environment variables and the desktop request header are as they were.
+
+**Connect to AI assistant (was Connect Claude).** Settings → Connections → **AI assistants** (was "Claude and agents"): the button, its messages and the guides name the feature for any assistant that connects the same way, Claude or Grok. A new connection's API token is labeled `AI assistant (relay)`; one made before keeps its `Claude (relay)` token, and Disconnect revokes it as before.
+
+**Find on this screen in the desktop app: Ctrl+F (⌘F) (#1092).** The desktop window has no find bar of its own, so Ctrl+F there went to Search (#695), and over a dialog it did nothing. It now opens a find bar for the words on the screen: the whole window (the top bar, the sidebar, the page, the status bar, an open menu or list) with no dialog open, the dialog alone with one. The value in a text box, a notes area or a drop-down counts too, the field outlined; what is hidden or folded does not. Case and accents are ignored, a line break is a space, and an amount is found however it is written: `1234.5` finds `$1,234.50` and `-200` finds `(200.00)`. Enter and Shift+Enter, Ctrl+G and F3 step through the matches ("3 of 17"); Escape closes the bar and leaves the dialog under it open. The bar follows the screen as it changes (a page redrawn, a report refreshed, a field typed in) and keeps its place. With no matches it offers Search with the same words. Search keeps Ctrl+K (⌘K) and `/`, and in a browser Ctrl+F stays the browser's own find. A match is marked by a tinted box drawn over its text, never by changing the page: the macOS window's web view accepts CSS highlights and never paints them.
+
+**Bank rules: a star made before the upgrade stays a star (NEW-259, W-193).** This release made `*` in a rule's payee pattern stand for anything ("T-MOBILE*"), so a rule made earlier with the star a bank prints, Contains `SQ *` for "SQ \*JOES DELI", also filed "MSQ LLC PARTS". A star the bank prints is now typed `\*` (`SQ \*`), and the upgrade writes every existing rule's stars that way, so each rule files exactly the lines it filed before; `*` stays the wildcard for rules written with it. A rule made from a statement line, and a vendor's own bank rule, write the payee's or the name's stars as stars. The rule form's tortoise explains both, and the list and the form say a pattern with a star in words ("Reads: “SQ *”"). A pattern of only `*` or spaces, which saved and matched nothing, is refused in a sentence on the form and through the API.
+
+**Add selected names each line it did not add (W-190, NEW-261).** "Added 1 of 2 ticked; not added 1: Pick a category…" named no line and gave only the first reason. Each line left out is now named by its date, the bank's text and its amount with its own reason, the message is a warning rather than a success, and those lines stay ticked; Add all categorised names them the same way. The API's `skipped` entries carry each line's `date`, `payee` and `amount`.
+
+**Refusals in sentences.** A To review memo over 500 characters (on the row, Add, Add selected, Receive payment and Pay bills) is refused with "A memo can be at most 500 characters; this one has 501." instead of the validator's text, and the row counts it near the limit (W-191). Pay bills over a bill's balance, from the feed or Pay Bills, says "$150.00 is more than the $80.00 still due on bill FM-1.", as Receive payment does for an invoice (W-192). A class id that is no class of this company is refused on every write that takes a class (documents and their lines, journal entries, bank-feed adds and picks, rules, transfers and the rest) instead of posting under "Unknown"; an archived class is taken where it was before (W-199).
+
+**A company file from a newer SlowBooks Pro (W-186).** Opening one showed "Can't locate revision identified by '…'" in the company list, or a generic start-up error. The file's revision is now read before anything migrates it, and the company list, opening it, Server Edition and the server's start-up say "This company file was last opened by a newer version of SlowBooks Pro, and this version cannot open it. Update SlowBooks Pro to open it; the file was left as it is." The file is not changed.
+
 ### v2.31.14 — Cash basis after the retainage change, and sentences where there were errors
 
 **Cash basis: a retainage payment recorded before 2.31.11 (#778, @ContractorKeith).** 2.31.11 changed what a payment recognizes on the cash basis when retainage is involved, but a payment recorded before that upgrade kept the cash lines the old rule wrote: held owner retainage counted as income and sat in Retainage Receivable on the cash Balance Sheet, and a paid retainage-release bill sat on 6990 Unapplied Cash Bill Payment Expense with no job, so a book already in use read wrong on the cash basis for as long as it was kept. The upgrade now rewrites, once, the cash lines of every payment applied to a document that holds or releases retainage, with the same recompute an edit runs, so each reads as a fresh posting does: income less the retainage held, the held part when the release is paid, the released cost on the held bills' own account, job and cost code. A payment dated on or before the closing date is left as it was and counted; the start-up log says how many payments and bill payments were rewritten and how many were kept. The pass also runs after a QuickBooks or IIF import and after a backup restore, so a restored older book reads right without a restart. The accrual books do not move.
@@ -73,7 +104,7 @@ on what the software does, not on what sprint shipped what.
 
 **Sales tax and use tax on a job.** A contract can say the contractor pays tax on materials (the lump-sum rule in Florida and many states): its pay applications charge no tax and its material bills accrue use tax to 2220 at the company's use-tax rate (Settings → Sales tax → **Use tax rate**, setting `use_tax_rate`; blank follows the sales tax rate), shown on the Sales Tax report; a bill line's **Use tax** box overrides the rule either way (`use_tax` true or false on the line), and a memorized bill keeps each line's box into every bill entered from it. A pay application with taxable lines at a tax rate of 0 says where to set the rate while it is open; once approved, its tax stands and it says nothing, so a job upgraded with approved applications billed at no tax is not flagged on each of them. The Use tax column takes only its box's width, so Enter Bill and a memorized bill show every line column in a 1264-pixel window and scroll only in a narrower one; the wide dialog is 1300 pixels at most (it was 1280), and a line's move handle and buttons are one size on every font, so the move controls keep one row at that width.
 
-**The contractor's dashboard.** Tiles for retainage owed to and by the company, over and under billing, backlog and committed not yet billed; receivables and payables say they exclude retainage. A **Retainage** report ties to 1150 and 2050; **Sub Compliance** lists subs with an expired or expiring certificate, no W-9, or a paid bill with no lien waiver, and the vendor list flags subs and colours the certificate date. The job Overview shows retainage, and Projected counts the budget not yet bought.
+**The contractor's dashboard.** Tiles for retainage owed to and by the company, over and under billing, backlog and committed not yet billed; receivables and payables say they exclude retainage. A **Retainage** report ties to 1150 and 2050; **Sub Compliance** lists subs with an expired or expiring certificate, no W-9, or a paid bill with no lien waiver, and the vendor list flags subs and colors the certificate date. The job Overview shows retainage, and Projected counts the budget not yet bought.
 
 **Field tickets.** A job's Field tickets tab holds **T&M tickets** (signed by the owner's rep, then made into a change order at cost with the job's markup, or billed on a job with no schedule of values), **material slips** (stock onto the job as a Job Cost Entry at average cost, a return the reverse, a void at the booked cost) and **delivery tickets** (received quantity on a PO's lines, so a bill that runs past what was received warns). The **Field Ticket Log** lists T&M not yet billed.
 
@@ -95,7 +126,7 @@ A retainage-release bill can't be re-lined (it re-posted to an expense account).
 
 **Payments in whole cents.** A payment, bill payment or batch payment amount, and each of its allocations, must be in whole cents, and a finer amount is refused with a sentence naming it (#747); it used to be rounded allocation by allocation, so two allocations of 0.005 applied two cents from a one-cent payment, and voiding it left the invoice a cent off. Applying a credit memo to an invoice, or a vendor credit to a bill, takes whole cents the same way: two half-cent applications of a one-cent credit each stored as a cent, and voiding the credit left the invoice or bill two cents further from where it started. A credit memo's and a vendor credit's **Apply Credit** dialog checks every row before it sends anything (whole cents, no more than the document's balance, no more than the credit remaining), names the row that is not right, and when the server refuses a row part-way, says what was applied before it and opens the dialog again on what remains; it used to stop at the first refusal with the rows above it applied and the dialog unchanged, so a second Apply applied them again.
 
-**Turning on company file encryption says what it asks.** The Turn on dialog names the company exactly as Settings shows it under the box, says when what was typed is not it yet, and asks for *your sign-in password*, saying it is not a new one (SlowBooks Pro makes the recovery key and shows it once). On a server, where the button is grey until an operator sets the secret, the page says which `.env` file it goes in and that the server is stopped and started. The guide leads with the two setups and says the picker's recovery key belongs to a file that is already encrypted.
+**Turning on company file encryption says what it asks.** The Turn on dialog names the company exactly as Settings shows it under the box, says when what was typed is not it yet, and asks for *your sign-in password*, saying it is not a new one (SlowBooks Pro makes the recovery key and shows it once). On a server, where the button is gray until an operator sets the secret, the page says which `.env` file it goes in and that the server is stopped and started. The guide leads with the two setups and says the picker's recovery key belongs to a file that is already encrypted.
 
 **Migrations:** eleven, revising 2.31.10's head `c8e1a4d7f305` in one chain: nine for construction (`e2a6c8f4b1d9`, `e1b7c4a92d68`, `a4d8e2f6b9c3`, `e4b7c2a9f1d3`, `c7e3a1f5d9b2`, `a3d8f1c6b9e4`, `b5d2e8f4a6c3`, `c7e4a9b2d1f5`, `d8f1b3c5e7a9`), then `b4d2e7a9c6f1` (bank check details for blank stock) and `e2b6c4d8f0a3` (memorized line use tax). Each is idempotent and walks back; a downgrade past the construction migrations loses the revenue accounts, the allowance-draw flags and the effective dates, as `docs/contractor-mode.md` says.
 
@@ -705,7 +736,7 @@ shows "N on hand" under its quantity once a stock item is picked. A new
 setting, Refuse a sale of more than is on hand (`inventory_refuse_oversell`,
 off by default, under Invoice Defaults), turns the warning into a refusal
 naming the item and how many short, with nothing posted. The Items page
-shows a count below zero in the warning colour with a note saying what it
+shows a count below zero in the warning color with a note saying what it
 means, and the item's form, Adjust and History say it in words.
 
 **Hide zero balances on the statements** (#625, from Discussion #354). The
@@ -1403,7 +1434,7 @@ editing a converted bill's lines keeps the commitment link and re-tallies
 billed-to-date, and the 2050 retainage line carries the job. Editing a converted bill's lines re-computes its retainage at the commitment's rate (an explicit `retainage_held` still wins), and a fully billed commitment refuses a higher amount with a 409 pointing to a sub change order.
 Sub change orders (#554), progress billing with retainage released (#555) and
 the buyout report / job cost by vendor (#556) build on this. A Business or
-Nonprofit company sees none of it. One behaviour change for everyone: a $0
+Nonprofit company sees none of it. One behavior change for everyone: a $0
 (description-only) PO line is no longer copied onto the bill a PO becomes —
 the converted bill carries only the lines with money on them. See
 [docs/contractor-mode.md](docs/contractor-mode.md).
@@ -1552,7 +1583,7 @@ vendor (a No vendor bucket for journals and job cost entries) with bills, paid t
 date, retainage held outstanding and open A/P; cost is period-filtered, the bill
 figures job-to-date and prorated by the job's share of each bill's line amounts
 (a split bill splits). Job Profitability and Job Budget vs Actual gained the PDF
-and CSV routes they lacked (honouring `customer_id` / `include_inactive`). A
+and CSV routes they lacked (honoring `customer_id` / `include_inactive`). A
 Business or Nonprofit company sees none of these reports. See
 [docs/contractor-mode.md](docs/contractor-mode.md).
 
@@ -2722,7 +2753,7 @@ injection), an administrator's to write and audited like the settings around
 them. The default is **per kind**: one default invoice message and one
 default giving-statement message, never crossed; the invoice picker and list
 still show only invoice messages (`/api/invoice-messages?kind=` filters, the
-invoice behaviour unchanged). The same words ride on all three outputs — the
+invoice behavior unchanged). The same words ride on all three outputs — the
 single PDF, the all-donors stack and the emailed copy (one code path). An
 empty message or footer prints what printed before, and the product-name
 footer is gone either way so a donor's statement carries no product name; the
@@ -3058,7 +3089,7 @@ another; an edit's reversal followed by its repost in one transaction can still
 contend with a concurrent edit of the same accounts, which the database resolves
 by failing one of them. NULL balances are coalesced to zero, and in-session
 Account objects are refreshed so a response built in the same request reflects
-the new balance. Behaviour is unchanged on SQLite. Found in MorrisAEGIS's fork (arkcpa-slowbooks).
+the new balance. Behavior is unchanged on SQLite. Found in MorrisAEGIS's fork (arkcpa-slowbooks).
 The Audit Log no longer lists an account row for each balance a posting
 moves (a change of `balance` alone); the posting's own lines, which are what
 moved it, are recorded as before.
@@ -3076,7 +3107,7 @@ the environment itself, so the Docker entrypoint passes no flag. The client
 address is now decided in that one place — `client_ip()` (login and portal
 audit rows) reads what uvicorn reports and no longer parses `X-Forwarded-For`
 itself, and the `TRUST_PROXY_HEADERS` knob is retired (removed from
-`.env.example`, `docker-compose.prod.yml` and the docs). The limiter honours
+`.env.example`, `docker-compose.prod.yml` and the docs). The limiter honors
 `RATE_LIMIT_STORAGE_URI` (e.g. `redis://…`) for shared counters, defaulting to
 in-memory as before; the `redis` client now ships in `requirements.txt` (a
 `redis://` URI used to fail at import without it), and when the URI is set the
@@ -3785,7 +3816,7 @@ migration accepts the numeric account types the Chart of Accounts List export ca
 2026 sample-company export; a real export rejected all 156 accounts (PR #306).
 
 **Smaller things the gate found.** In the dark theme a green or red amount
-read as plain text (the theme's plain-amount rule outranked the colour by
+read as plain text (the theme's plain-amount rule outranked the color by
 loading later), and the success toast kept 2.23.0's green; both carry the
 leaf green now, and so do bold and amber figures (the aging tables' totals
 and 30+ and 60+ columns, the cash forecast's net). The shared per-line
@@ -4062,7 +4093,7 @@ it: "Enter Bill (Alt+B)" on hover, "(⌥B)" on a Mac, and
 **The figure on the bar** (#265). Every bar, slice and point on the
 dashboard's and Analytics' charts carries its figure as text on or beside
 the mark — past a bar's end, in a slice, above a line's point — so the
-colour is not the only way from a mark to its amount; a label that would
+color is not the only way from a mark to its amount; a label that would
 land on another is left off, and the table under each chart has every
 figure. The dashboard's own aging bar and monthly revenue bars say theirs
 too.
@@ -4126,7 +4157,7 @@ say so beside Bills, with the Expenses API.
   an Anthropic key. The key now carries its provider; another provider has
   no key until one is entered for it, and switching back finds the saved key
   again. A key saved before 2.22.1 belongs to the provider that was chosen
-  when it was saved, read from the audit log, so a key the old behaviour
+  when it was saved, read from the audit log, so a key the old behavior
   left under another provider is not sent there either. Where the log has
   no such save, a vendor's own key prefix (sk-ant-, xai-, gsk_, AIza) says
   whose it is; failing that, the key goes to no provider and Settings asks
@@ -4357,7 +4388,7 @@ name; every amount in the plain and per-class P&L CSVs has two decimals.
 **From the gate's second round** (macOS NEW-42–NEW-44, Windows W-3–W-7; the
 dates and shortcuts ones are in the lines above):
 
-- **Back looks like a button** (NEW-42). The toolbar's ← was a bare grey
+- **Back looks like a button** (NEW-42). The toolbar's ← was a bare gray
   glyph that got its border on hover alone, and dimmed it looked the same, so
   with a card open it read as unusable. It is a bordered gold button reading
   "← Back" in both themes while there is somewhere to go, muted and
@@ -4381,7 +4412,7 @@ dates and shortcuts ones are in the lines above):
   page's Notes and a report's pickers and dates look and focus like a form's
   fields, in both themes: none is white in the dark theme, none draws the
   browser's ring, a dark date field's calendar icon is light, and with the
-  system's high-contrast colours a focused field draws the system highlight.
+  system's high-contrast colors a focused field draws the system highlight.
 - **Cards open from the keyboard.** The Report Center's cards, Banking's
   account cards and the dashboard's bank cards were a click alone; each is
   a link now: Tab reaches it, Enter or Space opens it, and Back returns to it.
@@ -4997,7 +5028,7 @@ in the file's free space).
   and the app runs as a user of its own. The image now gives them to that
   user, and an existing install's volumes, left empty by those failures,
   take the right owner when 2.18 starts.
-- A disabled button looks disabled (it drew at full colour and did
+- A disabled button looks disabled (it drew at full color and did
   nothing), and the QuickBooks Online page says why Import is unavailable.
 
 #### Import, export, lists and search
@@ -5100,11 +5131,11 @@ in the file's free space).
 - Text meets WCAG AA contrast in both themes everywhere it is drawn: every
   page, 142 dialogs, the sign-in and setup screens, pop-up messages and the
   PDF window. Muted text, the status bar, buttons, badges, notes and the
-  colours pages wrote in by hand now come from theme colours that pass; the
+  colors pages wrote in by hand now come from theme colors that pass; the
   look is the same, a shade darker or lighter only as far as AA needs.
   Semi-transparent text is measured as it is painted, and charts' lines,
-  bars and colour keys meet 3:1 in both themes (the light theme had the dark
-  theme's bright colours, as faint as 1.5:1). This clears the contrast list
+  bars and color keys meet 3:1 in both themes (the light theme had the dark
+  theme's bright colors, as faint as 1.5:1). This clears the contrast list
   the macOS release gate had carried for several releases.
 
 #### For API clients and agents
@@ -5389,7 +5420,7 @@ proxy trust the TLS guide describes takes effect under Docker.
 exemption only filled lines that left their tax flag unset, and every sales
 form sends each line's Tax box, defaulted from the item — so a reseller or
 exempt customer billed from the window was charged tax. Invoices,
-estimates, recurring templates and sales receipts all honour the customer
+estimates, recurring templates and sales receipts all honor the customer
 now, and the forms clear and disable the Tax boxes and say why. Found by
 the Windows lane on this release's gate. Documents already saved keep the
 tax they were saved with; check any open invoice to a reseller.
@@ -5686,7 +5717,7 @@ notice it needed to.
 
 Two things he deliberately left out, both correctly. Validating a template at
 save time would mean a bad expression can stop an invoice going out, and
-degrading to the built-in body is the better behaviour — the preview is where
+degrading to the built-in body is the better behavior — the preview is where
 an operator should find out instead. And this is its own endpoint rather than
 an option on the send preview, because widening a request model that a
 sending route shares is how a surface grows a capability nobody audited.
@@ -5762,7 +5793,7 @@ with every table in the way: three tables took seven passes, and five would
 have exceeded the limit and given up. Everything blocking is now cleared in
 one pass, so the cost is one step per table. Measured by the Windows QA
 agent, who noticed the comment in the code claimed one pass per table and the
-behaviour did not.
+behavior did not.
 
 **You can see a template edit before you save it.** Editing `invoice_email`
 under Settings -> Email Templates still meant saving over a working template
@@ -6022,7 +6053,7 @@ for the same shadowing, so the class is closed rather than the instance.
 **The search results panel never closed.** Not on clicking away, not on
 clearing the box, not on changing page — it stayed until a reload. At rest
 it painted a two-pixel sliver under the toolbar in every session, which is
-the grey edge along the top of the desktop screenshots taken for every
+the gray edge along the top of the desktop screenshots taken for every
 release. The JS was right all along: it adds a `hidden` class in ten places,
 and **there was no rule that hid anything**, only two element-specific ones
 for the modal and the splash. The generic rule the code has always assumed
@@ -6515,8 +6546,8 @@ every table header declares its scope, icon-only remove and close buttons
 carry labels, toast notifications announce through a live region, modals
 are real dialogs (focus moves in, Tab stays inside, Escape closes, focus
 returns to what opened them), the reconciliation difference says
-"Balanced" or "Out of balance" in words rather than colour alone, and the
-muted text colour now clears the AA contrast ratio in both themes. The
+"Balanced" or "Out of balance" in words rather than color alone, and the
+muted text color now clears the AA contrast ratio in both themes. The
 bigger gap was PDFs: every PDF the app produces — invoices, statements,
 pay stubs, W-2s, 1099s, 940/941, reports — is now **tagged (PDF/UA-1)** with
 a declared language and title, so a screen reader gets headings, tables

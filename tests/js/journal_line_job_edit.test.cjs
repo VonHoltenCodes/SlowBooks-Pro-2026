@@ -44,6 +44,7 @@ function page({ jobs = JOBS, entries = [], entry = null, accountant = false, row
         location: { hash: '#/journal' },
         T: word => word,
         Terms: { text: word => word },
+        hint: (text) => `<span class="hint-pop" hidden>${text}</span>`,
         escapeHtml: value => String(value ?? '').replace(/[&<>"']/g, character => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
         })[character]),
@@ -56,6 +57,7 @@ function page({ jobs = JOBS, entries = [], entry = null, accountant = false, row
         classIdFromForm: () => null,
         jobIdFromForm: () => null,
         TxnWarn: { ok: async () => true },
+        ZeroTotal: { ask: () => ({}) },
         ClassWarn: { ok: async () => true },
         toast: (...args) => calls.toast.push(args),
         toastPosted: () => {},

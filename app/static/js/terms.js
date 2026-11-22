@@ -25,9 +25,12 @@ const TERMS_NONPROFIT = {
     "Create Invoices": "Create Pledges",
     "New Invoice": "New Pledge",
     "Recurring Invoices": "Recurring Pledges",
-    "Overdue Invoices": "Overdue Pledges",
-    "Recent Invoices": "Recent Pledges",
+    "Overdue Invoices": "Overdue Pledges & Invoices",
+    "The oldest overdue invoices": "The oldest overdue pledges and invoices",
+    "Recent Invoices": "Recent Pledges & Invoices",
+    "The last five invoices": "The last five pledges and invoices",
     "Total Invoiced": "Total Pledged",
+    "Invoices & Receipts": "Pledges, Invoices & Donations",
     "Sales Receipt": "Donation",
     "Sales Receipts": "Donations",
     "Enter Sales Receipts": "Enter Donations",
@@ -58,11 +61,11 @@ const TERMS_NONPROFIT = {
     "Job Budget vs Actual": "Grant Budget vs Actual",
     "Jobs: Budget vs Actual": "Grants: Budget vs Actual",
     "Job Profitability": "Grant Income & Costs",
-    "Total Receivables": "Pledges Receivable",
+    "Total Receivables": "Pledges & Invoices Receivable",
     "A/R Aging": "Pledge Aging",
     "Accounts Receivable Aging": "Pledges Receivable Aging",
     "Monthly Revenue": "Monthly Revenue & Support",
-    "Receivables": "Pledges Receivable",
+    "Receivables": "Pledges & Invoices Receivable",
     "Revenue by Customer": "Revenue & Support by Donor"
 };
 

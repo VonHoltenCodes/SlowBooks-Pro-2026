@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — "It's like QuickBooks, but we own the source code"
+# SlowBooks Pro 2026 — "It's like QuickBooks, but we own the source code"
 # An independent, from-scratch replacement for Intuit QuickBooks Pro 2003.
 # No Intuit source code or binaries were decompiled, disassembled, or used.
 # Everything derives from published SDK documentation (QBFC 5.0, qbXML 4.0),
@@ -17,12 +17,13 @@ import time as _time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -34,7 +35,9 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import DataError
 
 from app.services.control_accounts import MissingControlAccount
+from app.services.dimensions import class_ids_checked
 from app.services.rate_limit import limiter
+from app.services.terminology import AsWritten
 
 from app.routes import (
     dashboard,
@@ -78,6 +81,8 @@ from app.routes import accountants_copy as accountants_copy_routes
 from app.routes import reclassify as reclassify_routes
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
+from app.routes import switchboard as switchboard_routes
+from app.routes import whoami as whoami_routes
 from app.routes import classes as classes_routes
 from app.routes import jobs as jobs_routes
 from app.routes import preferences as preferences_routes
@@ -170,6 +175,7 @@ from app.services.closing_date import (
     password_from_header as _closing_password_from_header,
 )
 from app.services.api_token_service import ADMIN_TOKEN_REFUSAL
+from app.services.api_token_service import is_link_label as _is_link_label
 from app.services.api_token_service import resolve as _resolve_api_token
 from app.services.served_companies import CompanyUnavailable, sentence_of
 from app.services.pdf_service import PdfEngineMissing
@@ -177,6 +183,41 @@ from app.services.pdf_service import PdfEngineMissing
 # An API token's request names the company it works in with this header
 # (#358); a signed-in person's session carries its company instead.
 _COMPANY_HEADER = "X-SlowBooks-Company"
+# ...and every answer to a token says which company's books it came from,
+# so a client holding tokens for several companies can check it was
+# answered from the one it asked (the AI assistant connection does).
+_COMPANY_SERVED_HEADER = "X-SlowBooks-Company-Served"
+# A request with no sign-in whose company header this server cannot honor
+# (repeated, blank, not a company file's name, or a company it does not
+# serve now) is refused before its token is looked up, never answered from
+# another company. The sentence names nothing: no one has signed in yet.
+UNSERVED_COMPANY_REFUSAL = (
+    "This server does not serve that company for this request. Nothing was done."
+)
+# The AI assistant connection's tokens are used by this app's own line to
+# itself, never from another computer: a copied connection file is no use
+# elsewhere on the network.
+LINK_TOKEN_ADDRESS_REFUSAL = (
+    "This token works only for the AI assistant connection on this computer. "
+    "Nothing was done."
+)
+# An AI assistant's token whose maker is no longer an administrator of the
+# company: nobody revoked it, and the sentence says what did happen.
+MAKER_GONE_REFUSAL = (
+    'The API token "{label}" stopped working because the administrator who made '
+    "it is no longer an administrator of this company. Nothing was done. An "
+    "administrator can make a new one under Settings, API Tokens."
+)
+REVOKED_REFUSAL = (
+    'The API token "{label}" was revoked. '
+    "Ask an administrator for a new one under Settings, API Tokens."
+)
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
+# A 401 the gate gives a request's token (it matches nothing here, or it
+# was turned off) carries this, so a program holding the token can tell it
+# from a route's own 401 (a sign-in that failed, a webhook's signature) and
+# stop using only a token the gate refused.
+_TOKEN_REFUSED_HEADER = "X-SlowBooks-Token-Refused"
 
 
 def _payroll_secret_problem(
@@ -454,14 +495,17 @@ def _refuse_a_database_behind_head(target=None) -> None:
     # #769: a file from before 2.29.0 is not migrated by this build. Said in
     # one sentence, and recorded for the desktop launcher's wait, which
     # names it instead of a timeout.
+    # W-186: one a newer SlowBooks Pro last opened, the same way, before
+    # the head check below calls it a database "behind" this build.
     from app.services import migration_floor
 
-    if migration_floor.is_below_floor(current):
+    refused = migration_floor.refusal([current])
+    if refused:
         if target is None:  # the company this server starts for
             from app.services import startup_progress
 
-            startup_progress.refuse(migration_floor.BELOW_FLOOR_MESSAGE)
-        raise migration_floor.BelowMigrationFloor()
+            startup_progress.refuse(refused)
+        migration_floor.refuse(refused)
 
     try:
         from alembic.config import Config
@@ -735,9 +779,17 @@ async def lifespan(app: FastAPI):
     from app.services import scheduler as _scheduler
 
     _auto_enter = _scheduler.start()
+    # Connect to AI assistant (#1087): a kept link opens its line in a thread of its
+    # own once the app is up; the relay being down never holds the start.
+    from app.services import switchboard_link as _claude_line
+
+    _claude_line.start_in_background()
     try:
         yield
     finally:
+        _claude_line.stop()
+        _claude_line.stop_retry(timeout=1.0)
+        _claude_line.stop_owed_retry(timeout=1.0)
         await _scheduler.stop(_auto_enter)
 
 
@@ -745,21 +797,27 @@ async def lifespan(app: FastAPI):
 # (fast, and the reason ORJSONResponse was deprecated in 0.136). We let it use
 # its default response class rather than pinning the now-deprecated ORJSON one.
 app = FastAPI(
-    title="Slowbooks Pro 2026",
+    title="SlowBooks Pro 2026",
     version=__version__,
     lifespan=lifespan,
+    # every write that names a class names one of this company's (W-199)
+    dependencies=[Depends(class_ids_checked)],
     description=(
         "Local bookkeeping API. Conventions an agent needs before writing:\n\n"
         "- **Unknown fields are rejected** (422 naming the field); nothing is "
         "silently dropped.\n"
         "- **Posted documents are voided, not deleted**: `POST /api/<resource>/"
         "{id}/void` (invoices, bills, payments, bill payments, credit memos, "
-        "expenses, journal entries, in-kind gifts, job costs). `DELETE` on one "
+        "expenses, journal entries, in-kind gifts, job costs, estimates). `DELETE` on one "
         "answers 405 and names the void route. A pledge that will not be paid "
         "is written off (`POST /api/invoices/{id}/write-off`), not voided.\n"
         "- **`tax_rate` on a document is a fraction** (0.089 = 8.9%), kept "
         "to six places (0.08875 = 8.875%); `default_tax_rate` in settings is "
-        'a percent string ("8.9"). Divide by 100.\n'
+        'a percent string ("8.9"). Divide by 100. A new invoice, sales '
+        "receipt, estimate, credit memo or recurring invoice sent without "
+        "`tax_rate` starts at `default_tax_rate`, as the app's forms do (a "
+        "credit memo for an invoice at that invoice's rate); send 0 for no "
+        "tax. An update without it keeps the rate.\n"
         "- **`terms` names an entry on `/api/payment-terms`** (its rule gives "
         "the due date and any early-payment discount; the document keeps the "
         "term it was saved under); text that is neither on the list nor "
@@ -818,10 +876,21 @@ async def _method_not_allowed_handler(request: Request, exc: StarletteHTTPExcept
     and the protected words ("Sales Tax") stay by the dictionary's own
     rule. The vocabulary audit's walk of a running server is what found
     it (scripts/audit/vocab_walk.py)."""
-    if isinstance(exc.detail, str) and exc.detail and exc.status_code != 405:
+    if (
+        isinstance(exc.detail, str)
+        and exc.detail
+        and exc.status_code != 405
+        # a sentence holding data (an email address, a mail server's
+        # reply) is shown as it was written
+        and not isinstance(exc.detail, AsWritten)
+    ):
         terms = _company_terms()
         if terms.has_words:
-            worded = terms.text(exc.detail)
+            # data in a sentence is not prose: what a person typed (a
+            # Sentence's data, said()) and any email address keep their
+            # words, and only ours around them are reworded (in time that
+            # grows only with the length of the sentence)
+            worded = terms.worded(exc.detail)
             if worded != exc.detail:
                 return JSONResponse(
                     status_code=exc.status_code,
@@ -867,7 +936,7 @@ async def _missing_control_account_handler(request: Request, exc: Exception):
     # "what customers owe — every invoice and payment" is written in the
     # business words; the company may not use them (see the handler above).
     return JSONResponse(
-        status_code=409, content={"detail": _company_terms().text(str(exc))}
+        status_code=409, content={"detail": _company_terms().worded(str(exc))}
     )
 
 
@@ -1204,6 +1273,9 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/invoice-messages",
     # The terms list is company setup too (#664): kept under Settings.
     "/api/payment-terms",
+    # Connect to AI assistant (#1087): linking to the relay makes a token, so it is
+    # an administrator's like the tokens themselves; the status is a read.
+    "/api/switchboard",
 )
 # HR and payroll are admin functions, reads included: pay stubs, W-2s and
 # 941s, NACHA files, benefit elections, garnishments and onboarding
@@ -1371,12 +1443,94 @@ def _role_refusal(role: str, method: str = "POST", path: str = "") -> str:
 
 async def require_session(request: Request, call_next):
     try:
-        return await _require_session(request, call_next)
+        response = await _require_session(request, call_next)
     except CompanyUnavailable as exc:
         # The session's company cannot be opened now (#358): the gate itself
         # opens it (the company id, the copy's mode) before any route runs,
         # so the sentence is answered here too, as a 503, never a traceback.
-        return JSONResponse(status_code=503, content={"detail": sentence_of(exc)})
+        response = JSONResponse(status_code=503, content={"detail": sentence_of(exc)})
+    served = getattr(request.state, "company_served", None)
+    if served is not None:
+        response.headers[_COMPANY_SERVED_HEADER] = served
+    return response
+
+
+def _from_this_apps_own_address(request: Request) -> bool:
+    """The request comes from this computer's loopback address, or from the
+    one address this app listens on, which is the address the AI assistant
+    connection calls the app at (switchboard_link._app_base_url)."""
+    host = getattr(request.client, "host", None) or ""
+    if host in _LOOPBACK_HOSTS:
+        return True
+    from urllib.parse import urlsplit
+
+    from app.services.switchboard_link import _app_base_url
+
+    own = urlsplit(_app_base_url()).hostname or ""
+    return bool(host) and host == own
+
+
+def api_token_refusal(request: Request):
+    """(the token's principal, None) when the gate lets the request's API
+    token in, else (the principal or None, the response the gate refuses it
+    with). The gate and the sign-in status (/api/auth/status) both ask
+    this, so a token is refused by one rule wherever it is sent."""
+    token_principal = None
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        token_principal = _resolve_api_token(auth_header[7:].strip())
+    if token_principal is not None and token_principal.get("revoked"):
+        # A revoked token says so (#434): the client that holds it is
+        # usually unattended, and "Not authenticated" sent its operator
+        # to the sign-in page. A secret that matches nothing stays vague.
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": REVOKED_REFUSAL.format(label=token_principal["label"])},
+            headers={_TOKEN_REFUSED_HEADER: "1"},
+        )
+    if token_principal is not None and token_principal.get("maker_gone"):
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={
+                "detail": MAKER_GONE_REFUSAL.format(label=token_principal["label"])
+            },
+            headers={_TOKEN_REFUSED_HEADER: "1"},
+        )
+    if token_principal is None:
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": "Not authenticated"},
+            headers=(
+                {_TOKEN_REFUSED_HEADER: "1"}
+                if auth_header.startswith("Bearer ")
+                else None
+            ),
+        )
+    if (
+        token_principal.get("link") or _is_link_label(token_principal.get("label"))
+    ) and not _from_this_apps_own_address(request):
+        return token_principal, JSONResponse(
+            status_code=401,
+            content={"detail": LINK_TOKEN_ADDRESS_REFUSAL},
+        )
+    # From here every answer to the token names the company it came
+    # from (require_session adds the header).
+    from app.services import served_companies as _sc
+
+    request.state.company_served = _sc.current_file() or ""
+    if token_principal.get("role") == "admin":
+        # Tokens have not been made as administrators since 2.29.0
+        # (#434), but one made earlier kept working until revoked
+        # (#659). It is refused now, with what to do instead; the
+        # row stays, flagged under Settings, API Tokens, until an
+        # administrator revokes it.
+        return token_principal, JSONResponse(
+            status_code=403,
+            content={
+                "detail": ADMIN_TOKEN_REFUSAL.format(label=token_principal["label"])
+            },
+        )
+    return token_principal, None
 
 
 async def _require_session(request: Request, call_next):
@@ -1417,7 +1571,13 @@ async def _require_session(request: Request, call_next):
         # deactivated, its role or password changed since, or the row is
         # gone. The role comes from the row too, so a demotion takes effect
         # on the next request instead of living in the cookie.
-        state, db_role, db_version = _check_session_user(request.session)
+        # Off the event loop (#959): the lookup opens a session and waits
+        # for a pooled connection; run on the loop's thread, an empty pool
+        # froze every request for the checkout timeout, and the handlers
+        # holding the connections could not hand them back meanwhile.
+        state, db_role, db_version = await run_in_threadpool(
+            _check_session_user, request.session
+        )
         if state == "revoked":
             request.session.clear()
             return JSONResponse(
@@ -1440,45 +1600,25 @@ async def _require_session(request: Request, call_next):
         # Scoped API tokens: non-human principals (agents, integrations)
         # authenticate with `Authorization: Bearer sbp_...` and wear a role
         # exactly like a user. Session auth always wins when present.
-        auth_header = request.headers.get("authorization") or ""
-        if auth_header.startswith("Bearer "):
-            token_principal = _resolve_api_token(auth_header[7:].strip())
-        if token_principal is not None and token_principal.get("revoked"):
-            # A revoked token says so (#434): the client that holds it is
-            # usually unattended, and "Not authenticated" sent its operator
-            # to the sign-in page. A secret that matches nothing stays vague.
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": (
-                        f"The API token \"{token_principal['label']}\" was revoked. "
-                        "Ask an administrator for a new one under Settings, API Tokens."
-                    )
-                },
-            )
-        if token_principal is None:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Not authenticated"},
-            )
-        if token_principal.get("role") == "admin":
-            # Tokens have not been made as administrators since 2.29.0
-            # (#434), but one made earlier kept working until revoked
-            # (#659). It is refused now, with what to do instead; the
-            # row stays, flagged under Settings, API Tokens, until an
-            # administrator revokes it.
-            return JSONResponse(
-                status_code=403,
-                content={
-                    "detail": ADMIN_TOKEN_REFUSAL.format(label=token_principal["label"])
-                },
-            )
+        token_principal, refused = api_token_refusal(request)
+        if refused is not None:
+            return refused
         # Tokens cannot manage identities — a leaked bookkeeper token must
         # not be able to mint itself an admin token or a user account.
         if path.startswith(("/api/users", "/api/tokens")):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "API tokens cannot manage users or tokens"},
+            )
+        # The AI assistant connection (#1087) is a signed-in person's: the
+        # assistant holding its token must not mint itself sign-in codes
+        # or end its own connection, nor read its state.
+        if path.startswith("/api/switchboard"):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": "An API token cannot reach the AI assistant connection."
+                },
             )
         # Restoring a backup replaces the whole company: a signed-in
         # administrator's, never a token's, whatever its role (#434).
@@ -1501,6 +1641,8 @@ async def _require_session(request: Request, call_next):
         # get_db reads this to stamp audit attribution ("token:<label>")
         request.state.token_principal = {
             "username": "token:" + token_principal["label"],
+            "label": token_principal["label"],
+            "ends_with_maker": bool(token_principal.get("ends_with_maker")),
             "role": role,
             "allow_backups": allow_backups,
             "allow_payroll": allow_payroll,
@@ -1650,7 +1792,16 @@ class ActingUserContextMiddleware:
         override_token = _closing_date_password.set(override)
         # The company this request works in (#358), here for the same reason
         # as the username: every Session the request opens binds to it.
-        company_token = _served_company.set(_request_company(scope, session))
+        company = _request_company(scope, session)
+        if company is _UNSERVED:
+            _acting_username.reset(token)
+            _acting_source.reset(source_token)
+            _closing_date_password.reset(override_token)
+            response = JSONResponse(
+                status_code=421, content={"detail": UNSERVED_COMPANY_REFUSAL}
+            )
+            return await response(scope, receive, send)
+        company_token = _served_company.set(company)
         try:
             await self.app(scope, receive, send)
         finally:
@@ -1660,23 +1811,51 @@ class ActingUserContextMiddleware:
             _acting_username.reset(token)
 
 
-def _request_company(scope, session) -> str | None:
+# what _request_company answers for a company header the server cannot honor
+_UNSERVED = object()
+
+
+def _request_company(scope, session):
     """The company file a request works in: the one its session chose, or,
     for an API token's request (no sign-in), the one its
     X-SlowBooks-Company header names, where the token is then looked up.
-    None is the company the server was started for."""
+    None is the company the server was started for.
+
+    A request with no sign-in whose header is given more than once, blank,
+    not a company file's name, or names a company this server does not
+    serve now gets _UNSERVED, and is refused: it is never answered from
+    the company the server was started for instead. A header naming that
+    company is honored. A signed-in session ignores the header; a request
+    with no sign-in that carries the header or a token follows these rules
+    whatever company its cookie chose."""
     from app.services import served_companies
+    from app.services.company_service import safe_company_filename
 
     chosen = served_companies.chosen_file(session)
-    if chosen is not None or session.get("authenticated") is True:
+    if session.get("authenticated") is True:
         return chosen
     wanted = _COMPANY_HEADER.lower().encode("latin-1")
-    for name, value in scope.get("headers") or []:
-        if name == wanted:
-            return served_companies.chosen_file(
-                {served_companies.SESSION_FILE_KEY: value.decode("latin-1").strip()}
-            )
-    return None
+    headers = scope.get("headers") or []
+    given = [value for name, value in headers if name == wanted]
+    if not given:
+        # A token's request with no header is the started company's, even
+        # when its cookie chose another company before any sign-in (the
+        # sign-in screen's choice is for the person signing in, not for a
+        # token, which is looked up where it is asked for).
+        bearer = any(
+            name == b"authorization" and value[:7].lower() == b"bearer "
+            for name, value in headers
+        )
+        return None if bearer else chosen
+    if len(given) > 1:
+        return _UNSERVED
+    filename = given[0].decode("latin-1").strip()
+    if not filename or safe_company_filename(filename) != filename:
+        return _UNSERVED
+    if filename == served_companies.started_file():
+        return None
+    chosen = served_companies.chosen_file({served_companies.SESSION_FILE_KEY: filename})
+    return _UNSERVED if chosen is None else chosen
 
 
 # ---- Middleware stack ----
@@ -1807,6 +1986,8 @@ app.include_router(simplefin.router)
 app.include_router(mercury.router)
 app.include_router(users_routes.router)
 app.include_router(api_tokens_routes.router)
+app.include_router(switchboard_routes.router)
+app.include_router(whoami_routes.router)
 app.include_router(tax.router)
 app.include_router(backups.router)
 app.include_router(company_file_routes.router)

@@ -255,7 +255,7 @@ def test_the_decimal_point_places_itself_when_on(browser):
         assert page.input_value("#p-amount") == "123.45"
         # a point typed yourself is kept
         page.focus("#p-amount")
-        page.keyboard.press("Control+a")
+        page.keyboard.press("ControlOrMeta+a")
         page.keyboard.type("100.")
         page.keyboard.press("Tab")
         assert float(page.input_value("#p-amount")) == 100
@@ -325,14 +325,22 @@ def test_my_preferences_save_themselves(browser, theme):
                 return 'rgb(255, 255, 255)'; };
             return [...document.querySelectorAll('#settings-my-preferences h3, #settings-my-preferences p, '
                 + '#settings-my-preferences label, #settings-my-preferences [id$=-hint]')]
-                .map(el => [el.textContent.trim().slice(0, 30), getComputedStyle(el).color, ground(el)]);
+                .map(el => [el.textContent.trim().slice(0, 30), getComputedStyle(el).color, ground(el),
+                            !!el.closest('.hint-pop')]);
         }""")
         bad = [
-            (t, fg, bg, contrast(fg, bg)) for t, fg, bg in low if contrast(fg, bg) < 4.5
+            (t, fg, bg, contrast(fg, bg))
+            for t, fg, bg, _ in low
+            if contrast(fg, bg) < 4.5
         ]
-        # heading, note, and a label + hint for each of the section's three
-        # boxes (#480's two, #482's report refresh) and for Text size (#717)
-        assert len(low) == 10 and not bad, bad
+        # in the open: the heading, a label + hint for each of the section's
+        # three boxes (#480's two, #482's report refresh), Text size's label
+        # (#717) and the Fast Rack's count and Add label (#912); the
+        # section's note (#977) holds its lead, Text size's line and the
+        # Fast Rack's, and reads at AA too
+        shown = [row for row in low if not row[3]]
+        assert len(shown) == 10 and not bad, (shown, bad)
+        assert len(low) - len(shown) == 3, low
         assert not page.is_checked("#pref-enter-moves")
         assert not page.is_checked("#pref-auto-decimal")
         # outside the administrator's form: no Save Settings needed

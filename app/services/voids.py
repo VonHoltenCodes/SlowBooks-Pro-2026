@@ -89,6 +89,20 @@ DOCUMENT_KEYED_VOIDS = {
         RestrictionRelease.id,
         RestrictionRelease.transaction_id,
     ),
+    # the void of a bill, vendor credit or bill payment the QuickBooks Online
+    # import carried onto 2000 with no posting (#713): it moves the amount off
+    # 2000, and the document has no transaction_id, so it voids no row here
+    "qbo_carry_bill_void": (Bill, Bill.id, Bill.transaction_id),
+    "qbo_carry_vendor_credit_void": (
+        VendorCredit,
+        VendorCredit.id,
+        VendorCredit.transaction_id,
+    ),
+    "qbo_carry_bill_payment_void": (
+        BillPayment,
+        BillPayment.id,
+        BillPayment.transaction_id,
+    ),
     "functional_allocation_void": (
         FunctionalAllocation,
         FunctionalAllocation.id,

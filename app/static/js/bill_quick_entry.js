@@ -27,11 +27,14 @@ const BillQuickEntry = {
             API.get('/accounts?active_only=true'),
             // the terms list (#664), as Enter Bill offers it
             PaymentTerms.load(),
+            // the company's classes, for the line Class cell (#1051)
+            BillQuickEntry.lineClasses() ? Nonprofit.loadFunds() : null,
         ]);
         BillQuickEntry._vendors = vendors;
         BillQuickEntry._items = items;
         BillQuickEntry._accounts = PurchaseAccounts.withBalanceSheet(accounts);  // the balance-sheet accounts too (#766)
         BillQuickEntry._defaultAccountId = null;
+        BillQuickEntry._classId = null;
         BillQuickEntry._lineCount = 0;
         BillQuickEntry._batch = [];
         // files attached before the save (#881): this page's form holds
@@ -42,10 +45,8 @@ const BillQuickEntry = {
                 <h2>Bill Quick Entry</h2>
                 <div style="font-size:10px; color:var(--text-muted);">
                     Batch bill entry — for entering a stack of vendor bills quickly
+                    ${hint('Enter the bill and press <strong>Save &amp; Next</strong> (or Ctrl+Enter) to save it and start the next one. Each line is an account and an amount.', 'Bill Quick Entry')}
                 </div>
-            </div>
-            <div class="quick-entry-info" style="background:var(--primary-light); padding:8px 12px; margin-bottom:12px; border:1px solid var(--qb-gold); font-size:11px;">
-                Enter the bill and press <strong>Save &amp; Next</strong> (or Ctrl+Enter) to save it and start the next one. Each line is an account and an amount.
             </div>
             <form id="bqe-form" aria-label="Bill Quick Entry" onsubmit="BillQuickEntry.save(event)">
                 <div class="form-grid">
@@ -62,7 +63,7 @@ const BillQuickEntry = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Lines</h3>
                 <div class="table-container"><table class="line-items-table bill-lines-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col" title="Where the line is recorded">Account</th><th scope="col">Description</th><th scope="col" class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col" title="Where the line is recorded">Account</th><th scope="col">Description</th>${BillQuickEntry.lineClasses() ? Nonprofit.classHeadHtml() : ''}<th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="bqe-lines">${BillQuickEntry.lineHtml(BillQuickEntry._lineCount++)}</tbody>
                 </table></div>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="BillQuickEntry.addLine()">+ Add Line</button>
@@ -77,17 +78,32 @@ const BillQuickEntry = {
             <div id="bqe-log" style="margin-top:16px;"></div>`;
     },
 
+    // A Class on each line (#1051), drawn where the company has a class of
+    // its own (Nonprofit.lineClassShown, Enter Bill's rule); the empty
+    // choice is "No class", there being no header class here. A new line,
+    // and the next bill's first line, start with the class of the line
+    // above: the last one chosen.
+    _classId: null,
+    lineClasses() { return typeof Nonprofit !== 'undefined' && !!Nonprofit.classCellHtml; },
+    lastClass() {
+        const rows = $$('#bqe-lines tr');
+        const last = rows[rows.length - 1];
+        return last && BillQuickEntry.lineClasses() ? Nonprofit.fundFromRow(last, 'line-class') : null;
+    },
+
     lineHtml(idx) {
         const acctOpts = PurchaseAccounts.options(BillQuickEntry._accounts, BillQuickEntry._defaultAccountId);
         return `<tr data-bqeline="${idx}">
                 <td><select class="line-item" onchange="BillQuickEntry.itemSelected(this)">${ItemQuickAdd.options(BillQuickEntry._items)}</select></td>
                 <td>${AccountQuickAdd.picker(`<select class="line-account"><option value="">Choose...</option>${acctOpts}</select>`, 'bill-entry')}</td>
                 <td><input class="line-desc"></td>
+                ${BillQuickEntry.lineClasses() ? Nonprofit.classCellNoHeaderHtml('line-class', BillQuickEntry._classId) : ''}
                 <td class="col-amount"><input class="line-amt money" type="number" step="0.01" min="0" oninput="BillQuickEntry.recalc()"></td>
             </tr>`;
     },
 
     addLine() {
+        BillQuickEntry._classId = BillQuickEntry.lastClass();
         $('#bqe-lines').insertAdjacentHTML('beforeend', BillQuickEntry.lineHtml(BillQuickEntry._lineCount++));
     },
 
@@ -155,7 +171,8 @@ const BillQuickEntry = {
             const acct = row.querySelector('.line-account');
             const accountId = acct && !acct.disabled && /^\d+$/.test(acct.value) ? Number(acct.value) : null;
             if (!missing && acct && !acct.disabled && !accountId && amount > 0) missing = { n: i + 1, sel: acct };
-            lines.push({ item_id: itemId, account_id: accountId, description: desc, amount, line_order: lines.length });
+            const classId = BillQuickEntry.lineClasses() ? Nonprofit.fundFromRow(row, 'line-class') : null;
+            lines.push({ item_id: itemId, account_id: accountId, description: desc, class_id: classId, amount, line_order: lines.length });
         });
         return { lines, missing };
     },
@@ -165,6 +182,9 @@ const BillQuickEntry = {
         const form = e.target;
         if (form.dataset.saving) return;
         const { lines, missing } = BillQuickEntry._lines();
+        // $0.00 is asked about first, as the bill form asks (ZeroTotal); a
+        // bill is never saved for nothing, so Yes is answered in a sentence
+        if (!ZeroTotal.ask('Bill', BillQuickEntry.recalc())) return;
         if (BillQuickEntry.recalc() <= 0) {
             toast('Enter what the vendor charged: an amount on at least one line.', 'error');
             return;
@@ -224,6 +244,7 @@ const BillQuickEntry = {
     // vendor's, or one day's); the number and the lines start again.
     _next(form) {
         form.bill_number.value = '';
+        BillQuickEntry._classId = BillQuickEntry.lastClass();
         BillQuickEntry._lineCount = 0;
         $('#bqe-lines').innerHTML = BillQuickEntry.lineHtml(BillQuickEntry._lineCount++);
         BillQuickEntry.recalc();

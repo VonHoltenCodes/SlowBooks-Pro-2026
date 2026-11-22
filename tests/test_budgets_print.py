@@ -33,7 +33,7 @@ def _text(fragment: str) -> str:
 
 
 def _rows(page: str) -> list[list[str]]:
-    body = page.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    body = page.split("<tbody>", 1)[1].split("</table>", 1)[0]
     return [
         [_text(td) for td in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
         for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S)

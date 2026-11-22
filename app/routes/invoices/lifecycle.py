@@ -18,7 +18,7 @@ from app.services.accounting import (
     create_journal_entry,
     get_ar_account_id,
     _q,
-    void_line_memo,
+    reversing_lines,
 )
 from app.services.jobs_service import own_job
 from app.services.numbering import next_invoice_number
@@ -78,8 +78,10 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
         raise HTTPException(
             status_code=400,
             detail=(
-                "Cannot void an invoice with payments applied. Void the "
-                "payment(s) first, then void the invoice."
+                # no article before the noun: a company that calls it a
+                # pledge read "an pledge"
+                "This invoice has payments applied and cannot be voided. "
+                "Void the payment(s) first, then void the invoice."
             ),
         )
     check_closing_date(
@@ -115,19 +117,15 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
         original_lines = (
             db.query(TransactionLine)
             .filter(TransactionLine.transaction_id == invoice.transaction_id)
+            .order_by(TransactionLine.id)
             .all()
         )
-        reverse_lines = []
-        for ol in original_lines:
-            reverse_lines.append(
-                {
-                    "account_id": ol.account_id,
-                    "debit": ol.credit,  # swap debit/credit
-                    "credit": ol.debit,
-                    "description": void_line_memo(ol.description),
-                    "basis": ol.basis,
-                }
-            )
+        # Each line's own dimensions come over (job, class, cost code, cost
+        # type, function), as a credit memo's and a bill's void carry them:
+        # a coded line's revenue comes off its own code and type, so the
+        # job's Cost Detail nets to zero on every row (NEW-262), not on the
+        # code's row plus a negative "Revenue with no cost code".
+        reverse_lines = reversing_lines(original_lines)
         if reverse_lines:
             create_journal_entry(
                 db,
@@ -156,7 +154,6 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
         )
         .all()
     )
-    from app.services.accounting import reversing_lines
     from app.services.qbo_documents import reversed_already
 
     for fee_txn in fee_txns:
@@ -772,6 +769,7 @@ def duplicate_invoice(
             job_id=own_job(db, original.customer_id, oline.job_id, left_off),
             class_id=oline.class_id,
             cost_code_id=oline.cost_code_id,
+            cost_type=oline.cost_type,
             is_taxable=cline.is_taxable,
             line_order=oline.line_order,
         )
@@ -800,4 +798,16 @@ def duplicate_invoice(
     if new_invoice.customer:
         resp.customer_name = invoice_customer_name(new_invoice)
     resp.jobs_left_off = left_off
+    # the copy is a new sale: its answer says what a new invoice's says
+    # about a missing or expired exemption certificate
+    from app.services.tax_exemption import note_certificate
+
+    note_certificate(
+        db,
+        resp,
+        new_invoice.customer,
+        new_invoice.date,
+        new_invoice.job_id,
+        bool(new_invoice.tax_exempt),
+    )
     return resp

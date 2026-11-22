@@ -7,6 +7,7 @@ newest first. Every role reads it; nothing writes through it.
 """
 
 import smtplib
+import ssl
 from datetime import timedelta
 from pathlib import Path
 
@@ -53,7 +54,16 @@ def smtp(monkeypatch, db_session):
         def __init__(self, *a, **k):
             pass
 
-        def starttls(self):
+        def ehlo_or_helo_if_needed(self):
+            pass
+
+        def has_extn(self, name):
+            return name == "starttls"
+
+        def starttls(self, context=None):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+
+        def ehlo(self):
             pass
 
         def login(self, *a):
@@ -180,9 +190,16 @@ def test_an_invoices_activity_lists_each_event_in_order(
     assert "Line: work, $100.00" in created["details"]
     assert edited["text"] == f"Edited by {who}."
     assert "Due date 2026-06-30 → 2026-07-15" in edited["details"]
-    assert "Line removed: work, $100.00" in edited["details"]
-    assert "Line added: more work, $200.00" in edited["details"]
-    assert "Total $100.00 → $200.00" in edited["details"]
+    # a rewritten line that shares nothing with the one before it (neither
+    # description nor amount) reads as one removed and one added (W-222),
+    # before the totals it moved (W-223)
+    assert edited["details"] == [
+        "Due date 2026-06-30 → 2026-07-15",
+        "Line added: more work, $200.00",
+        "Line removed: work, $100.00",
+        "Subtotal $100.00 → $200.00",
+        "Total $100.00 → $200.00",
+    ], edited["details"]
     assert emailed["text"] == f"Emailed to ap@probe.test by {who}."
     assert attached["text"] == f"receipt.pdf attached by {who}."
     assert voided["text"] == f"Voided by {who}."
@@ -197,7 +214,16 @@ def test_a_failed_send_says_so(client, seed_accounts, db_session, smtp, monkeypa
         def __init__(self, *a, **k):
             pass
 
-        def starttls(self):
+        def ehlo_or_helo_if_needed(self):
+            pass
+
+        def has_extn(self, name):
+            return name == "starttls"
+
+        def starttls(self, context=None):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+
+        def ehlo(self):
             pass
 
         def login(self, *a):
@@ -407,12 +433,10 @@ def test_a_journal_entrys_activity(client, seed_accounts, db_session):
     ], events
     assert events[3]["text"].startswith("Journal Entry created by ")
     edited = events[2]["details"]
-    assert any(
-        d.startswith("Line removed: ") and "debit $100.00" in d for d in edited
-    ), edited
-    assert any(
-        d.startswith("Line added: ") and "debit $150.00" in d for d in edited
-    ), edited
+    # each line changed in its place (W-215), not removed and added again
+    assert any(d.endswith(": Debit $100.00 → $150.00") for d in edited), edited
+    assert any(d.endswith(": Credit $100.00 → $150.00") for d in edited), edited
+    assert not any(d.startswith(("Line removed", "Line added")) for d in edited)
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +582,9 @@ def test_the_email_log_sender_migration(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("c894a1e7d2b3").down_revision == "b8640c3e4a5b"
-    assert script.get_heads() == ["d897a2c4e6f1"]  # #897 is the head above it
+    assert script.get_heads() == [
+        "c1128e5a7d0f"
+    ]  # the estimate void (#1128) is the head
     command.upgrade(cfg, "b8640c3e4a5b")  # the step below it
     with sqlite3.connect(db) as conn:
         conn.execute(

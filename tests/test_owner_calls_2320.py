@@ -36,10 +36,12 @@ def test_a_save_that_keeps_the_company_type_carries_no_note(client):
 
 def test_the_paper_size_setting_says_what_stays_on_letter():
     src = (ROOT / "app/static/js/settings.js").read_text(encoding="utf-8")
+    # #977: the line is the field's entry in the section's note, and the
+    # field points at it
     at = src.index('name="pdf_paper_size"')
-    after = src[at : at + 900]
+    assert 'aria-describedby="pdf-paper-size-help"' in src[at : at + 120]
+    entry = src[src.index("{ name: 'PDF Paper Size', id: 'pdf-paper-size-help'") :]
     assert (
         "Checks, mailing labels and the IRS forms print on Letter whatever this says"
-        in after
+        in entry[:300]
     )
-    assert 'class="form-hint"' in after

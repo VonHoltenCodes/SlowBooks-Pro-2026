@@ -19,6 +19,7 @@
 import csv
 import io
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
@@ -35,6 +36,13 @@ from app.models.transactions import Transaction
 from app.services.account_label import account_label
 from app.services.account_tree import inherited_detail_type, parent_link_problem
 from app.services.accounting import _q, create_journal_entry
+from app.services.column_fit import (
+    add_notes,
+    fit_notes,
+    fit_to_columns,
+    journal_label,
+    line_label,
+)
 from app.services.safe_errors import DataProblem
 from app.services.settings_service import use_account_numbers
 
@@ -478,17 +486,12 @@ def _plan_accounts(db: Session, accounts: list[dict]) -> list[dict]:
     return decisions
 
 
-def dry_run_bundle(
-    db: Session,
-    bundle: dict,
-    parsers: dict,
-    source_label: str,
-    source_type: str | None = None,
-) -> dict:
-    """Validate a bundle {kind: csv_text}. Nothing is written."""
+def missing_files(bundle: dict) -> list[str]:
+    """The dry run's refusals for the chart or the ledger not being in the
+    upload, in the words of a source whose files are called that. A source
+    that reads something else (QuickBooks Online's Export data zip) hands
+    dry_run_bundle its own sentences (#910)."""
     errors: list[str] = []
-    warnings: list[str] = []
-
     if "coa" not in bundle:
         errors.append(
             "Missing chart of accounts file (filename containing 'chart' or 'accounts')"
@@ -498,6 +501,23 @@ def dry_run_bundle(
             "Missing general ledger / journal file (filename containing "
             "'general', 'ledger', or 'journal')"
         )
+    return errors
+
+
+def dry_run_bundle(
+    db: Session,
+    bundle: dict,
+    parsers: dict,
+    source_label: str,
+    source_type: str | None = None,
+    missing: Callable[[dict], list[str]] = missing_files,
+) -> dict:
+    """Validate a bundle {kind: csv_text}. Nothing is written. ``missing``
+    says, in the source's own words, what a bundle without the chart or
+    the ledger lacks."""
+    errors: list[str] = list(missing(bundle))
+    warnings: list[str] = []
+
     if errors:
         return {
             "ok": False,
@@ -672,6 +692,10 @@ def dry_run_bundle(
         if decision["warning"]:
             warnings.append(decision["warning"])
 
+    # A value longer than its column is cut to fit on import, and said so
+    # (PostgreSQL refuses it; SQLite took it): the same sentences here.
+    warnings.extend(_column_fit_notes(db, accounts, journals, seen))
+
     existing = set(books_by_name(db)) | set(onto_accounts(db, accounts))
     return {
         "ok": not errors,
@@ -688,11 +712,63 @@ def dry_run_bundle(
     }
 
 
+def _column_fit_notes(db: Session, accounts, journals, seen) -> list[str]:
+    """What the import will cut to fit a column: the planned accounts'
+    names and descriptions and each posted journal line's memo, in the words
+    the import's own cut says (column_fit)."""
+    from app.models.transactions import TransactionLine
+
+    notes: list[str] = []
+    for decision in sorted(_plan_accounts(db, accounts), key=lambda d: d["index"]):
+        spec = decision["spec"]
+        notes.extend(
+            fit_notes(Account(name=spec["name"], description=spec["description"]))
+        )
+    for group in journals:
+        if not group or _group_reference(group) in seen:
+            continue
+        journal = journal_label(_group_reference(group), group[0]["date"])
+        for row in group:
+            if row["debit"] == 0 and row["credit"] == 0:
+                continue
+            description = row.get("description") or None
+            for sentence in fit_notes(
+                TransactionLine(description=description),
+                label=line_label(journal, description),
+            ):
+                if sentence not in notes:
+                    notes.append(sentence)
+    return notes
+
+
 def run_import_bundle(
-    db: Session, bundle: dict, parsers: dict, source_type: str, source_label: str
+    db: Session,
+    bundle: dict,
+    parsers: dict,
+    source_type: str,
+    source_label: str,
+    missing: Callable[[dict], list[str]] = missing_files,
 ) -> dict:
-    """Execute the import. Refuses when the dry-run fails."""
-    verdict = dry_run_bundle(db, bundle, parsers, source_label, source_type)
+    """Execute the import. Refuses when the dry-run fails. A value longer
+    than its column is cut to the column's length and the answer says so
+    (column_fit): PostgreSQL refuses it otherwise, and nothing is saved."""
+    cut: list[str] = []
+    with fit_to_columns(db, cut):
+        result = _run_import_bundle(
+            db, bundle, parsers, source_type, source_label, missing
+        )
+    return add_notes(result, cut)
+
+
+def _run_import_bundle(
+    db: Session,
+    bundle: dict,
+    parsers: dict,
+    source_type: str,
+    source_label: str,
+    missing: Callable[[dict], list[str]] = missing_files,
+) -> dict:
+    verdict = dry_run_bundle(db, bundle, parsers, source_label, source_type, missing)
     if not verdict["ok"]:
         return {**verdict, "imported_accounts": 0, "imported_journals": 0}
 
@@ -820,11 +896,21 @@ def run_import_bundle(
     posted = 0
     duplicates = 0
     seen = already_imported(db, source_type)
+    # A row that names its party (QuickBooks Online's Journal puts the
+    # block's name on every line it builds) and sits on Accounts Payable or
+    # Accounts Receivable is remembered with its posting, for the source to
+    # name once its contact lists are in (#915): a vendor-named A/P entry
+    # and a customer-named A/R line age as that party's (#897).
+    from app.services.control_journal_lines import _account as _control
+
+    ar_id, ap_id = _control(db, "1100"), _control(db, "2000")
+    named_control_lines: list[dict] = []
     for group in journals:
         if group and _group_reference(group) in seen:
             duplicates += 1
             continue
         lines = []
+        named_here: list[tuple[str, str]] = []
         for row in group:
             # Exact name first (disambiguated duplicates keep their code
             # suffix); the stripped form covers "Name (Code)" GL exports.
@@ -853,13 +939,18 @@ def run_import_bundle(
                     "description": row.get("description") or None,
                 }
             )
+            name = str(row.get("name") or "").strip()
+            if name and acct.id in (ar_id, ap_id):
+                named_here.append(
+                    ("payable" if acct.id == ap_id else "receivable", name)
+                )
         if not lines:
             continue
         first = group[0]
         # Store the same value the dedupe key uses (cut to the column width),
         # so a re-import recognises this journal (#498).
         reference = _group_reference(group)
-        create_journal_entry(
+        txn = create_journal_entry(
             db,
             first["date"],
             first.get("description")
@@ -869,6 +960,10 @@ def run_import_bundle(
             reference=reference,
         )
         posted += 1
+        for kind, name in dict.fromkeys(named_here):
+            named_control_lines.append(
+                {"kind": kind, "transaction_id": txn.id, "name": name}
+            )
 
     db.commit()
     return {
@@ -876,6 +971,10 @@ def run_import_bundle(
         "warnings": warnings,
         "imported_accounts": created,
         "imported_journals": posted,
+        # the A/P and A/R lines that named their party, for the source to
+        # resolve (#915); only when there are any, so the answer of a source
+        # whose rows carry no name reads as before
+        **({"named_control_lines": named_control_lines} if named_control_lines else {}),
         # journals the file held that posted nothing (all-zero lines)
         "skipped_journals": len([g for g in journals if g]) - posted - duplicates,
         # journals an earlier import already posted (same reference)

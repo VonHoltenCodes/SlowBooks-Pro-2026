@@ -31,6 +31,9 @@ const JobsPage = {
     // Pay apps. A job not opened yet opens on Overview.
     _tabByJob: {},
     _period: { start: '', end: '' },
+    // Hide zero balances on the Cost Detail tab (#1052, as #625): kept on the
+    // address (hide_zero=1) and on the Save PDF / Save CSV links.
+    _hideZero: false,
     _tree: null,
     _open: new Set(),        // expanded node keys
     _showLines: new Set(),   // nodes with their line list open
@@ -89,7 +92,7 @@ const JobsPage = {
                 <select id="job-filter-status" aria-label="Status" onchange="JobsPage.setFilter('status', this.value)">
                     <option value="">All statuses</option>${statusOpts}</select>
                 ${ActiveLists.pickerHtml('jobs')}
-                <span style="font-size:11px; color:var(--gray-500);">${Terms.text('Job-to-date figures from posted lines. Click a job to drill down.')}</span>
+                <span style="font-size:11px; color:var(--gray-500);">${Terms.text('Job-to-date figures from posted lines.')} ${hint(Terms.text('Click a job to drill down.'), T('Jobs'))}</span>
             </div>
             <div id="jobs-table">${JobsPage._tableHtml()}</div>`;
     },
@@ -195,6 +198,7 @@ const JobsPage = {
         // figures, with an address that said nothing of it — and a refused
         // range named that period as "kept": round-3 review.)
         JobsPage._period = { start: dates.start_date, end: dates.end_date };
+        JobsPage._hideZero = q.hide_zero === '1' || q.hide_zero === 'true';
         JobsPage._from =(typeof ReportsPage !== 'undefined' && ReportsPage._view(q.from)) ? q.from : null;
         try {
             JobsPage._job = await API.get(`/jobs/${id}`);
@@ -277,6 +281,7 @@ const JobsPage = {
         const qs = new URLSearchParams();
         if (JobsPage._period.start) qs.set('start_date', JobsPage._period.start);
         if (JobsPage._period.end) qs.set('end_date', JobsPage._period.end);
+        if (JobsPage._hideZero) qs.set('hide_zero', '1');
         if (JobsPage._from) qs.set('from', JobsPage._from);
         const q = qs.toString();
         const url = `#/jobs/${JobsPage._job.id}${q ? `?${q}` : ''}`;
@@ -288,6 +293,18 @@ const JobsPage = {
         if (p.start) parts.push(`start_date=${p.start}`);
         if (p.end) parts.push(`end_date=${p.end}`);
         return parts.length ? '?' + parts.join('&') : '';
+    },
+    // the cost tree's query: the period, and Hide zero balances when on
+    _treeQs() {
+        const qs = JobsPage._periodQs();
+        if (!JobsPage._hideZero) return qs;
+        return (qs ? qs + '&' : '?') + 'hide_zero=1';
+    },
+    async setHideZero(on) {
+        JobsPage._hideZero = !!on;
+        JobsPage._tree = null;
+        JobsPage._syncAddress();
+        await JobsPage.setTab(JobsPage._tab);
     },
 
     async tabHtml() {
@@ -310,7 +327,7 @@ const JobsPage = {
     },
 
     async loadTree() {
-        if (!JobsPage._tree) JobsPage._tree = await API.get(`/jobs/${JobsPage._job.id}/cost-tree${JobsPage._periodQs()}`);
+        if (!JobsPage._tree) JobsPage._tree = await API.get(`/jobs/${JobsPage._job.id}/cost-tree${JobsPage._treeQs()}`);
         return JobsPage._tree;
     },
 
@@ -401,7 +418,8 @@ const JobsPage = {
     // ---- Cost Detail: the drill-down tree --------------------------------------
     async costsHtml() {
         const tree = await JobsPage.loadTree();
-        if (!tree.types.length) {
+        // with zero balances hidden the toolbar stays, so the box can be unticked
+        if (!tree.types.length && !tree.hide_zero) {
             return `<div class="empty-state"><p>Nothing budgeted or posted to this job yet.</p>
                 <p style="font-size:12px;color:var(--text-muted)">Tag a bill, expense, time entry or job cost entry to it, or set a budget on the Budget tab.</p></div>`;
         }
@@ -426,7 +444,7 @@ const JobsPage = {
             if (open) {
                 for (const node of ty.codes) body += JobsPage.nodeHtml(node, 1);
                 const un = ty.uncoded;
-                if (un.lines.length || un.figures.actual || un.figures.committed) {
+                if (un.lines.length || un.figures.actual || un.figures.committed || un.figures.act_revenue || un.figures.est_revenue) {
                     const ukey = `uncoded:${ty.cost_type}`;
                     body += JobsPage.rowHtml(ukey, 1, '<em>No cost code</em>', un.figures, JobsPage._showLines.has(ukey), false, 'uncoded', un.lines.length);
                     if (JobsPage._showLines.has(ukey)) body += JobsPage.linesHtml(un.lines, 2);
@@ -449,6 +467,14 @@ const JobsPage = {
                 <td></td><td></td><td></td><td></td><td></td><td class="amount">${JobsPage.money(before)}</td>
                 <td class="amount">${JobsPage.money(-before)}</td><td></td><td></td><td></td></tr>`;
         }
+        // revenue with no cost code and no cost type (#1066): a row of its
+        // own, so the revenue columns foot to the Total row
+        const ur = tree.unassigned_revenue;
+        if (ur && (ur.lines.length || ur.figures.est_revenue || ur.figures.act_revenue)) {
+            const rkey = 'revenue:uncoded';
+            body += JobsPage.rowHtml(rkey, 0, '<em>Revenue with no cost code</em>', ur.figures, JobsPage._showLines.has(rkey), false, 'uncoded', ur.lines.length);
+            if (JobsPage._showLines.has(rkey)) body += JobsPage.linesHtml(ur.lines, 1);
+        }
         const jl = tree.job_level_budget;
         if (jl.original || jl.changes || jl.est_revenue) {
             body += JobsPage.rowHtml('joblevel', 0, '<em>Whole-job budget (not by code)</em>', jl, false, false, 'joblevel');
@@ -467,8 +493,12 @@ const JobsPage = {
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:11px;color:var(--text-muted)">
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(true)">Expand all</button>
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(false)">Collapse all</button>
-                <span>Click a type or code to open it; click the line count to see the posted lines; click a line to open its document.</span>
-                <span style="margin-left:auto;display:flex;gap:6px">
+                ${hint('Click a type or code to open it; click the line count to see the posted lines; click a line to open its document.', JobsPage.TAB_LABELS.costs)}
+                <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+                    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text)" title="Leave out a cost code with no budget, no committed cost, no actual cost and no revenue; the totals are the same">
+                        <input type="checkbox" id="job-hide-zero" ${JobsPage._hideZero ? 'checked' : ''} onchange="JobsPage.setHideZero(this.checked)">
+                        Hide zero balances
+                    </label>
                     <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('pdf')" title="The tree as shown, for this period">Save PDF</button>
                     <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('csv')" title="Every type and cost code, for this period">Save CSV</button>
                 </span>
@@ -477,8 +507,8 @@ const JobsPage = {
             ${JobsPage.revenueSectionsHtml(tree.revenue_sections)}`;
     },
 
-    // A contractor's revenue by section, beside the section's cost: a pay
-    // application's revenue has no cost type, so the tree above is cost only.
+    // A contractor's revenue by section, beside the section's cost, the
+    // billed markups spread over the sections their budget went to.
     revenueSectionsHtml(rows) {
         if (!rows || !rows.length) return '';
         const m = JobsPage.money;
@@ -555,7 +585,7 @@ const JobsPage = {
     // the PDF prints the rows that are open, the CSV every row.
     saveCostTree(kind) {
         const id = JobsPage._job.id;
-        const qs = new URLSearchParams(JobsPage._periodQs().replace(/^\?/, ''));
+        const qs = new URLSearchParams(JobsPage._treeQs().replace(/^\?/, ''));
         let url = `/api/jobs/${id}/cost-tree/csv`;
         if (kind === 'pdf') {
             url = `/api/jobs/${id}/cost-tree/pdf`;
@@ -627,7 +657,7 @@ const JobsPage = {
                 <span>Seed from an estimate:</span>
                 <select id="budget-estimate"><option value="">Pick an estimate…</option>${estOpts}</select>
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.seedBudget()">Load estimate lines as budget</button>
-                <span style="color:var(--text-muted);font-size:11px">Cost = qty × unit cost (or the line amount when no cost is entered); revenue = the line amount. Rows you edit here become manual and survive re-seeding.</span>
+                ${hint('Cost = qty × unit cost (or the line amount when no cost is entered); revenue = the line amount. Rows you edit here become manual and survive re-seeding.', 'Load estimate lines as budget')}
             </div>
             <div class="table-container"><table class="data-table" style="font-size:12px">
                 <thead><tr><th scope="col">Cost code</th><th scope="col">Budget cost</th><th scope="col">Est. revenue</th><th scope="col">Source</th></tr></thead>
@@ -1123,8 +1153,7 @@ const JobsPage = {
             `<option value="${c.id}" ${String(co.commitment_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.number)} · ${escapeHtml(c.vendor_name || '')}</option>`)).join('');
         const lineRows = (co.lines || []).map((l, i) => JobsPage.coLineRowHtml(l, i)).join('');
         return `<form id="co-form" data-write onsubmit="JobsPage.coSave(event, ${co.id || 'null'})">
-            <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">${co.id ? `Change order ${escapeHtml(co.number || '')}` : 'New change order'}</h4>
-            ${co.allowance_return ? '<p style="font-size:12px;color:var(--text-muted)">This change order returns an allowance\'s unspent amount to the owner: it takes the amount off the contract with no markup. Change its amount, title or date; funding and markup are fixed.</p>' : ''}
+            <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">${co.id ? `Change order ${escapeHtml(co.number || '')}` : 'New change order'}${co.allowance_return ? ` ${hint('This change order returns an allowance\'s unspent amount to the owner: it takes the amount off the contract with no markup. Change its amount, title or date; funding and markup are fixed.', co.id ? `Change order ${co.number || ''}` : 'New change order')}` : ''}</h4>
             <div class="form-grid">
                 <div class="form-group"><label>Title</label><input id="co-title" ${d} maxlength="200" value="${escapeHtml(co.title || '')}"></div>
                 <div class="form-group"><label>Kind</label><select id="co-kind" ${d || (co.id ? 'disabled' : '')}>${kindOpts}</select></div>
@@ -1173,7 +1202,7 @@ const JobsPage = {
             <td><input class="co-l-markup" data-write type="number" step="0.0001" min="-99.9999" max="999.9999" value="${line.markup_pct ?? ''}" style="width:64px;text-align:right" placeholder="dflt" oninput="JobsPage.coRecalc()"></td>
             <td class="amount co-l-amt">0.00</td>
             <td class="amount co-l-sell">0.00</td>
-            <td><button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coRemoveLine(this)">✕</button></td>
+            <td><button type="button" class="btn btn-sm btn-secondary" data-write aria-label="Remove line" title="Remove line" onclick="JobsPage.coRemoveLine(this)">✕</button></td>
         </tr>`;
     },
 
@@ -1206,7 +1235,8 @@ const JobsPage = {
         body.insertAdjacentHTML('beforeend', JobsPage.coLineRowHtml({}, body.children.length));
         JobsPage.coRecalc();
     },
-    coRemoveLine(btn) { const tr = btn.closest('tr'); if (tr) tr.remove(); JobsPage.coRecalc(); },
+    // The shared Remove line: names follow, and the keyboard stays on the form.
+    coRemoveLine(btn) { if (!LineOrder.removeLine(btn, () => JobsPage.coRecalc())) JobsPage.coRecalc(); },
 
     coRecalc() {
         const funding = $('#co-funding') ? $('#co-funding').value : 'contract';
@@ -1270,6 +1300,7 @@ const JobsPage = {
     async coSave(e, id) {
         if (e) e.preventDefault();
         const data = JobsPage.coReadForm();
+        if (!ZeroTotal.ask('Change Order', data.lines.reduce((sum, l) => sum + l.quantity * l.unit_cost, 0))) return;
         try {
             if (id) { const { kind, job_id, ...body } = data; await API.put(`/change-orders/${id}`, body); }
             else { await API.post('/change-orders', data); }
@@ -1313,9 +1344,8 @@ const JobsPage = {
             ? `<div style="font-size:11px;color:var(--text-danger)">${escapeHtml(co.number || 'This change order')} is dated ${ageDays} days ago, so it takes effect then unless you choose the day the owner signed.</div>` : '';
         openModal('Approve change order', `<form id="co-approve-form" onsubmit="JobsPage.coApproveSubmit(event, ${id})">
             <p>Approving ${escapeHtml(co.number || 'this change order')} updates the contract, budget and commitment.</p>
-            <div class="form-group"><label for="co-approved-on">Takes effect on</label>
-                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}"${co.date ? ` min="${escapeHtml(co.date)}"` : ''}>
-                <div style="font-size:11px;color:var(--text-muted)">The date the owner signed. Reports, WIP and pay applications read the change order from this day. It cannot be before the change order's own date or the contract date.</div>${oldNote}</div>
+            <div class="form-group"><label for="co-approved-on">Takes effect on ${hint("The date the owner signed. Reports, WIP and pay applications read the change order from this day. It cannot be before the change order's own date or the contract date.", 'Takes effect on')}</label>
+                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}"${co.date ? ` min="${escapeHtml(co.date)}"` : ''}>${oldNote}</div>
             <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Approve</button></div>
         </form>`);
@@ -1346,9 +1376,8 @@ const JobsPage = {
         const contractDate = ((JobsPage._contract && JobsPage._contract.contract) || {}).contract_date || '';
         openModal('Return unspent allowance', `<form id="co-return-form" onsubmit="JobsPage.coReturnAllowanceSubmit(event, ${sovLineId})">
             <p>Return the ${formatCurrency(remaining)} left on this allowance to the owner. This makes a draft change order for minus that amount, with no markup.</p>
-            <div class="form-group"><label for="co-return-date">Change order date</label>
-                <input id="co-return-date" type="date" required value="${iso}"${contractDate ? ` min="${escapeHtml(contractDate)}"` : ''}>
-                <div style="font-size:11px;color:var(--text-muted)">Approving it cannot take effect before this date, so use the day the allowance closed out (for a month-end return, a date in that month). It cannot be before the contract date or in a closed period.</div></div>
+            <div class="form-group"><label for="co-return-date">Change order date ${hint('Approving it cannot take effect before this date, so use the day the allowance closed out (for a month-end return, a date in that month). It cannot be before the contract date or in a closed period.', 'Change order date')}</label>
+                <input id="co-return-date" type="date" required value="${iso}"${contractDate ? ` min="${escapeHtml(contractDate)}"` : ''}></div>
             <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Make change order</button></div>
         </form>`);
@@ -1620,7 +1649,7 @@ const JobsPage = {
                 <th scope="col" class="amount">Completed</th><th scope="col" class="amount">%</th>
                 <th scope="col" class="amount">Balance</th><th scope="col" class="amount">Retainage</th>
             </tr></thead>
-            <tbody id="pa-body">${rows}</tbody>
+            <tbody id="pa-body" data-line-names>${rows}</tbody>
         </table></div>
         <div id="pa-totals" style="display:flex;gap:16px;flex-wrap:wrap;margin:10px 0">
             ${JobsPage.paTotalsHtml(totals)}
@@ -1894,7 +1923,7 @@ const JobsPage = {
         </tr>`).join('');
         return `
             ${unposted.length ? `<div style="margin-bottom:8px"><button class="btn btn-sm btn-primary" onclick="JobsPage.postTime([${unposted.map(e => e.id).join(',')}])">Post ${unposted.length} approved entr${unposted.length === 1 ? 'y' : 'ies'} to this job</button>
-                <span style="font-size:11px;color:var(--text-muted)">Labor posts at the employee's loaded cost rate with burden as its own line.</span></div>` : ''}
+                ${hint("Labor posts at the employee's loaded cost rate with burden as its own line.", JobsPage.TAB_LABELS.time)}</div>` : ''}
             <div class="table-container"><table class="data-table" style="font-size:12px">
                 <thead><tr><th scope="col">Date</th><th scope="col">Employee</th><th scope="col">Cost code</th><th scope="col" class="amount">Reg</th><th scope="col" class="amount">OT</th><th scope="col" class="amount">DT</th><th scope="col">Status</th><th scope="col">${T('Job')} cost</th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
@@ -1985,7 +2014,7 @@ const JobsPage = {
                 <option value="false" ${exempt ? 'selected' : ''}>Exempt</option>
             </select></div>
             <fieldset class="job-exempt-certificate form-group" style="grid-column:1/-1; border:1px solid var(--gray-200); padding:8px 10px; ${exempt ? '' : 'display:none;'}">
-                <legend style="font-size:12px;">Exemption certificate</legend>
+                <legend style="font-size:12px;">Exemption certificate ${hint(`Printed under the totals of this ${T('job').toLowerCase()}'s exempt estimates and ${T('invoices').toLowerCase()}. Each document keeps the certificate it was made with.`, 'Exemption certificate')}</legend>
                 <div class="form-grid">
                     <div class="form-group"><label>Certificate number *</label>
                         <input name="exempt_certificate_number" maxlength="50" ${need} value="${escapeHtml(job.exempt_certificate_number || '')}"></div>
@@ -1996,7 +2025,6 @@ const JobsPage = {
                     <div class="form-group"><label>Expires</label>
                         <input name="exempt_certificate_expires" type="date" ${exempt ? '' : 'disabled'} value="${job.exempt_certificate_expires || ''}"></div>
                 </div>
-                <div class="hint">Printed under the totals of this ${T('job').toLowerCase()}'s exempt estimates and ${T('invoices').toLowerCase()}. Each document keeps the certificate it was made with.</div>
             </fieldset>`;
     },
 

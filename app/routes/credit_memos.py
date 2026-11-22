@@ -42,8 +42,12 @@ from app.services.closing_date import check_closing_date
 from app.services.jobs_service import refuse_other_customers_jobs
 from app.services.sub_customers import refuse_unless_pays_for
 from app.services.numbering import next_credit_memo_number
-from app.services.settings_service import get_all_settings as get_settings
+from app.services.settings_service import (
+    default_sales_tax_rate,
+    get_all_settings as get_settings,
+)
 from app.services.request_utils import content_disposition
+from app.services.tax_exemption import note_certificate
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -137,6 +141,10 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
     # The job, on the header or a line, is this customer's (NEW-36).
     refuse_other_customers_jobs(db, customer.id, data.job_id, data.lines, "credit memo")
+    # a line's cost code and type are on the chart (#1055)
+    from app.services.job_costing import refuse_unknown_line_costs
+
+    refuse_unknown_line_costs(db, data.lines)
 
     # A memo that credits an invoice takes that invoice's tax rate unless
     # it states its own: the tax goes back the way it was charged. It
@@ -156,7 +164,9 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
             tax_rate = original.tax_rate
         exempt = bool(original.tax_exempt)
     if tax_rate is None:
-        tax_rate = 0
+        # no invoice named and no rate sent: the company's Default Tax Rate,
+        # as the Credit Memo form starts (#1129); it was 0
+        tax_rate = default_sales_tax_rate(db)
 
     # Tax follows the lines the way an invoice's does: an item's own flag,
     # and nothing at all for a non-taxable customer or an exempt invoice.
@@ -222,6 +232,8 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                 amount=amt,
                 class_id=line_data.class_id,
                 job_id=line_data.job_id,
+                cost_code_id=line_data.cost_code_id,
+                cost_type=line_data.cost_type,
                 line_order=i,
             )
         )
@@ -243,6 +255,10 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                         # and A/R lines below do
                         "class_id": line_data.class_id,
                         "job_id": line_data.job_id,
+                        # the cost code and type whose revenue it takes back
+                        # (#1055); the account is the item's
+                        "cost_code_id": line_data.cost_code_id,
+                        "cost_type": line_data.cost_type,
                     }
                 )
 
@@ -293,6 +309,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     db.refresh(cm)
     resp = CreditMemoResponse.model_validate(cm)
     resp.customer_name = customer.name
+    note_certificate(db, resp, customer, cm.date, cm.job_id, exempt)
     return resp
 
 

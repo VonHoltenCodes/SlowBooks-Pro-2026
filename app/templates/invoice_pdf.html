@@ -8,25 +8,32 @@
     {# The printed face is literal — the screen vocabulary (Invoice -> Pledge) must not leak onto a program-fee invoice. #}
     <title>{% if kind == 'DonationReceipt' %}Donation Receipt{% elif kind == 'Pledge' %}Pledge{% elif kind == 'SalesReceipt' %}Sales Receipt{% else %}Invoice{% endif %}</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
+    /* every page after the first names its document and page, in the top margin (#1035) */
+    @page { @top-center { content: {{ (('Donation receipt' if kind == 'DonationReceipt' else 'Pledge' if kind == 'Pledge' else 'Sales receipt' if kind == 'SalesReceipt' else 'Invoice') ~ ' ' ~ (inv.invoice_number or ''))|css_string }} " \00B7  Page " counter(page) " of " counter(pages); font-size: 7pt; color: #999; overflow-wrap: anywhere; } }
+    @page :first { @top-center { content: none; } }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
-    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 14px; }
     .company-info { font-size: 9pt; color: #4a4a6a; }
     .company-name { font-size: 16pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
     .company-logo { display: block; max-height: 60px; max-width: 200px; margin-bottom: 6px; }
     .invoice-title { text-align: right; }
     .invoice-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
-    .invoice-number { font-size: 12pt; color: #666; margin-top: 4px; }
+    .invoice-number { font-size: 12pt; color: #666; margin-top: 2px; }
     .invoice-title .void { color: #b00020; }
     /* Labels over values, one column each: side by side, four labels at a
        fixed 80px squeezed the values until "Sep 01, 2026" and "Net 30" broke
        over two lines whenever a PO # was present (2.17.3 exploratory W-L1). */
-    .meta-table { width: 100%; margin-bottom: 16px; border-collapse: collapse; table-layout: fixed; }
-    .meta-table th { padding: 3px 8px; font-size: 8pt; font-weight: 700; color: #4a4a6a; text-align: left; border-bottom: 1px solid #d0d6e0; }
-    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; white-space: nowrap; }
-    .meta-table td.po { white-space: normal; overflow-wrap: anywhere; }
-    .terms-discount { margin: -10px 0 14px; padding: 0 8px; font-size: 9pt; font-weight: 700; }
-    .addresses { display: flex; gap: 40px; margin-bottom: 20px; }
+    /* The dates and terms sit beside the title, label and value on a row
+       each (#1041): a band of their own across the page pushed the line
+       table a fifth of the way down the sheet. */
+    .meta-table { margin: 6px 0 0 auto; border-collapse: collapse; }
+    .meta-table th { padding: 1px 8px 1px 0; font-size: 8pt; font-weight: 700; color: #4a4a6a; text-align: right; white-space: nowrap; }
+    .meta-table td { padding: 1px 0; font-size: 9pt; vertical-align: top; white-space: nowrap; text-align: right; }
+    .meta-table td.po { white-space: normal; overflow-wrap: anywhere; max-width: 180px; }
+    .terms-discount { margin: -6px 0 12px; padding: 0 8px; font-size: 9pt; font-weight: 700; }
+    .addresses { display: flex; gap: 40px; margin-bottom: 14px; }
     .address-block { flex: 1; }
     .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
     .address-text { font-size: 9pt; color: #333; }
@@ -37,20 +44,42 @@
     .amount-due-value { font-size: 14pt; font-weight: 700; color: #003366; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .amount-due-date { font-size: 8pt; color: #4a4a6a; white-space: nowrap; }
     table.line-items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
-    table.line-items th.r { text-align: right; }
-    table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    table.line-items tr:nth-child(even) { background: #f7f9fb; }
-    .totals { float: right; width: 240px; }
-    .totals table { width: 100%; }
+    table.line-items > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.line-items > thead > tr > th.r { text-align: right; }
+    table.line-items > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.line-items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.line-items > tbody > tr:nth-child(even) { background: #f7f9fb; }
+    /* The last line row, the totals, the notes and the footer are one
+       unbreakable group of the line table (W-183, #1039): the totals never start a
+       page with no row above them, nor the notes without the totals, on
+       WeasyPrint's PDF and on Chromium's print alike (a row's own
+       break-after: avoid is not honoured by Chromium). */
+    table.line-items > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.line-items > tbody.doc-tail > tr:nth-child(even) { background: none; }
+    table.line-items > tbody.doc-tail > tr.doc-end > td { padding: 16px 0 0; border-bottom: 0; }
+    table.line-items > tbody.doc-tail > tr.alt { background: #f7f9fb; }
+    /* A long last line is cut in two (W-187): its last lines open the group,
+       so the totals keep a row above them even when the rest of it ends a page. */
+    table.line-items > tbody > tr.row-head > td { border-bottom: 0; padding-bottom: 0; }
+    table.line-items > tbody > tr.row-end > td { padding-top: 0; }
+    /* W-201: a row's figures sit on its first line, so a cut row's are where
+       any row's are. A cut is at a line boundary of the layout, so the first
+       part's last line is the layout's own, set as usual: never stretched to
+       the column's width (NEW-271). */
+    table.line-items > tbody > tr > td { vertical-align: top; }
+    /* The end of long notes and the footer are one block (W-188). */
+    .doc-close { break-inside: avoid; page-break-inside: avoid; }
+    .notes.notes-end { margin-top: 0; padding-top: 0; border-top: 0; break-before: auto; page-break-before: auto; }
+    .totals { margin-left: auto; break-inside: avoid; page-break-inside: avoid; } /* a block, not a float, so the footer's break-before: avoid binds to it (#1032); never broken inside (#1033) */
+    /* the block's table is 240px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214) */
+    .totals table { width: 240px; margin-left: auto; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
     .totals td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .totals .label { font-weight: 700; color: #4a4a6a; }
+    .totals .label { font-weight: 700; color: #4a4a6a; white-space: nowrap; }
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .totals td.tax-exempt { padding-top: 6px; font-size: 8.5pt; font-style: italic; color: #333; text-align: right; }
-    .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
-    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
+    .notes { clear: both; break-before: avoid; page-break-before: avoid; margin-top: 16px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
+    .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
     .footer .invoice-footer { font-size: 8pt; color: #4a4a6a; margin-bottom: 2px; }
 </style>
 </head>
@@ -75,28 +104,18 @@
         <div class="invoice-title">
             <h1>{% if kind == 'DonationReceipt' %}DONATION RECEIPT{% elif kind == 'Pledge' %}PLEDGE{% elif kind == 'SalesReceipt' %}SALES RECEIPT{% else %}INVOICE{% endif %}{% if inv.status == 'void' %} <span class="void">VOID</span>{% endif %}</h1>
             <div class="invoice-number">#{{ inv.invoice_number }}</div>
+            <table class="meta-table">
+                <tr><th scope="row">{% if kind == 'DonationReceipt' %}Date of contribution:{% elif kind == 'Pledge' %}Pledge date:{% else %}Date:{% endif %}</th><td>{{ inv.date | fdate }}</td></tr>
+                {# A sales receipt is paid at the time of sale: no due date, no terms. #}
+                {% if not inv.is_sales_receipt %}
+                <tr><th scope="row">{% if kind == 'Pledge' %}Due:{% else %}Due Date:{% endif %}</th><td>{{ inv.due_date | fdate }}</td></tr>
+                {% if kind != 'Pledge' and inv.terms %}<tr><th scope="row">Terms:</th><td class="text">{{ inv.terms }}</td></tr>{% endif %}
+                {% endif %}
+                {% if inv.po_number %}<tr><th scope="row">PO #:</th><td class="po">{{ inv.po_number }}</td></tr>{% endif %}
+            </table>
         </div>
     </div>
 
-    {# A sales receipt is paid at the time of sale — no due date, no terms. #}
-    <table class="meta-table">
-        <tr>
-            <th scope="col">{% if kind == 'DonationReceipt' %}Date of contribution:{% elif kind == 'Pledge' %}Pledge date:{% else %}Date:{% endif %}</th>
-            {% if not inv.is_sales_receipt %}
-            <th scope="col">{% if kind == 'Pledge' %}Due:{% else %}Due Date:{% endif %}</th>
-            {% if kind != 'Pledge' %}<th scope="col">Terms:</th>{% endif %}
-            {% endif %}
-            {% if inv.po_number %}<th scope="col">PO #:</th>{% endif %}
-        </tr>
-        <tr>
-            <td>{{ inv.date | fdate }}</td>
-            {% if not inv.is_sales_receipt %}
-            <td>{{ inv.due_date | fdate }}</td>
-            {% if kind != 'Pledge' %}<td>{{ inv.terms or '' }}</td>{% endif %}
-            {% endif %}
-            {% if inv.po_number %}<td class="po">{{ inv.po_number }}</td>{% endif %}
-        </tr>
-    </table>
     {# The early-payment discount the terms offer (#664), and by when: never
        once it is paid or a discount was taken, even if an older server still
        sends the offer line (#665). #}
@@ -159,27 +178,45 @@
     <table class="line-items">
         <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th><th class="r" style="width:80px;">Rate</th><th class="r" style="width:80px;">Amount</th></tr></thead>
         <tbody>
+        {% set rl = retainage_lines or [] %}
+        {#- What is short stays in the last group (#1045): a last line with a long
+           description is not bound to the totals, and long notes follow the
+           table as a block of their own, free to break, with no column
+           headings over them. #}
+        {%- set long_last = (rl or inv.lines) and (((rl or inv.lines)|last).description or '')|length > 600 and last_line_cut != 'kept' %}
+        {%- set long_notes = (inv.notes or '')|length > 1000 %}
         {% for line in inv.lines %}
-            <tr>
-                <td>{{ line.description or '' }}{% if inv.tax_amount and not line.is_taxable and not nonprofit %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
+            {% if loop.last and not rl and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
+            {#- a long last line: its end opens the group (W-187) #}
+            {%- set cut = loop.last and not rl and long_last %}
+            {%- set d_head, d_end = line_cut(line.description) if cut else (line.description or '', '') %}
+            {%- set untaxed %}{% if inv.tax_amount and not line.is_taxable and not nonprofit %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}{% endset %}
+            <tr{% if loop.index is even or cut %} class="{{ ['alt' if loop.index is even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
+                <td>{{ d_head | desc }}{% if not d_end %}{{ untaxed }}{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}</td>
                 <td class="r">{{ line.rate | rate(cur) }}</td>
                 <td class="r">{{ line.amount | currency(cur) }}</td>
             </tr>
+            {% if cut %}</tbody><tbody class="doc-tail"><tr class="{% if loop.index is even %}alt {% endif %}row-end"><td>{{ d_end | desc }}{% if d_end %}{{ untaxed }}{% endif %}</td><td colspan="3"></td></tr>{% endif %}
         {% endfor %}
         {# A pay application's invoice with no lines (#751, #815): the release,
            the retainage a lower percent gives back, or holds, named as its
            lines, so the table says what the money is for. #}
-        {% for row in retainage_lines or [] %}
-            <tr>
-                <td>{{ row.description }}</td>
+        {% for row in rl %}
+            {% if loop.last and not long_last %}</tbody><tbody class="doc-tail">{% endif %}
+            {%- set cut = loop.last and long_last %}
+            {%- set even = (loop.index + (inv.lines|length)) is even %}
+            {%- set d_head, d_end = line_cut(row.description) if cut else (row.description, '') %}
+            <tr{% if even or cut %} class="{{ ['alt' if even, 'row-head' if cut, 'joined' if d_end] | select | join(' ') }}"{% endif %}{% if cut %} data-last-line{% endif %}>
+                <td>{{ d_head | desc }}</td>
                 <td class="r">1</td>
                 <td class="r">{{ row.amount | currency(cur) }}</td>
                 <td class="r">{{ row.amount | currency(cur) }}</td>
             </tr>
+            {% if cut %}</tbody><tbody class="doc-tail"><tr class="{% if even %}alt {% endif %}row-end"><td>{{ d_end | desc }}</td><td colspan="3"></td></tr>{% endif %}
         {% endfor %}
-        </tbody>
-    </table>
+        {% if not inv.lines and not rl %}</tbody><tbody class="doc-tail">{% endif %}
+        <tr class="doc-end"><td colspan="4">
 
     {% set lineless = (retainage_lines or []) | length > 0 %}
     <div class="totals">
@@ -227,11 +264,14 @@
     <div class="irs-statement" style="margin-top:14px; padding:10px 12px; border:1px solid #999; font-size:10px; line-height:1.45;">
         <div style="font-weight:700; margin-bottom:4px;">Acknowledgment of contribution</div>
         <table style="font-size:10px; margin-bottom:6px;">
-            <tr><td style="padding-right:12px;">Date of contribution</td><td>{{ inv.date | fdate }}</td></tr>
-            <tr><td style="padding-right:12px;">Amount</td><td>{{ inv.total | currency(cur) }}</td></tr>
+            {# the day the money came in and what was received, as the sentence
+               below says them: a receipt paid later, or in part, is not its own
+               date and total #}
+            <tr><td style="padding-right:12px; white-space:nowrap;">Date of contribution</td><td>{{ (irs.date or inv.date) | fdate }}</td></tr>
+            <tr><td style="padding-right:12px; white-space:nowrap;">Amount</td><td>{{ irs.amount_received | currency(cur) }}</td></tr>
             {% if inv.fair_value_amount %}
-            <tr><td style="padding-right:12px;">Fair value of goods or services</td><td>{{ inv.fair_value_amount | currency(cur) }}{% if inv.fair_value_description %} — {{ inv.fair_value_description }}{% endif %}</td></tr>
-            <tr><td style="padding-right:12px;">Deductible portion</td><td>{{ irs.deductible_amount | currency(cur) }}</td></tr>
+            <tr><td style="padding-right:12px; white-space:nowrap;">Fair value of goods or services</td><td>{{ inv.fair_value_amount | currency(cur) }}{% if inv.fair_value_description %} — {{ inv.fair_value_description }}{% endif %}</td></tr>
+            <tr><td style="padding-right:12px; white-space:nowrap;">Deductible portion</td><td>{{ irs.deductible_amount | currency(cur) }}</td></tr>
             {% endif %}
         </table>
         <div>{{ irs.text }}</div>
@@ -240,11 +280,23 @@
     <div style="margin-top:10px; font-size:10px; color:#444;">Contributions are deductible when paid; an acknowledgment is issued for each payment received.</div>
     {% endif %}
 
-    {% if inv.notes %}
+    {% if inv.notes and not long_notes %}
     <div class="notes"><strong>Notes:</strong> {{ inv.notes }}</div>
     {% endif %}
 
-    {# Settings -> Invoice footer, on every page (saved and never printed before). #}
-    <div class="footer">{% if company.invoice_footer %}<div class="invoice-footer">{{ company.invoice_footer }}</div>{% endif %}Generated by Slowbooks Pro 2026</div>
+    {# Settings -> Invoice footer, drawn once at the end of the document, after the totals (#1030). #}
+    {% if not long_notes %}
+    <div class="footer">{% if company.invoice_footer %}<div class="invoice-footer">{{ company.invoice_footer }}</div>{% endif %}Generated by SlowBooks Pro 2026</div>
+    {% endif %}
+        </td></tr>
+        </tbody>
+    </table>
+    {% if long_notes %}
+    {#- the notes' last lines and the footer are one block (W-188) #}
+    {% set n_head, n_end = tail_split(inv.notes) %}
+    <div class="notes"><strong>Notes:</strong> {{ n_head }}</div>
+    <div class="doc-close"><div class="notes notes-end">{{ n_end }}</div>
+    <div class="footer">{% if company.invoice_footer %}<div class="invoice-footer">{{ company.invoice_footer }}</div>{% endif %}Generated by SlowBooks Pro 2026</div></div>
+    {% endif %}
 </body>
 </html>

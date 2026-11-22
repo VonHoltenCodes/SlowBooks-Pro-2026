@@ -112,6 +112,11 @@ class CreditMemoLine(Base):
     # divisions reverses each division's income on the P&L by Class.
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    # The cost code and cost type the credit takes revenue back from (#1055),
+    # as the invoice line it credits carries them; the income account is
+    # the item's either way.
+    cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
+    cost_type = Column(String(20), nullable=True)
     line_order = Column(Integer, default=0)
 
     credit_memo = relationship("CreditMemo", back_populates="lines")

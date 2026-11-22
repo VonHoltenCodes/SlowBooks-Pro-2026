@@ -17,6 +17,7 @@ can never become "Contributions Tax".
 from __future__ import annotations
 
 import re
+import string
 
 NONPROFIT: dict[str, str] = {
     # people
@@ -35,9 +36,16 @@ NONPROFIT: dict[str, str] = {
     "Create Invoices": "Create Pledges",
     "New Invoice": "New Pledge",
     "Recurring Invoices": "Recurring Pledges",
-    "Overdue Invoices": "Overdue Pledges",
-    "Recent Invoices": "Recent Pledges",
+    # the receivables cards hold pledges and program-fee invoices both, and
+    # their titles say so (#969)
+    "Overdue Invoices": "Overdue Pledges & Invoices",
+    "The oldest overdue invoices": "The oldest overdue pledges and invoices",
+    "Recent Invoices": "Recent Pledges & Invoices",
+    "The last five invoices": "The last five pledges and invoices",
     "Total Invoiced": "Total Pledged",
+    # Income by Customer's count column: every sales document in the row,
+    # so a nonprofit's names all three kinds it counts
+    "Invoices & Receipts": "Pledges, Invoices & Donations",
     "Sales Receipt": "Donation",
     "Sales Receipts": "Donations",
     "Enter Sales Receipts": "Enter Donations",
@@ -71,11 +79,11 @@ NONPROFIT: dict[str, str] = {
     "Jobs: Budget vs Actual": "Grants: Budget vs Actual",
     "Job Profitability": "Grant Income & Costs",
     # receivables
-    "Total Receivables": "Pledges Receivable",
+    "Total Receivables": "Pledges & Invoices Receivable",
     "A/R Aging": "Pledge Aging",
     "Accounts Receivable Aging": "Pledges Receivable Aging",
     "Monthly Revenue": "Monthly Revenue & Support",
-    "Receivables": "Pledges Receivable",
+    "Receivables": "Pledges & Invoices Receivable",
     "Revenue by Customer": "Revenue & Support by Donor",
 }
 
@@ -183,6 +191,52 @@ class Terms:
 
         return _WORD_RES[self.mode].sub(_swap, s)
 
+    def text_keeping_addresses(self, s: str) -> str:
+        """text() for a sentence that may hold an email address: the prose
+        is reworded, a run of characters with an @ in it never is (an
+        address is data: invoices@customer.example is nobody's address
+        once "invoices" is swapped).
+
+        The time taken grows with the length of the sentence and no
+        faster, whatever is in it: one pass cuts it at its white space,
+        and each stretch between two addresses is reworded whole (so a
+        phrase of two words is still found)."""
+        if not self._dict or not s:
+            return s
+        if "@" not in s:
+            return self.text(s)
+        out, prose = [], []
+        for piece in _WHITE_SPACE.split(s):
+            if "@" in piece:
+                if prose:
+                    out.append(self.text("".join(prose)))
+                    prose = []
+                out.append(piece)
+            else:
+                prose.append(piece)
+        if prose:
+            out.append(self.text("".join(prose)))
+        return "".join(out)
+
+    def worded(self, s: str) -> str:
+        """A finished sentence in the company's words, by what it is made
+        of: our own prose is reworded, and what a person typed (or anything
+        else written as data) never is.
+
+        AsWritten is data from end to end. A Sentence is our prose with the
+        data it carries inside it (said()), so only its own words change:
+        "Always CC: not an email address: not a customer." keeps the
+        person's "not a customer". Any other text is prose, with its email
+        addresses kept (text_keeping_addresses)."""
+        if not self._dict or not s or isinstance(s, AsWritten):
+            return s
+        if isinstance(s, Sentence):
+            return "".join(
+                piece if is_data else self.text_keeping_addresses(piece)
+                for piece, is_data in s.parts
+            )
+        return self.text_keeping_addresses(s)
+
     def slug(self, key: str) -> str:
         """Filename form: ``profit-loss`` / ``statement-of-activities``."""
         return re.sub(r"[^a-z0-9]+", "-", self(key).lower()).strip("-")
@@ -190,6 +244,106 @@ class Terms:
     def compact(self, key: str) -> str:
         """CamelCase form for document filenames: ``SalesReceipt`` / ``Donation``."""
         return re.sub(r"\W", "", self(key))
+
+
+# white space, kept by split() so a sentence joins back as it was
+_WHITE_SPACE = re.compile(r"(\s+)")
+
+
+class AsWritten(str):
+    """Text that is shown exactly as it is written: the vocabulary swap
+    every HTTP error body passes through (app/main.py) leaves it alone.
+
+    For a sentence that holds data and not only prose of ours: an email
+    address, a mail server's reply, a document's own printed face, a
+    person's name. Swapping whole words inside those turns
+    invoices@customer.example into an address nobody was sent to. Whoever
+    builds such a sentence words its prose itself."""
+
+    __slots__ = ()
+
+
+class Sentence(str):
+    """A sentence of ours with data inside it: what a person typed, a
+    record's own name, a file's name. It reads as the plain text it joins
+    to, and it remembers which pieces are data, so the vocabulary swap
+    (Terms.worded, at the boundary every HTTP error crosses) rewords the
+    prose around them and never them. A nonprofit's refusal of an Always
+    CC of "not a customer" says the person's "not a customer", not "not a
+    donor".
+
+    Built with said(); pieces join on with ``+`` and Sentence.join, and
+    str() of an exception made with one gives it back, so a refusal that
+    passes through ``str(exc)`` or is put together from several keeps its
+    pieces. An f-string turns it back into plain text (all prose again):
+    put a sentence together with said() and ``+``, not inside an f-string."""
+
+    parts: tuple[tuple[str, bool], ...]
+
+    def __new__(cls, *pieces):
+        parts: list[tuple[str, bool]] = []
+        for piece in pieces:
+            if isinstance(piece, Sentence):
+                parts.extend(piece.parts)
+            elif isinstance(piece, AsWritten):
+                parts.append((str.__str__(piece), True))
+            elif piece is not None:
+                parts.append((str(piece), False))
+        parts = [(text, is_data) for text, is_data in parts if text]
+        self = super().__new__(cls, "".join(text for text, _ in parts))
+        self.parts = tuple(parts)
+        return self
+
+    def __str__(self) -> str:
+        # str(exc) on an exception raised with a Sentence is the Sentence
+        return self
+
+    def __add__(self, other):
+        if isinstance(other, str):
+            return Sentence(self, other)
+        return NotImplemented
+
+    def __radd__(self, other):
+        if isinstance(other, str):
+            return Sentence(other, self)
+        return NotImplemented
+
+    def join(self, items) -> Sentence:  # type: ignore[override]
+        """``sep.join(items)``, keeping the pieces of each item that is a
+        Sentence (or AsWritten) and of the separator."""
+        pieces: list = []
+        for i, item in enumerate(items):
+            if i:
+                pieces.append(self)
+            pieces.append(item)
+        return Sentence(*pieces)
+
+
+def said(template: str, *args, **kwargs) -> Sentence:
+    """``template.format(*args, **kwargs)`` as a Sentence: the template's
+    own words are ours (reworded for the company), and every value filled
+    into it is data, shown exactly as it is (formatted by its field's
+    spec). For a refusal that repeats what was typed:
+
+        said("Class '{}' already exists", name)
+
+    A value that is our own word ("invoice", a label) belongs in the
+    template, or joined on with ``+``, not filled in."""
+    fmt = string.Formatter()
+    pieces: list = []
+    auto = 0
+    for literal, field, spec, conversion in fmt.parse(template):
+        if literal:
+            pieces.append(literal)
+        if field is None:
+            continue
+        if field == "":
+            field = str(auto)
+            auto += 1
+        value, _ = fmt.get_field(field, args, kwargs)
+        value = fmt.convert_field(value, conversion)
+        pieces.append(AsWritten(fmt.format_field(value, spec or "")))
+    return Sentence(*pieces)
 
 
 def document_reference(face: str, number, name: str | None = None) -> str:

@@ -2,13 +2,181 @@
 # PDF generation — WeasyPrint + Jinja2 templates.
 # ============================================================================
 
+import calendar
+import re
+import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
+from typing import NamedTuple
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, Template, pass_context
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+
+# ----------------------------------------------------------------------------
+# Long words on a printed page (app/templates/_print_text.html has the rule).
+#
+# A word longer than the room it has broke nothing and bent everything: one
+# tracking address in a line's description took the Qty, Rate and Amount
+# columns and the totals off the paper, a long payer on a deposit slip took
+# its Amount column, a reference on a giving statement its running total.
+# Every word of LONG_WORD characters or more on a printed page is now set in
+# a <span class="long-word">, which may break at any character, so it never
+# holds a column, a flex row or a box wider than the page gives it. Shorter
+# words are as they were: they break between words only, and inside when
+# one alone is wider than its line. A count of characters is not a width
+# (nineteen W's are wider than twenty ordinary letters), so a table's
+# columns are kept by widths, not by this: the description asks for none
+# of its own, and a column of short text is as wide as its text up to the
+# most its template gives it (``_own_width``, and _print_text.html).
+#
+# It is done to the page once it is drawn, not in each template, so no
+# field can be missed: Template.render() of this environment answers the
+# page with its long words wrapped, when the page takes the rule in (a
+# printed template; an email's body or a web page does not, and is not
+# touched). Only text is read: never a tag, an attribute, a style sheet or
+# a title.
+#
+# overflow-wrap: anywhere on a whole cell would do the same, but WeasyPrint
+# measures such a cell one character at a time against all of its text: a
+# 1,200-character description took six seconds to lay out, and it is laid
+# out up to four times. A word in its own element is measured alone, and a
+# word longer than any line (LONG_WORD_WHOLE) is set in short pieces with a
+# place to break between them, so a run of a thousand characters costs no
+# more than a thousand characters of words. Such a word's lines end at a
+# piece's end, a few characters short of the column's edge, and a long last
+# line cut in two (choose_last_line) is cut where a piece starts, so its
+# two parts are set as the whole was. A piece is of whole letters: a mark
+# stays with its letter and a joined emoji in one (``_letters``), so text
+# written without spaces (Thai) is shaped in pieces as it is whole.
+# ----------------------------------------------------------------------------
+LONG_WORD = 20
+# up to this long, a word is one piece (it may fit a line): it moves to the
+# next line whole when it fits there, and breaks only where its line ends
+LONG_WORD_WHOLE = 100
+_LONG_WORD_PIECE = 10
+_PRINT_RULE = ".long-word {"
+_TAG = re.compile(r"(<[^>]+>)")
+# a word's characters, a character reference (&amp;) counted as one
+_CHAR = re.compile(r"&[#\w]+;|\S")
+_RAW_TEXT = ("style", "script", "title", "svg")
+_INLINE_END = re.compile(r"</(?:strong|b|em|i|u|a|small|span|label)\s*>", re.I)
+_SPAN = '<span class="long-word">'
+# Between two pieces, and before a long word that follows a label with no
+# space ("<strong>Notes:</strong>word"): a place a line may break, with no
+# width and no text. WeasyPrint sizes a word that follows an inline element
+# on its line as unbreakable; after this it starts a line, as far as the
+# measuring goes.
+_GAP = '<span class="long-word-gap"></span>'
+
+
+def _joins_back(char: str, before: str) -> bool:
+    """Whether a character is set with the one before it, as one letter to
+    the eye: a mark over or under its letter (an accent typed after it, a
+    Thai vowel or tone mark, a keycap's box), a joiner and what it joins (a
+    family is four people and three joiners), a skin tone, the second letter
+    of a flag, a consonant after a virama. A piece of a long word never
+    starts with one: apart from its letter a mark prints on a dotted circle,
+    and a family prints as its members."""
+    code = ord(char[0]) if len(char) == 1 else 0
+    if not code or code < 0x300:
+        return False
+    if unicodedata.category(char) in ("Mn", "Mc", "Me"):
+        return True
+    if code in (0x200C, 0x200D, 0x0E33, 0x0EB3) or 0x1F3FB <= code <= 0x1F3FF:
+        return True
+    # the vowels and final consonants of a Korean syllable typed in parts,
+    # and an emoji's tag letters
+    if 0x1160 <= code <= 0x11FF or 0xE0020 <= code <= 0xE007F:
+        return True
+    if len(before) != 1:
+        return False
+    if before == "\u200d" or unicodedata.combining(before) == 9:
+        return True
+    return False
+
+
+def _letters(chars: list) -> list:
+    """A word's characters gathered as a reader counts them: each letter
+    with its marks, each joined emoji and each flag as one."""
+    out, flag = [], False
+    for char in chars:
+        pair = len(char) == 1 and 0x1F1E6 <= ord(char) <= 0x1F1FF
+        if out and (_joins_back(char, out[-1][-1]) or (pair and flag)):
+            out[-1].append(char)
+            flag = False
+        else:
+            out.append([char])
+            flag = pair
+    return out
+
+
+def _pieces(chars: list) -> list:
+    """A word longer than any line as short pieces, each of whole letters
+    (see ``_letters``) and of _LONG_WORD_PIECE characters or a few more."""
+    pieces, piece = [], []
+    for letter in _letters(chars):
+        piece.extend(letter)
+        if len(piece) >= _LONG_WORD_PIECE:
+            pieces.append("".join(piece))
+            piece = []
+    if piece:
+        pieces.append("".join(piece))
+    return pieces
+
+
+def _wrap_words(text: str, least: int, gap_first: bool = False) -> str:
+    """One run of text (no tags in it) with every word of ``least``
+    characters or more in a long-word span."""
+
+    def wrap(match):
+        chars = _CHAR.findall(match.group(0))
+        if len(chars) < least:
+            return match.group(0)
+        whole = len(chars) <= LONG_WORD_WHOLE
+        pieces = ["".join(chars)] if whole else _pieces(chars)
+        made = _GAP.join(f"{_SPAN}{piece}</span>" for piece in pieces)
+        return (_GAP if gap_first and match.start() == 0 else "") + made
+
+    return re.sub(r"\S+", wrap, text)
+
+
+def break_long_words(html: str, least: int = LONG_WORD) -> str:
+    """``html`` with every word of ``least`` characters or more, in its
+    text, set in a long-word span. What is already in one stays as it is."""
+    out, raw, wrapped, last = [], None, 0, ""
+    for part in _TAG.split(html):
+        if part.startswith("<") and part.endswith(">"):
+            name = re.match(r"</?\s*([\w-]+)", part)
+            name = name.group(1).lower() if name else ""
+            if raw:
+                raw = None if part.startswith("</") and name == raw else raw
+            elif name in _RAW_TEXT and not part.startswith("</"):
+                raw = name
+            elif part == _SPAN:
+                wrapped += 1
+            elif wrapped and name == "span":
+                wrapped += -1 if part.startswith("</") else 1
+            out.append(part)
+            last = part
+        elif raw or wrapped or not part.strip():
+            out.append(part)
+        else:
+            out.append(_wrap_words(part, least, bool(_INLINE_END.fullmatch(last))))
+    return "".join(out)
+
+
+class _PrintedTemplate(Template):
+    """A template of this environment: a printed page it renders has its
+    long words set to break (see LONG_WORD)."""
+
+    def render(self, *args, **kwargs):
+        html = super().render(*args, **kwargs)
+        return break_long_words(html) if _PRINT_RULE in html else html
+
+
 _jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
+_jinja_env.template_class = _PrintedTemplate
 
 
 def _company_logo_data_uri(company_settings: dict) -> str:
@@ -50,12 +218,30 @@ class PdfEngineMissing(RuntimeError):
     """WeasyPrint, or the native libraries it loads, is not installed."""
 
 
+# When the package is installed but its native libraries are not (Homebrew
+# glib without pango, say), the import gets as far as dlopen()ing gobject,
+# fails on pango, and the failed import's cffi handle closes gobject again —
+# but glib cannot be unloaded on macOS, so it keeps the strings gobject's
+# constructor interned. A second import re-opens gobject, its constructor
+# looks those up in now-unmapped memory, and the process segfaults: every
+# second PDF crashed the server. The first such failure is final for the
+# life of the process, so it is kept here and the import is never retried.
+_NATIVE_LOAD_FAILURE: OSError | None = None
+
+
 def _weasyprint():
     """(HTML, URLFetcher) — imported on first use, not at import time."""
+    global _NATIVE_LOAD_FAILURE
+    if _NATIVE_LOAD_FAILURE is not None:
+        raise PdfEngineMissing(WEASYPRINT_MISSING) from _NATIVE_LOAD_FAILURE
     try:
         from weasyprint import HTML, URLFetcher
-    except (ImportError, OSError) as exc:
-        # OSError: the package is there and its pango/gobject DLLs are not
+    except OSError as exc:
+        # the package is there and its pango/gobject libraries are not
+        _NATIVE_LOAD_FAILURE = exc
+        raise PdfEngineMissing(WEASYPRINT_MISSING) from exc
+    except ImportError as exc:
+        # nothing was loaded, so a later import (after an install) may work
         raise PdfEngineMissing(WEASYPRINT_MISSING) from exc
 
     return HTML, URLFetcher
@@ -219,11 +405,579 @@ def _format_date(value):
     return str(value)
 
 
+# The end of a long last line or of long notes, kept with what follows it
+# (W-187, W-188): a block that may break across pages (#1045) is cut in two,
+# and its last few lines go into the unbreakable group with the totals or
+# the footer, so that group never starts a page on its own. Chromium does
+# not honour break-after: avoid on a row, nor reliably break-before: avoid
+# after a long block; an unbreakable group is what both engines keep.
+DOC_TAIL_KEEP = 240  # characters, about two to three lines of a line's description
+DOC_TAIL_MOST = (
+    600  # a sentence's end within this many characters of the end is the cut
+)
+
+
+def _tail_split(text, keep=DOC_TAIL_KEEP, most=DOC_TAIL_MOST):
+    """``(head, end)``: ``text`` cut so ``end`` is its last ``keep`` characters
+    or a little more. The cut is at a sentence's or a line's end when one
+    falls in the last ``most`` characters, else at a space; text this short
+    is all ``end``."""
+    text = (text or "").rstrip()
+    if len(text) <= keep:
+        return "", text
+    hi = len(text) - keep  # the cut is at or before this
+    lo = max(1, len(text) - most)
+    cut = -1
+    for m in re.finditer(r"[.!?;:](?=\s)|\n", text[lo:hi]):
+        cut = lo + m.end()
+    if cut <= 0:
+        cut = text.rfind(" ", 1, hi)
+    if cut <= 0:
+        cut = hi
+    return text[:cut].rstrip(), text[cut:].lstrip()
+
+
+_jinja_env.globals["tail_split"] = _tail_split
+
+
+# A long last line (W-200, W-201, NEW-266, 2.32.0 round 23; NEW-271, round
+# 24). The document is first laid out with the line whole, and that layout,
+# the one the PDF prints (same fonts, width and CSS), decides:
+# - the whole line and the totals on one page, with room to spare (so a
+#   browser's print, whose pages run a little differently, keeps them
+#   together too): it prints whole, with no cut at all;
+# - the line on the totals' page but with little room, or running over a
+#   page break with more than DOC_TAIL_LINES of its lines on the totals'
+#   page: it is "kept", printed whole inside the unbreakable group with the
+#   totals, when that group fits on a page (checked by laying it out) and
+#   moving the line leaves the page before it at least half full;
+# - otherwise it is cut at a line boundary of that layout, so what reaches
+#   the totals' page is the end alone, never part of the first part: its
+#   last DOC_TAIL_LINES lines, or, when the line itself runs over onto the
+#   totals' page with more than that, the lines the page break leaves there.
+# Cutting off the last two lines of a line that already ran over a page left
+# the rest of its first part on the totals' page too (NEW-271: 3 to 11 lines
+# there, the first part's last line set full in mid-page over a seam).
+# Qty, Rate and Amount sit at the top of every row (vertical-align: top),
+# so a cut row's figures are where any row's are: on its first line.
+DOC_TAIL_LINES = 2
+# the room (points) the group must leave at the foot of its page for the
+# whole line to be printed uncut: about five lines, more than Chromium's
+# and WeasyPrint's pages ever differ by over a document
+DOC_TAIL_SLACK = 72.0
+# When nothing can be laid out (no WeasyPrint): the end is about two lines
+# of the narrowest description column (some 60 characters a line), cut at
+# a sentence's end only within a third line.
+DOC_LINE_TAIL_KEEP = 120
+DOC_LINE_TAIL_MOST = 170
+_WORD = re.compile(r"\S+")
+
+
+def _cut_words(text: str, words: int):
+    """``(head, end)``: ``text`` with its last ``words`` words as the end."""
+    starts = [m.start() for m in _WORD.finditer(text)]
+    if words <= 0 or words >= len(starts):
+        return "", text
+    at = starts[-words]
+    return text[:at].rstrip(), text[at:]
+
+
+class _Carried(NamedTuple):
+    """The end of a long last line that the layout carries with the totals:
+    how many characters its lines hold, spaces and line breaks not counted,
+    and whether the first of those lines is a blank one (W-213).
+
+    A layout line ends where the layout broke it: at a space, after a
+    hyphen or a slash, between two characters of a script written without
+    spaces, or inside a word longer than its column. Counting the carried
+    lines' words found the same place only when every line ended at a space:
+    text with no spaces was not cut at all (its Qty, Rate and Amount printed
+    a page away from it), and a line the layout broke after a hyphen put the
+    cut a word early. The characters are the same in the layout's lines and
+    in the description, so they find the line's own boundary whatever ended
+    the line."""
+
+    chars: int
+    blank: int = 0
+
+
+def _cut_chars(text: str, chars: int):
+    """``(head, end)``: ``text`` with its last ``chars`` characters, spaces
+    and line breaks not counted, as the end."""
+    at, left = len(text), chars
+    while left > 0 and at > 0:
+        at -= 1
+        if not text[at].isspace():
+            left -= 1
+    if chars <= 0 or left > 0 or not text[:at].strip():
+        return "", text
+    return text[:at].rstrip(), text[at:]
+
+
+def _plain_lines(value) -> str:
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _desc(value):
+    """A line's description as it prints (W-213): escaped, each line break
+    a <br>, so a description typed as separate lines prints as them. What
+    ``line_cut`` already made is passed through."""
+    from markupsafe import Markup, escape
+
+    if isinstance(value, Markup):
+        return value
+    return escape(_plain_lines(value)).replace("\n", Markup("<br>"))
+
+
+_jinja_env.filters["desc"] = _desc
+
+
+def _own_width(value):
+    """A value for a column of short text beside a description (who a
+    deposit is from, a reference, an item number, a unit): the text, and
+    before it the same text on one line in an element that takes no height
+    and prints nothing (.one-line, app/templates/_print_text.html).
+
+    The column is as wide as its widest cell, and a cell that wraps is only
+    as wide as its longest word: beside a description that has the rest of
+    the table, a name would print a word to a line. The line that does not
+    wrap is what gives the column the width of its text; the template gives
+    the cell the most it may be, and text wider than that wraps there. No
+    count of characters decides it: twenty capital W's are wider than
+    twenty ordinary letters."""
+    from markupsafe import Markup, escape
+
+    text = escape("" if value is None else value)
+    if not str(text).strip():
+        return text
+    return Markup('<span class="one-line" aria-hidden="true">%s</span>%s') % (
+        text,
+        text,
+    )
+
+
+_jinja_env.filters["own_width"] = _own_width
+
+# what a report prints on one line: a number, an amount, a percentage, a
+# date. A word in one is a currency or a unit (three letters at most) or a
+# month.
+_MONTHS = frozenset(
+    name.lower().rstrip(".")
+    for names in (calendar.month_name, calendar.month_abbr)
+    for name in names
+    if name
+)
+
+
+def _is_figure(value) -> bool:
+    """Whether a report's cell is a figure, which is on one line, and not
+    words, which wrap in their column: by what is in it, never by how long
+    it is. A reference and a memo are words, and so is one word alone
+    ("Wire", "INV-1042"): a word may have to break inside, which a line
+    that never wraps cannot."""
+    if value is None or isinstance(value, (int, float)):
+        return True
+    tokens = str(value).split()
+    if len(tokens) > 4:
+        return False
+    digits = False
+    for token in tokens:
+        bare = token.strip(".,;:()[]%+-−–—$€£¥")
+        if not bare:
+            continue
+        if bare.isalpha():
+            if len(bare) > 3 and bare.lower() not in _MONTHS:
+                return False
+            continue
+        if not all(c.isdigit() or not c.isalnum() for c in bare):
+            return False
+        digits = True
+    return digits or not any(t.strip("—–-−") for t in tokens)
+
+
+_jinja_env.tests["figure"] = _is_figure
+
+# A figure is on one line, and its column is as wide as that line: so a
+# figure is one only while it is no wider than a column of words may be. A
+# run of digits wider than that (a wire's trace number of 26 digits typed
+# as a payment's reference) is set as words are: it wraps in its column and
+# breaks inside, where on one line it left its cell and printed over the
+# column beside it. Its width is judged from what it is made of, as a
+# sans-serif face sets digits and their punctuation.
+_FIGURE_EM = {",": 0.32, ".": 0.32, " ": 0.32, "-": 0.37, "(": 0.39, ")": 0.39}
+
+
+def _figure_em(token: str) -> float:
+    return sum(
+        _FIGURE_EM.get(c, 0.6 if c.isdigit() or c == "$" else 0.8) for c in token
+    )
+
+
+# An amount as a report sets it: a sign, a currency, digits in groups of
+# three or with cents, a percent. An amount prints whole on one line up to
+# the largest one SlowBooks keeps (thirteen figures and cents); anything
+# else, a bare run of digits (a trace number) or a reference of numbers
+# with commas, points or a sign in it, is judged by its width.
+_AMOUNT = re.compile(
+    r"[-−+]?\(?[-−+]?[$€£¥]?[-−]?"
+    r"(?:\d{1,3}(?:,\d{3}){1,4}|\d{1,13})"
+    r"(?:\.(?P<places>\d{1,4}))?\)?(?P<percent>%)?"
+)
+
+
+def _is_amount(token: str) -> bool:
+    m = _AMOUNT.fullmatch(token)
+    if not m or not any(c in token for c in "$€£¥.,%"):
+        return False
+    # cents for money; a percent may have a few more places
+    return len(m["places"] or "") <= (4 if m["percent"] else 2)
+
+
+def _one_line(value, cap: float = 0.0) -> bool:
+    """Whether a report's cell is a figure that is set on one line: a
+    figure (``_is_figure``) with nothing in it wider than ``cap`` ems, the
+    most a word of its section's columns counts for (``_word_cap``). An
+    amount is always on one line, whatever its width (``_is_amount``)."""
+    if not _is_figure(value):
+        return False
+    if value is None or isinstance(value, (int, float)):
+        return True
+    cap = cap or _CAP_MOST_EM
+    return all(
+        _is_amount(token) or _figure_em(token) <= cap for token in str(value).split()
+    )
+
+
+_jinja_env.tests["one_line"] = _one_line
+
+# A report's columns share the sheet by what is in them, and each is at
+# least as wide as its longest word: six columns of words with a wide word
+# in each were wider than the sheet. A word that may be wider than its
+# column's share of the sheet is set in a .w element, which counts for no
+# more than that share when the columns are measured (max-width, in ems of
+# its own text); in a column narrower than the word it breaks inside, as a
+# word longer than its line does everywhere. An ordinary word is narrower
+# than the least share: it is not set in one, and the page's text is as it
+# was. Which words may be wider is judged generously from their letters
+# (``_em_width``): a word judged wide that is not is in a .w that changes
+# nothing, since the element's max-width is the measure, not the judgment.
+_CAP_MOST_EM = 13.0
+_CAP_LEAST_EM = 9.0
+_REPORT_EM_PX = 10.5
+_REPORT_FIGURE_PX = 84.0
+_REPORT_CELL_PAD_PX = 12.0
+# the printing width of a report's sheet, in CSS pixels (_report_theme.html:
+# 16 mm at each side)
+_REPORT_SHEET_PX = {
+    ("letter", False): 695.0,
+    ("letter", True): 935.0,
+    ("a4", False): 672.0,
+    ("a4", True): 1001.0,
+}
+
+
+def _word_cap(section: dict, paper_size: str = "letter", landscape=False) -> float:
+    """The most a word of one of a report section's columns counts for, in
+    ems: the sheet's width, less what its columns of figures take, shared
+    by its columns of words. A column with a figure in it that may be too
+    wide for one line (``_one_line``) is a column of words."""
+    columns = len(section.get("columns") or []) or 1
+    rows = section.get("rows") or []
+    words = set()
+    for row in rows:
+        for at, cell in enumerate(row.get("cells") or []):
+            if at not in words and not _one_line(cell, _CAP_LEAST_EM):
+                words.add(at)
+    words.add(0)
+    figures = max(0, columns - len(words))
+    sheet = _REPORT_SHEET_PX[
+        ("a4" if paper_size == "a4" else "letter", bool(landscape))
+    ]
+    room = sheet - figures * _REPORT_FIGURE_PX - columns * _REPORT_CELL_PAD_PX
+    share = room / len(words) / _REPORT_EM_PX
+    return round(max(_CAP_LEAST_EM, min(_CAP_MOST_EM, share)), 2)
+
+
+_jinja_env.filters["word_cap"] = _word_cap
+
+
+_NARROW = frozenset("ijlI.,;:'!|`()[]{}/\\-")
+_FULL = frozenset("mwMW@%")
+
+
+def _em_width(word: str) -> float:
+    """The most a word may measure, in ems, whatever the font: each letter
+    at the widest a sans-serif face sets its kind."""
+    width = 0.0
+    for char in word:
+        if char in _NARROW:
+            width += 0.45
+        elif char in _FULL:
+            width += 1.0
+        elif char.isascii():
+            width += 0.8 if char.isupper() else 0.68
+        else:
+            width += 1.3 if ord(char) >= 0x2E80 else 0.8
+    return width
+
+
+def _capped(value, cap: float = _CAP_MOST_EM):
+    """A report's cell with each word that may be wider than ``cap`` ems in
+    a .w element (see ``_word_cap``). A figure on one line is never in one:
+    it keeps its width, and its column has it."""
+    from markupsafe import Markup, escape
+
+    text = "" if value is None else str(value)
+    if hasattr(value, "__html__") or len(text) * 1.3 <= cap:
+        return value
+    if _one_line(value, cap):
+        return value
+    parts = re.split(r"(\s+)", text)
+    if not any(_em_width(part) > cap for part in parts):
+        return value
+    return Markup(
+        "".join(
+            (
+                f'<span class="w">{escape(part)}</span>'
+                if _em_width(part) > cap
+                else str(escape(part))
+            )
+            for part in parts
+        )
+    )
+
+
+_jinja_env.filters["capped"] = _capped
+
+
+def _joined_head(head: str, blanks: int = 0):
+    """The first part of a cut line, set as the layout set it (no line of it
+    stretched, NEW-271); a blank line the description has where the cut falls
+    stays at its foot (a no-break space holds the line open in both
+    engines)."""
+    from markupsafe import Markup
+
+    return _desc(head) + Markup("<br>&nbsp;") * blanks
+
+
+@pass_context
+def _line_cut(ctx, text):
+    """``(head, end)`` of a long last line, as the layout chose
+    (``last_line_cut`` in the template's context): "whole" (and "kept", which
+    the templates print in the group with the totals) leaves it uncut,
+    ``_Carried`` carries its last lines with the totals (an int, that many
+    of its last words), and nothing chosen falls back on the character
+    count.
+
+    A cut falls between two of the layout's lines. When it falls where the
+    description has a line break, the first part's last line is a short one
+    of its own and is not set full; a blank line there opens the end, so
+    none is lost (W-213)."""
+    text = _plain_lines(text).rstrip()
+    how = ctx.get("last_line_cut")
+    if how in ("whole", "kept"):
+        return text, ""
+    # the layout's lines carried, with the blank line above them when the
+    # layout counted it as one of the lines carried; an int, or (words, 1),
+    # is the same in words
+    carried = isinstance(how, _Carried)
+    if carried:
+        how, end_blanks = how.chars, how.blank
+    elif isinstance(how, tuple):
+        how, end_blanks = how
+    else:
+        end_blanks = 0
+    if isinstance(how, int) and not isinstance(how, bool):
+        from markupsafe import Markup
+
+        head, end = (_cut_chars if carried else _cut_words)(text, how)
+        if not head:
+            return head, end
+        breaks = text[len(head) : len(text) - len(end)].count("\n")
+        if breaks:
+            end_blanks = min(end_blanks, breaks - 1)
+            return (
+                _joined_head(head, breaks - 1 - end_blanks),
+                Markup("&nbsp;<br>") * end_blanks + _desc(end),
+            )
+        return _joined_head(head), end
+    return _tail_split(text, DOC_LINE_TAIL_KEEP, DOC_LINE_TAIL_MOST)
+
+
+_jinja_env.globals["line_cut"] = _line_cut
+
+
+def _box_classes(box) -> tuple:
+    element = getattr(box, "element", None)
+    if element is None:
+        return (), None
+    return tuple((element.get("class") or "").split()), element
+
+
+def _own_text(text_box, cell) -> bool:
+    """Whether a text box is the cell's own text: set straight in it, or a
+    long word of it in the element that lets it break (LONG_WORD)."""
+    element = text_box.element
+    return element is cell.element or (
+        element is not None and "long-word" in (element.get("class") or "").split()
+    )
+
+
+def _line_texts(box, own: bool = False) -> list[str]:
+    """The text of each line box inside ``box``, in order. With ``own``,
+    the cell's own text only: not a tag set after a description in an
+    element of its own ("(non-taxable)", an accepted alternate's), which is
+    no part of the description a cut divides."""
+    from weasyprint.formatting_structure import boxes as wb
+
+    out = []
+    for line in box.descendants():
+        if isinstance(line, wb.LineBox):
+            out.append(
+                "".join(
+                    t.text
+                    for t in line.descendants()
+                    if isinstance(t, wb.TextBox) and not (own and not _own_text(t, box))
+                )
+            )
+    return out
+
+
+def _layout(html: str):
+    """WeasyPrint's layout of ``html``, as the PDF prints it; None when it
+    cannot be laid out."""
+    try:
+        HTML, _ = _weasyprint()
+        return HTML(string=html, url_fetcher=_get_fetcher()).render()
+    except Exception:  # pragma: no cover - no WeasyPrint: the fallback cut
+        return None
+
+
+def _last_line_layout(document):
+    """What a layout says of the long last line: its lines by page
+    ``[(page, text)]``, where its first part starts (page, the fraction of
+    the page's height above it, whether a row of the table is above it on
+    that page), and the totals' group's page, the room under it and the
+    pages it spans."""
+    from weasyprint.formatting_structure import boxes as wb
+
+    lines, start, tail, tail_pages = [], None, None, set()
+    for number, page in enumerate(document.pages):
+        page_box = page._page_box
+        top, height = page_box.content_box_y(), page_box.height
+        rows_above = False
+        for box in page_box.descendants():
+            classes, element = _box_classes(box)
+            if element is None:
+                continue
+            if isinstance(box, wb.TableRowGroupBox):
+                if "doc-tail" in classes:
+                    tail_pages.add(number)
+                    if tail is None:
+                        bottom = box.position_y + box.margin_height()
+                        tail = (number, top + height - bottom)
+                continue
+            if not isinstance(box, wb.TableRowBox):
+                continue
+            if element.get("data-last-line") is None:
+                rows_above = True
+                continue
+            cells = [c for c in box.children if isinstance(c, wb.TableCellBox)]
+            if not cells:
+                continue
+            if start is None:
+                start = (number, (box.position_y - top) / height, rows_above)
+            lines.extend((number, t) for t in _line_texts(cells[0], own=True))
+    return lines, start, tail, tail_pages
+
+
+def _carry(lines, count):
+    """The last ``count`` lines as ``_Carried``: the characters they hold,
+    with the blank line flag when the first of them is a blank line (two
+    line breaks in the description, counted as a line, W-213)."""
+    kept = lines[-count:]
+    chars = sum(len("".join(t.split())) for t in kept)
+    if not chars:
+        return None
+    return _Carried(chars, 0 if kept[0].strip() else 1)
+
+
+def choose_last_line(html_whole: str, keep: bool = True):
+    """How a document's long last line prints (see DOC_TAIL_LINES): "whole",
+    "kept" (whole, in the group with the totals), or the last lines to
+    carry with the totals (``_Carried``), read from a layout of ``html_whole``
+    (the line uncut). With ``keep`` False, "kept" is not answered (its
+    layout did not hold). None when it cannot be laid out, and the
+    character count decides."""
+    document = _layout(html_whole)
+    if document is None:
+        return None
+    found, start, tail, _pages = _last_line_layout(document)
+    if tail is None or start is None or not found:
+        return None
+    page, room = tail
+    head_pages = {p for p, t in found if t.strip()}
+    if head_pages == {page} and room >= DOC_TAIL_SLACK:
+        return "whole"
+    # trailing empty line boxes are no lines of the description
+    while found and not found[-1][1].strip():
+        found.pop()
+    lines = [t for _p, t in found]
+    on_totals_page = sum(1 for p, _t in found if p == page)
+    first_page, above, rows_above = start
+    if (
+        keep
+        and on_totals_page
+        and (
+            # on the totals' page, with too little room under it
+            (head_pages == {page} and rows_above)
+            # or run over onto it from the page before, past its middle
+            or (
+                on_totals_page > DOC_TAIL_LINES
+                and first_page == page - 1
+                and above >= 0.5
+            )
+        )
+    ):
+        return "kept"
+    return _carry(lines, max(DOC_TAIL_LINES, on_totals_page))
+
+
+def kept_holds(html_kept: str) -> bool:
+    """The kept line and the totals' group on one page, as laid out."""
+    document = _layout(html_kept)
+    if document is None:
+        return False
+    _l, _s, tail, pages = _last_line_layout(document)
+    return tail is not None and len(pages) == 1
+
+
 _jinja_env.filters["currency"] = _format_currency
 _jinja_env.filters["rate"] = _format_rate
 _jinja_env.filters["qty"] = _format_qty
 _jinja_env.filters["tax_percent"] = _format_tax_percent
 _jinja_env.filters["fdate"] = _format_date
+
+
+def _css_string(value):
+    """A value as a quoted CSS string, for a document's running page header
+    (#1035). The value is user data (a document number). Autoescape would
+    write a quote as an HTML entity, which a <style> block prints as itself,
+    so the result is marked safe and quotes, backslashes, control characters
+    and < > & become CSS hex escapes instead: nothing can end the string or
+    the style block."""
+    from markupsafe import Markup
+
+    out = []
+    for ch in "" if value is None else str(value):
+        if ch in "\\\"<>&'" or ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append("\\%x " % ord(ch))
+        else:
+            out.append(ch)
+    return Markup('"' + "".join(out) + '"')
+
+
+_jinja_env.filters["css_string"] = _css_string
 
 
 def _format_pct_label(value):
@@ -298,8 +1052,28 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
         context["company_logo_data_uri"] = _company_logo_data_uri(company_settings)
     # Letter or A4, from the setting (#807)
     context.setdefault("paper_size", paper_size_of(company_settings))
+    terms = terms_for(company_settings)
+    if "last_line_cut" in context:
+        return template.render(company=company_settings, terms=terms, **context)
+    # a long last line: laid out whole first, then whole or cut at a line
+    # boundary (choose_last_line, W-200, W-201)
+    whole = template.render(
+        company=company_settings, terms=terms, last_line_cut="whole", **context
+    )
+    if "data-last-line" not in whole:
+        return whole
+    how = choose_last_line(whole)
+    if how == "whole":
+        return whole
+    if how == "kept":
+        kept = template.render(
+            company=company_settings, terms=terms, last_line_cut="kept", **context
+        )
+        if kept_holds(kept):
+            return kept
+        how = choose_last_line(whole, keep=False)
     return template.render(
-        company=company_settings, terms=terms_for(company_settings), **context
+        company=company_settings, terms=terms, last_line_cut=how, **context
     )
 
 
@@ -394,6 +1168,11 @@ def _slip_date(value) -> str:
 
 # an amount's box: the amount ends at the field's x, inside this width
 _SLIP_AMOUNT_WIDTH_IN = 2.5
+# the room a figure of ten million takes at the left of its x, which the
+# text at its left (a check number, the account's name) stops short of
+_SLIP_FIGURE_ROOM_IN = 1.2
+_SLIP_TEXT_LEAST_IN = 0.5
+_SLIP_SHEET_IN = {"letter": 8.5, "a4": 8.27}
 
 
 def _slip_kind(line: dict, other: bool) -> str:
@@ -508,6 +1287,32 @@ def deposit_slip_pages(deposit: dict, company_settings: dict) -> list:
     return pages
 
 
+def deposit_slip_text_room(company_settings: dict) -> dict:
+    """The width, in inches, each line of text on a pre-printed deposit slip
+    has (the date, the account's name, a check's number): from where the
+    layout puts it to the figures at its right, or to the sheet's edge. A
+    longer one is cut there, so it never prints over a figure or off the
+    slip."""
+    from app.services.settings_service import (
+        DEPOSIT_SLIP_AMOUNTS,
+        DEPOSIT_SLIP_DEFAULTS,
+        deposit_slip_layout,
+    )
+
+    layout = deposit_slip_layout(company_settings.get("deposit_slip_layout"))
+    sheet = _SLIP_SHEET_IN[paper_size_of(company_settings)]
+    figures = [float(layout[f]["x"]) for f in DEPOSIT_SLIP_AMOUNTS]
+    room = {}
+    for field in DEPOSIT_SLIP_DEFAULTS:
+        if field in DEPOSIT_SLIP_AMOUNTS or "x" not in layout[field]:
+            continue
+        x = float(layout[field]["x"])
+        right = [f - _SLIP_FIGURE_ROOM_IN for f in figures if f > x]
+        edge = min(right) if right else sheet - 0.25
+        room[field] = round(max(_SLIP_TEXT_LEAST_IN, edge - x), 4)
+    return room
+
+
 def render_deposit_slip_stock_html(deposit: dict, company_settings: dict) -> str:
     """The deposit on the bank's pre-printed slip (#798): the figures alone,
     each at its place on the slip (deposit_slip_pages), with no labels, no
@@ -515,6 +1320,7 @@ def render_deposit_slip_stock_html(deposit: dict, company_settings: dict) -> str
     already carries."""
     return _jinja_env.get_template("deposit_slip_stock.html").render(
         pages=deposit_slip_pages(deposit, company_settings),
+        text_room=deposit_slip_text_room(company_settings),
         paper_size=paper_size_of(company_settings),
         amount_width=_SLIP_AMOUNT_WIDTH_IN,
     )

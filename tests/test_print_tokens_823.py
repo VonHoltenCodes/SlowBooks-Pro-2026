@@ -267,7 +267,9 @@ def test_the_launcher_opens_only_this_servers_print_addresses(monkeypatch):
     api = desktop_launcher.PickerApi(3001)
     good = "http://127.0.0.1:3001/print/" + "a" * 43
     assert api.open_document_url("SlowBooks Pro 2026", good) == {"success": True}
-    assert opened == [("SlowBooks Pro 2026", good, {"zoomable": True})]
+    assert opened == [
+        ("SlowBooks Pro 2026", good, {"zoomable": True, "text_select": True})
+    ]
     for bad in (
         "http://127.0.0.1:3002/print/" + "a" * 43,  # another port
         "http://localhost:3001/print/" + "a" * 43,

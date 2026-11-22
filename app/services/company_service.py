@@ -29,6 +29,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.config import DATABASE_URL
+from app.services.terminology import said
 
 logger = logging.getLogger(__name__)
 
@@ -204,12 +205,45 @@ def manifest_list_companies() -> list[dict]:
             "file": filename,
             "is_current": is_current,
             "sample": bool(c.get("sample")),
+            # its file is gone from the company folder (#1054): deleted by
+            # hand, so the picker offers Remove from list
+            "missing": not is_current and _file_missing(filename),
         }
         note = None if is_current else _below_floor_note(filename)
         if note:
             entry["note"] = note
         companies.append(entry)
     return companies
+
+
+def _file_missing(filename: str) -> bool:
+    """True when the list names a company whose file is not in the company
+    folder: deleted or moved by hand (#1054), or a name no company file can
+    have."""
+    path = company_db_path(filename) if filename else None
+    return path is None or not path.exists()
+
+
+MISSING_NOT_LISTED = "That company is not on the list."
+MISSING_FILE_PRESENT = (
+    "That company's file is still in the company folder, so it stays on "
+    "the list. Open it to work in it."
+)
+
+
+def remove_missing_from_list(filename: str) -> dict:
+    """Take a company whose file is missing off the companies list (#1054).
+
+    Only the list's entry goes: nothing in the data folder is touched, and a
+    company whose file is still there is refused, so this can never stand in
+    for deleting a company. When it was the last company opened, the list
+    remembers the first one left instead."""
+    if not any(c.get("file") == filename for c in _read_manifest()["companies"]):
+        return {"success": False, "error": MISSING_NOT_LISTED}
+    if not _file_missing(filename):
+        return {"success": False, "error": MISSING_FILE_PRESENT}
+    _drop_manifest_entry(filename)
+    return {"success": True}
 
 
 def _below_floor_note(filename: str) -> str | None:
@@ -221,10 +255,11 @@ def _below_floor_note(filename: str) -> str | None:
     if path is None or not path.exists():
         return None
     try:
-        from app.services.migration_floor import file_problem
+        from app.services.migration_floor import file_refusal
 
-        # a plain file only: an encrypted one says so when it is opened
-        return file_problem(path, resolve_key=False)
+        # a plain file only: an encrypted one says so when it is opened; a
+        # file a newer SlowBooks Pro last opened is said the same way (W-186)
+        return file_refusal(path, resolve_key=False)
     except Exception:
         logger.exception("Could not read the migration state of %s", filename)
         return None
@@ -433,7 +468,7 @@ def manifest_create_company(
     ):
         return {
             "success": False,
-            "error": f"A company file named '{filename}' already exists",
+            "error": said("A company file named '{}' already exists", filename),
         }
 
     companies_dir().mkdir(parents=True, exist_ok=True)
@@ -564,7 +599,10 @@ def create_company(
     # Check if company already exists
     existing = db.query(Company).filter(Company.database_name == database_name).first()
     if existing:
-        return {"success": False, "error": f"Database '{database_name}' already exists"}
+        return {
+            "success": False,
+            "error": said("Database '{}' already exists", database_name),
+        }
 
     # Create the database
     base_url = _base_url()

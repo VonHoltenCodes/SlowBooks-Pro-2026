@@ -59,9 +59,8 @@ const MemorizedPage = {
             </div>
             <div id="mem-table">${MemorizedPage.tableHtml(rows)}</div>
             <div class="form-group" style="margin-top:12px;">
-                <label style="font-weight:normal;"><input type="checkbox" id="mem-auto-enter" name="auto_enter_on_open" value="true" data-admin style="width:auto; vertical-align:middle; margin-right:6px;" ${autoEnter ? 'checked' : ''} onchange="MemorizedPage.setAutoEnter(this)">Enter due memorized bills and journal entries when the app opens and once a day</label>
-            </div>
-            <p class="hint" style="margin-top:8px;">An auto-enter memorized bill or journal entry is entered on its date: the app enters every due one when it opens and once a day while it runs, every missed date in order, once someone has signed in. Recurring ${T('invoices')} wait, as before, for Generate or Enter All Due, which enters every due schedule of both kinds at once. A remind schedule waits on the Due now list until you press Enter now. Paused schedules enter nothing; resuming one skips the dates it missed. A server install can run scripts/run_recurring.py from cron instead.</p>`;
+                <label style="font-weight:normal;"><input type="checkbox" id="mem-auto-enter" name="auto_enter_on_open" value="true" data-admin style="width:auto; vertical-align:middle; margin-right:6px;" ${autoEnter ? 'checked' : ''} onchange="MemorizedPage.setAutoEnter(this)">Enter due memorized bills and journal entries when the app opens and once a day ${hint(`An auto-enter memorized bill or journal entry is entered on its date: the app enters every due one when it opens and once a day while it runs, every missed date in order, once someone has signed in. Recurring ${T('invoices')} wait, as before, for Generate or Enter All Due, which enters every due schedule of both kinds at once. A remind schedule waits on the Due now list until you press Enter now. Paused schedules enter nothing; resuming one skips the dates it missed. A server install can run scripts/run_recurring.py from cron instead.`, 'Auto-enter')}</label>
+            </div>`;
     },
 
     // What the app entered by itself (when it opened, or its daily run)
@@ -312,7 +311,7 @@ const MemorizedPage = {
                     <option value="remind" ${mem.mode !== 'auto' ? 'selected' : ''}>Remind me: listed as due until I enter it</option>
                     <option value="auto" ${mem.mode === 'auto' ? 'selected' : ''}>Auto-enter: posted on its date (when the app opens, or its daily run)</option>
                 </select></div>
-            <div class="form-group"><label>How often *</label>
+            <div class="form-group"><label>How often * ${hint("Twice a month is the next date's day and fifteen days later (the 1st and the 16th; the 15th and the 30th). A monthly schedule begun on the 31st is entered on the last day of a shorter month.", 'How often')}</label>
                 <select name="frequency_choice" data-no-search onchange="MemorizedPage.frequencyChanged(this)">
                     ${MemorizedPage.FREQUENCIES.map(f => `<option value="${f[0]}" ${f[0] === choice ? 'selected' : ''}>${f[1]}</option>`).join('')}
                 </select>
@@ -323,8 +322,7 @@ const MemorizedPage = {
                         <option value="weekly" ${unit === 'weekly' ? 'selected' : ''}>weeks</option>
                         <option value="monthly" ${unit === 'monthly' ? 'selected' : ''}>months</option>
                     </select>
-                </div>
-                <div class="hint">Twice a month is the next date's day and fifteen days later (the 1st and the 16th; the 15th and the 30th). A monthly schedule begun on the 31st is entered on the last day of a shorter month.</div></div>
+                </div></div>
             <div class="form-group"><label>${isNew ? 'First date *' : 'Next date *'}</label>
                 <input name="next_date" type="date" required value="${mem.next_date || todayISO()}"></div>
             <div class="form-group"><label>End date</label>
@@ -390,9 +388,8 @@ const MemorizedPage = {
                     ${MemorizedPage.scheduleFieldsHtml(m, !id)}
                     <div class="form-group"><label>Vendor *</label>
                         ${VendorQuickAdd.html(vendors, { id: 'mem-vendor', onchange: 'BillsPage.vendorSelected(this.value)' })}</div>
-                    <div class="form-group"><label>Bill Number</label>
-                        <input name="bill_number" placeholder="left blank: the date and the vendor's initials" value="${escapeHtml(m.bill_number || '')}" aria-describedby="mem-bill-number-hint">
-                        <div class="hint" id="mem-bill-number-hint">Left blank, each bill is numbered the date and the vendor's initials, as Enter Bill numbers one. A number typed here is used as it is on the first bill and -2, -3... after that, since a vendor's bill number cannot repeat. Memorize from a bill leaves it blank on purpose.</div></div>
+                    <div class="form-group"><label>Bill Number ${hint("Left blank, each bill is numbered the date and the vendor's initials, as Enter Bill numbers one. A number typed here is used as it is on the first bill and -2, -3... after that, since a vendor's bill number cannot repeat. Memorize from a bill leaves it blank on purpose.", 'Bill Number', 'mem-bill-number-hint')}</label>
+                        <input name="bill_number" placeholder="left blank: the date and the vendor's initials" value="${escapeHtml(m.bill_number || '')}" aria-describedby="mem-bill-number-hint"></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms" title="The due date follows from the terms">
                             ${PaymentTerms.optionsHtml(terms, "The vendor's terms", !id || m.payment_term_id != null)}
@@ -439,6 +436,7 @@ const MemorizedPage = {
         // is a line id (the grid draws one from a bill's line, or from the
         // template's own, and a template is saved whole)
         lines.forEach(l => { delete l.purchase_order_line_id; delete l.id; });
+        if (!ZeroTotal.ask('Memorized Bill', BillsPage.recalc())) return;
         if (BillsPage.recalc() <= 0) {
             toast('Enter what the vendor charges: an amount, or a quantity and rate, on at least one line.', 'error');
             return;
@@ -563,6 +561,7 @@ const MemorizedPage = {
         e.preventDefault();
         const form = e.target;
         const lines = JournalPage.collectLines();
+        if (!ZeroTotal.ask('Memorized Journal Entry', lines.reduce((sum, l) => sum + l.debit + l.credit, 0))) return;
         if (lines.length < 2) { toast('At least 2 lines required', 'error'); return; }
         if (!(await ClassWarn.ok(form, { rows: '#je-lines tr', cls: 'je-function' }))) return;
         const body = {

@@ -63,7 +63,9 @@ jobs:
           APP_VERSION="$(python -c 'from app import __version__; print(__version__)')"
           [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            test "$GITHUB_REF_NAME" = "v$APP_VERSION"
+            # A pre-release tag (v2.32.0-beta.1) builds the version it is a
+            # pre-release OF: only "-beta.<number>" may follow the version.
+            [[ "${GITHUB_REF_NAME}" =~ ^v${APP_VERSION//./\\.}(-beta\.[0-9]+)?$ ]]
           fi
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
           echo "APP_BUILD_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
@@ -388,6 +390,8 @@ jobs:
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
+          # a -beta.N tag's release is a pre-release (see windows.yml)
+          prerelease: ${{ contains(github.ref_name, '-beta.') }}
           files: |
             dist/SlowBooksPro-*-macos-arm64.dmg
             dist/SlowBooksPro-macos-arm64.dmg

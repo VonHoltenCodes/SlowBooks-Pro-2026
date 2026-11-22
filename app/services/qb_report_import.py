@@ -1494,11 +1494,12 @@ def import_qb_report(
     if kind is None:
         base["errors"].append(
             "Unrecognized report layout. Supported exports: Transaction "
-            "Detail (filtered to Sales Receipt or Invoice), Deposit Detail, "
-            "Check Detail, Transaction Detail by Account and Time by Name by "
-            "Job detail — keep the report's default columns — or a categorized "
-            "bank sheet (Bank Account, Transaction Date, Memo, Payee, Account, "
-            "Amount)."
+            "Detail (filtered to Sales Receipt or Invoice) and Transaction "
+            "Detail by Account, each with Debit and Credit ticked under "
+            "Customize Report > Display (Amount may stay); Deposit Detail, "
+            "Check Detail and Time by Name by Job detail with their default "
+            "columns; or a categorized bank sheet (Bank Account, Transaction "
+            "Date, Memo, Payee, Account, Amount)."
         )
         return base
     if adjusting_only and kind != "ledger":
@@ -1537,8 +1538,9 @@ def import_qb_report(
         if "Account" in cols:
             base["errors"].append(
                 "This appears to be Transaction Detail by Account with an added "
-                "Account column. Nothing was imported. Export again using the "
-                "default columns; set Customize Report > Filters > Account > "
+                "Account column. Nothing was imported. Export again without the "
+                "Account column, with Debit and Credit ticked under Customize "
+                "Report > Display; set Customize Report > Filters > Account > "
                 "All accounts rather than adding an Account column."
             )
             return base

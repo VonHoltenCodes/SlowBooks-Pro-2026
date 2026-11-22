@@ -35,7 +35,25 @@ from app.services.ofx_import import import_transactions
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 30.0
+# How long one request to the bridge may take (#1002). A bridge that refreshes
+# several institutions on one request takes 20–45 s on a slow night, so 30 s
+# timed out syncs through no fault of the user's side; the default is 120 s,
+# and SLOWBOOKS_SIMPLEFIN_TIMEOUT in the .env raises or lowers it (a number of
+# seconds, floor 10).
+DEFAULT_TIMEOUT = 120.0
+TIMEOUT_SETTING = "SLOWBOOKS_SIMPLEFIN_TIMEOUT"
+
+
+def request_timeout() -> float:
+    """The bridge timeout in seconds: the .env setting when it is a number, else the default."""
+    import os
+
+    raw = (os.environ.get(TIMEOUT_SETTING) or "").strip()
+    try:
+        return max(10.0, float(raw)) if raw else DEFAULT_TIMEOUT
+    except ValueError:
+        return DEFAULT_TIMEOUT
+
 
 # First sync reaches back this far; later syncs re-request a small overlap
 # window before the last sync (dedup makes the overlap harmless). The
@@ -100,15 +118,41 @@ def _pin(url: str, address: str) -> tuple[str, dict]:
     return pinned, {"host": host, "sni": host}
 
 
-def send(request: dict, timeout: float = DEFAULT_TIMEOUT) -> httpx.Response:
+def timeout_sentence(exc: Exception, elapsed: float, timeout: float) -> str:
+    """What a timed-out request says (#1002, #1017). A read that took the
+    whole configured wait is a slow bridge, and raising the setting helps; a
+    connect that was never answered (Windows gives up after its SYN retries,
+    about 21 s, long before the setting) is a bridge that can't be reached,
+    and the sentence says what was measured, not a wait that never happened."""
+    # a read timeout fires only once the configured wait has run; a connect
+    # timeout is the network giving up, whenever that was
+    if isinstance(exc, httpx.ConnectTimeout):
+        return (
+            "Could not reach the SimpleFIN bridge: the connection was not "
+            f"answered after {elapsed:.0f} seconds. Check the bridge address "
+            "and your network, then try again."
+        )
+    return (
+        f"SimpleFIN did not answer within {timeout:g} seconds. A bridge that "
+        "refreshes several banks can be slow; try again, or raise "
+        f"{TIMEOUT_SETTING} in the .env to wait longer."
+    )
+
+
+def send(request: dict, timeout: float | None = None) -> httpx.Response:
     """Execute a request dict from a build_* function (hardened defaults).
 
     Every outbound URL passes the SSRF guard first — this is the single
     network chokepoint for the SimpleFIN feature — and the connection is
     made to the address the guard approved (host header and SNI keep the
     hostname), then the peer address is checked once more after connect."""
+    if timeout is None:
+        timeout = request_timeout()
     address = _assert_public_https(request["url"])
     pinned_url, names = _pin(request["url"], address)
+    import time as _time
+
+    started = _time.monotonic()
     try:
         # follow_redirects=False is load-bearing: a redirect would resolve a
         # new hostname and step straight around the pin. Keep it off.
@@ -132,6 +176,11 @@ def send(request: dict, timeout: float = DEFAULT_TIMEOUT) -> httpx.Response:
             # Windows — the 2.9.3 gate found exactly that). A stream that
             # cannot report its peer is not evidence either way.
             peer = _peer_address(response)
+    except httpx.TimeoutException as exc:
+        logger.warning("SimpleFIN bridge request timed out", exc_info=True)
+        raise SimpleFINError(
+            timeout_sentence(exc, _time.monotonic() - started, timeout)
+        )
     except httpx.RequestError:
         logger.warning("SimpleFIN bridge request failed", exc_info=True)
         raise SimpleFINError("Could not reach the SimpleFIN bridge right now")
@@ -212,16 +261,23 @@ def _epoch(day: date) -> int:
 
 
 def build_accounts_request(
-    access_url: str, start_date: date | None = None, end_date: date | None = None
+    access_url: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    balances_only: bool = False,
 ) -> dict:
     """GET {access_url}/accounts, for transactions on or after start_date
-    and before end_date (the protocol's end-date is exclusive)."""
+    and before end_date (the protocol's end-date is exclusive). With
+    balances_only the server sends the accounts and their balances and no
+    transactions (the protocol's balances-only=1): Refresh accounts (#905)."""
     bare, auth = _split_credentials(access_url)
     params = {}
     if start_date is not None:
         params["start-date"] = _epoch(start_date)
     if end_date is not None:
         params["end-date"] = _epoch(end_date)
+    if balances_only:
+        params["balances-only"] = 1
     return {
         "method": "GET",
         "url": bare.rstrip("/") + "/accounts",
@@ -231,13 +287,18 @@ def build_accounts_request(
 
 
 def fetch_accounts(
-    access_url: str, start_date: date | None = None, end_date: date | None = None
+    access_url: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    balances_only: bool = False,
 ) -> dict:
-    resp = send(build_accounts_request(access_url, start_date, end_date))
+    resp = send(build_accounts_request(access_url, start_date, end_date, balances_only))
     if resp.status_code == 403:
+        # Update token keeps every mapping (#905); disconnecting loses them
         raise SimpleFINError(
-            "The SimpleFIN bridge refused the stored credentials — "
-            "disconnect and connect again with a fresh token"
+            "The SimpleFIN bridge refused the stored credentials — get a "
+            "fresh setup token from your SimpleFIN provider and use "
+            "Update token on the Banking page"
         )
     if resp.status_code != 200:
         logger.warning("SimpleFIN accounts fetch failed: HTTP %s", resp.status_code)
@@ -336,6 +397,73 @@ def account_summaries(data: dict) -> list[dict]:
     return out
 
 
+def merge_accounts_cache(
+    old_cache: list, summaries: list[dict], mapped_ids
+) -> list[dict]:
+    """The account list the page shows (#905): the bridge's accounts as it
+    reports them now, then each mapped account it no longer reports, kept
+    from the earlier list with gone=True, so the row can be moved to another
+    account or unmapped rather than vanishing with its mapping still saved.
+    A gone account nothing is mapped from any more is dropped."""
+    out = [dict(a, gone=False) for a in summaries]
+    present = {a["id"] for a in out}
+    mapped = {str(i) for i in mapped_ids}
+    kept = set()
+    for old in old_cache if isinstance(old_cache, list) else []:
+        if not isinstance(old, dict):
+            continue
+        sf_id = str(old.get("id", ""))
+        if sf_id in present or sf_id not in mapped or sf_id in kept:
+            continue
+        kept.add(sf_id)
+        out.append(
+            {
+                "id": sf_id,
+                "name": str(old.get("name", "")),
+                "org": str(old.get("org", "")),
+                "currency": str(old.get("currency", "")),
+                "balance": str(old.get("balance", "")),
+                "gone": True,
+            }
+        )
+    for sf_id in sorted(mapped - present - kept):
+        # mapped, and in no list this connection has seen
+        out.append(
+            {
+                "id": sf_id,
+                "name": sf_id,
+                "org": "",
+                "currency": "",
+                "balance": "",
+                "gone": True,
+            }
+        )
+    return out
+
+
+def parse_feed_last_sync(raw: str) -> dict[str, str]:
+    """Settings JSON → {simplefin_account_id: ISO time of its last sync}."""
+    try:
+        data = json.loads(raw or "{}")
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if isinstance(v, str) and v}
+
+
+def feed_start(today: date, last_sync: str) -> date:
+    """Where one feed's sync begins: RESYNC_OVERLAP_DAYS before its own last
+    sync, or FIRST_SYNC_DAYS back for a feed that has never synced."""
+    if last_sync:
+        try:
+            last = date.fromisoformat(last_sync[:10])
+            return last - timedelta(days=RESYNC_OVERLAP_DAYS)
+        except ValueError:
+            pass
+    return today - timedelta(days=FIRST_SYNC_DAYS)
+
+
 def to_import_rows(
     sf_account: dict, reverse_signs: bool = False
 ) -> tuple[list[dict], list[str]]:
@@ -414,11 +542,17 @@ def sync_accounts(
     data: dict,
     account_map: dict[str, int],
     reversed_ids: frozenset[str] | set[str] = frozenset(),
+    since_by_id: dict[str, date] | None = None,
 ) -> dict:
-    """Import every mapped bridge account's transactions. Returns totals.
-    Accounts in reversed_ids have their amounts' signs flipped."""
+    """Import every mapped bridge account's transactions. Returns totals,
+    and under "synced" the ids the bridge answered for. Accounts in
+    reversed_ids have their amounts' signs flipped. With since_by_id, an
+    account's transactions from before its own start are left out: one
+    request reaches back as far as the feed that needs the most, and each
+    feed takes its own window of it (#905)."""
     imported = skipped = 0
     warnings: list[str] = []
+    synced: list[str] = []
     by_id = {str(a.get("id", "")): a for a in data.get("accounts", [])}
     for sf_id, bank_account_id in account_map.items():
         sf_account = by_id.get(sf_id)
@@ -431,7 +565,11 @@ def sync_accounts(
         rows, row_errors = to_import_rows(
             sf_account, reverse_signs=sf_id in reversed_ids
         )
+        since = (since_by_id or {}).get(sf_id)
+        if since is not None:
+            rows = [row for row in rows if row["date"] >= since]
         warnings.extend(row_errors)
+        synced.append(sf_id)
         result = import_transactions(
             db, bank_account_id, rows, import_source="simplefin"
         )
@@ -439,4 +577,9 @@ def sync_accounts(
         skipped += result["skipped"]
     for sf_error in data.get("errors", []):
         warnings.append(str(sf_error))
-    return {"imported": imported, "skipped": skipped, "warnings": warnings}
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "warnings": warnings,
+        "synced": synced,
+    }

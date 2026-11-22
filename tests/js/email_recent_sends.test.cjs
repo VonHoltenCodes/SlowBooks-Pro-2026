@@ -80,3 +80,57 @@ test('a saved secret shows the placeholder note; an unset one shows nothing', ()
     assert.equal(SettingsPage._secretNote(''), '');
     assert.equal(SettingsPage._secretNote('a-real-value'), '');
 });
+
+test('the sentence, then the server reply once under it, as plain lines', () => {
+    // the sentence never holds the server's words, so both lines show
+    const said = SettingsPage._emailLogFailure({
+        error_message: '554 5.7.1 Message rejected as spam',
+        failure: 'The mail server refused the message.',
+    });
+    assert.equal(said.sentence, 'The mail server refused the message.');
+    assert.equal(said.raw, '554 5.7.1 Message rejected as spam');
+    // a reader who is given the sentence in both fields sees it once
+    const same = SettingsPage._emailLogFailure({
+        error_message: 'The mail server asked to try again later.',
+        failure: 'The mail server asked to try again later.',
+    });
+    assert.equal(same.raw, '');
+    // one refused address per line, kept as lines and escaped
+    const html = SettingsPage._emailLogRowsHtml([
+        { sent_at: '2026-11-20T12:00:00+00:00', recipient: 'a@x.com', subject: 'S', entity_type: 'invoice', status: 'failed',
+          error_message: 'a@x.com: 550 5.1.1 User unknown\nb@x.com: 550 <no>', failure: 'The address was refused by the mail server: a@x.com, b@x.com. Check it and send again.' },
+    ]);
+    assert.match(html, /white-space:pre-line/);
+    assert.match(html, /a@x\.com: 550 5\.1\.1 User unknown\nb@x\.com: 550 &lt;no&gt;/);
+});
+
+test('every kind of send has a name in the What column, never its code', () => {
+    // each entity_type send_email() is called with (held to this list by
+    // tests/test_email_failure_sentences.py)
+    const named = {
+        invoice: 'Invoice', estimate: 'Estimate', reminder: 'Payment reminder',
+        statement: 'Statement', collection: 'Collection letter',
+        giving_statement: 'Giving statement', settings_test: 'Test',
+        acknowledgment_receipt: 'Acknowledgment', acknowledgment_letter: 'Acknowledgment',
+    };
+    for (const [code, label] of Object.entries(named)) {
+        assert.equal(SettingsPage._emailSourceLabel(code), label);
+    }
+});
+
+test('a sent row whose copy was refused says so under Sent', () => {
+    const html = SettingsPage._emailLogRowsHtml([
+        { sent_at: '2026-11-20T12:00:00+00:00', recipient: 'a@x.com', cc: 'b@x.com', subject: 'S', entity_type: 'invoice', status: 'sent',
+          note: 'The mail server refused a copy to: b@x.com.', error_message: 'b@x.com: 550 5.1.1 <nobody>', failure: null },
+        { sent_at: '2026-11-20T12:01:00+00:00', recipient: 'c@x.com', subject: 'T', entity_type: 'invoice', status: 'sent',
+          note: 'The mail server refused a copy to: d@x.com.', error_message: null, failure: null },
+        { sent_at: '2026-11-20T12:02:00+00:00', recipient: 'e@x.com', subject: 'U', entity_type: 'invoice', status: 'sent',
+          note: null, error_message: null, failure: null },
+    ]);
+    assert.match(html, /Sent<div[^>]*>The mail server refused a copy to: b@x\.com\.<\/div>/);
+    // the server's reply under it, escaped (an administrator's row has it)
+    assert.match(html, /b@x\.com: 550 5\.1\.1 &lt;nobody&gt;/);
+    assert.match(html, /refused a copy to: d@x\.com\./);
+    assert.equal((html.match(/refused a copy/g) || []).length, 2);
+    assert.doesNotMatch(html, /Failed/);
+});

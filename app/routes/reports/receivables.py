@@ -23,8 +23,12 @@ from app.services.pdf_service import (
 from app.services.settings_service import get_all_settings as get_settings
 from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
-from app.routes._roles import is_admin
-from app.services.email_errors import sentence_for_last_send, where_to_see_why
+from app.routes._roles import reads_mail_server_words
+from app.services.email_errors import (
+    note_for_last_send,
+    failed_send_line,
+    with_notes,
+)
 from app.routes._helpers import refuse_unknown_filters
 
 logger = logging.getLogger(__name__)
@@ -194,18 +198,26 @@ def ar_aging_report(db: Session, as_of_date: date) -> dict:
             row["total"] -= amt
 
     # A journal line on A/R that names the customer (#897): QuickBooks keeps
-    # it as the customer's receivable and an import carries it, so it ages by
-    # its date (a credit one offsets the newest bucket, as a credit memo).
-    from app.services.control_journal_lines import aging_bucket, receivable_lines
+    # it as the customer's receivable and an import carries it. The
+    # customer's lines that lower what is owed pay its oldest raising ones
+    # first (#917), so what is still owed ages from the line it is owed on,
+    # and only a payment with nothing left to pay is a credit (offsetting the
+    # newest bucket, as a credit memo does).
+    from app.services.control_journal_lines import (
+        aging_bucket,
+        applied,
+        receivable_lines,
+    )
 
-    for named in receivable_lines(db, as_of_date, named_only=True):
-        for row in rows_for(named.party_id):
-            if named.amount > 0:
-                row[aging_bucket(as_of_date, named.date)] += named.amount
-            else:
-                row["unapplied_credits"] -= named.amount
-                row["current"] += named.amount
-            row["total"] += named.amount
+    for cid, aged in applied(receivable_lines(db, as_of_date, named_only=True)).items():
+        for row in rows_for(cid):
+            for on, left in aged.open_items:
+                row[aging_bucket(as_of_date, on)] += left
+                row["total"] += left
+            if aged.credit:
+                row["unapplied_credits"] += aged.credit
+                row["current"] -= aged.credit
+                row["total"] -= aged.credit
 
     _COLS = _AGING_COLS
     items = sorted(aging.values(), key=lambda i: (i["customer_name"] or "").lower())
@@ -230,25 +242,117 @@ def ar_aging_report(db: Session, as_of_date: date) -> dict:
     return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
 
 
+_BASIS_QUERY = Query(
+    default=None,
+    description="accrual or cash; omitted, the company's default report basis",
+)
+
+
 @router.get("/income-by-customer")
 def income_by_customer(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
 ):
-    """Income by Customer: invoices dated in the period, in home currency.
+    """Income by Customer: what each customer bought in the period, in home
+    currency (`income_by_customer_report`)."""
+    return income_by_customer_report(db, start_date, end_date, basis)
 
-    Sales is the pre-tax subtotal — sales tax is money collected for the
-    state, not income — with the tax beside it (explore 2.17.3, W-L11).
-    Paid includes money the customer paid in the period that is not
-    applied to an invoice yet, and Balance is net of it, so
-    Sales + Tax − Paid = Balance (W-H9: $612.30 shown paid of $682.30)."""
+
+@router.get("/income-by-customer/pdf")
+def income_by_customer_pdf(
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
+):
+    """Income by Customer in the report PDF theme (W-197), portrait as the
+    A/R Aging beside it: the columns and figures the screen shows, the
+    period saying the basis. Print is this page (#683)."""
+    from app.routes.reports.financial import _pdf_response
+    from app.services.ledger_exports import income_by_customer_sections
+    from app.services.terminology import terms_from_db
+
+    data = income_by_customer_report(db, start_date, end_date, basis)
+    return _pdf_response(
+        income_by_customer_sections(data, terms_from_db(db)),
+        db,
+        f"Income-by-Customer_{data['start_date']}_{data['end_date']}.pdf",
+    )
+
+
+@router.get("/income-by-customer/csv")
+def income_by_customer_csv_route(
+    request: Request,
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    db: Session = Depends(get_db),
+    basis: str = _BASIS_QUERY,
+):
+    """Income by Customer as a spreadsheet (W-197), the screen's columns."""
+    from app.routes.csv import _csv_response
+    from app.routes.reports.financial import _company_name
+    from app.services.ledger_exports import income_by_customer_csv
+    from app.services.terminology import terms_from_db
+
+    data = income_by_customer_report(db, start_date, end_date, basis)
+    return _csv_response(
+        income_by_customer_csv(data, _company_name(db), terms_from_db(db)),
+        f"Income-by-Customer_{data['start_date']}_{data['end_date']}.csv",
+        request,
+    )
+
+
+def income_by_customer_report(db: Session, start_date, end_date, basis=None) -> dict:
+    """Income by Customer's figures, for the screen, the PDF and the CSV.
+
+    Sales is income only: the pre-tax lines that post to an income account
+    (sales tax is money collected for the state, explore 2.17.3, W-L11, and
+    a line on an item that posts to a balance-sheet account, a security
+    deposit, is billed but not a sale, W-195), so Sales ties to the Profit
+    and Loss's income for the same dates. What such a line billed is Not
+    income, beside it. Paid includes money the customer paid in the period
+    that is not applied to an invoice yet, and Balance is net of it, so
+    Sales + Not income + Tax − Paid = Balance (W-H9).
+
+    On the accrual basis a credit memo dated in the period reduces that
+    customer's Sales, Not income and Tax by what it credited (W-198), as it
+    reduces the P&L's income on its date; what of it was applied comes off
+    Paid (an invoice's Paid counts the credits applied to it) and what is
+    still open comes off Balance. A write-off (bad debt, not a sale
+    reversed) and an early-payment discount stay what they were: part of
+    what settled the invoice.
+
+    On the cash basis (the company default, or `basis=cash`, #1062) a sale
+    counts when it is paid and in the proportion paid, as on the cash
+    Profit and Loss: Sales and Sales Tax are what the period's payments
+    recognized of each invoice, read from their cash lines, and money not
+    yet applied to an invoice is income (Unapplied Cash Payment Income).
+    Not income is what the period's payments paid of a line that posts to
+    no income account (a security deposit, W-205). Paid is the money that
+    came in for those, so on the cash basis a row reads Sales + Not income
+    + Tax = Paid: the money received in the dates, every part of it in one
+    column. Balance there is not part of that sum (W-204): it is what is
+    still owed today on the invoices listed, less the money not yet
+    applied, and its heading and the report's note say so. A credit memo
+    counts for nothing there, as on the cash P&L: no cash came for the
+    part it credited.
+
+    The answer carries `row_rule`, the sentence saying which sum a row
+    holds on its basis, and `balance_heading`, for the screen, the PDF and
+    the CSV."""
+    from app.services import cash_basis
     from app.services.contact_balances import home_amount, unapplied_payments
+    from app.services.sales_income import non_income_by_invoice
 
+    basis = cash_basis.resolve_basis(db, basis if isinstance(basis, str) else None)
     if not start_date:
         start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
+    if basis == "cash":
+        return _income_by_customer_cash(db, start_date, end_date)
 
     invoices = (
         db.query(Invoice)
@@ -257,46 +361,146 @@ def income_by_customer(
         .filter(Invoice.status != InvoiceStatus.VOID)
         .all()
     )
+    other = non_income_by_invoice(db, [inv.id for inv in invoices])
 
-    by_customer = {}
-
-    def row(cid, name):
-        if cid not in by_customer:
-            by_customer[cid] = {
-                "customer_id": cid,
-                "customer_name": name,
-                "invoice_count": 0,
-                "total_sales": Decimal(0),
-                "total_tax": Decimal(0),
-                "total_paid": Decimal(0),
-                "total_balance": Decimal(0),
-            }
-        return by_customer[cid]
-
+    by_customer: dict = {}
     for inv in invoices:
-        r = row(inv.customer_id, inv.customer.full_name if inv.customer else "Unknown")
+        r = _income_row(
+            by_customer,
+            inv.customer_id,
+            inv.customer.full_name if inv.customer else "Unknown",
+        )
         rate = inv.exchange_rate
+        billed = home_amount(inv.subtotal, rate)
+        not_income = other.get(inv.id, Decimal(0))
         r["invoice_count"] += 1
-        r["total_sales"] += home_amount(inv.subtotal, rate)
+        r["total_sales"] += billed - not_income
+        r["total_other"] += not_income
         r["total_tax"] += home_amount(inv.tax_amount, rate)
         r["total_paid"] += home_amount(inv.amount_paid, rate)
         r["total_balance"] += home_amount(inv.balance_due, rate)
 
+    _add_credit_memos(db, by_customer, start_date, end_date)
+
     unapplied = unapplied_payments(db, start=start_date, end=end_date)
     if unapplied:
         names = {
-            c.id: c.name
-            for c in db.query(Customer.id, Customer.name).filter(
+            c.id: c.full_name
+            for c in db.query(Customer).filter(
                 Customer.id.in_({p.customer_id for p in unapplied})
             )
         }
         for p in unapplied:
-            r = row(p.customer_id, names.get(p.customer_id, "Unknown"))
+            r = _income_row(
+                by_customer, p.customer_id, names.get(p.customer_id, "Unknown")
+            )
             r["total_paid"] += p.unapplied_home
             r["total_balance"] -= p.unapplied_home
 
+    _add_direct_income(db, by_customer, start_date, end_date)
+    return _income_by_customer_answer(by_customer, start_date, end_date, "accrual")
+
+
+def _add_credit_memos(db: Session, by_customer: dict, start_date, end_date):
+    """The accrual basis's credit memos (W-198): each memo dated in the
+    period, not voided, takes its credit off its customer's row: its income
+    lines off Sales, its other lines off Not income, its tax off Tax, what
+    was applied off Paid and what is still open off Balance. Write-offs and
+    early-payment discounts are left out, as Sales by Item leaves them."""
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.services.sales_income import posts_to_income
+
+    memos = (
+        db.query(CreditMemo)
+        .options(joinedload(CreditMemo.customer), joinedload(CreditMemo.lines))
+        .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
+        .filter(CreditMemo.status != CreditMemoStatus.VOID)
+        .filter(CreditMemo.is_write_off.isnot(True))
+        .filter(CreditMemo.discount_payment_id.is_(None))
+        .all()
+    )
+    if not memos:
+        return
+    to_income = posts_to_income(db)
+    for cm in memos:
+        r = _income_row(
+            by_customer,
+            cm.customer_id,
+            cm.customer.full_name if cm.customer else "Unknown",
+        )
+        # the lines its journal debited to income: above zero, on an
+        # income account; the rest of its subtotal is Not income
+        income = sum(
+            (
+                _q(Decimal(str(ln.amount or 0)))
+                for ln in cm.lines
+                if Decimal(str(ln.amount or 0)) > 0 and to_income(ln.item_id)
+            ),
+            Decimal(0),
+        )
+        r["total_sales"] -= income
+        r["total_other"] -= _q(Decimal(str(cm.subtotal or 0))) - income
+        r["total_tax"] -= _q(Decimal(str(cm.tax_amount or 0)))
+        r["total_paid"] -= _q(Decimal(str(cm.amount_applied or 0)))
+        r["total_balance"] -= _q(Decimal(str(cm.balance_remaining or 0)))
+
+
+# Money recorded straight to or from a bank or card account, whose lines on
+# an income account the P&L reads on both bases: a register entry or a
+# bank-feed line added (#1065), Make Deposits' lines for money never
+# invoiced (#792, NEW-272), a card charge and an expense.
+DIRECT_INCOME_SOURCES = ("bank_entry", "deposit", "cc_charge", "expense")
+NO_CUSTOMER = "No customer"
+
+
+def _add_direct_income(db: Session, by_customer: dict, start_date, end_date):
+    """Income recorded with no invoice, straight from the bank (#1065,
+    NEW-272): each line of DIRECT_INCOME_SOURCES on an income account, dated
+    in the period, is Sales and, being money in the bank already, Paid, on
+    either basis: under the customer the line names, else on one row for
+    income with no customer, so Sales ties to the P&L's income. A voided
+    entry counts for nothing, and money out of the account (a refund) lowers
+    both."""
+    from app.models.accounts import Account, AccountType
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services.bank_register import voided_transaction_ids
+    from app.services.terminology import terms_from_db
+
+    lines = (
+        db.query(TransactionLine, Transaction.id)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(Transaction.source_type.in_(DIRECT_INCOME_SOURCES))
+        .filter(Transaction.date >= start_date, Transaction.date <= end_date)
+        .filter(Account.account_type == AccountType.INCOME)
+        .all()
+    )
+    if not lines:
+        return
+    voided = voided_transaction_ids(db, [txn_id for _, txn_id in lines])
+    live = [(line, txn_id) for line, txn_id in lines if txn_id not in voided]
+    names = {
+        c.id: c.full_name
+        for c in db.query(Customer).filter(
+            Customer.id.in_({line.customer_id for line, _ in live} - {None})
+        )
+    }
+    nobody = terms_from_db(db).text(NO_CUSTOMER)
+    for line, _ in live:
+        amount = Decimal(str(line.credit or 0)) - Decimal(str(line.debit or 0))
+        if line.customer_id is None:
+            r = _income_row(by_customer, None, nobody)
+        else:
+            r = _income_row(
+                by_customer, line.customer_id, names.get(line.customer_id, "Unknown")
+            )
+        r["total_sales"] += amount
+        r["total_paid"] += amount
+
+
+def _income_by_customer_answer(by_customer: dict, start_date, end_date, basis: str):
     items = sorted(by_customer.values(), key=lambda x: x["total_sales"], reverse=True)
-    money = ("total_sales", "total_tax", "total_paid", "total_balance")
+    money = ("total_sales", "total_other", "total_tax", "total_paid", "total_balance")
     grand = {k: sum((i[k] for i in items), Decimal(0)) for k in money}
     for item in items:
         for k in money:
@@ -305,9 +509,108 @@ def income_by_customer(
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
+        "basis": basis,
         "items": items,
         **{k: float(v) for k, v in grand.items()},
+        **income_by_customer_rule(
+            basis, any(i["total_other"] for i in items) or bool(grand["total_other"])
+        ),
     }
+
+
+def income_by_customer_rule(basis: str, with_other: bool = True) -> dict:
+    """What a row of Income by Customer adds up to on its basis (W-204), and
+    the Balance column's heading. On accrual the row runs from what was
+    billed to what is left: Sales + Not income + Sales Tax − Paid =
+    Balance. On cash it is the money received in the dates: Sales + Not
+    income + Sales Tax = Paid, and Balance, what is still owed today on
+    the invoices listed less the money not yet applied, stands apart.
+    `with_other`: the report has a Not income column (only when the
+    period has some), so the sentence names it.
+
+    The sentences say "the documents counted", the count column: it
+    counts invoices and sales receipts alike (on a nonprofit pledges,
+    program-fee invoices and donations), so no one kind's name is true of
+    every row, and "invoices" would read "pledges" on a nonprofit."""
+    parts = "Sales + Not income + Sales Tax" if with_other else "Sales + Sales Tax"
+    if basis == "cash":
+        return {
+            "balance_heading": "Balance owed now",
+            "row_rule": (
+                f"Cash basis: on every row {parts} = Paid, the money received "
+                "in these dates. Balance owed now is what is still owed today "
+                "on the documents counted, less money received and not yet "
+                "applied; it is not part of that sum."
+            ),
+        }
+    return {
+        "balance_heading": "Balance",
+        "row_rule": (
+            f"On every row {parts} − Paid = Balance: what the documents "
+            "counted and the credit memos in these dates billed and credited, "
+            "less what has been paid or credited on them and money not yet "
+            "applied."
+        ),
+    }
+
+
+def _income_row(by_customer: dict, cid, name) -> dict:
+    if cid not in by_customer:
+        by_customer[cid] = {
+            "customer_id": cid,
+            "customer_name": name,
+            "invoice_count": 0,
+            "total_sales": Decimal(0),
+            "total_other": Decimal(0),
+            "total_tax": Decimal(0),
+            "total_paid": Decimal(0),
+            "total_balance": Decimal(0),
+        }
+    return by_customer[cid]
+
+
+def _income_by_customer_cash(db: Session, start_date: date, end_date: date) -> dict:
+    """Income by Customer on the cash basis (#1062): see income_by_customer."""
+    from app.services import cash_basis
+    from app.services.contact_balances import home_amount
+
+    recognized = cash_basis.recognized_sales(db, start_date, end_date)
+    by_customer: dict = {}
+    if recognized:
+        invoices = (
+            db.query(Invoice)
+            .options(joinedload(Invoice.customer))
+            .filter(Invoice.id.in_(list(recognized)))
+            .all()
+        )
+        for inv in invoices:
+            got = recognized[inv.id]
+            other = got.get("other", Decimal(0))
+            if got["income"] == 0 and got["tax"] == 0 and other == 0:
+                continue
+            name = inv.customer.full_name if inv.customer else "Unknown"
+            r = _income_row(by_customer, inv.customer_id, name)
+            r["invoice_count"] += 1
+            r["total_sales"] += got["income"]
+            # the paid part of a line on an item that posts to no income
+            # account (a security deposit, W-205): received, not income
+            r["total_other"] += other
+            r["total_tax"] += got["tax"]
+            r["total_paid"] += got["income"] + other + got["tax"]
+            r["total_balance"] += home_amount(inv.balance_due, inv.exchange_rate)
+    unapplied = cash_basis.unapplied_cash_income(db, start_date, end_date)
+    if unapplied:
+        names = {
+            c.id: c.full_name
+            for c in db.query(Customer).filter(Customer.id.in_(list(unapplied)))
+        }
+        for cid, amount in unapplied.items():
+            r = _income_row(by_customer, cid, names.get(cid, "Unknown"))
+            r["total_sales"] += amount
+            r["total_paid"] += amount
+            r["total_balance"] -= amount
+    _add_direct_income(db, by_customer, start_date, end_date)
+    return _income_by_customer_answer(by_customer, start_date, end_date, "cash")
 
 
 def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dict:
@@ -686,7 +989,7 @@ def customer_statement_pdf(
 
 
 @router.post("/batch-email-statements")
-def batch_email_statements(db: Session = Depends(get_db)):
+def batch_email_statements(request: Request, db: Session = Depends(get_db)):
     """Email a statement to every customer with an overdue invoice.
 
     Reports what actually went out. send_email() returns False rather than
@@ -726,6 +1029,7 @@ def batch_email_statements(db: Session = Depends(get_db)):
     sent = 0
     failed = 0
     errors = []
+    notes = []
     # the display name (DBA, #679) when one is set: the statement goes to
     # the customer, who knows the company by it
     company_name = settings.get("display_name") or settings.get("company_name") or ""
@@ -768,19 +1072,25 @@ def batch_email_statements(db: Session = Depends(get_db)):
             logger.exception("Failed to send statement to customer %s", customer.id)
         if ok:
             sent += 1
+            note = note_for_last_send(db, "statement", cid)
+            if note:
+                notes.append(f"{customer.name}: {note}")
         else:
             failed += 1
             # the reply's sentence when the send ran and the server said
             # why (#811); the raw text stays in the email log
-            why = sentence_for_last_send(db, "statement", cid) if ran else ""
             errors.append(
-                f"{customer.name}: the statement could not be sent. {why}".rstrip()
-                if why
-                else f"{customer.name}: the statement could not be sent (the "
-                "email log has the reason)"
+                failed_send_line(
+                    db,
+                    "statement",
+                    cid,
+                    reads_mail_server_words(request),
+                    f"{customer.name}: the statement",
+                    ran,
+                )
             )
 
-    return {"sent": sent, "failed": failed, "errors": errors}
+    return with_notes({"sent": sent, "failed": failed, "errors": errors}, notes)
 
 
 @router.post("/collection-letters")
@@ -831,6 +1141,7 @@ def collection_letters(
     generated = 0
     emailed = 0
     errors = []
+    notes = []
 
     for cid, invs in by_customer.items():
         customer = db.query(Customer).filter(Customer.id == cid).first()
@@ -870,12 +1181,19 @@ def collection_letters(
                     entity_id=cid,
                 ):
                     emailed += 1
+                    note = note_for_last_send(db, "collection", cid)
+                    if note:
+                        notes.append(f"{customer.name}: {note}")
                 else:
-                    why = sentence_for_last_send(db, "collection", cid)
+                    # the same words as the other batch sends (W-218)
                     errors.append(
-                        f"{customer.name}: the letter could not be emailed. "
-                        + (why + " " if why else "")
-                        + where_to_see_why(is_admin(request))
+                        failed_send_line(
+                            db,
+                            "collection",
+                            cid,
+                            reads_mail_server_words(request),
+                            f"{customer.name}: the letter",
+                        )
                     )
         except Exception:
             logger.exception(
@@ -883,4 +1201,6 @@ def collection_letters(
             )
             errors.append(f"{customer.name}: unable to generate collection letter")
 
-    return {"generated": generated, "emailed": emailed, "errors": errors}
+    return with_notes(
+        {"generated": generated, "emailed": emailed, "errors": errors}, notes
+    )

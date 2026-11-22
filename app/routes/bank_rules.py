@@ -11,7 +11,7 @@ from app.routes._helpers import reject_null_updates
 from app.models.accounts import Account
 from app.models.bank_rules import BankRule
 from app.models.classes import TxnClass
-from app.models.contacts import Vendor
+from app.models.contacts import Customer, Vendor
 from app.models.jobs import Job
 from app.models.banking import BankTransaction
 from app.schemas.bank_rules import BankRuleCreate, BankRuleUpdate, BankRuleResponse
@@ -49,6 +49,12 @@ def _out(db: Session, rules: list[BankRule]) -> list[BankRuleResponse]:
         if job_ids
         else {}
     )
+    customer_ids = {r.customer_id for r in rules if r.customer_id}
+    customers = (
+        {c.id: c.name for c in db.query(Customer).filter(Customer.id.in_(customer_ids))}
+        if customer_ids
+        else {}
+    )
     numbered = use_account_numbers(db)
     out = []
     for r in rules:
@@ -59,20 +65,75 @@ def _out(db: Session, rules: list[BankRule]) -> list[BankRuleResponse]:
         resp.vendor_name = vendors.get(r.vendor_id)
         resp.class_name = classes.get(r.class_id)
         resp.job_name = jobs.get(r.job_id)
+        resp.customer_name = customers.get(r.customer_id)
         out.append(resp)
     return out
 
 
-def _check_refs(db: Session, fields: dict) -> None:
+# the most a rule's memo holds: the memo a To review line keeps for its
+# entry (#1049) holds as much
+MEMO_MAX = 500
+
+
+def _check_refs(db: Session, fields: dict, rule: BankRule | None = None) -> None:
+    """Each record a rule names exists. `rule` is the rule being edited, so
+    a field the edit leaves out is checked as the rule has it."""
+    if "pattern" in fields:
+        # a pattern of only `*` or spaces matched nothing and was saved
+        # anyway (W-193)
+        from app.services.bank_rules_engine import pattern_problem
+
+        problem = pattern_problem(fields["pattern"])
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
     if fields.get("vendor_id") is not None and not db.get(Vendor, fields["vendor_id"]):
         raise HTTPException(status_code=404, detail="Vendor not found")
     if fields.get("account_id") is not None and not db.get(
         Account, fields["account_id"]
     ):
         raise HTTPException(status_code=404, detail="Account not found")
+    if "memo" in fields:
+        # a blank memo is no memo
+        memo = (fields["memo"] or "").strip() or None
+        if memo is not None and len(memo) > MEMO_MAX:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A rule's memo can be at most {MEMO_MAX} characters; "
+                f"this one has {len(memo)}.",
+            )
+        fields["memo"] = memo
+    customer_id = fields.get("customer_id")
+    if customer_id is not None:
+        customer = db.get(Customer, customer_id)
+        if customer is None:
+            raise HTTPException(
+                status_code=404,
+                detail="That customer was not found; pick one from the list.",
+            )
+        # a rule keeps its own customer when it has since been made
+        # inactive, as it keeps its vendor; a new pick must be active
+        if not customer.is_active and (rule is None or rule.customer_id != customer_id):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{customer.name} is inactive; pick another customer.",
+            )
+    if rule is not None and "customer_id" not in fields:
+        customer_id = rule.customer_id
+    job_id = fields.get("job_id")
+    if rule is not None and "job_id" not in fields:
+        job_id = rule.job_id
     # a rule's class and job are refused in the words the feed and the
-    # transfers use for the same class and job (#813)
+    # transfers use for the same class and job (#813); a job of another
+    # customer than the rule's could never post on its line
     require_dimensions(db, class_id=fields.get("class_id"), job_id=fields.get("job_id"))
+    if customer_id is not None and job_id is not None:
+        job = db.get(Job, job_id)
+        if job is not None and job.customer_id != customer_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The job {job.full_name} belongs to another customer "
+                "than this rule's.",
+            )
 
 
 @router.get("", response_model=list[BankRuleResponse])
@@ -107,7 +168,7 @@ def update_rule(rule_id: int, data: BankRuleUpdate, db: Session = Depends(get_db
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
     fields = reject_null_updates(BankRule, data.model_dump(exclude_unset=True))
-    _check_refs(db, fields)
+    _check_refs(db, fields, rule)
     for key, val in fields.items():
         setattr(rule, key, val)
     db.commit()

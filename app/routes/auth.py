@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Auth routes
+# SlowBooks Pro 2026 — Auth routes
 #
 #   GET  /api/auth/status  → {setup_needed, authenticated, multi_user, desktop, user?}
 #   POST /api/auth/setup   → first-time password set (409 if already set)
@@ -20,6 +20,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import Field
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
@@ -187,6 +188,15 @@ def auth_status(request: Request):
     import app.database as db_module
 
     try:
+        if _a_program(request):
+            # a program is told only of the company its own token opens,
+            # and refused by the gate's own check, with the gate's answer
+            # (its header tells the program its token was turned away)
+            from app.main import api_token_refusal
+
+            _principal, refused = api_token_refusal(request)
+            if refused is not None:
+                return refused
         db = db_module.SessionLocal()
     except served_companies.CompanyUnavailable as exc:
         return _status_while_company_unavailable(
@@ -209,9 +219,19 @@ def _status_while_company_unavailable(request: Request, sentence: str) -> dict:
         "desktop": _desktop_window(request),
         "company_unavailable": sentence,
         "companies": [
-            {**c, "opens": False} for c in served_companies.names_for_sign_in()
+            {**c, "opens": False}
+            for c in served_companies.names_for_sign_in()
+            if not _a_program(request) or c["current"]
         ],
     }
+
+
+def _a_program(request: Request) -> bool:
+    """A request that carries an API token and no sign-in: a program's,
+    told of its own company alone."""
+    return request.session.get("authenticated") is not True and (
+        request.headers.get("authorization") or ""
+    ).lower().startswith("bearer ")
 
 
 def _auth_status(request: Request, db: Session) -> dict:
@@ -232,7 +252,10 @@ def _auth_status(request: Request, db: Session) -> dict:
         # Login UI shows a username field only when this is true.
         "multi_user": is_multi_user(db),
     }
-    if out["multi_user"] and not authenticated:
+    # A program's request (it carries an API token, not a sign-in) is told
+    # of its own company alone: no usernames, and no other company's name.
+    program = not authenticated and _a_program(request)
+    if out["multi_user"] and not authenticated and not program:
         # The names, so the sign-in screen can offer a list instead of a
         # blank field — the way a desktop bookkeeping package does. Names
         # only, never roles; and only on a multi-user install, where the
@@ -248,7 +271,7 @@ def _auth_status(request: Request, db: Session) -> dict:
             .all()
         ]
     # Whose books these are. The sign-in screen names them (with several
-    # companies on one machine, "Unlock Slowbooks" did not say whose
+    # companies on one machine, "Unlock SlowBooks" did not say whose
     # password it wanted — explore 2.17.3, macbase1 F2), and first-run setup
     # prefills the name, so setup neither re-asks for the name typed in the
     # New Company dialog (F3) nor silently renames a file that already holds
@@ -270,6 +293,7 @@ def _auth_status(request: Request, db: Session) -> dict:
         out["companies"] = [
             {**c, "opens": authenticated and c["file"] in opens}
             for c in served_companies.names_for_sign_in()
+            if not program or c["current"]
         ]
     if setup_needed:
         from app.models.transactions import Transaction
@@ -637,6 +661,13 @@ def set_own_password(
     return {"status": "ok"}
 
 
+def _working_in_another_company() -> str | None:
+    """The company file this request works in when it is not the one the
+    server was started for, else None."""
+    here = served_companies.current_file()
+    return None if here == served_companies.started_file() else here
+
+
 @router.post("/setup")
 def setup(
     payload: SetupPayload,
@@ -651,7 +682,9 @@ def setup(
             status_code=status.HTTP_409_CONFLICT,
             detail="Password already set — use /login",
         )
-    chosen = served_companies.chosen_file(request.session)
+    # The company this request works in: the cookie's choice, or the one a
+    # request with no sign-in names in its company header.
+    chosen = _working_in_another_company()
     if chosen is not None and request.session.get(SET_UP_KEY) != chosen:
         # Another company on this server with no password yet (#358): made
         # under Companies, and set up by the administrator who opens it from
@@ -673,10 +706,11 @@ def setup(
         if other:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Another company file ({other}) is already named "
-                    f"'{payload.company_name.strip()}'. Choose a name that "
-                    "tells the two apart."
+                detail=said(
+                    "Another company file ({}) is already named '{}'. Choose "
+                    "a name that tells the two apart.",
+                    other,
+                    payload.company_name.strip(),
                 ),
             )
 
@@ -917,7 +951,7 @@ def login(
         )
     _record_login_attempt(db, request, success=True)
     # Same rotation rationale as /setup.
-    company = served_companies.chosen_file(request.session)
+    company = _working_in_another_company()
     request.session.clear()
     request.session["authenticated"] = True
     remember_this_start(request.session)

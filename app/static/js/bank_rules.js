@@ -7,15 +7,12 @@ const BankRulesPage = {
         const rules = await API.get('/bank-rules');
         let html = `
             <div class="page-header">
-                <h2>Bank Rules</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Bank Rules</h2>${hint('Rules auto-match imported bank transactions by payee name. Higher priority rules are checked first.', 'Bank Rules')}</div>
                 <div class="btn-group">
                     <button class="btn btn-primary" onclick="BankRulesPage.showForm()">+ New Rule</button>
                     <button class="btn btn-secondary" onclick="BankRulesPage.applyAll()">Apply Rules Now</button>
                 </div>
-            </div>
-            <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">
-                Rules auto-match imported bank transactions by payee name. Higher priority rules are checked first.
-            </p>`;
+            </div>`;
 
         if (rules.length === 0) {
             html += '<div class="empty-state"><p>No bank rules yet. Create one to auto-categorize transactions.</p></div>';
@@ -23,18 +20,21 @@ const BankRulesPage = {
             // the Class and Job columns (#675) once a rule names one
             const withClass = rules.some(r => r.class_id);
             const withJob = rules.some(r => r.job_id);
+            // the Customer column (#1075) once a rule names one
+            const withCustomer = rules.some(r => r.customer_id);
             html += `<div class="table-container"><table>
                 <thead><tr>
                     <th scope="col">Name</th><th scope="col">Pattern</th><th scope="col">Match Type</th>
-                    <th scope="col">Category Account</th><th scope="col">Vendor</th>${withClass ? `<th scope="col">${T('Class')}</th>` : ''}${withJob ? `<th scope="col">${T('Job')}</th>` : ''}<th scope="col">Priority</th><th scope="col">Active</th><th scope="col">Actions</th>
+                    <th scope="col">Category Account</th><th scope="col">Vendor</th>${withCustomer ? `<th scope="col">${T('Customer')}</th>` : ''}${withClass ? `<th scope="col">${T('Class')}</th>` : ''}${withJob ? `<th scope="col">${T('Job')}</th>` : ''}<th scope="col">Priority</th><th scope="col">Active</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const r of rules) {
                 html += `<tr>
                     <td><strong>${escapeHtml(r.name)}</strong></td>
-                    <td><code>${escapeHtml(r.pattern)}</code></td>
+                    <td><code>${escapeHtml(r.pattern)}</code>${BankRulesPage.patternReading(r.pattern)}</td>
                     <td>${escapeHtml(r.rule_type)}</td>
                     <td>${r.account_name ? escapeHtml(r.account_name) : '—'}</td>
                     <td>${r.vendor_name ? escapeHtml(r.vendor_name) : '—'}</td>
+                    ${withCustomer ? `<td>${r.customer_name ? escapeHtml(r.customer_name) : '—'}</td>` : ''}
                     ${withClass ? `<td>${r.class_name ? escapeHtml(r.class_name) : '—'}</td>` : ''}
                     ${withJob ? `<td>${r.job_name ? escapeHtml(r.job_name) : '—'}</td>` : ''}
                     <td>${r.priority}</td>
@@ -61,7 +61,7 @@ const BankRulesPage = {
 
     // prefill: a rule's fields filled in from another screen (#259).
     async showForm(id = null, prefill = null) {
-        let rule = { name: '', pattern: '', account_id: '', vendor_id: '', class_id: '', job_id: '', rule_type: 'contains', priority: 0, is_active: true };
+        let rule = { name: '', pattern: '', account_id: '', vendor_id: '', class_id: '', job_id: '', customer_id: '', memo: '', rule_type: 'contains', priority: 0, is_active: true };
         if (id) rule = await API.get(`/bank-rules/${id}`);
         if (prefill) {
             const { afterSave, from, ...fields } = prefill;
@@ -71,11 +71,12 @@ const BankRulesPage = {
             BankRulesPage._afterSave = null;
         }
 
-        const [accounts, vendors, classes, jobs] = await Promise.all([
+        const [accounts, vendors, classes, jobs, customers] = await Promise.all([
             API.get('/accounts'),
             API.get('/vendors').catch(() => []),
             API.get('/classes?include_archived=true').catch(() => []),
             API.get('/jobs?include_inactive=true').catch(() => []),
+            API.get('/customers?tree=1').catch(() => []),
         ]);
         BankRulesPage._accounts = accounts;
         // the vendor a matched line is posted for (#493): active vendors,
@@ -83,6 +84,11 @@ const BankRulesPage = {
         const vendorOpts = vendors
             .filter(v => v.is_active !== false || v.id == rule.vendor_id)
             .map(v => `<option value="${v.id}" ${rule.vendor_id==v.id?'selected':''}>${escapeHtml(v.name)}</option>`).join('');
+        // the customer a matched money-in line is added for (#1075): active
+        // customers, and the rule's own even when it has been made inactive
+        const customerOpts = customers
+            .filter(c => c.is_active !== false || c.id == rule.customer_id)
+            .map(c => `<option value="${c.id}" ${rule.customer_id==c.id?'selected':''}>${escapeHtml(customerLabel(c))}</option>`).join('');
         // the class and job a matched line comes in with (#675): live ones,
         // and the rule's own even when archived or made inactive. Each
         // picker shows once the company has classes, or jobs.
@@ -105,9 +111,9 @@ const BankRulesPage = {
                 <div class="form-grid">
                     <div class="form-group"><label>Rule Name *</label>
                         <input name="name" required value="${escapeHtml(rule.name)}"></div>
-                    <div class="form-group"><label>Payee Pattern *</label>
-                        <input name="pattern" required value="${escapeHtml(rule.pattern)}" placeholder="e.g. AMZN or Amazon"></div>
-                    ${prefill && prefill.from ? `<div class="form-group full-width form-hint" style="font-size:11px; color:var(--gray-500);">From ${escapeHtml(prefill.from)}: the pattern is its payee, matched by Contains in any case. A shorter pattern catches other spellings, and a very short one ("CO") catches too much.</div>` : ''}
+                    <div class="form-group"><label for="bank-rule-pattern">Payee Pattern * ${hint(`${prefill && prefill.from ? `From ${escapeHtml(prefill.from)}: the pattern is its payee, matched by Contains in any case. A shorter pattern catches other spellings, and a very short one ("CO") catches too much. ` : ''}A <code>*</code> stands for anything: <code>T-MOBILE*</code> matches "T-MOBILE AUTOPAY". A star the bank prints is typed <code>\\*</code>: <code>SQ \\*</code> matches "SQ *JOES DELI" and not "MSQ LLC PARTS". A rule made before SlowBooks Pro 2.32.0 had its stars written that way, so it matches what it matched before.`, 'Payee Pattern', 'bank-rule-pattern-hint')}</label>
+                        <input id="bank-rule-pattern" name="pattern" required value="${escapeHtml(rule.pattern)}" placeholder="e.g. AMZN or Amazon" aria-describedby="bank-rule-pattern-hint bank-rule-pattern-reads" oninput="BankRulesPage.showReading(this)">
+                        <div id="bank-rule-pattern-reads" class="rule-pattern-reads" aria-live="polite">${BankRulesPage.readingText(rule.pattern)}</div></div>
                     <div class="form-group"><label>Match Type</label>
                         <select name="rule_type">
                             <option value="contains" ${rule.rule_type==='contains'?'selected':''}>Contains</option>
@@ -116,11 +122,14 @@ const BankRulesPage = {
                         </select></div>
                     <div class="form-group"><label>Category Account</label>
                         ${AccountQuickAdd.picker(`<select name="account_id" id="rule-account"><option value="">-- None --</option>${acctOpts}</select>`, 'bank-rule')}</div>
-                    <div class="form-group"><label for="bank-rule-vendor">Vendor</label>
-                        <select id="bank-rule-vendor" name="vendor_id" aria-describedby="bank-rule-vendor-hint"><option value="">-- None --</option>${vendorOpts}</select>
-                        <div id="bank-rule-vendor-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">A line this rule matches is added for this vendor. The vendor's own name matches too.</div></div>
+                    <div class="form-group"><label for="bank-rule-vendor">Vendor ${hint("A line this rule matches is added for this vendor. The vendor's own name matches too.", 'Vendor', 'bank-rule-vendor-hint')}</label>
+                        <select id="bank-rule-vendor" name="vendor_id" aria-describedby="bank-rule-vendor-hint"><option value="">-- None --</option>${vendorOpts}</select></div>
+                    <div class="form-group"><label for="bank-rule-customer">${T('Customer')} ${hint('A deposit this rule matches is added for this customer. Money out takes the vendor.', T('Customer'), 'bank-rule-customer-hint')}</label>
+                        <select id="bank-rule-customer" name="customer_id" aria-describedby="bank-rule-customer-hint"><option value="">-- None --</option>${customerOpts}</select></div>
                     ${classGroup}
                     ${jobGroup}
+                    <div class="form-group full-width"><label for="bank-rule-memo">Memo ${hint('The memo a line this rule matches is added with, unless one is typed on the line.', 'Memo', 'bank-rule-memo-hint')}</label>
+                        <input id="bank-rule-memo" name="memo" maxlength="500" autocomplete="off" value="${escapeHtml(rule.memo || '')}" aria-describedby="bank-rule-memo-hint"></div>
                     <div class="form-group"><label>Priority</label>
                         <input name="priority" type="number" value="${rule.priority}" title="Higher = checked first"></div>
                     <div class="form-group"><label>Active</label>
@@ -136,11 +145,88 @@ const BankRulesPage = {
             </form>`);
     },
 
+    // A rule's payee pattern (#1064, NEW-259), read as the server reads it
+    // (bank_rules_engine.pattern_parts): `*` is anything, `\*` a star
+    // itself, `\\` a backslash before a star; text runs and wildcards
+    // (null) in order.
+    patternParts(pattern) {
+        const chars = String(pattern || '').trim();
+        const parts = [];
+        let text = '';
+        for (let i = 0; i < chars.length; i++) {
+            const c = chars[i];
+            if (c === '\\' && i + 1 < chars.length && (chars[i + 1] === '*' || chars[i + 1] === '\\')) {
+                text += chars[i + 1];
+                i++;
+            } else if (c === '*') {
+                if (text) { parts.push(text); text = ''; }
+                if (!parts.length || parts[parts.length - 1] !== null) parts.push(null);
+            } else {
+                text += c;
+            }
+        }
+        if (text) parts.push(text);
+        return parts;
+    },
+
+    // A payee or a name as a pattern that matches it as written: each star
+    // in it is the bank's own (Rule… from a statement line).
+    escapePattern(text) {
+        const s = String(text || '');
+        let out = '';
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (c === '*') out += '\\*';
+            else if (c === '\\' && i + 1 < s.length && (s[i + 1] === '*' || s[i + 1] === '\\')) out += '\\\\';
+            else out += c;
+        }
+        return out;
+    },
+
+    // The server's sentence for a pattern with no text to match (W-193).
+    PATTERN_EMPTY: 'A payee pattern needs some of the text the bank prints; a pattern of only * or spaces would match nothing. To match a star the bank prints, type \\*.',
+
+    patternProblem(pattern) {
+        return BankRulesPage.patternParts(pattern).some(p => p !== null && p.trim()) ? null : BankRulesPage.PATTERN_EMPTY;
+    },
+
+    // How a pattern with a star or a backslash in it reads, in words: its
+    // text in quotes, a wildcard as "anything" ('' for plain text, which
+    // reads as itself).
+    readingText(pattern) {
+        const p = String(pattern || '');
+        if (!/[*\\]/.test(p) || BankRulesPage.patternProblem(p)) return '';
+        const words = BankRulesPage.patternParts(p).map(x => (x === null ? 'anything' : `“${escapeHtml(x)}”`));
+        return `Reads: ${words.join(', then ')}`;
+    },
+
+    patternReading(pattern) {
+        const text = BankRulesPage.readingText(pattern);
+        return text ? `<div class="rule-pattern-reads">${text}</div>` : '';
+    },
+
+    showReading(input) {
+        const out = document.getElementById('bank-rule-pattern-reads');
+        if (out) out.innerHTML = BankRulesPage.readingText(input.value);
+        input.setCustomValidity('');
+    },
+
     async save(e, id) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target).entries());
+        // a pattern of only `*` or spaces is refused here as the server
+        // refuses it, in its sentence (W-193)
+        const problem = BankRulesPage.patternProblem(data.pattern);
+        if (problem) {
+            const input = e.target.querySelector('[name="pattern"]');
+            if (input) { input.setCustomValidity(problem); input.reportValidity(); input.focus(); }
+            toast(problem, 'error');
+            return;
+        }
         data.account_id = data.account_id ? parseInt(data.account_id) : null;
         data.vendor_id = data.vendor_id ? parseInt(data.vendor_id) : null;
+        data.customer_id = data.customer_id ? parseInt(data.customer_id) : null;
+        data.memo = (data.memo || '').trim() || null;
         // a picker that isn't on the form (no classes, no jobs) leaves the
         // rule's own as it is
         if ('class_id' in data) data.class_id = data.class_id ? parseInt(data.class_id) : null;

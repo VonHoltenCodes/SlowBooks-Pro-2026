@@ -63,9 +63,11 @@ def sentence_of(exc: CompanyUnavailable) -> str:
     of the server's own, looked up, never the exception's text itself (a
     code scanner reads ``str(exc)`` on the way to a response as a possible
     traceback; here it is never one, and this keeps it so)."""
-    from app.services import company_file
+    from app.services import company_file, migration_floor
 
     known = (
+        migration_floor.BELOW_FLOOR_MESSAGE,
+        migration_floor.NEWER_VERSION_MESSAGE,
         NOT_SERVED,
         MISSING,
         OTHER_VERSION,
@@ -208,7 +210,11 @@ def open_engine(filename: str):
 
     url = "sqlite:///" + path.as_posix()
     engine = company_file.create_sqlite_engine(
-        url, company_file.install_key, pool_pre_ping=True
+        url,
+        company_file.install_key,
+        # the same pool as the started company's (#966): sized to the thread
+        # pool, SLOWBOOKS_DB_POOL_SIZE reaching every company the server serves
+        **database.engine_kwargs(url),
     )
     database.enable_sqlite_tuning(engine)
     try:
@@ -219,10 +225,11 @@ def open_engine(filename: str):
     except RuntimeError as exc:
         engine.dispose()
         logger.error("not serving %s: %s", filename, exc)
-        from app.services.migration_floor import BelowMigrationFloor
+        from app.services.migration_floor import CompanyFileRefused
 
-        if isinstance(exc, BelowMigrationFloor):
-            raise CompanyUnavailable(str(exc)) from exc  # from before 2.29.0
+        # from before 2.29.0 (#769), or a newer build's (W-186)
+        if isinstance(exc, CompanyFileRefused):
+            raise CompanyUnavailable(str(exc)) from exc
         raise CompanyUnavailable(OTHER_VERSION) from exc
     return engine
 

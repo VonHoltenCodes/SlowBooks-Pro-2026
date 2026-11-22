@@ -53,10 +53,13 @@ def test_the_dialogs_tab_is_walked_in_script_in_the_browsers_order():
         utils,
     )
     # the dialog's first control is found the same way — passing a form's
-    # own skip link by (#266), which stays the first stop for Tab
+    # own skip link by (#266), which stays the first stop for Tab, and a
+    # field's tortoise (#977) and the Activity panel's toggle (#1095), which
+    # stay in the Tab order
     assert "const stops = _tabStops($('#modal-body'), null);" in utils
     assert (
-        "const first = stops.find(el => !el.matches('.skip-link')) || stops[0];"
+        "const first = stops.find(el => !el.matches('.skip-link, [data-hint], [data-activity-toggle]'))"
+        " || stops.find(el => !el.matches('[data-hint], [data-activity-toggle]'));"
         in utils
     )
     # a text box's words are selected on the way in, a textarea's are not
@@ -132,20 +135,29 @@ def test_the_alt_shortcuts_compare_the_keys_position_and_cmd_k_finds():
 
 
 def test_ctrl_f_finds_only_in_the_desktop_window():
-    """#695: the desktop app has no find bar, so Ctrl+F (⌘F) is its search
-    there; in a browser it stays the browser's find in page."""
+    """#695: the desktop app has no find bar of its own, so Ctrl+F (⌘F)
+    opens Find on this screen there (find.js); in a browser it stays the
+    browser's find in page. The record search keeps Ctrl+K and /."""
     app = _src("app.js")
     keys = app[app.index("// Keyboard shortcuts.") :]
     keys = keys[: keys.index("// Close search dropdown")]
+    assert "if (window.FindBar && App.inDesktopShell()) {" in keys
     assert (
-        "const desktopFind = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F') && App.inDesktopShell();"
+        "if (FindBar.isFindKey(e)) { e.preventDefault(); FindBar.open(); return; }"
         in keys
     )
-    assert "|| desktopFind ||" in keys
+    assert "desktopFind" not in app
+    find = _src("find.js")
+    assert (
+        "return (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F');"
+        in find
+    )
     shim = _src("desktop_shim.js")
     assert "inShell: inDesktopShell," in shim
     assert "window.SlowbooksDesktop.inShell()" in app
-    assert "...(App.inDesktopShell() ? [`${mod}+F`] : [])" in app
+    assert "search.setAttribute('aria-keyshortcuts', `${mod}+K /`);" in app
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    assert html.index("/static/js/find.js") < html.index("/static/js/app.js")
 
 
 # ── NEW-30 ────────────────────────────────────────────────────────────────
@@ -268,10 +280,17 @@ def test_the_line_class_and_function_cells_leave_their_names_to_the_grid_rule():
         '<select class="${cls}-fund" data-no-search><option value="">Same as header</option>'
         in utils
     )
-    assert '<select class="${cls}">${Nonprofit.optionsHtml(selected' in utils
-    # the rule that names them: the column heading and "line N"
-    assert "rowName = `line ${row.sectionRowIndex + 1}`;" in utils
-    assert "return [heading, rowName].filter(Boolean).join(', ');" in utils
+    # the Function picker shares its cell with Split (side by side, so the
+    # mouse can reach Split); it still carries no name of its own
+    assert (
+        '<select class="${cls}" style="flex:1 1 5em;min-width:5em;">'
+        "${Nonprofit.optionsHtml(selected" in utils
+    )
+    # the rule that names them: the column heading and "line N", N being the
+    # line's place among the lines (a row that belongs to the line above it,
+    # a nonprofit's Split chooser, is not a line and takes that line's number)
+    assert "rowName = `line ${_linePlaces(body, places).get(row)}`;" in utils
+    assert "[heading, rowName].filter(Boolean).join(', ')" in utils
 
 
 # ── NEW-39 ────────────────────────────────────────────────────────────────
@@ -373,7 +392,7 @@ def test_an_unchecked_radio_group_is_one_stop_its_first_radio():
 
 def test_the_shortcut_list_follows_the_screen_reader_bullets():
     docs = (ROOT / "docs/accessibility.md").read_text(encoding="utf-8")
-    bullets_end = docs.index("State is never conveyed by colour alone")
+    bullets_end = docs.index("State is never conveyed by color alone")
     assert docs.index("### Keyboard shortcuts") > bullets_end
     assert docs.index("### Keyboard shortcuts") < docs.index(
         "## What we know is still open"

@@ -82,12 +82,7 @@ const BankingPage = {
     _renderMercurySection(feed, feeds, rows = []) {
         let body;
         if (!feed.connected) {
-            body = `<p>See payments arriving in your Mercury account in SlowBooks.
-                Create a <strong>Read Only</strong> token in
-                <a href="https://app.mercury.com/settings/tokens" target="_blank" rel="noopener">Mercury’s API token settings</a>,
-                then connect here. Your token is stored encrypted on this server.</p>
-                <p class="form-hint">SlowBooks Pro is not affiliated with, endorsed by, or sponsored by Mercury; Mercury is a trademark of Mercury Technologies, Inc.</p>
-                <p class="form-hint hidden" data-admin-note>An administrator connects the bank feed.</p>
+            body = `<p class="form-hint hidden" data-admin-note>An administrator connects the bank feed.</p>
                 <form onsubmit="BankingPage.connectMercury(event)" data-admin>
                     <div class="form-group">
                         <label for="mercury-token">Mercury read-only API token</label>
@@ -102,10 +97,7 @@ const BankingPage = {
                 <td class="amount mercury-available">${escapeHtml(a.available_balance)} USD</td>
                 <td class="amount mercury-inflight">${a.in_flight_balance === undefined ? '—' : escapeHtml(a.in_flight_balance) + ' USD'}</td>
                 <td>${BankingPage._importCell('mercury', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank'])}</td></tr>`).join('');
-            body = `<p>Sync posted deposits and withdrawals into <em>To review</em>.
-                Match them to payments already recorded, or review and add them to your books.
-                Syncing does not mark invoices paid.</p>
-                <p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)}</p>
+            body = `<p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)}</p>
                 <p>${feed.last_sync ? 'Last successful sync: ' + escapeHtml(feed.last_sync.replace('T', ' ')) : 'Not synced yet.'}</p>
                 <div class="table-container"><table id="mercury-balances">
                     <thead><tr><th scope="col">Mercury account</th><th scope="col" class="amount">Current balance</th><th scope="col" class="amount">Available</th><th scope="col" class="amount">Incoming transfers</th><th scope="col">Imports into</th></tr></thead>
@@ -115,10 +107,8 @@ const BankingPage = {
                 <form onsubmit="BankingPage.syncMercury(event)" data-write>
                     <div class="form-group" style="margin-top:12px;">
                         <label for="mercury-since">Import transactions posted since</label>
-                        <input type="date" id="mercury-since" value="${escapeHtml(feed.since)}" max="${todayISO()}" required>
+                        <input type="date" id="mercury-since" value="${escapeHtml(feed.since)}" max="${todayISO()}" required aria-describedby="mercury-since-help">
                     </div>
-                    <p>Each sync checks this date range again and skips transactions already imported.
-                        Choose an earlier date to bring in more history. Use one feed source per bank account to avoid duplicates from other imports.</p>
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary">Sync Mercury</button>
                         <button type="button" class="btn btn-secondary" onclick="BankingPage.refreshMercury(this)">Refresh accounts</button>
@@ -129,7 +119,26 @@ const BankingPage = {
         }
         clearTimeout(BankingPage._mercuryBalanceTimer);
         if (feed.connected) BankingPage._mercuryBalanceTimer = setTimeout(() => BankingPage.pollMercuryBalances(), 15000);
-        return `<div class="card" style="margin-top:16px;"><div class="card-header">Bank Feed (Mercury)</div>${body}</div>`;
+        // #977: the card's teaching behind one tortoise on its heading, a
+        // list (connected, the card has four lines of it)
+        return `<div class="card" style="margin-top:16px;"><div class="card-header">Bank Feed (Mercury) ${hintList('Bank Feed (Mercury)', feed.connected ? [
+            { text: `Sync posted deposits and withdrawals into <em>To review</em>.
+            Match them to payments already recorded, or review and add them to your books.
+            Syncing does not mark invoices paid.` },
+            { name: 'Import transactions posted since', id: 'mercury-since-help', text: `Each sync checks this date range again and skips transactions already imported.
+                    Choose an earlier date to bring in more history. Use one feed source per bank account to avoid duplicates from other imports.` },
+            { name: 'Balance webhooks', text: `Receive current, available, and incoming-transfer balance updates automatically.
+            The balances above refresh every 15 seconds while Banking is open. These updates do not post ledger entries.` },
+            { name: 'Webhook URL', id: 'mercury-webhook-url-help', text: `Register the HTTPS URL below with Mercury for checking and savings balance events.
+            <a href="https://docs.mercury.com/reference/createwebhook" target="_blank" rel="noopener">Mercury webhook registration</a>
+            returns a signing secret; save it here. Registering requires Mercury permission to manage webhooks.` },
+        ] : [
+            { text: `See payments arriving in your Mercury account in SlowBooks.
+            Create a <strong>Read Only</strong> token in
+            <a href="https://app.mercury.com/settings/tokens" target="_blank" rel="noopener">Mercury’s API token settings</a>,
+            then connect here. Your token is stored encrypted on this server.` },
+            { text: 'SlowBooks Pro is not affiliated with, endorsed by, or sponsored by Mercury; Mercury is a trademark of Mercury Technologies, Inc.' },
+        ])}</div>${body}</div>`;
     },
 
     _mercuryBalanceStatus(feed) {
@@ -168,15 +177,11 @@ const BankingPage = {
     _renderMercuryWebhook(webhook) {
         const url = location.origin + webhook.path;
         const registration = JSON.stringify({ url, eventTypes: webhook.event_types }, null, 2);
+        // its two teaching lines are in the card's note (#977)
         return `<details style="margin-top:16px;"><summary>Balance webhooks</summary>
-            <p>Receive current, available, and incoming-transfer balance updates automatically.
-                The balances above refresh every 15 seconds while Banking is open. These updates do not post ledger entries.</p>
-            <p>Register the HTTPS URL below with Mercury for checking and savings balance events.
-                <a href="https://docs.mercury.com/reference/createwebhook" target="_blank" rel="noopener">Mercury webhook registration</a>
-                returns a signing secret; save it here. Registering requires Mercury permission to manage webhooks.</p>
             ${location.protocol !== 'https:' ? '<p>Open SlowBooks at your public HTTPS address before copying this registration. Mercury cannot deliver to a LAN address.</p>' : ''}
             <div class="form-group"><label for="mercury-webhook-url">Webhook URL</label>
-                <input id="mercury-webhook-url" readonly value="${escapeHtml(url)}"></div>
+                <input id="mercury-webhook-url" readonly value="${escapeHtml(url)}" aria-describedby="mercury-webhook-url-help"></div>
             <div class="form-group"><label for="mercury-webhook-registration">Mercury registration JSON</label>
                 <textarea id="mercury-webhook-registration" rows="7" readonly>${escapeHtml(registration)}</textarea></div>
             <form onsubmit="BankingPage.saveMercuryWebhook(event)" data-admin>
@@ -447,9 +452,8 @@ const BankingPage = {
         };
         openModal('Use an account I already have', `
             <form onsubmit="BankingPage.useOwnAccount(event)" data-source="${escapeHtml(source)}" data-row="${escapeHtml(row)}" data-row-name="${escapeHtml(rowName)}">
-                <p>Choose the account in your chart that ${escapeHtml(rowName)} is. It becomes ${cards ? 'a bank account (or a credit-card account, for a liability)' : 'a bank account'}
-                    with a register, and this feed imports into it.</p>
-                <div class="form-group"><label for="own-account">Account</label>
+                <div class="form-group"><label for="own-account">Account ${hint(`Choose the account in your chart that ${escapeHtml(rowName)} is. It becomes ${cards ? 'a bank account (or a credit-card account, for a liability)' : 'a bank account'}
+                    with a register, and this feed imports into it.`, 'Account')}</label>
                     <select id="own-account" name="account_id" required>
                         ${group(cards ? 'Asset accounts: become bank accounts' : 'Asset accounts', 'asset')}
                         ${cards ? group('Liability accounts: become credit-card accounts', 'liability') : ''}
@@ -486,15 +490,17 @@ const BankingPage = {
 
     _renderFeedSection(feed, feeds, rows = []) {
         let body;
+        // #977: the not-connected card's one teaching line, behind the
+        // tortoise on its heading (the connected card's line is state and
+        // stays in the open)
+        let about = '';
         if (!feed.connected) {
-            body = `
-                <p style="font-size:12px; margin-bottom:8px;">
-                    Pull transactions straight from your bank — no file exports.
+            about = ` ${hint(`Pull transactions straight from your bank — no file exports.
                     Connect your bank at any SimpleFIN provider — the reference one is
                     <a href="https://bridge.simplefin.org" target="_blank" rel="noopener">bridge.simplefin.org</a> —
                     then paste the <strong>setup token</strong> it gives you below.
-                    Your credential stays on this machine; SlowBooks has no middleman server.
-                </p>
+                    Your credential stays on this machine; SlowBooks has no middleman server.`, 'Bank Feeds (SimpleFIN)')}`;
+            body = `
                 <p class="form-hint hidden" data-admin-note>An administrator connects the bank feed.</p>
                 <form onsubmit="BankingPage.connectSimpleFIN(event)" data-admin>
                     <div class="form-group">
@@ -513,10 +519,22 @@ const BankingPage = {
                 ? `<label style="font-size:11px; white-space:nowrap;"><input type="checkbox" data-sfid="${escapeHtml(sfId)}" class="simplefin-reverse" data-admin
                         ${reversed.has(sfId) ? 'checked' : ''}> Reverse signs</label>`
                 : `<span style="font-size:11px;">${reversed.has(sfId) ? 'Signs reversed' : 'As the bank sends them'}</span>`;
-            const tableRows = feed.accounts.map(a => `<tr>
-                    <td>${escapeHtml(a.name)}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.org || '')}</div></td>
-                    <td class="amount">${escapeHtml(a.balance)} ${escapeHtml(a.currency)}</td>
-                    <td>${BankingPage._importCell('simplefin', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank', 'credit_card'])}</td>
+            // #905: a row the bridge no longer reports, and one it reports
+            // that imports nowhere yet, say so under the account's name
+            const marks = {
+                gone: '<span class="badge badge-void">Gone from SimpleFIN</span>',
+                new: '<span class="badge badge-sent">New — not mapped</span>',
+            };
+            BankingPage._sfFeed = feed;
+            const moveTo = (a) => feed.account_map[a.id] && mayMap
+                ? `<div style="margin-top:4px;"><button type="button" class="btn btn-secondary btn-sm" data-admin
+                        data-sfid="${escapeHtml(a.id)}" data-row-name="${escapeHtml(a.name)}"
+                        onclick="BankingPage.showSimpleFINMove(this)">Move this mapping to…</button></div>`
+                : '';
+            const tableRows = feed.accounts.map(a => `<tr class="simplefin-row" data-sfid="${escapeHtml(a.id)}" data-state="${escapeHtml(a.state || '')}">
+                    <td>${escapeHtml(a.name)}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.org || '')}</div>${marks[a.state] ? `<div>${marks[a.state]}</div>` : ''}</td>
+                    <td class="amount">${a.gone ? '—' : `${escapeHtml(a.balance)} ${escapeHtml(a.currency)}`}</td>
+                    <td>${BankingPage._importCell('simplefin', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank', 'credit_card'])}${moveTo(a)}</td>
                     <td>${signs(a.id)}</td>
                 </tr>`).join('');
             body = `
@@ -529,6 +547,10 @@ const BankingPage = {
                     back as far as your SimpleFIN provider keeps.
                     If a feed shows a bank account's balance as negative and its deposits as withdrawals,
                     tick <em>Reverse signs</em> for it before syncing.
+                    <em>Refresh accounts</em> reads the account list again (an account added at your SimpleFIN
+                    provider, or a replacement card); a card that came back under a new account takes its
+                    old one's place with <em>Move this mapping to…</em>, and its first sync reaches back
+                    the usual three months.
                 </p>
                 <p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)} The administrator also sets whether a feed's signs are reversed.</p>
                 <div class="table-container"><table>
@@ -538,11 +560,13 @@ const BankingPage = {
                 <div class="form-actions" style="margin-top:12px;">
                     <button class="btn btn-primary" onclick="BankingPage.syncSimpleFIN()">Sync Now</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showSimpleFINHistory()">Fetch older history…</button>
+                    <button class="btn btn-secondary" data-admin onclick="BankingPage.refreshSimpleFIN()">Refresh accounts</button>
+                    <button class="btn btn-secondary" data-admin onclick="BankingPage.showSimpleFINUpdateToken()">Update token…</button>
                     <button class="btn btn-secondary" data-admin onclick="BankingPage.disconnectSimpleFIN()">Disconnect</button>
                 </div>`;
         }
         return `<div class="card" style="margin-top:16px;">
-            <div class="card-header">Bank Feeds (SimpleFIN)</div>${body}</div>`;
+            <div class="card-header">Bank Feeds (SimpleFIN)${about}</div>${body}</div>`;
     },
 
     async connectSimpleFIN(e) {
@@ -582,19 +606,16 @@ const BankingPage = {
         openModal('Fetch older history', `
             <form onsubmit="BankingPage.fetchSimpleFINHistory(event)">
                 <div class="form-group">
-                    <label for="simplefin-history">Reach back</label>
+                    <label for="simplefin-history">Reach back ${hint(`How much history there is depends on your SimpleFIN provider: the SimpleFIN Bridge keeps
+                    about 90 days, and others, such as BankSync, keep up to a year. Transactions already
+                    imported are skipped; the rest wait in each account's <em>To review</em> list, where
+                    anything from before your books began can be excluded.`, 'Reach back')}</label>
                     <select id="simplefin-history" name="history_months">
                         <option value="3">3 months</option>
                         <option value="6">6 months</option>
                         <option value="12" selected>12 months</option>
                     </select>
                 </div>
-                <p style="font-size:12px; margin:8px 0;">
-                    How much history there is depends on your SimpleFIN provider: the SimpleFIN Bridge keeps
-                    about 90 days, and others, such as BankSync, keep up to a year. Transactions already
-                    imported are skipped; the rest wait in each account's <em>To review</em> list, where
-                    anything from before your books began can be excluded.
-                </p>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Fetch</button>
@@ -616,6 +637,105 @@ const BankingPage = {
             BankingPage.go('#/banking');
         } catch (err) {
             if (btn) { btn.disabled = false; btn.textContent = 'Fetch'; }
+            toast(err.message, 'error');
+        }
+    },
+
+    // Refresh accounts (#905): the bridge's account list again, balances
+    // only; needs no mapping, unlike Sync Now.
+    async refreshSimpleFIN() {
+        try {
+            const r = await API.post('/simplefin/refresh');
+            const parts = [`${r.added.length} new`];
+            if (r.gone.length) parts.push(`${r.gone.length} gone from SimpleFIN`);
+            toast(`Account list refreshed: ${parts.join(', ')}`);
+            if (r.warnings && r.warnings.length) toast(r.warnings[0], 'error');
+            BankingPage.go('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Move this mapping to… (#905): a mapped row's SlowBooks account and its
+    // Reverse signs choice go to another SimpleFIN account in one step, the
+    // old one unmapped (a reissued card under a new account id).
+    showSimpleFINMove(btn) {
+        const { sfid, rowName } = btn.dataset;
+        const feed = BankingPage._sfFeed || { accounts: [], account_map: {} };
+        const choices = feed.accounts.filter(a => !a.gone && a.id !== sfid && !feed.account_map[a.id]);
+        if (!choices.length) {
+            openModal('Move this mapping', `
+                <p>Every SimpleFIN account in the list already imports somewhere. If the account this mapping
+                    belongs to now is new at your SimpleFIN provider, use <strong>Refresh accounts</strong> first;
+                    one that imports elsewhere is set to <em>— not imported —</em> and saved first.</p>
+                <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+            return;
+        }
+        openModal('Move this mapping', `
+            <form onsubmit="BankingPage.moveSimpleFIN(event)" data-sfid="${escapeHtml(sfid)}">
+                <p>${escapeHtml(rowName)} stops importing. The SimpleFIN account you choose imports into the same
+                    SlowBooks account from now on, with the same Reverse signs choice. Its first sync brings in
+                    about the last three months; anything already imported is skipped.</p>
+                <div class="form-group"><label for="simplefin-move-to">Move to</label>
+                    <select id="simplefin-move-to" name="to_id" required>
+                        ${choices.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}${a.org ? ' (' + escapeHtml(a.org) + ')' : ''}</option>`).join('')}
+                    </select></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Move mapping</button>
+                </div>
+            </form>`);
+    },
+
+    async moveSimpleFIN(e) {
+        e.preventDefault();
+        const form = e.target;
+        const button = form.querySelector('button[type=submit]');
+        button.disabled = true;
+        try {
+            await API.post('/simplefin/move', { from_id: form.dataset.sfid, to_id: form.to_id.value });
+            closeModal();
+            toast('Mapping moved');
+            BankingPage.go('#/banking');
+        } catch (err) {
+            button.disabled = false;
+            toast(err.message, 'error');
+        }
+    },
+
+    // Update token (#905): a fresh setup token for the connection already
+    // here; the mappings, Reverse signs choices and sync dates stay.
+    showSimpleFINUpdateToken() {
+        openModal('Update SimpleFIN token', `
+            <form onsubmit="BankingPage.updateSimpleFINToken(event)">
+                <div class="form-group"><label for="simplefin-new-token">New setup token ${hint(`Paste a new setup token from your SimpleFIN provider. Every mapping and Reverse signs choice
+                    is kept; a mapped account the new connection does not report is shown as
+                    <em>Gone from SimpleFIN</em>, to move to its new account or set to not imported.`, 'New setup token')}</label>
+                    <input type="password" id="simplefin-new-token" name="setup_token" required autocomplete="off"
+                           placeholder="Paste the one-time setup token"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update token</button>
+                </div>
+            </form>`);
+    },
+
+    async updateSimpleFINToken(e) {
+        e.preventDefault();
+        const form = e.target;
+        const token = form.setup_token.value.trim();
+        if (!token) return;
+        const button = form.querySelector('button[type=submit]');
+        button.disabled = true;
+        try {
+            const r = await API.post('/simplefin/update-token', { setup_token: token });
+            closeModal();
+            toast(`Token updated: ${Object.keys(r.account_map).length - r.missing.length} mapping(s) kept`);
+            if (r.missing.length) {
+                toast(`Not in the new connection: ${r.missing.map(m => m.name).join(', ')}. ` +
+                    'Move each mapping to its new account, or set it to not imported.', 'error');
+            }
+            BankingPage.go('#/banking');
+        } catch (err) {
+            button.disabled = false;
             toast(err.message, 'error');
         }
     },
@@ -674,9 +794,8 @@ const BankingPage = {
                         <input name="bank_name"></div>
                     <div class="form-group"><label>Last 4 digits</label>
                         <input name="last_four" maxlength="4"></div>
-                    <div class="form-group"><label>Statement balance</label>
+                    <div class="form-group"><label>Statement balance ${hint('What the statement says on the As-of date: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900) — unless the books already carry this account, when only a difference you confirm is posted.', 'Statement balance')}</label>
                         <input name="opening_balance" class="money" type="number" step="0.01" value="0" oninput="this.dataset.touched = '1'">
-                        <div style="font-size:10px; color:var(--gray-500);">What the statement says on the As-of date: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900) — unless the books already carry this account, when only a difference you confirm is posted.</div>
                         <div id="acct-ledger-note" style="font-size:11px; margin-top:4px;" role="status"></div></div>
                     <div class="form-group"><label>As of</label>
                         <input name="opening_date" type="date" value="${todayISO()}" onchange="BankingPage._showLedgerBalance(this.form)"></div>
@@ -883,6 +1002,86 @@ const BankingPage = {
         await BankingPage._backToRegister(id);
         const again = document.getElementById('reg-hide-voided');
         if (again) focusFor(again, keyboard);
+    },
+
+    // How the register is read (#903): its order (Oldest first, as a
+    // ledger reads, or Newest first) and where it opens (its newest
+    // entries, #728, or the top of the page, where To review is). Kept in
+    // this browser by sign-in for every register and company, as Hide
+    // voided is. Open at not chosen: the top of the page while lines wait
+    // in To review, the newest entries otherwise.
+    _regPrefKey(name) {
+        const owner = (typeof App !== 'undefined' && App._tabsOwner) || '';
+        const bar = owner.indexOf('|');
+        return `slowbooks-register-${name}:${bar < 0 ? '' : owner.slice(0, bar)}`;
+    },
+    _regPref(name) {
+        return typeof Store !== 'undefined' ? Store.get(BankingPage._regPrefKey(name)) : null;
+    },
+    _keepRegPref(name, value) {
+        if (typeof Store === 'undefined') return;
+        if (value) Store.set(BankingPage._regPrefKey(name), value);
+        else Store.remove(BankingPage._regPrefKey(name));
+    },
+    _newestFirst() { return BankingPage._regPref('sort') === 'newest'; },
+    _openAtChosen() {
+        const v = BankingPage._regPref('open-at');
+        return v === 'newest' || v === 'top' ? v : '';
+    },
+    // The order changed: kept, and the register drawn again in place, the
+    // keyboard back on the box.
+    async regSortChanged(sel, id) {
+        BankingPage._keepRegPref('sort', sel.value === 'newest' ? 'newest' : '');
+        const keyboard = typeof App !== 'undefined' && typeof App.keyboardFocus === 'function' && App.keyboardFocus();
+        await BankingPage._backToRegister(id);
+        const again = document.getElementById('reg-sort');
+        if (again) focusFor(again, keyboard);
+    },
+    // Where it opens: kept for the next opening; the page stays put.
+    regOpenAtChanged(sel) {
+        BankingPage._keepRegPref('open-at', sel.value === 'newest' || sel.value === 'top' ? sel.value : '');
+    },
+    // Where the newest entries are: the foot of the page read oldest first,
+    // the entry row under the filter bar read newest first.
+    _scrollToNewest() {
+        const box = document.getElementById('content');
+        if (!box) return;
+        const bar = document.getElementById('reg-filters');
+        if (BankingPage._newestFirst() && bar) {
+            box.scrollTop += bar.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+        } else {
+            box.scrollTop = box.scrollHeight;
+        }
+    },
+    // Jump to top / Jump to newest (#903). From the keyboard the focus goes
+    // too: to the entry row's date (or the Sort box, the row hidden) for
+    // the newest, to the page's heading for the top.
+    jumpRegister(where) {
+        const keyboard = typeof App !== 'undefined' && typeof App.keyboardFocus === 'function' && App.keyboardFocus();
+        const box = document.getElementById('content');
+        let to = null;
+        if (where === 'top') {
+            if (box) box.scrollTop = 0;
+            to = document.querySelector('#page-content .page-header h2');
+        } else {
+            BankingPage._scrollToNewest();
+            const qe = document.getElementById('qe-date');
+            to = qe && qe.offsetParent !== null ? qe : document.getElementById('reg-sort');
+        }
+        if (keyboard && to) {
+            if (to.tagName === 'H2' && !to.hasAttribute('tabindex')) to.setAttribute('tabindex', '-1');
+            try { to.focus({ preventScroll: true, focusVisible: true }); } catch (e) { /* stays */ }
+        }
+    },
+    // The To review count, a link to the list (#903): the list comes into
+    // view and takes the focus, as a skip link's target does.
+    jumpToReview(e) {
+        if (e) e.preventDefault();
+        const panel = document.getElementById('reg-review');
+        if (!panel) return false;
+        if (typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+        try { panel.focus({ preventScroll: true }); } catch (err) { /* stays */ }
+        return false;
     },
 
     // A date the register takes from its boxes, its address or the From it
@@ -1149,15 +1348,17 @@ const BankingPage = {
     },
 
     // The register drawn (#728): opened, it shows the newest entries and
-    // the entry row at the foot, the list still oldest to newest; drawn
-    // again in place (a filter changed by hand) the page stays where it
-    // was. A save's way back (_backToRegister) puts its own place after
-    // this. Only the scroll moves: nothing takes the focus.
+    // the entry row; drawn again in place (a filter changed by hand) the
+    // page stays where it was. A save's way back (_backToRegister) puts its
+    // own place after this. Only the scroll moves: nothing takes the focus.
+    // Open at (#903) can choose the top of the page instead; not chosen,
+    // the register opens there while lines wait in To review.
     mountRegister() {
         if (!BankingPage._openAtEnd) return;
         BankingPage._openAtEnd = false;
+        const at = BankingPage._openAtChosen() || (BankingPage._reviewWaiting ? 'top' : 'newest');
         const box = document.getElementById('content');
-        if (box) box.scrollTop = box.scrollHeight;
+        if (at === 'top') { if (box) box.scrollTop = 0; } else BankingPage._scrollToNewest();
     },
 
     // Whether the page under any dialog open is this account's register.
@@ -1220,6 +1421,7 @@ const BankingPage = {
         let review = [];
         // the whole queue: a year fetched from a feed can be more than a page
         if (feed) review = await fetchAllPages(`/banking/transactions?bank_account_id=${feed.bank_account_id}&status=unmatched`);
+        BankingPage._reviewWaiting = review.length > 0;  // where it opens (#903)
         // the lines set aside, by the user or by an import as already in
         // the books, for Show excluded (W-116)
         const excluded = feed ? await API.get(`/banking/accounts/${feed.bank_account_id}/feed/excluded`).catch(() => null) : null;
@@ -1245,7 +1447,7 @@ const BankingPage = {
                 <div class="card"><div class="card-header">${kind === 'credit_card' ? 'Amount owed' : 'Balance'}</div>
                     <div class="card-value">${formatCurrency(reg.balance)}</div></div>
                 <div class="card"><div class="card-header">To review</div>
-                    <div class="card-value">${review.length}</div>
+                    <div class="card-value">${review.length ? `<a href="#/banking/${id}" id="reg-review-count" style="color:inherit;" onclick="return BankingPage.jumpToReview(event)" aria-label="${review.length} to review: go to the To review list">${review.length}</a>` : review.length}</div>
                     <div style="font-size:11px; color:var(--gray-500);">${feed ? 'statement lines not yet in the books' : 'no bank feed on this account'}</div></div>
                 ${info.last_reconciled ? `<div class="card"><div class="card-header">Last reconciled</div><div class="card-value" style="font-size:16px;">${formatDate(info.last_reconciled)}</div></div>` : ''}
             </div>`;
@@ -1278,6 +1480,8 @@ const BankingPage = {
                 : '';
         // From and To apply on Enter or once the bar is left, a pick from the
         // calendar at once (#663: regFiltersKey)
+        const newestFirst = BankingPage._newestFirst();
+        const openAt = BankingPage._openAtChosen();
         const dateBox = `onpointerdown="BankingPage.regDatePointer(this)" onchange="BankingPage.regDateChanged(this, ${id})"`;
         html += `
             <div class="toolbar" id="reg-filters" data-drawn="${drawing}" data-account="${id}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
@@ -1289,6 +1493,11 @@ const BankingPage = {
                 <label for="reg-class" style="font-size:11px;">${T('Class')}</label>
                 <select id="reg-class" data-no-search onchange="BankingPage.regFilterChanged(${id})"><option value="">All ${T('classes').toLowerCase()}</option>${classOpts}</select>
                 <label for="reg-hide-voided" style="font-size:11px; display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="reg-hide-voided"${hideVoided ? ' checked' : ''} onchange="BankingPage.regHideVoided(this, ${id})">Hide voided</label>
+                <label for="reg-sort" style="font-size:11px;">Sort</label>
+                <select id="reg-sort" data-no-search onchange="BankingPage.regSortChanged(this, ${id})"><option value="oldest"${newestFirst ? '' : ' selected'}>Oldest first</option><option value="newest"${newestFirst ? ' selected' : ''}>Newest first</option></select>
+                <label for="reg-open-at" style="font-size:11px;">Open at</label>
+                <select id="reg-open-at" data-no-search onchange="BankingPage.regOpenAtChanged(this)"><option value=""${openAt ? '' : ' selected'}>To review if any, else newest</option><option value="newest"${openAt === 'newest' ? ' selected' : ''}>Newest entries</option><option value="top"${openAt === 'top' ? ' selected' : ''}>Top of page (To review)</option></select>
+                <button type="button" class="btn btn-sm btn-secondary" id="reg-jump-newest" onclick="BankingPage.jumpRegister('newest')">Jump to newest</button>
                 ${filtered ? `<button type="button" class="btn btn-sm btn-secondary" onclick="BankingPage.regClear(${id})">Clear</button>` : ''}
                 ${filtered ? `<span id="reg-filter-note" style="font-size:11px; color:var(--gray-500);">Showing ${reg.class_name ? `${T('class').toLowerCase()} <strong>${escapeHtml(reg.class_name)}</strong>` : 'every ' + T('class').toLowerCase()}${f.start_date ? ` from ${formatDate(f.start_date)}` : ''}${f.end_date ? ` to ${formatDate(f.end_date)}` : ''}: the running balance counts these lines${reg.class_name ? ` only — the account's whole balance is ${formatCurrency(reg.balance)}` : ''}.</span>` : ''}
             </div>`;
@@ -1305,18 +1514,26 @@ const BankingPage = {
         // with none and leave the list).
         const quickRow = f.class_id ? BankingPage._entryRowOff(!!(chosen && chosen.is_system_default))
             : BankingPage._quickEntryRow(id, kind, chart, outLabel, inLabel);
+        // Newest first (#903): the entry row heads the list, under the
+        // column heads, in a body of its own (a <tfoot> draws at the foot
+        // wherever it is written)
+        const entryFirst = newestFirst && quickRow.replace(/^<tfoot>/, '<tbody class="reg-entry-first">').replace(/<\/tfoot>$/, '</tbody>');
+        const jumpTop = `<div id="reg-jumps" style="margin:6px 0 0;"><button type="button" class="btn btn-sm btn-secondary" id="reg-jump-top" onclick="BankingPage.jumpRegister('top')">Jump to top</button></div>`;
         // one set of columns, empty or not (#729): the empty register's
         // header said Category where the populated one said Type
         const head = `<thead><tr>
-                    <th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col">Category</th>
+                    <th scope="col" aria-sort="${newestFirst ? 'descending' : 'ascending'}">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col">Category</th>
                     <th scope="col" class="amount">${outLabel}</th><th scope="col" class="amount">${inLabel}</th><th scope="col" class="amount">Balance</th>
                     <th scope="col" title="✓ cleared · R reconciled">✓</th><th scope="col"></th>
                 </tr></thead>`;
         if (!reg.entries.length) {
             html += `<div class="empty-state"><p>${filtered ? 'Nothing posted to this account for these filters' : 'Nothing posted to this account yet'}</p></div>`;
-            html += `<div class="table-container"><table>${head}<tbody></tbody>${quickRow}</table></div>`;
+            html += newestFirst ? `<div class="table-container"><table>${head}${entryFirst}<tbody></tbody></table></div>`
+                : `<div class="table-container"><table>${head}<tbody></tbody>${quickRow}</table></div>`;
         } else {
-            const rows = shown.map(e => `
+            // the running balance is the service's, read oldest first;
+            // Newest first only draws the rows the other way up (#903)
+            const rows = (newestFirst ? [...shown].reverse() : shown).map(e => `
                 <tr data-txn="${e.transaction_id}" style="${e.voided ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                     <td>${formatDate(e.date)}</td>
                     <td>${escapeHtml(e.payee || '')}</td>
@@ -1335,7 +1552,11 @@ const BankingPage = {
             // row follows the entries on a populated register as on an
             // empty one (W-14, NEW-140)
             const opening = f.start_date ? `<tr style="color:var(--gray-500);" id="reg-opening"><td>${formatDate(f.start_date)}</td><td colspan="7">Balance brought forward${reg.class_name ? ` (${escapeHtml(reg.class_name)})` : ''}</td><td class="amount">${formatCurrency(reg.opening_balance)}</td><td></td><td></td></tr>` : '';
-            html += `<div class="table-container"><table>${head}<tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}`;
+            // Newest first: the balance brought forward is the oldest line,
+            // so it closes the table
+            html += newestFirst
+                ? `<div class="table-container"><table>${head}${entryFirst}<tbody>${rows}${opening}</tbody></table></div>${hiddenNote}${jumpTop}`
+                : `<div class="table-container"><table>${head}<tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}${jumpTop}`;
         }
         return html;
     },
@@ -1470,7 +1691,8 @@ const BankingPage = {
         // the lines by id, for "Rule…" (the payee and the category chosen)
         BankingPage._reviewLines = Object.fromEntries(review.map(t => [t.id, t]));
         const rows = review.map(t => `
-            <tr>
+            <tr data-review-line="${t.id}">
+                <td><input type="checkbox" class="review-tick" data-review-tick="${t.id}" data-write aria-label="Tick the line of ${formatDate(t.date)}, ${escapeHtml(t.payee || t.description || 'no payee')}, ${formatCurrency(t.amount)}" onchange="BankingPage.tickChanged()"></td>
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(t.description || '')}</div></td>
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)'}">${formatCurrency(t.amount)}</td>
@@ -1488,22 +1710,22 @@ const BankingPage = {
         setTimeout(() => BankingPage._fillCategorySelects(kind), 0);
         // one column for the row's picks (NEW-197: three columns pushed
         // Match / Exclude / Rule… past the right edge at 1280)
-        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name'].filter(Boolean).join(' / ')}</th>`;
-        return `<div class="card" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
-            <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
+        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name', 'Memo'].filter(Boolean).join(' / ')}</th>`;
+        return `<div class="card" id="reg-review" data-review-panel tabindex="-1" role="region" aria-label="To review" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
+            <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books ${hint(`What you pick on a line is kept on it until it is added. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} and the memo chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                Tick lines to set a category, ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}or name on all of them from the bar above the list; <strong>Add selected</strong> sets what the bar holds on them and adds them.
+                <strong>Match</strong> links it to something you already entered.
+                A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.`, 'To review')}
                 <span style="float:right;">
+                    <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.addSelected(${feedId}, ${accountId})" title="Add the ticked lines, with what the bar above the list sets on them">Add selected</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
                     <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.excludeAll(${feedId}, ${accountId})" aria-label="Exclude all shown: ${review.length} statement line${review.length === 1 ? '' : 's'}" title="Set aside every line in this list; Show excluded, under the list, has each one with Restore">Exclude all shown</button>
                 </span>
             </div>
+            ${BankingPage._bulkBar(accountId)}
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
+                <thead><tr><th scope="col"><input type="checkbox" id="review-tick-all" data-write aria-label="Tick every line shown" onchange="BankingPage.tickAll(this)"></th><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
-            <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
-                <strong>Match</strong> links it to something you already entered.
-                A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
-            </div>
         </div>`;
     },
 
@@ -1528,13 +1750,10 @@ const BankingPage = {
         return `<div class="excluded-lines" style="margin-bottom:16px;">
             <button type="button" class="btn btn-sm btn-secondary" id="excluded-toggle" data-readonly-ok aria-expanded="false" aria-controls="excluded-list" onclick="BankingPage.toggleExcluded(this)">Show excluded (${n})</button>
             <div id="excluded-list" class="card" hidden style="margin-top:6px;">
-                <div class="card-header">Excluded — ${n} statement line${n === 1 ? '' : 's'} set aside, not in To review</div>
+                <div class="card-header">Excluded — ${n} statement line${n === 1 ? '' : 's'} set aside, not in To review ${hint('<strong>Restore</strong> returns a line to To review, where it can be added or matched. Nothing here is posted.', 'Excluded')}</div>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Why</th><th scope="col"></th></tr></thead>
                     <tbody>${rows}</tbody></table></div>
-                <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                    <strong>Restore</strong> returns a line to To review, where it can be added or matched. Nothing here is posted.
-                </div>
             </div>
         </div>`;
     },
@@ -1558,16 +1777,25 @@ const BankingPage = {
     // now; a line keeps its own choice (one picked a moment ago, not yet
     // reloaded, included).
     _reviewAccounts: null,
+    // The bank and card accounts under their own heading (#948): a line
+    // whose category is another bank or card account posts as a transfer,
+    // and the heading says so where the hand goes; the kind label stays.
     _fillReviewCats() {
         const usable = BankingPage._reviewAccounts || [];
-        document.querySelectorAll('select.review-cat').forEach(sel => {
+        document.querySelectorAll('select.review-cat, select.review-bulk-cat').forEach(sel => {
             const current = sel.value || sel.dataset.current;
-            sel.innerHTML = '<option value="">Pick a category…</option>' + usable.map(a =>
-                `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`).join('');
+            const opt = (a) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
+            const transfers = usable.filter(a => a.bank_kind);
+            const categories = usable.filter(a => !a.bank_kind);
+            sel.innerHTML = '<option value="">Pick a category…</option>'
+                + `<optgroup label="Categories">${categories.map(opt).join('')}</optgroup>`
+                + (transfers.length ? `<optgroup label="Transfer to another account">${transfers.map(opt).join('')}</optgroup>` : '');
         });
     },
 
     async addLine(lineId, accountId) {
+        // a pick on another row a moment ago is kept before this one posts
+        await Promise.allSettled([...BankingPage._pendingCategories]);
         const sel = $(`#cat-${lineId}`);
         const picks = BankingPage._reviewPicks(lineId);
         const body = { ...picks };
@@ -1578,7 +1806,7 @@ const BankingPage = {
             const said = added.vendor_name ? `Added to the books for ${added.vendor_name}` : 'Added to the books';
             const outside = BankingPage._outsideFilter(BankingPage._lineDate(added, lineId));
             toast(outside ? `${said}. ${outside}` : said);
-            BankingPage._backToRegister(accountId);
+            BankingPage._dropReviewRow(lineId, accountId);
             // a name typed that is no vendor's is the payee the offer names
             BankingPage._offerFeedVendors([picks.payee ? { ...added, payee: picks.payee } : added]);
         } catch (err) { toast(err.message, 'error'); }
@@ -1592,29 +1820,220 @@ const BankingPage = {
     // no vendor's posts as the payee's text); money in, a customer, whose
     // jobs the Job box then narrows to. Left blank, the line posts as it
     // always did: no class, no job, the vendor its payee or rule names.
+    //
+    // Each box is kept on the line as it is picked (#904), the way the
+    // category is, and the row is drawn with what was kept: another line's
+    // Add, Exclude, Match or Rule…, and a reload, used to lose every name,
+    // class and job not yet added.
     _reviewDimCells(t) {
         const small = 'font-size:11px; padding:2px 4px; width:150px; display:block;';
+        const save = `onchange="BankingPage.setPicks(${t.id})"`;
+        const sel = (id, kept) => (String(id) === String(kept) ? ' selected' : '');
+        // where nothing was picked, the class, job and vendor the line's
+        // bank rule gives it: the row shows what Add posts
+        const or = (pick, rule) => (pick !== null && pick !== undefined ? pick : rule);
         let html = '';
         if (BankingPage._lineClassShown()) {
             const opts = BankingPage._classes_().filter(c => !c.is_archived)
-                .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-            html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
+                .map(c => `<option value="${c.id}"${sel(c.id, or(t.pick_class_id, t.rule_class_id))}>${escapeHtml(c.name)}</option>`).join('');
+            html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         }
         const moneyIn = parseFloat(t.amount) > 0;
         const jobs = BankingPage._jobs || [];
         if (jobs.length) {
-            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}"${sel(j.id, or(t.pick_job_id, t.rule_job_id))}>${escapeHtml(j.full_name || j.name)}</option>`).join('');
             const bind = moneyIn ? ` data-customer-select="rv-customer-${t.id}"` : '';
-            html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}"><option value="">— No job —</option>${opts}</select>`;
+            html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}" ${save}><option value="">— No job —</option>${opts}</select>`;
         }
         if (moneyIn) {
             const opts = (BankingPage._customers || [])
-                .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
-            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
+                .map(c => `<option value="${c.id}"${sel(c.id, or(t.pick_customer_id, t.rule_customer_id))}>${escapeHtml(customerLabel(c))}</option>`).join('');
+            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}" ${save}><option value="">—</option>${opts}</select>`;
         } else {
-            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}">`;
+            const kept = t.pick_vendor_name || t.pick_payee || t.rule_vendor_name || '';
+            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" value="${escapeHtml(kept)}" style="${small}" ${save}>`;
         }
-        return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';
+        // the entry's memo (#1049), kept on the line like the rest; where
+        // none was typed, the memo the line's bank rule gives it (#1075)
+        // At most MEMO_MAX characters, as the server keeps (W-191); near
+        // the limit the count shows under it.
+        const memo = t.pick_memo || t.rule_memo || '';
+        html += `<input type="text" id="rv-memo-${t.id}" class="review-memo" data-write maxlength="${BankingPage.MEMO_MAX}" autocomplete="off" aria-label="Memo, line ${t.id}" aria-describedby="rv-memo-count-${t.id}" placeholder="Memo" value="${escapeHtml(memo)}" style="${small}" ${save} oninput="BankingPage.memoCount(this, ${t.id})">`;
+        html += `<span id="rv-memo-count-${t.id}" class="review-memo-count" aria-live="polite">${BankingPage.memoCountText(memo.length)}</span>`;
+        return `<td><div style="display:grid; gap:2px;">${html}</div></td>`;
+    },
+
+    // The most a To review memo holds: the server's MEMO_MAX (W-191).
+    MEMO_MAX: 500,
+
+    // "487 of 500 characters" once a memo is within 50 of the limit, else
+    // nothing.
+    memoCountText(n) {
+        return n >= BankingPage.MEMO_MAX - 50 ? `${n} of ${BankingPage.MEMO_MAX} characters` : '';
+    },
+
+    memoCount(input, lineId) {
+        const out = document.getElementById(`rv-memo-count-${lineId}`);
+        if (out) out.textContent = BankingPage.memoCountText(input.value.length);
+    },
+
+    // The bar above the To review list (#1053): what it holds is set on
+    // every ticked line, by Set on ticked or by Add selected before it
+    // adds them. A box left at its blank choice changes nothing. Money-out
+    // lines take the vendor, money-in lines the customer.
+    _bulkBar(accountId) {
+        const small = 'font-size:11px; padding:2px 4px; width:150px;';
+        let html = `<select id="bulk-cat" class="review-bulk-cat" data-write aria-label="Category for the ticked lines" style="${small}"><option value="">Pick a category…</option></select>`;
+        if (BankingPage._lineClassShown()) {
+            const opts = BankingPage._classes_().filter(c => !c.is_archived)
+                .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+            html += `<select id="bulk-class" data-write data-no-search aria-label="${T('Class')} for the ticked lines" style="${small}"><option value="">${T('Class')}…</option>${opts}</select>`;
+        }
+        const jobs = BankingPage._jobs || [];
+        if (jobs.length) {
+            const opts = jobs.map(j => `<option value="${j.id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            html += `<select id="bulk-job" data-write data-no-search aria-label="${T('Job')} for the ticked lines" style="${small}"><option value="">${T('Job')}…</option>${opts}</select>`;
+        }
+        html += `<input type="text" id="bulk-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor for the ticked money-out lines" placeholder="Vendor (money out)" style="${small}">`;
+        const custs = (BankingPage._customers || [])
+            .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
+        html += `<select id="bulk-customer" data-write aria-label="${T('Customer')} for the ticked money-in lines" style="${small}"><option value="">${T('Customer')} (money in)…</option>${custs}</select>`;
+        return `<div class="review-bulk" role="group" aria-labelledby="review-bulk-label" data-write style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; font-size:11px;">
+                <span id="review-bulk-label">For the ticked lines (<span id="review-ticked" aria-live="polite">none ticked</span>):</span>
+                ${html}
+                <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.applyToTicked()">Set on ticked</button>
+            </div>`;
+    },
+
+    _tickedIds() {
+        return [...document.querySelectorAll('input.review-tick:checked')]
+            .map(b => parseInt(b.dataset.reviewTick, 10)).filter(Number.isFinite);
+    },
+
+    // the count beside the bar, and the header box ticked, clear or mixed
+    tickChanged() {
+        const boxes = [...document.querySelectorAll('input.review-tick')];
+        const n = boxes.filter(b => b.checked).length;
+        const out = document.getElementById('review-ticked');
+        if (out) out.textContent = n ? `${n} ticked` : 'none ticked';
+        const all = document.getElementById('review-tick-all');
+        if (all) {
+            all.checked = n > 0 && n === boxes.length;
+            all.indeterminate = n > 0 && n < boxes.length;
+        }
+    },
+
+    tickAll(box) {
+        document.querySelectorAll('input.review-tick').forEach(b => { b.checked = box.checked; });
+        BankingPage.tickChanged();
+    },
+
+    // Set what the bar holds on each ticked line, kept on the line as a pick
+    // on the row is (setCategory, setPicks). Returns how many lines changed,
+    // or null when nothing is ticked.
+    async applyToTicked({ quiet = false } = {}) {
+        const ids = BankingPage._tickedIds();
+        if (!ids.length) { toast('Tick the lines first: the box at the start of each row.', 'error'); return null; }
+        const val = (id) => { const el = document.getElementById(id); return el && el.value ? el.value.trim() : ''; };
+        const cat = val('bulk-cat'), cls = val('bulk-class'), job = val('bulk-job');
+        const vendor = val('bulk-vendor'), customer = val('bulk-customer');
+        if (!(cat || cls || job || vendor || customer)) {
+            if (!quiet) toast('Choose a category, class, job or name in the bar to set on the ticked lines.', 'error');
+            return 0;
+        }
+        const lines = BankingPage._reviewLines || {};
+        const saves = [];
+        let changed = 0;
+        for (const id of ids) {
+            const t = lines[id];
+            if (!t) continue;
+            const moneyIn = parseFloat(t.amount) > 0;
+            let picks = false;
+            const set = (elId, value) => {
+                const el = document.getElementById(elId);
+                if (!el || !value) return false;
+                if (el.tagName === 'SELECT' && !el.querySelector(`option[value="${CSS.escape(value)}"]`)) return false;
+                el.value = value;
+                return true;
+            };
+            if (cat) {
+                const sel = document.getElementById(`cat-${id}`);
+                if (sel) {
+                    if (!sel.querySelector(`option[value="${CSS.escape(cat)}"]`)) {
+                        const src = document.querySelector(`#bulk-cat option[value="${CSS.escape(cat)}"]`);
+                        if (src) sel.appendChild(src.cloneNode(true));
+                    }
+                    sel.value = cat;
+                    saves.push(BankingPage.setCategory(id, sel));
+                }
+            }
+            picks = set(`rv-class-${id}`, cls) || picks;
+            if (moneyIn) picks = set(`rv-customer-${id}`, customer) || picks;
+            else picks = set(`rv-vendor-${id}`, vendor) || picks;
+            picks = set(`rv-job-${id}`, job) || picks;
+            if (picks) saves.push(BankingPage.setPicks(id));
+            if (cat || picks) changed += 1;
+        }
+        await Promise.allSettled(saves);
+        if (!quiet) toast(`Set on ${changed} ticked line${changed === 1 ? '' : 's'}`);
+        return changed;
+    },
+
+    // Add selected (#1053): the ticked lines, after the bar's choices are
+    // set on them, each with its own row's picks; each line that cannot
+    // post (no category yet) is named in the toast with its reason, as a
+    // warning, and stays ticked (W-190).
+    async addSelected(feedId, accountId) {
+        const ids = BankingPage._tickedIds();
+        if (!ids.length) { toast('Tick the lines to add first: the box at the start of each row.', 'error'); return; }
+        try {
+            await BankingPage.applyToTicked({ quiet: true });
+            await Promise.allSettled([...BankingPage._pendingCategories]);
+            const lines = BankingPage._reviewLines || {};
+            const picked = ids.map(id => ({ id, ...BankingPage._reviewPicks(id) }))
+                .filter(p => Object.keys(p).length > 1);
+            const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`, { line_ids: ids, lines: picked });
+            const skipped = new Set(r.skipped.map(x => x.id));
+            const outside = BankingPage._outsideFilterAll(ids.filter(id => !skipped.has(id) && lines[id]).map(id => String(lines[id].date || '')));
+            const notAdded = BankingPage._notAddedText(r.skipped, lines);
+            const said = `Added ${r.added} of ${ids.length} ticked.${notAdded ? ` ${notAdded}` : ''}`;
+            // a line left out is a warning, not a success (W-190)
+            toast(outside ? `${said} ${outside}` : said, !r.added ? 'error' : (r.skipped.length ? 'warning' : undefined));
+            await BankingPage._backToRegister(accountId);
+            // the lines not added stay ticked, to be fixed and added again
+            BankingPage._tickAgain(r.skipped.map(x => x.id));
+            const typed = Object.fromEntries(picked.filter(p => p.payee).map(p => [p.id, p.payee]));
+            BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id])
+                .filter(Boolean).map(t => (typed[t.id] ? { ...t, payee: typed[t.id] } : t)));
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Each line Add selected or Add all did not add, named by its date,
+    // the bank's text and its amount, with its own reason (W-190): "Not
+    // added: Oct 3, 2026, BETA HOMES CHECK, $120.00: Pick a category …".
+    // '' when every line was added.
+    _notAddedText(skipped, lines = {}) {
+        if (!skipped || !skipped.length) return '';
+        const named = skipped.map(x => {
+            const t = lines[x.id] || {};
+            const day = x.date || t.date;
+            const payee = x.payee || t.payee || t.description;
+            const amount = x.amount != null ? x.amount : t.amount;
+            const what = [day ? formatDate(day) : '', payee || '', amount != null && amount !== '' ? formatCurrency(amount) : '']
+                .filter(Boolean).join(', ') || `line ${x.id}`;
+            return `${what}: ${String(x.reason || '').replace(/\.$/, '')}`;
+        });
+        return `Not added (${skipped.length}): ${named.join('; ')}.`;
+    },
+
+    // Tick these review lines again after the list is drawn anew.
+    _tickAgain(ids) {
+        let any = false;
+        for (const id of ids || []) {
+            const box = document.querySelector(`input.review-tick[data-review-tick="${Number(id)}"]`);
+            if (box) { box.checked = true; any = true; }
+        }
+        if (any) BankingPage.tickChanged();
     },
 
     // What a review row chose besides its category, as the add call takes it.
@@ -1630,7 +2049,82 @@ const BankingPage = {
             const vendorId = BankingPage._payeeVendorId(name);
             if (vendorId) picks.vendor_id = vendorId; else picks.payee = name;
         }
+        const memo = val(`rv-memo-${lineId}`).trim();
+        if (memo) picks.memo = memo;
         return picks;
+    },
+
+    // A review row's class, job and name kept on the line as they are
+    // picked (#904), as setCategory keeps the category: the whole row at
+    // once, a box left blank clearing its pick, so a job the Customer box
+    // just cleared (JobPicker, after this handler) is cleared on the line
+    // too. Read a moment later for that reason; tracked with the category
+    // saves, which Add, Add all, Rule… and the rest wait for.
+    setPicks(lineId) {
+        const saving = new Promise(resolve => setTimeout(resolve, 0))
+            .then(() => API.request('PATCH', `/banking/transactions/${lineId}`, {
+                class_id: null, job_id: null, customer_id: null, vendor_id: null, payee: null, memo: null,
+                ...BankingPage._reviewPicks(lineId),
+            }))
+            .then(saved => {
+                const t = (BankingPage._reviewLines || {})[lineId];
+                if (t && saved) Object.assign(t, saved);
+            })
+            .catch(err => toast(err.message, 'error'));
+        BankingPage._pendingCategories.add(saving);
+        saving.finally(() => BankingPage._pendingCategories.delete(saving));
+        return saving;
+    },
+
+    // A line gone from To review by its own Add, Exclude or Match (#904):
+    // only its row leaves the list. The rest of the list stays as it is,
+    // each row with what was typed and the focus where it was; the page
+    // around it (the counts, the register with the new entry, its balance,
+    // Show excluded) is drawn again. The list as the server has it now
+    // decides: a line that arrived meanwhile, or no list left, draws the
+    // whole page again, as before.
+    _drops: 0,
+    async _dropReviewRow(lineId, accountId) {
+        const content = document.getElementById('page-content');
+        const live = content && content.querySelector('[data-review-panel]');
+        const row = live && live.querySelector(`tr[data-review-line="${Number(lineId)}"]`);
+        if (!row || !BankingPage._onRegister(accountId)) return BankingPage._backToRegister(accountId);
+        const next = row.nextElementSibling || row.previousElementSibling;
+        const hadFocus = row.contains(document.activeElement);
+        row.remove();
+        if (BankingPage._reviewLines) delete BankingPage._reviewLines[lineId];
+        BankingPage.tickChanged();
+        if (hadFocus && next) {
+            const add = next.querySelector('button.btn-primary');
+            if (add) add.focus();
+        }
+        const mine = ++BankingPage._drops;
+        const box = document.getElementById('content');
+        let html;
+        try {
+            html = await BankingPage.renderRegister(accountId, App.parseHash(location.hash).query);
+        } catch (err) { return BankingPage._backToRegister(accountId); }
+        if (mine !== BankingPage._drops || !live.isConnected) return;
+        const at = box ? box.scrollTop : 0;
+        const fresh = document.createElement('div');
+        fresh.innerHTML = html;
+        const panel = fresh.querySelector('[data-review-panel]');
+        const want = new Set(Object.keys(BankingPage._reviewLines || {}));
+        const shown = [...live.querySelectorAll('tr[data-review-line]')];
+        if (!panel || [...want].some(id => !shown.some(tr => tr.dataset.reviewLine === id))) {
+            content.innerHTML = html;
+        } else {
+            // a line added or matched elsewhere meanwhile leaves too
+            shown.filter(tr => !want.has(tr.dataset.reviewLine)).forEach(tr => tr.remove());
+            const head = live.querySelector('.card-header');
+            if (head) head.replaceWith(panel.querySelector('.card-header'));
+            const kids = [...fresh.childNodes];
+            const i = kids.indexOf(panel);
+            [...content.childNodes].forEach(n => { if (n !== live) n.remove(); });
+            kids.slice(0, i).forEach(n => content.insertBefore(n, live));
+            kids.slice(i + 1).forEach(n => content.appendChild(n));
+        }
+        if (box) box.scrollTop = at;
     },
 
     // Record a provider payout from the review queue (#584): the deposit
@@ -1651,14 +2145,11 @@ const BankingPage = {
         const gross = net;
         openModal(`Record ${escapeHtml(name)} payout`, `
             <form onsubmit="BankingPage.submitPayout(event, ${lineId}, ${accountId})">
-                <p style="font-size:12px; margin:0 0 8px;">
-                    This ${escapeHtml(formatCurrency(net))} deposit clears the ${escapeHtml(name)} clearing
+                <div class="form-grid">
+                    <div class="form-group"><label>Gross cleared ${hint(`This ${escapeHtml(formatCurrency(net))} deposit clears the ${escapeHtml(name)} clearing
                     account, which holds ${escapeHtml(formatCurrency(bal))} awaiting payout. Leave the gross
                     at the net unless the processor took a fee that was not booked when the payment came in:
-                    the gross less the net is booked as fee.
-                </p>
-                <div class="form-grid">
-                    <div class="form-group"><label>Gross cleared</label>
+                    the gross less the net is booked as fee.`, 'Gross cleared')}</label>
                         <input id="payout-gross" type="number" step="0.01" min="${net.toFixed(2)}" value="${gross.toFixed(2)}"
                             oninput="BankingPage._payoutFee()"></div>
                     <div class="form-group"><label>Fee</label>
@@ -1738,8 +2229,9 @@ const BankingPage = {
 
     async excludeLine(lineId, accountId) {
         try {
+            await Promise.allSettled([...BankingPage._pendingCategories]);
             await API.post(`/banking/transactions/${lineId}/exclude`);
-            BankingPage._backToRegister(accountId);
+            BankingPage._dropReviewRow(lineId, accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -1782,8 +2274,12 @@ const BankingPage = {
 
     // A bank rule from a statement line (#259): the rule form opens with
     // the payee as the pattern and the category chosen here filled in, so
-    // the two screens that know the same payee hand it across. Saved, the
-    // rules run over the queue, and the register comes back.
+    // the two screens that know the same payee hand it across; the vendor,
+    // class and job picked on the row come too (#904), and the customer and
+    // memo (#1075; a rule names no name that is no vendor's). Saved, the
+    // rules run over
+    // the queue, and the register comes back with every row's picks, which
+    // are kept on the lines.
     async ruleFromLine(lineId, accountId) {
         const line = (BankingPage._reviewLines || {})[lineId] || {};
         const sel = document.getElementById(`cat-${lineId}`);
@@ -1791,10 +2287,18 @@ const BankingPage = {
         const accountChosen = sel && (sel.value || sel.dataset.current);
         const payee = (line.payee || line.description || '').trim();
         if (!payee) { toast('This line has no payee to make a rule from.', 'error'); return; }
+        const picks = BankingPage._reviewPicks(lineId);
         BankRulesPage.showForm(null, {
             name: payee,
-            pattern: payee,
+            // the bank's text as it is written: a star it prints is a star
+            // (NEW-259), not "anything"
+            pattern: BankRulesPage.escapePattern(payee),
             account_id: accountChosen ? parseInt(accountChosen, 10) : '',
+            vendor_id: picks.vendor_id || '',
+            class_id: picks.class_id || '',
+            job_id: picks.job_id || '',
+            customer_id: picks.customer_id || '',
+            memo: picks.memo || '',
             from: 'a statement line',
             afterSave: async () => {
                 try { await API.post('/bank-rules/apply'); } catch (e) { /* the rule is saved; the queue catches it on the next import */ }
@@ -1830,8 +2334,9 @@ const BankingPage = {
             const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`, picked.length ? { lines: picked } : undefined);
             const skipped = new Set(r.skipped.map(x => x.id));
             const outside = BankingPage._outsideFilterAll(categorised.filter(t => !skipped.has(t.id)).map(t => String(t.date || '')));
-            const said = `Added ${r.added}${r.skipped.length ? `, skipped ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`;
-            toast(outside ? `${said}. ${outside}` : said);
+            const notAdded = BankingPage._notAddedText(r.skipped, lines);
+            const said = `Added ${r.added}.${notAdded ? ` ${notAdded}` : ''}`;
+            toast(outside ? `${said} ${outside}` : said, r.skipped.length ? 'warning' : undefined);
             BankingPage._backToRegister(accountId);
             const typed = Object.fromEntries(picked.filter(p => p.payee).map(p => [p.id, p.payee]));
             BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id])
@@ -1848,9 +2353,28 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    async showMatch(lineId, accountId) {
+    // Match's date range (#1050): 30 days either side of the line by
+    // default, or 90 days, a year or all dates; the choice is kept for the
+    // sitting (this tab), so the next line opens with it.
+    MATCH_RANGES: [['30', '30 days'], ['90', '90 days'], ['365', 'A year'], ['all', 'All dates']],
+    _matchRange() {
+        let kept = BankingPage._matchDays;
+        if (!kept) { try { kept = sessionStorage.getItem('sb.matchDays'); } catch (e) { kept = null; } }
+        return BankingPage.MATCH_RANGES.some(([v]) => v === kept) ? kept : '30';
+    },
+    _keepMatchRange(value) {
+        BankingPage._matchDays = value;
+        try { sessionStorage.setItem('sb.matchDays', value); } catch (e) { /* kept in memory for the sitting */ }
+    },
+    async matchRangeChanged(sel, lineId, accountId) {
+        BankingPage._keepMatchRange(sel.value);
+        await BankingPage.showMatch(lineId, accountId, { refocus: true });
+    },
+
+    async showMatch(lineId, accountId, { refocus = false } = {}) {
         try {
-            const cands = await API.get(`/banking/transactions/${lineId}/candidates`);
+            const days = BankingPage._matchRange();
+            const cands = await API.get(`/banking/transactions/${lineId}/candidates?days=${days}`);
             // each posting's date, for Matched to say one the dates leave out
             BankingPage._matchDates = Object.fromEntries(cands.map(c => [c.line_id, c.date]));
             const rows = cands.map(c => `<tr>
@@ -1858,21 +2382,186 @@ const BankingPage = {
                 <td>${escapeHtml(c.payee || c.description || '')}</td>
                 <td>${escapeHtml(c.reference || '')}</td>
                 <td style="font-size:10px;">${escapeHtml(sourceWord(c.source_type, c.source_kind))}</td>
-                <td><button class="btn btn-sm btn-primary" onclick="BankingPage.matchLine(${lineId}, ${c.line_id}, ${accountId})">Match</button></td>
+                <td><button class="btn btn-sm btn-primary" onclick="BankingPage.matchLine(${lineId}, ${c.line_id}, ${accountId})" aria-label="Match to ${escapeHtml(c.payee || c.description || 'this posting')}, ${formatDate(c.date)}">Match</button></td>
             </tr>`).join('');
-            openModal('Match to a posting', rows
+            const range = BankingPage.MATCH_RANGES.find(([v]) => v === days)[1];
+            const within = days === 'all' ? 'on any date' : `within ${range.toLowerCase()} of this line`;
+            const opts = BankingPage.MATCH_RANGES.map(([v, label]) => `<option value="${v}"${v === days ? ' selected' : ''}>${label}</option>`).join('');
+            const bar = `<div style="margin-bottom:8px; font-size:12px;"><label for="match-range">Look for postings</label>
+                <select id="match-range" data-readonly-ok onchange="BankingPage.matchRangeChanged(this, ${lineId}, ${accountId})" style="margin-left:6px;">${opts}</select>
+                <span style="color:var(--gray-500); margin-left:6px;">either side of the line's date</span></div>`;
+            openModal('Match to a posting', bar + BankingPage._feedPayOffer(lineId, accountId) + (rows
                 ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Payee / description</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col"></th></tr></thead><tbody>${rows}</tbody></table></div>`
-                : `<p>Nothing in the books has this amount within 30 days. Use <strong>Add</strong> to post it.</p>`);
+                : `<p>Nothing in the books has this amount ${within}. Look further back, or use <strong>Add</strong> to post it.</p>`));
+            if (refocus) { const sel = document.getElementById('match-range'); if (sel) sel.focus(); }
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Receive payment / Pay bills from a line (#1056): a money-in line
+    // pays a customer's open invoices, a money-out line a vendor's open
+    // bills, in full or in part. The server posts one payment for the
+    // line's whole amount, on its date, into or out of this account, and
+    // matches it to the line; what is not applied stays a credit on the
+    // customer or a prepayment to the vendor, as Receive Payments and Pay
+    // Bills leave it.
+    _feedPayOffer(lineId, accountId) {
+        const t = (BankingPage._reviewLines || {})[lineId];
+        if (!t) return '';
+        const moneyIn = parseFloat(t.amount) > 0;
+        const what = moneyIn ? `pays ${T('customer').toLowerCase()} ${T('invoices').toLowerCase()} still open` : 'pays vendor bills still open';
+        return `<div class="feed-pay" data-write style="margin:0 0 10px; padding:8px; border:1px solid var(--gray-200); border-radius:4px;">
+                <button type="button" class="btn btn-sm btn-secondary" data-write id="feed-pay-open" aria-expanded="false" aria-controls="feed-pay-panel" onclick="BankingPage.openFeedPay(${lineId}, ${accountId})">${moneyIn ? 'Receive payment…' : 'Pay bills…'}</button>
+                <span style="font-size:11px; color:var(--gray-500); margin-left:6px;">when this ${moneyIn ? 'deposit' : 'payment'} ${what}</span>
+                <div id="feed-pay-panel" hidden style="margin-top:8px;"></div>
+            </div>`;
+    },
+
+    _feedPayCtx: null,
+
+    async openFeedPay(lineId, accountId) {
+        const t = (BankingPage._reviewLines || {})[lineId];
+        const panel = document.getElementById('feed-pay-panel');
+        const opener = document.getElementById('feed-pay-open');
+        if (!t || !panel) return;
+        const moneyIn = parseFloat(t.amount) > 0;
+        BankingPage._feedPayCtx = { lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
+        let picked = '';
+        let options = '';
+        if (moneyIn) {
+            const sel = document.getElementById(`rv-customer-${lineId}`);
+            picked = String((sel && sel.value) || t.pick_customer_id || '');
+            options = (BankingPage._customers || [])
+                .map(c => `<option value="${c.id}"${String(c.id) === picked ? ' selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
+        } else {
+            const box = document.getElementById(`rv-vendor-${lineId}`);
+            picked = String(BankingPage._payeeVendorId(box ? box.value : '') || t.pick_vendor_id || t.rule_vendor_id || '');
+            options = [...(BankingPage._vendorsByName || new Map()).values()]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(v => `<option value="${v.id}"${String(v.id) === picked ? ' selected' : ''}>${escapeHtml(v.name)}</option>`).join('');
+        }
+        const who = moneyIn ? T('Customer') : 'Vendor';
+        panel.innerHTML = `<form id="feed-pay-form" onsubmit="BankingPage.submitFeedPay(event)">
+                <div class="form-group" style="margin-bottom:6px;"><label for="feed-pay-party">${who}</label>
+                    <select id="feed-pay-party" onchange="BankingPage.loadFeedPayDocs()"><option value="">Pick the ${who.toLowerCase()}…</option>${options}</select></div>
+                <div id="feed-pay-docs"></div>
+                <p id="feed-pay-sum" aria-live="polite" style="font-size:12px; margin:6px 0;"></p>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" id="feed-pay-submit">${moneyIn ? 'Receive payment' : 'Pay bills'}</button>
+                </div>
+            </form>`;
+        panel.hidden = false;
+        if (opener) opener.setAttribute('aria-expanded', 'true');
+        if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms(panel);
+        if (picked) await BankingPage.loadFeedPayDocs();
+        else BankingPage._feedPaySum();
+        const party = document.getElementById('feed-pay-party');
+        if (party) party.focus();
+    },
+
+    // the open invoices or bills of the one picked, oldest first, each
+    // filled with what the line covers, oldest first, as Receive Payments
+    // fills them
+    async loadFeedPayDocs() {
+        const ctx = BankingPage._feedPayCtx;
+        const party = document.getElementById('feed-pay-party');
+        const box = document.getElementById('feed-pay-docs');
+        if (!ctx || !party || !box) return;
+        if (!party.value) { ctx.docs = []; box.innerHTML = ''; BankingPage._feedPaySum(); return; }
+        const id = parseInt(party.value, 10);
+        let docs;
+        try {
+            docs = ctx.moneyIn
+                ? await fetchAllPages(`/invoices?customer_id=${id}&open_only=true&billed_to=true`)
+                : await fetchAllPages(`/bills?vendor_id=${id}&open_only=true`);
+        } catch (err) { toast(err.message, 'error'); return; }
+        if (BankingPage._feedPayCtx !== ctx || party.value !== String(id)) return;
+        docs = docs.filter(d => d.status !== 'void' && (parseFloat(d.balance_due) || 0) > 0)
+            .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id));
+        ctx.docs = docs;
+        const word = ctx.moneyIn ? T('Invoice') : 'Bill';
+        if (!docs.length) {
+            box.innerHTML = `<p style="font-size:12px;">${escapeHtml(party.options[party.selectedIndex].text)} has no open ${ctx.moneyIn ? T('invoices').toLowerCase() : 'bills'}.</p>`;
+            BankingPage._feedPaySum();
+            return;
+        }
+        let left = Math.round(ctx.amount * 100);
+        const rows = docs.map(d => {
+            const due = Math.round((parseFloat(d.balance_due) || 0) * 100);
+            const put = Math.max(0, Math.min(due, left));
+            left -= put;
+            const num = ctx.moneyIn ? d.invoice_number : (d.bill_number || d.id);
+            return `<tr>
+                <td>${escapeHtml(String(num || ''))}</td>
+                <td>${formatDate(d.date)}</td>
+                <td class="amount">${formatCurrency(d.balance_due)}</td>
+                <td><input type="number" class="feed-pay-amount" data-doc="${d.id}" data-due="${(due / 100).toFixed(2)}" step="0.01" min="0" max="${(due / 100).toFixed(2)}" value="${put ? (put / 100).toFixed(2) : ''}" aria-label="Amount to apply to ${escapeHtml(word.toLowerCase())} ${escapeHtml(String(num || ''))}" oninput="BankingPage._feedPaySum()" style="width:110px;"></td>
+            </tr>`;
+        }).join('');
+        box.innerHTML = `<div class="table-container"><table><thead><tr><th scope="col">${escapeHtml(word)}</th><th scope="col">Date</th><th scope="col" class="amount">Still due</th><th scope="col">Apply</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+        if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms(box);
+        BankingPage._feedPaySum();
+    },
+
+    _feedPayAmounts() {
+        return [...document.querySelectorAll('#feed-pay-docs input.feed-pay-amount')]
+            .map(i => ({ id: parseInt(i.dataset.doc, 10), cents: Math.round((parseFloat(i.value) || 0) * 100) }))
+            .filter(a => a.cents > 0);
+    },
+
+    // what the line covers, what is applied, and where the rest goes
+    _feedPaySum() {
+        const ctx = BankingPage._feedPayCtx;
+        const out = document.getElementById('feed-pay-sum');
+        if (!ctx || !out) return;
+        const line = Math.round(ctx.amount * 100);
+        const applied = BankingPage._feedPayAmounts().reduce((n, a) => n + a.cents, 0);
+        const money = (c) => formatCurrency(c / 100);
+        if (applied > line) {
+            out.textContent = `Applied ${money(applied)}, more than this line's ${money(line)}. Lower an amount.`;
+        } else if (applied === line) {
+            out.textContent = `Applying all of this line's ${money(line)}.`;
+        } else {
+            const rest = ctx.moneyIn ? `stays a credit on the ${T('customer').toLowerCase()}, to apply later` : 'stays a prepayment to the vendor, to apply later';
+            out.textContent = `Applying ${money(applied)} of this line's ${money(line)}; the ${money(line - applied)} left over ${rest}.`;
+        }
+    },
+
+    async submitFeedPay(e) {
+        e.preventDefault();
+        const ctx = BankingPage._feedPayCtx;
+        const party = document.getElementById('feed-pay-party');
+        if (!ctx || !party) return;
+        if (!party.value) { toast(`Pick the ${ctx.moneyIn ? T('customer').toLowerCase() : 'vendor'} first.`, 'error'); party.focus(); return; }
+        const amounts = BankingPage._feedPayAmounts();
+        if (!amounts.length) { toast(`Enter an amount to apply to at least one ${ctx.moneyIn ? T('invoice').toLowerCase() : 'bill'}.`, 'error'); return; }
+        const { lineId, accountId, moneyIn } = ctx;
+        const picks = BankingPage._reviewPicks(lineId);
+        const body = moneyIn
+            ? { customer_id: parseInt(party.value, 10), allocations: amounts.map(a => ({ invoice_id: a.id, amount: (a.cents / 100).toFixed(2) })) }
+            : { vendor_id: parseInt(party.value, 10), allocations: amounts.map(a => ({ bill_id: a.id, amount: (a.cents / 100).toFixed(2) })) };
+        if (picks.class_id) body.class_id = picks.class_id;
+        if (picks.memo) body.memo = picks.memo;
+        try {
+            await Promise.allSettled([...BankingPage._pendingCategories]);
+            const done = await API.post(`/banking/transactions/${lineId}/${moneyIn ? 'receive-payment' : 'pay-bills'}`, body);
+            closeModal();
+            const who = party.options[party.selectedIndex].text;
+            const said = moneyIn ? `Payment from ${who} received and matched` : `Bills of ${who} paid and matched`;
+            const outside = BankingPage._outsideFilter(BankingPage._lineDate(done, lineId));
+            toast(outside ? `${said}. ${outside}` : said);
+            BankingPage._feedPayCtx = null;
+            BankingPage._dropReviewRow(lineId, accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async matchLine(lineId, ledgerLineId, accountId) {
         try {
+            await Promise.allSettled([...BankingPage._pendingCategories]);
             await API.post(`/banking/transactions/${lineId}/match`, { line_id: ledgerLineId });
             const outside = BankingPage._outsideFilter(String((BankingPage._matchDates || {})[ledgerLineId] || ''));
             toast(outside ? `Matched. ${outside}` : 'Matched');
             closeModal();
-            BankingPage._backToRegister(accountId);
+            BankingPage._dropReviewRow(lineId, accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -1897,7 +2586,8 @@ const BankingPage = {
         const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         // the date of this register's last post, while the page lives (#566)
         const carried = BankingPage._lastDate[accountId] || '';
-        // the row lives in its own <tfoot>, after the entries; every field is
+        // the row lives in its own <tfoot>, after the entries (a <tbody>
+        // before them, read newest first, #903); every field is
         // named for the new entry, apart from the page's other fields
         return `<tfoot><tr id="reg-quick-entry" data-write style="background:var(--primary-light);">
                     <td><input type="date" id="qe-date" aria-label="New entry date" value="${carried || today}" data-carried="${carried}" style="width:120px; font-size:11px; padding:2px 4px;" ${key}></td>
@@ -2096,15 +2786,14 @@ const BankingPage = {
                 <div class="form-grid">
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${carried || todayISO()}" data-carried="${carried}"></div>
-                    <div class="form-group"><label>Amount *</label>
-                        <input name="amount" class="money" type="number" step="0.01" required>
-                        <div style="font-size:10px; color:var(--gray-500);">${isCard ? 'Negative = a charge (owe more). Positive = a payment to the card.' : 'Negative = money out (a payment). Positive = money in (a deposit).'}</div></div>
+                    <div class="form-group"><label>Amount * ${hint(isCard ? 'Negative = a charge (owe more). Positive = a payment to the card.' : 'Negative = money out (a payment). Positive = money in (a deposit).', 'Amount')}</label>
+                        <input name="amount" class="money" type="number" step="0.01" required></div>
                     <div class="form-group"><label>Payee</label>
                         <input name="payee" id="entry-payee" list="entry-payee-vendors" autocomplete="off" onblur="BankingPage.payeeTyped(this.value, BankingPage._formMoneyIn(), 'entry-payee')">
                         ${BankingPage._vendorDatalist('entry-payee-vendors')}</div>
                     <div class="form-group"><label>Check / ref #</label>
                         <input name="check_number"></div>
-                    <div class="form-group full-width" id="entry-category-group"><label>Category * <span style="font-weight:normal; color:var(--gray-500);">(the other side of the entry; a bank or card account makes it a transfer)</span></label>
+                    <div class="form-group full-width" id="entry-category-group"><label>Category * ${hint('(the other side of the entry; a bank or card account makes it a transfer)', 'Category')}</label>
                         ${AccountQuickAdd.picker(`<select name="category_account_id" id="entry-category"><option value="">Select…</option>${catOpts}</select>`, 'register', { ctx: accountId, id: 'entry-category-add', label: 'Add a new account…' })}</div>
                     <div class="form-group full-width"><label>Memo</label>
                         <input name="description"></div>
@@ -2113,7 +2802,7 @@ const BankingPage = {
                     <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from)</span></label>
                         ${BankingPage.nameSelectHtml('entry-name', 'customer_id', null, `${T('Customer')}`)}</div>
                     <div class="form-group full-width" id="entry-splits" style="display:none;">
-                        <label>Split across accounts <span style="font-weight:normal; color:var(--gray-500);">(each line's share of the amount; a loan payment's principal and interest, a check that pays several things, a card processor's deposit as the gross with the fee taken out)</span></label>
+                        <label>Split across accounts ${hint("(each line's share of the amount; a loan payment's principal and interest, a check that pays several things, a card processor's deposit as the gross with the fee taken out)", 'Split across accounts')}</label>
                         <table class="data-table" style="font-size:12px;"><thead><tr><th scope="col">Account</th><th scope="col" class="amount">Amount</th><th scope="col">Taken out</th><th scope="col">${T('Customer')}</th>${Nonprofit.classHeadHtml()}<th scope="col">Memo</th><th scope="col"></th></tr></thead>
                         <tbody id="entry-split-rows"></tbody></table>
                         ${BankingPage.newNameBoxHtml()}
@@ -2790,12 +3479,11 @@ const BankingPage = {
         const toOpts = accounts.map(a => opt(a, firstCard ? a.id === firstCard.id : a.id !== fromId)).join('');
         openModal('Transfer', `
             <form onsubmit="BankingPage.saveTransfer(event)">
-                <p style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Move money between bank and card accounts. Paying a card is a transfer from the bank to the card.</p>
                 <div class="form-grid">
                     <div class="form-group"><label>Date *</label><input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Amount *</label><input name="amount" class="money" type="number" step="0.01" min="0.01" required></div>
                     <div class="form-group"><label>From *</label><select name="from_account_id" required>${fromOpts}</select></div>
-                    <div class="form-group"><label>To *</label><select name="to_account_id" required>${toOpts}</select></div>
+                    <div class="form-group"><label>To * ${hint('Move money between bank and card accounts. Paying a card is a transfer from the bank to the card.', 'To')}</label><select name="to_account_id" required>${toOpts}</select></div>
                     <div class="form-group"><label>Reference</label><input name="reference"></div>
                     <div class="form-group"><label>Memo</label><input name="memo"></div>
                     ${classGroup}
@@ -2891,14 +3579,11 @@ const BankingPage = {
         const defaultDate = minDate && todayISO() < minDate ? minDate : todayISO();
         openModal('Begin Reconciliation', `
             <form onsubmit="BankingPage.createReconciliation(event, ${accountId})">
-                <p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">
-                    Enter the ending date and balance from your statement. For a card, the balance is the amount owed.
-                    ${last ? `This account is reconciled through ${formatDate(last)}; the statement date comes after that.` : ''}
-                </p>
+                ${last ? `<p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">This account is reconciled through ${formatDate(last)}; the statement date comes after that.</p>` : ''}
                 <div class="form-grid">
                     <div class="form-group"><label>Statement Date *</label>
                         <input name="statement_date" type="date" required value="${defaultDate}" ${minDate ? `min="${minDate}"` : ''}></div>
-                    <div class="form-group"><label>Statement Ending Balance *</label>
+                    <div class="form-group"><label>Statement Ending Balance * ${hint('Enter the ending date and balance from your statement. For a card, the balance is the amount owed.', 'Statement Ending Balance')}</label>
                         <input name="statement_balance" class="money" type="number" step="0.01" required></div>
                 </div>
                 <div class="form-actions">
@@ -3127,13 +3812,10 @@ const BankingPage = {
     changeStatement(reconId, statementDate, statementBalance) {
         openModal('Change Statement', `
             <form onsubmit="BankingPage.saveStatement(event, ${reconId})">
-                <p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">
-                    Correct the ending date or balance from your statement. The lines you have ticked stay ticked; the difference is refigured.
-                </p>
                 <div class="form-grid">
                     <div class="form-group"><label>Statement Date *</label>
                         <input name="statement_date" type="date" required value="${escapeHtml(statementDate)}"></div>
-                    <div class="form-group"><label>Statement Ending Balance *</label>
+                    <div class="form-group"><label>Statement Ending Balance * ${hint('Correct the ending date or balance from your statement. The lines you have ticked stay ticked; the difference is refigured.', 'Statement Ending Balance')}</label>
                         <input name="statement_balance" class="money" type="number" step="0.01" required value="${Number(statementBalance).toFixed(2)}"></div>
                 </div>
                 <div class="form-actions">

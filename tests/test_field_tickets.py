@@ -553,6 +553,21 @@ def test_bill_it_on_a_job_with_no_schedule_of_values(con, seed_customer, seed_ac
     assert (t["status"], t["invoice_id"]) == ("signed", None)
 
 
+def test_billing_tickets_starts_the_invoice_at_the_company_rate(
+    con, seed_customer, seed_accounts
+):
+    # the invoice Bill it makes is a new invoice: the company's Default Tax
+    # Rate, as the form and the API start one (#1129); it was 0%
+    r = con.put("/api/settings", json={"default_tax_rate": "8.25"})
+    assert r.status_code == 200, r.text
+    job = _job(con, seed_customer.id)
+    a = _signed(con, job["id"], [LABOR])
+    r = con.post("/api/field-tickets/bill", json={"ticket_ids": [a["id"]]})
+    assert r.status_code == 200, r.text
+    inv = con.get(f"/api/invoices/{r.json()['invoice_id']}").json()
+    assert inv["tax_rate"] == "0.0825"
+
+
 def test_bill_it_refused_on_a_job_with_a_schedule_of_values(con, seed_customer):
     job = _job(con, seed_customer.id)
     r = con.put(

@@ -32,16 +32,25 @@ def irs_statement(
     fair_value_amount=None,
     fair_value_description: Optional[str] = None,
     in_kind_descriptions: Optional[list[str]] = None,
+    received: Optional[list[dict]] = None,
 ) -> dict:
     """{deductible_amount, text} for one gift.
 
     amount               the contribution (None for property)
     fair_value_amount    value of goods/services the donor received back
     in_kind_descriptions the property given, when the gift is not cash
+    received             [{date, amount}] when the money came in on more
+                         than one day: the sentence then says how much came
+                         in when, so a gift paid across two tax years reads
+                         the same here as on each year's giving statement
     """
     name = _legal_name(company)
     ein = (company or {}).get("company_tax_id") or ""
-    tail = f" {name}" + (f" (EIN {ein})" if ein else "") + f". {RETAIN}"
+    tail = (
+        f" {name}"
+        + (f" (EIN {ein})" if ein else "")
+        + f".{_received_sentence(received)} {RETAIN}"
+    )
 
     if in_kind_descriptions:
         what = "; ".join(d for d in in_kind_descriptions if d)
@@ -67,6 +76,19 @@ def irs_statement(
         return {"deductible_amount": float(deductible), "text": text}
     text = f"{NO_GOODS} Contribution of {_money(amount)} received by" + tail
     return {"deductible_amount": float(amount), "text": text}
+
+
+def _received_sentence(received: Optional[list[dict]]) -> str:
+    """ " It was received as $0.01 on Dec 31, 2025 and $149.99 on Jan 01,
+    2026." for money that came in on more than one day, else nothing. The
+    dates are written as the printed documents write every date."""
+    if not received or len(received) < 2:
+        return ""
+    parts = [
+        f"{_money(r['amount'])} on {r['date'].strftime('%b %d, %Y')}" for r in received
+    ]
+    listed = ", ".join(parts[:-1]) + " and " + parts[-1]
+    return f" It was received as {listed}."
 
 
 def invoice_doc_kind(inv, t: Terms) -> str:
@@ -119,14 +141,7 @@ def invoice_pdf_context(inv, company: dict) -> dict:
     ship country."""
     t = terms_for(company)
     kind = invoice_doc_kind(inv, t)
-    irs = None
-    if kind == "DonationReceipt":
-        irs = irs_statement(
-            company,
-            inv.total,
-            getattr(inv, "fair_value_amount", None),
-            getattr(inv, "fair_value_description", None),
-        )
+    irs = receipt_irs(company, inv) if kind == "DonationReceipt" else None
     customer = getattr(inv, "customer", None)
     bill_to_for = None
     if getattr(inv, "bill_to_name", None) is not None:
@@ -188,29 +203,181 @@ class NotAGift(ValueError):
         self.reason = reason
 
 
-def gift_from_invoice(inv) -> dict:
-    """A sales receipt is a gift; a pledge is not until it is paid."""
+def _dec(v) -> Decimal:
+    return Decimal(str(v or 0))
+
+
+def receipt_money(inv, start=None, end=None) -> dict:
+    """What has actually been received on a donation receipt.
+
+    A receipt is a gift for the money paid on it, not for what it was
+    written for: it counts at what its payments that are not void paid on
+    it, and at nothing once its payment is voided (a returned check),
+    which leaves the receipt open and unpaid. Each payment counts at its
+    own exchange rate, the dollars that came in, so a foreign-currency
+    gift is stated in home currency; the fair value of what the donor
+    received back is converted at the receipt's rate, the currency it was
+    typed in.
+
+    With `start`/`end` only the payments dated in those dates count (a
+    giving statement's year). The fair value is taken off the money in the
+    order it came in: each payment that is not void covers what is left of
+    it, up to its own amount, and the dates get the part their payments
+    covered. So a receipt paid across two years has its fair value deducted
+    once, in full, between the two statements: never twice, never more in a
+    year than came in that year, and none of it dropped because the first
+    year's money was less than the dinner was worth. With no dates it is
+    the whole fair value, the figure the letter and the receipt state.
+
+    The contribution is dated when its money came in: the date of the
+    first payment counted, never the date the receipt was written. A
+    December receipt whose check came back and was made good in January is
+    a January gift on the letter, on the receipt and on the giving
+    statement alike. Money that came in on more than one day is listed in
+    `received`, a row a day, so the letter can say how much came in when.
+
+    {paid: document currency, amount: home currency, fair_value: home
+    currency (the part that belongs to the dates), date: the first counted
+    payment's, received: [{date, amount in home currency}] by day}
+
+    A receipt with no payment record at all (written by an import that
+    keeps none) counts at its own amount paid, on its own date. Only
+    payments count: a credit applied to a receipt lowers what is owed on
+    it and is not money received."""
+    from sqlalchemy.orm import object_session
+
+    from app.models.payments import Payment, PaymentAllocation
+    from app.services.contact_balances import home_amount
+
+    rate = getattr(inv, "exchange_rate", None)
+    fair_value = home_amount(getattr(inv, "fair_value_amount", None), rate)
+
+    def in_dates(d) -> bool:
+        return (start is None or d >= start) and (end is None or d <= end)
+
+    db = object_session(inv)
+    rows = (
+        db.query(PaymentAllocation.amount, Payment)
+        .join(Payment, Payment.id == PaymentAllocation.payment_id)
+        .filter(PaymentAllocation.invoice_id == inv.id)
+        .order_by(Payment.date, Payment.id)
+        .all()
+        if db is not None and getattr(inv, "id", None) is not None
+        else []
+    )
+    if not rows:
+        paid = _q(_dec(getattr(inv, "amount_paid", None)))
+        if not in_dates(inv.date):
+            paid = Decimal("0")
+        return {
+            "paid": paid,
+            "amount": home_amount(paid, rate),
+            "fair_value": fair_value if paid > 0 else Decimal("0"),
+            "date": inv.date,
+            "received": [],
+        }
+    live = [(amt, p) for amt, p in rows if not p.is_voided]
+    counted = [(amt, p) for amt, p in live if in_dates(p.date)]
+    paid = sum((_dec(amt) for amt, _ in counted), Decimal("0"))
+    amount = sum(
+        (home_amount(amt, p.exchange_rate) for amt, p in counted), Decimal("0")
+    )
+    if start is None and end is None:
+        fv_here = fair_value if counted else Decimal("0")
+    else:
+        fv_here, left = Decimal("0"), fair_value
+        for amt, p in live:
+            covered = min(left, home_amount(amt, p.exchange_rate))
+            left -= covered
+            if in_dates(p.date):
+                fv_here += covered
+    by_day: dict = {}
+    for amt, p in counted:
+        by_day[p.date] = by_day.get(p.date, Decimal("0")) + home_amount(
+            amt, p.exchange_rate
+        )
+    return {
+        "paid": _q(paid),
+        "amount": _q(amount),
+        "fair_value": _q(fv_here),
+        "date": counted[0][1].date if counted else inv.date,
+        "received": [{"date": d, "amount": _q(a)} for d, a in by_day.items()],
+    }
+
+
+def receipt_irs(company: dict, inv) -> Optional[dict]:
+    """The IRS block of a printed donation receipt, or None when nothing
+    has been received on it (its payment was voided): a receipt that is
+    not paid acknowledges no contribution. The sentence is in home
+    currency, at what was received; `deductible_amount` stays in the
+    receipt's own currency, beside the figures the printed table shows in
+    it, and `amount_received` is what was paid, in that currency too.
+    `date` is the day the contribution came in (receipt_money), which is
+    not the receipt's date when its first payment was voided and it was
+    paid later."""
+    if _is_void(inv):
+        return None
+    money = receipt_money(inv)
+    if money["paid"] <= 0:
+        return None
+    irs = irs_statement(
+        company,
+        money["amount"],
+        money["fair_value"],
+        getattr(inv, "fair_value_description", None),
+        received=money["received"],
+    )
+    doc_fv = _q(_dec(getattr(inv, "fair_value_amount", None)))
+    irs["deductible_amount"] = float(max(money["paid"] - doc_fv, Decimal("0")))
+    irs["amount_received"] = float(money["paid"])
+    irs["date"] = money["date"]
+    return irs
+
+
+def _is_void(inv) -> bool:
+    status = getattr(inv, "status", None)
+    return getattr(status, "value", status) == "void"
+
+
+def gift_from_invoice(inv, start=None, end=None) -> dict:
+    """A sales receipt is a gift for what has been paid on it; a pledge is
+    not until it is paid, and then the payment is the gift. Amounts are
+    home currency (see receipt_money). A void receipt, or one with
+    nothing received on it in the dates, is no gift."""
     if not inv.is_sales_receipt:
         raise NotAGift("Acknowledge the payment, not the pledge")
+    if _is_void(inv):
+        raise NotAGift("This donation receipt is void")
+    money = receipt_money(inv, start, end)
+    if money["amount"] <= 0:
+        raise NotAGift("Nothing has been received on this donation receipt")
     return {
         "kind": "invoice",
         "id": inv.id,
         "number": inv.invoice_number,
-        "date": inv.date,
-        "amount": _q(Decimal(str(inv.total or 0))),
+        "date": money["date"],
+        "amount": money["amount"],
+        # what was paid in the receipt's own currency, for the receipt's
+        # window, and the days the money came in, for the letter
+        "document_paid": money["paid"],
+        "received": money["received"],
         "description": ", ".join(ln.description for ln in inv.lines if ln.description),
-        "fair_value_amount": inv.fair_value_amount,
-        "fair_value_description": inv.fair_value_description,
+        "fair_value_amount": money["fair_value"] or None,
+        "fair_value_description": (
+            inv.fair_value_description if money["fair_value"] else None
+        ),
         "in_kind_lines": [],
         "customer_id": inv.customer_id,
     }
 
 
 def payment_gift_amount(db, payment) -> Decimal:
-    """The part of a payment that is a gift: everything except what it
+    """The part of a payment that is a gift, in home currency at the
+    payment's own rate (the dollars received): everything except what it
     paid on a sales receipt (that receipt is acknowledged on its own)."""
     from app.models.invoices import Invoice
     from app.models.payments import PaymentAllocation
+    from app.services.contact_balances import home_amount
 
     on_receipts = (
         db.query(PaymentAllocation)
@@ -223,7 +390,7 @@ def payment_gift_amount(db, payment) -> Decimal:
     )
     total = _q(Decimal(str(payment.amount or 0)))
     receipts = sum((Decimal(str(a.amount)) for a in on_receipts), Decimal("0"))
-    return _q(max(total - receipts, Decimal("0")))
+    return home_amount(max(total - receipts, Decimal("0")), payment.exchange_rate)
 
 
 def gift_from_payment(db, payment) -> dict:
@@ -237,7 +404,9 @@ def gift_from_payment(db, payment) -> dict:
     return {
         "kind": "payment",
         "id": payment.id,
-        "number": payment.reference or payment.check_number or f"payment {payment.id}",
+        # the reference the donor would know it by, or none: never the
+        # payment's row id
+        "number": payment.reference or payment.check_number or None,
         "date": payment.date,
         "amount": amount,
         "description": payment.notes or "",
@@ -333,6 +502,7 @@ def gift_irs(company: dict, gift: dict) -> dict:
         gift["amount"],
         gift["fair_value_amount"],
         gift["fair_value_description"],
+        received=gift.get("received"),
     )
 
 
@@ -371,9 +541,18 @@ def render_acknowledgment(db, company: dict, customer, gift: dict) -> tuple[str,
 # ── year-end giving statement ────────────────────────────────────────────
 
 
+# Where a gift booked straight to the bank is (#606): a register or
+# bank-feed entry, Make Deposits' lines for money never invoiced (#792), a
+# card charge or an expense, the same entries Income by Customer counts as
+# the donor's money (NEW-272, NEW-274). Each is a gift only by the rule
+# below: an income credit that names the donor, more than zero, not void.
+GIFT_BANK_SOURCES = ("bank_entry", "deposit", "cc_charge", "expense")
+
+
 def gift_from_bank_line(db, line, txn=None) -> dict:
     """A gift booked on a deposit line (#606): an income credit on a
-    register or bank-feed entry that names the donor."""
+    register or bank-feed entry, or a Make Deposits line (NEW-274), that
+    names the donor."""
     from app.models.accounts import Account, AccountType
     from app.models.transactions import Transaction
     from app.services.entry_text import BANK_ENTRY_HEADER
@@ -381,7 +560,10 @@ def gift_from_bank_line(db, line, txn=None) -> dict:
 
     txn = txn or db.get(Transaction, line.transaction_id)
     account = db.get(Account, line.account_id)
-    if txn.source_type != "bank_entry" or account.account_type != AccountType.INCOME:
+    if (
+        txn.source_type not in GIFT_BANK_SOURCES
+        or account.account_type != AccountType.INCOME
+    ):
         raise NotAGift("This line is not a gift booked on a deposit")
     if not line.customer_id:
         raise NotAGift("This deposit line names no donor")
@@ -407,8 +589,9 @@ def gift_from_bank_line(db, line, txn=None) -> dict:
 
 def gifts_from_bank_entries(db, customer_id: int, start, end) -> list[dict]:
     """Gifts booked straight to the bank (#606): the income lines of a
-    register or bank-feed deposit that name this donor, so one deposit of
-    two gifts counts once for each. A void entry drops out."""
+    register or bank-feed deposit, or of Make Deposits (NEW-274), that name
+    this donor, so one deposit of two gifts counts once for each. A void
+    entry drops out."""
     from app.models.accounts import Account, AccountType
     from app.models.transactions import Transaction, TransactionLine
 
@@ -418,7 +601,7 @@ def gifts_from_bank_entries(db, customer_id: int, start, end) -> list[dict]:
         .join(Account, Account.id == TransactionLine.account_id)
         .filter(
             TransactionLine.customer_id == customer_id,
-            Transaction.source_type == "bank_entry",
+            Transaction.source_type.in_(GIFT_BANK_SOURCES),
             Transaction.date >= start,
             Transaction.date <= end,
             Account.account_type == AccountType.INCOME,
@@ -440,29 +623,55 @@ def collect_gifts(db, customer_id: int, year: int) -> dict:
     plus payments that are gifts — a receipt's own payment is never
     counted twice) and income lines of bank deposits that name the donor
     (#606), with the deductible portion per gift, and non-cash
-    gifts listed without a value."""
+    gifts listed without a value.
+
+    Every amount is home currency, and every gift is money that came in
+    during the year: a donation receipt counts at what its payments that
+    are not void paid on it in the year (receipt_money), dated the day
+    the first of them came in, so one whose
+    payment was voided is not on the statement, as it is not on the cash
+    basis Income by Customer."""
     from datetime import date as _date
+
+    from sqlalchemy import and_, or_
 
     from app.models.in_kind import InKindGift
     from app.models.invoices import Invoice, InvoiceStatus
-    from app.models.payments import Payment
+    from app.models.payments import Payment, PaymentAllocation
 
     start, end = _date(year, 1, 1), _date(year, 12, 31)
     cash: list[dict] = []
+    # a receipt counts in the year its money came in, at what came in: a
+    # receipt dated in another year whose payment is dated in this one
+    # (a returned check made good in January) belongs here
+    paid_here = (
+        db.query(PaymentAllocation.invoice_id)
+        .join(Payment, Payment.id == PaymentAllocation.payment_id)
+        .filter(
+            Payment.is_voided.is_(False),
+            Payment.date >= start,
+            Payment.date <= end,
+        )
+    )
     receipts = (
         db.query(Invoice)
         .filter(
             Invoice.customer_id == customer_id,
             Invoice.is_sales_receipt.is_(True),
             Invoice.status != InvoiceStatus.VOID,
-            Invoice.date >= start,
-            Invoice.date <= end,
+            or_(
+                and_(Invoice.date >= start, Invoice.date <= end),
+                Invoice.id.in_(paid_here),
+            ),
         )
         .order_by(Invoice.date, Invoice.id)
         .all()
     )
     for inv in receipts:
-        cash.append(gift_from_invoice(inv))
+        try:
+            cash.append(gift_from_invoice(inv, start, end))
+        except NotAGift:
+            continue
     payments = (
         db.query(Payment)
         .filter(
@@ -482,8 +691,12 @@ def collect_gifts(db, customer_id: int, year: int) -> dict:
     cash.extend(gifts_from_bank_entries(db, customer_id, start, end))
     cash.sort(key=lambda g: (g["date"], g["kind"], g["id"]))
     for g in cash:
-        fv = _q(Decimal(str(g["fair_value_amount"] or 0)))
-        g["deductible"] = _q(max(g["amount"] - fv, Decimal("0")))
+        # no more is deducted than was given (receipt_money already
+        # shares a receipt's fair value out by the money that came in; this
+        # holds the row rule for every kind of gift): the totals add up
+        fv = min(_q(Decimal(str(g["fair_value_amount"] or 0))), g["amount"])
+        g["fair_value_amount"] = fv or None
+        g["deductible"] = _q(g["amount"] - fv)
     in_kind = [
         gift_from_in_kind(ik)
         for ik in db.query(InKindGift)

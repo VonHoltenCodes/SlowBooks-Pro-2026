@@ -6,6 +6,7 @@ same rows with `error_message` replaced by the bookkeeper's sentence for the
 failure: the raw text carries mail-server hostnames and banners.
 """
 
+import ssl
 from datetime import datetime, timedelta
 
 import pytest
@@ -92,7 +93,12 @@ def test_an_administrator_sees_the_whole_row_with_the_raw_error(client, db_sessi
     _seed(db_session)
     body = client.get("/api/email-log").json()
     failed = next(r for r in body["rows"] if r["status"] == "failed")
-    assert failed["error_message"] == RAW_ERROR
+    # the server's reply, as plain words (NEW-275), from a row stored the
+    # old way
+    assert failed["error_message"] == (
+        "535 5.7.8 Authentication failed on relay7.mailhost-internal.example "
+        "ESMTP Postfix (Debian/GNU)"
+    )
     assert "username or password" in failed["failure"]
     assert set(failed) == {
         "id",
@@ -106,7 +112,10 @@ def test_an_administrator_sees_the_whole_row_with_the_raw_error(client, db_sessi
         "status",
         "error_message",
         "failure",
+        # a sent row's refused copy, in our own words (null here)
+        "note",
     }
+    assert failed["note"] is None
 
 
 @pytest.mark.parametrize("how", NON_ADMIN)
@@ -182,7 +191,16 @@ def test_a_row_for_an_emailed_invoice_carries_that_invoice_id(
         def __init__(self, *a, **k):
             pass
 
-        def starttls(self):
+        def ehlo_or_helo_if_needed(self):
+            pass
+
+        def has_extn(self, name):
+            return name == "starttls"
+
+        def starttls(self, context=None):
+            assert context.verify_mode == ssl.CERT_REQUIRED
+
+        def ehlo(self):
             pass
 
         def login(self, *a):

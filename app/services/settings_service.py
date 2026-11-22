@@ -7,7 +7,7 @@ from other modules" convention.
 
 import re
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.models.settings import Settings, DEFAULT_SETTINGS
 from cryptography.fernet import InvalidToken
 
 from app.services.crypto import decrypt_value, encrypt_value, is_encrypted, is_readable
+from app.services.terminology import said
 
 _SENSITIVE_KEYS = frozenset(
     {
@@ -705,8 +706,10 @@ def clean_setting_value(key: str, value) -> str:
         label = _ADDRESS_LIST_SETTINGS[key]
         kept, rejected = parse_addresses(text)
         if rejected:
+            # what was typed is said back as typed (said): a nonprofit's
+            # "not a customer" is not turned into "not a donor"
             raise SettingValueError(
-                f"{label}: not an email address: " + ", ".join(rejected[:5]) + "."
+                said(label + ": not an email address: {}.", ", ".join(rejected[:5]))
             )
         joined = ", ".join(kept)
         if len(joined) > LOG_ADDRESSES_MAX:
@@ -820,6 +823,24 @@ def clean_setting_value(key: str, value) -> str:
                 "for no closing date."
             ) from None
     return "" if value is None else str(value)
+
+
+def default_sales_tax_rate(db: Session) -> Decimal:
+    """The company's Default Tax Rate (Settings, a percent: 8.875 is 8.875%)
+    as the fraction a document stores, to six places: the rate a new
+    invoice, sales receipt, estimate, credit memo or recurring invoice starts
+    at on the form, and on the API when the request leaves tax_rate out
+    (#1129). An unreadable or out-of-range setting is 0."""
+    raw = get_setting_raw(db, "default_tax_rate")
+    if raw is None:
+        raw = DEFAULT_SETTINGS.get("default_tax_rate") or "0"
+    try:
+        rate = Decimal(str(raw).strip() or "0") / Decimal("100")
+    except (ArithmeticError, InvalidOperation):
+        return Decimal("0")
+    if not rate.is_finite() or rate < 0 or rate > 1:
+        return Decimal("0")
+    return rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
 def new_lines_taxable(db: Session) -> bool:

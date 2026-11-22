@@ -21,8 +21,7 @@ const ExpensesPage = {
             </div>`;
 
         if (expenses.length === 0) {
-            html += `<div class="empty-state"><p>No expenses recorded yet</p>
-                <p style="font-size:12px; color:var(--gray-600);">Enter a receipt you've already paid — by card, cash, or check. Scan it to fill the form.</p></div>`;
+            html += `<div class="empty-state"><p>No expenses recorded yet ${hint("Enter a receipt you've already paid — by card, cash, or check. Scan it to fill the form.", 'Expenses')}</p></div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr><th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Expense Account</th><th scope="col">Paid From</th><th scope="col">Reference</th>
@@ -55,13 +54,25 @@ const ExpensesPage = {
         return n > 1 ? `Split (${n} accounts)` : escapeHtml(x.expense_account_name || '');
     },
 
-    // Accounts money can leave from: the chart's bank and credit-card
-    // accounts (bank_kind), nothing else.
-    paidFromAccounts(accounts) {
-        return accounts.filter(a => a.bank_kind);
+    // Accounts money can leave from: the chart's active bank and credit-card
+    // accounts (bank_kind), nothing else; an inactive one stays off the
+    // list (#1005) unless it is the account an expense being edited was paid
+    // from (`keepId`), shown and marked so the record still reads.
+    paidFromAccounts(accounts, keepId) {
+        return accounts.filter(a => a.bank_kind && (a.is_active !== false || String(a.id) === String(keepId)));
     },
 
-    async showForm() {
+    // Where a new expense opens (#1005): the default deposit account from
+    // Settings when it is set and active, else the first active checking
+    // account, else the first account on the list.
+    startPaidFrom(paidFrom, settings) {
+        const d = (typeof DepositAccounts !== 'undefined') ? DepositAccounts.startId(paidFrom, settings) : '';
+        return paidFrom.find(a => String(a.id) === d)
+            || paidFrom.find(a => /checking/i.test(a.name || ''))
+            || paidFrom[0];
+    },
+
+    async showForm(keepPaidFromId) {
         const [vendors, accounts] = await Promise.all([
             API.get('/vendors?active_only=true'),
             API.get('/accounts'),
@@ -78,9 +89,9 @@ const ExpensesPage = {
         // 5100 Materials Cost as often as against an expense (W-L18).
         const expenseAccts = PurchaseAccounts.withBalanceSheet(accounts);  // and the balance-sheet accounts (#766)
         ExpensesPage._expenseAccounts = expenseAccts;
-        const paidFrom = ExpensesPage.paidFromAccounts(accounts);
-        const acctOpt = a => `<option value="${a.id}">${accountLabel(a)}</option>`;
-        const checking = paidFrom.find(a => /checking/i.test(a.name || '')) || paidFrom[0];
+        const paidFrom = ExpensesPage.paidFromAccounts(accounts, keepPaidFromId);
+        const acctOpt = a => `<option value="${a.id}">${accountLabel(a)}${a.is_active === false ? ' (inactive)' : ''}</option>`;
+        const checking = ExpensesPage.startPaidFrom(paidFrom, App.settings);
         PendingFiles.reset();  // files attached before the first save (#796)
 
         openModal('Enter Expense', `
@@ -128,7 +139,7 @@ const ExpensesPage = {
     async replace(id) {
         const x = await API.get(`/expenses/${id}`);
         if (x.status === 'void') { toast('This expense is void; there is nothing to change.', 'error'); return; }
-        await ExpensesPage.showForm();
+        await ExpensesPage.showForm(x.paid_from_account_id);  // its own account stays on the list even if inactive (#1005)
         const form = $('#expense-form');
         if (!form) return;
         Replace.set(form, 'date', x.date);
@@ -209,7 +220,10 @@ const ExpensesPage = {
     },
 
     removeLine(btn) {
-        if (ExpensesPage.rows().length > 1) btn.closest('tr').remove();
+        // the shared Remove line: names follow, and the keyboard stays on the
+        // form. The last line goes like any other; a save with none is asked
+        // about.
+        if (LineOrder.removeLine(btn, () => ExpensesPage.recalc())) return;
         ExpensesPage.recalc();
     },
 
@@ -237,7 +251,6 @@ const ExpensesPage = {
         const leftEl = $('#expense-left');
         leftEl.textContent = formatCurrency(left);
         leftEl.style.color = left === 0 ? '' : 'var(--text-danger)';
-        document.querySelectorAll('#expense-lines .line-remove').forEach(b => { b.disabled = rows.length < 2; });
         return left;
     },
 
@@ -338,6 +351,7 @@ const ExpensesPage = {
                 is_billable: !!row.querySelector('.line-billable')?.checked,
             });
         });
+        if (!ZeroTotal.ask('Expense', lines.reduce((sum, l) => sum + l.amount, 0))) return;
         if (missing) {
             toast(`Choose an account for line ${missing.n}: where should it be recorded?`, 'error');
             missing.sel.focus();

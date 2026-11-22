@@ -393,7 +393,7 @@ const ReportsPage = {
             <div style="display:flex; align-items:center; gap:10px; margin:0 0 8px;">
                 <button type="button" class="btn btn-sm btn-secondary" id="all-reports-toggle" aria-expanded="${open}" aria-controls="all-reports" onclick="ReportsPage.toggleAll()">${open ? '▾' : '▸'} All reports</button>
             </div>
-            <div class="card-grid" id="all-reports" ${open ? '' : 'hidden'}>${ReportsPage._allGrid()}</div>`;
+            <div id="all-reports" ${open ? '' : 'hidden'}>${ReportsPage._allGrid()}</div>`;
     },
 
     // The views starred, in the order they were starred (render reads them;
@@ -410,9 +410,10 @@ const ReportsPage = {
         return [...statements, 'ar-aging', 'ap-aging', ...(Terms.isConstruction() ? ['job-profitability'] : [])];
     },
 
-    // The Report Center's cards in their fixed order, each as its view and
-    // its html (ReportsPage._pick): the nonprofit's own statements lead in
-    // place of the P&L and Balance Sheet.
+    // The Report Center's cards, each as its view, section, title and html
+    // (ReportsPage._pick), in their sections' order and alphabetical within
+    // each (#936): the nonprofit's own statements in place of the P&L and
+    // Balance Sheet.
     _cards() {
         const card = ReportsPage._pick;
         const cards = [
@@ -448,11 +449,8 @@ const ReportsPage = {
             card('1099-summary', '1099 Summary', 'Vendor payments for 1099 filing'),
             card('budget-vs-actual', 'Budget vs Actual', 'Monthly budget variance analysis'),
         ];
-        // Construction leads with a Construction group: the three contractor
-        // reports that always existed, then the five job reports added in #556.
-        // The job reports are construction-only cards (a Business or Nonprofit
-        // company never sees them); the rest keep their fixed order. Mirrors
-        // the nonprofit swap above.
+        // The job reports are construction-only cards (a Business or
+        // Nonprofit company never sees them). Mirrors the nonprofit swap above.
         if (Terms.isConstruction()) {
             cards.push(
                 card('wip-schedule', 'WIP Schedule', Terms.text('Work in progress: revised contract, cost to date, percent complete, earned vs billed and over/under billing per job')),
@@ -466,18 +464,59 @@ const ReportsPage = {
                 card('retainage', 'Retainage', Terms.text('Per job: retainage owners hold from you and you hold from each sub, held, released and outstanding, tied to the Balance Sheet')),
                 card('compliance', 'Sub Compliance', Terms.text('Subs with an expired or expiring certificate of insurance, no W-9 on file, or a paid bill with no lien waiver')),
             );
-            const lead = ['job-profitability', 'job-budget-vs-actual', 'profit-loss-by-job',
-                'wip-schedule', 'cost-to-complete', 'change-order-log', 'buyout', 'job-cost-by-vendor',
-                'cost-to-complete-forecast', 'commitment-status', 'field-ticket-log', 'retainage', 'compliance'];
-            const front = lead.map(v => cards.find(c => c.view === v)).filter(Boolean);
-            return [...front, ...cards.filter(c => !lead.includes(c.view))];
         }
-        return cards;
+        // In their sections (#936), the sections in their fixed order, each
+        // section's cards alphabetical by the title shown (the company's
+        // own words), ignoring case.
+        const order = ReportsPage._sections().map(s => s.key);
+        const rank = (c) => order.indexOf(c.section);
+        return cards.sort((a, b) => (rank(a) - rank(b))
+            || a.title.localeCompare(b.title, undefined, { sensitivity: 'base', numeric: true }));
     },
 
-    // A card and its view, for arranging; the html is ReportsPage._card's.
+    // The sections All reports is in (#936), in their fixed order, each
+    // headed in the company's own words. A card's section is its view's in
+    // _sectionOf; a view not listed there is a books tool.
+    _sections() {
+        return [
+            { key: 'statements', head: 'Statements' },
+            { key: 'customers', head: T('Customers & Sales') },
+            { key: 'vendors', head: 'Vendors & Purchases' },
+            { key: 'jobs', head: T('Jobs') },
+            { key: 'payroll', head: 'Payroll & Tax' },
+            { key: 'books', head: 'Books Tools' },
+        ];
+    },
+
+    _sectionOf: {
+        'profit-loss': 'statements', 'profit-loss-detail': 'statements',
+        'profit-loss-by-class': 'statements', 'profit-loss-unclassified': 'statements',
+        'profit-loss-by-job': 'statements', 'balance-sheet': 'statements',
+        'cash-flow': 'statements', 'financial-statements': 'statements',
+        'statement-of-activities': 'statements', 'statement-of-financial-position': 'statements',
+        'fund-balances': 'statements', 'functional-expenses': 'statements',
+        'ar-aging': 'customers', 'sales-tax': 'payroll', 'income-by-customer': 'customers',
+        'past-customers': 'customers', 'sales-by-item': 'customers',
+        'estimate-closing-rate': 'customers', 'customer-statement': 'customers',
+        'pledges': 'customers', 'giving-statements': 'customers',
+        'ap-aging': 'vendors', 'purchases-by-item': 'vendors', '1099-summary': 'payroll',
+        'job-budget-vs-actual': 'jobs', 'job-profitability': 'jobs',
+        'wip-schedule': 'jobs', 'cost-to-complete': 'jobs', 'change-order-log': 'jobs',
+        'buyout': 'jobs', 'job-cost-by-vendor': 'jobs', 'cost-to-complete-forecast': 'jobs',
+        'commitment-status': 'jobs', 'field-ticket-log': 'jobs', 'retainage': 'jobs',
+        'compliance': 'jobs',
+    },
+
+    // A card and its view, for arranging: its section (#936), its title as
+    // shown (the sort key; every card's title is plain text of our own, so
+    // it is taken as it is) and its html (ReportsPage._card's).
     _pick(view, title, text) {
-        return { view, html: ReportsPage._card(view, title, text) };
+        return {
+            view,
+            section: ReportsPage._sectionOf[view] || 'books',
+            title: String(title).trim(),
+            html: ReportsPage._card(view, title, text),
+        };
     },
 
     // The starred cards, in the order they were starred (#395, #794).
@@ -488,9 +527,20 @@ const ReportsPage = {
             : '<p style="color:var(--text-muted); margin:0;">Star a report under All reports to keep it here.</p>';
     },
 
-    // All reports: every card not starred, in the fixed order.
+    // All reports: every card not starred, in its section under the
+    // section's heading (#936), alphabetical within it. A section with no
+    // card left in it (none for this company type, or every one starred)
+    // has no heading.
     _allGrid() {
-        return ReportsPage._cards().filter(c => !ReportsPage._pins.includes(c.view)).map(c => c.html).join('');
+        const rest = ReportsPage._cards().filter(c => !ReportsPage._pins.includes(c.view));
+        return ReportsPage._sections().map(s => {
+            const mine = rest.filter(c => c.section === s.key);
+            if (!mine.length) return '';
+            return `<div class="report-section" data-section="${s.key}">
+                <h3 id="report-section-${s.key}" class="report-section-head" style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin:16px 0 8px;">${escapeHtml(s.head)}</h3>
+                <div class="card-grid" aria-labelledby="report-section-${s.key}">${mine.map(c => c.html).join('')}</div>
+            </div>`;
+        }).join('');
     },
 
     // Fold or open All reports; the choice sticks.
@@ -1730,7 +1780,8 @@ const ReportsPage = {
         const set = (section, c) => `ReportsPage.openSetDrillDown(${args({ section }, null, c.start_date, c.end_date, null, null, 'profit-loss', scope)})`;
         return `${ReportsPage._exportButtons('profit-loss', qs)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, a column per ${noun}${params.exclude_adjusting ? ', adjusting entries left out' : ''}${data.basis === 'cash' ? ', cash basis' : ''}${data.hide_zero ? ', zero balances hidden' : ''}. Click an amount for the transactions behind it; the Total column is the ${escapeHtml(T('Profit & Loss'))} for the whole period.
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, a column per ${noun}${params.exclude_adjusting ? ', adjusting entries left out' : ''}${data.basis === 'cash' ? ', cash basis' : ''}${data.hide_zero ? ', zero balances hidden' : ''}.
+                ${hint(`Click an amount for the transactions behind it; the Total column is the ${escapeHtml(T('Profit & Loss'))} for the whole period.`, `${T('Profit & Loss')} by ${by === 'month' ? 'Month' : 'Quarter'}`)}
             </div>
             ${ReportsPage._basisNote(data)}
             ${ReportsPage._pivotGrid({
@@ -1839,7 +1890,7 @@ const ReportsPage = {
             data.hide_zero ? 'zero balances hidden' : '',
         ].filter(Boolean).join(' &middot; ');
         return `${ReportsPage._exportButtons('profit-loss-detail', qs)}
-            <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${scope ? ` &middot; ${scope}` : ''}${ReportsPage._basisWords(data)} &middot; ${data.line_count} ${data.line_count === 1 ? 'line' : 'lines'}. A line's type opens its document.</p>${ReportsPage._basisNote(data)}
+            <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${scope ? ` &middot; ${scope}` : ''}${ReportsPage._basisWords(data)} &middot; ${data.line_count} ${data.line_count === 1 ? 'line' : 'lines'}. ${hint("A line's type opens its document.", `${T('Profit & Loss')} Detail`)}</p>${ReportsPage._basisNote(data)}
             <div class="table-container"><table class="pl-detail">
                 <caption class="visually-hidden">${escapeHtml(`${T('Profit & Loss')} Detail`)}, ${escapeHtml(data.start_date)} to ${escapeHtml(data.end_date)}</caption>
                 <thead><tr><th scope="col">Type</th><th scope="col">Date</th><th scope="col">Num</th><th scope="col">Name</th><th scope="col">Memo</th><th scope="col">Split</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Balance</th></tr></thead>
@@ -2139,8 +2190,7 @@ const ReportsPage = {
             </tr>`).join('');
         const name = u.account_number ? `${escapeHtml(u.account_number)} ${escapeHtml(u.account_name)}` : escapeHtml(u.account_name);
         return `
-            <h3 style="margin:18px 0 6px; font-size:14px;">Use tax</h3>
-            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, each at the rate it was booked at (the setting today is ${SalesLines.taxPercent(u.rate)}%). Pay it as a check or bill to the tax agency on ${name}.</p>
+            <h3 style="margin:18px 0 6px; font-size:14px;">Use tax ${hint(`Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, each at the rate it was booked at (the setting today is ${SalesLines.taxPercent(u.rate)}%). Pay it as a check or bill to the tax agency on ${name}.`, 'Use tax')}</h3>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Vendor</th><th scope="col">${T('Job')}</th><th scope="col">Line</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Use tax</th></tr></thead>
                 <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No use tax accrued</td></tr>'}</tbody>
@@ -2160,8 +2210,7 @@ const ReportsPage = {
             </tr>`).join('');
         if (!rows) return '';
         return `
-            <h3 style="margin:18px 0 6px; font-size:14px;">Exempt sales</h3>
-            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Sales with no tax, by why: the kind of certificate the document carries from its ${T('job').toLowerCase()} when the whole sale is exempt, exempt with no certificate on file, or lines left untaxed on a taxed sale.</p>
+            <h3 style="margin:18px 0 6px; font-size:14px;">Exempt sales ${hint(`Sales with no tax, by why: the kind of certificate the document carries from its ${T('job').toLowerCase()} when the whole sale is exempt, exempt with no certificate on file, or lines left untaxed on a taxed sale.`, 'Exempt sales')}</h3>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Reason</th><th scope="col" class="amount">Sales</th></tr></thead>
                 <tbody>${rows}
@@ -2276,16 +2325,32 @@ const ReportsPage = {
     },
 
     async incomeByCustomer(prefill) {
-        await ReportsPage.openPeriodModal(T("Income by Customer"), ReportsPage.defaultPeriod(), async (_period, range) => {
-            const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}`);
-            // Sales before tax, the tax beside it; Paid includes money not
-            // yet applied to an invoice, and Balance is net of it.
-            // A customer's name opens the customer's page (R9)
+        // the Basis switch the P&L has (#1062): on the cash basis a sale
+        // counts when it is paid, in the proportion paid
+        const basisOpts = ReportsPage._basisOpts(prefill);
+        await ReportsPage.openPeriodModal(T("Income by Customer"), ReportsPage.defaultPeriod(), async (_period, range, p) => {
+            // the basis rides on the PDF and the CSV too (W-197)
+            const qs = `start_date=${range.start}&end_date=${range.end}${ReportsPage._basisQs(p)}`;
+            const data = await API.get(`/reports/income-by-customer?${qs}`);
+            // Sales is income only, before tax; a line on an item that posts
+            // to a balance-sheet account (a security deposit) is Not income,
+            // a column shown only when the period has one (W-195). Paid
+            // includes money not yet applied to an invoice, and Balance is
+            // net of it. The server's row_rule says which sum a row holds
+            // on its basis (W-204: on cash, Sales + Not income + Sales Tax =
+            // Paid, and the Balance owed now stands apart). A customer's
+            // name opens the customer's page (R9). The count column counts
+            // invoices and sales receipts alike (a nonprofit's pledges,
+            // invoices and donations), and its heading names them all:
+            // "Invoices" ("Pledges") was true of only some of them
+            const other = !!data.total_other || data.items.some(i => i.total_other);
+            const otherCell = (v) => other ? `<td class="amount">${formatCurrency(v || 0)}</td>` : '';
             let rows = data.items.map(i =>
                 `<tr>
                     <td>${i.customer_id ? ReportsPage._rowLink(`ReportsPage.openCustomer(${i.customer_id}, this)`, i.customer_name, `customer:${i.customer_id}`) : escapeHtml(i.customer_name)}</td>
                     <td class="amount">${i.invoice_count}</td>
                     <td class="amount">${formatCurrency(i.total_sales)}</td>
+                    ${otherCell(i.total_other)}
                     <td class="amount">${formatCurrency(i.total_tax || 0)}</td>
                     <td class="amount">${formatCurrency(i.total_paid)}</td>
                     <td class="amount">${formatCurrency(i.total_balance)}</td>
@@ -2295,17 +2360,23 @@ const ReportsPage = {
                 <td>TOTAL</td>
                 <td class="amount">${data.items.reduce((sum, item) => sum + item.invoice_count, 0)}</td>
                 <td class="amount">${formatCurrency(data.total_sales)}</td>
+                ${otherCell(data.total_other)}
                 <td class="amount">${formatCurrency(data.total_tax || 0)}</td>
                 <td class="amount">${formatCurrency(data.total_paid)}</td>
                 <td class="amount">${formatCurrency(data.total_balance)}</td>
             </tr>`;
-            return `
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
+            const otherHead = other
+                ? `<th scope="col" class="amount">Not income ${hint(escapeHtml(Terms.text('What was billed on an item that posts to a balance-sheet account, such as a security deposit. It is owed, but it is not a sale, so it is not in Sales or on the Profit & Loss.')), 'Not income')}</th>`
+                : '';
+            const cols = other ? 7 : 6;
+            return `${ReportsPage._exportButtons('income-by-customer', qs)}
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. ${hint(escapeHtml(Terms.text('Sales is what was sold, before tax, and ties to the income on the Profit & Loss for the same dates. On the accrual basis a credit memo takes its credit off Sales on its date.')), T('Income by Customer'))}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
-                </table></div>`;
-        }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null }, prefill });
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${escapeHtml(T('Invoices & Receipts'))}</th><th scope="col" class="amount">Sales</th>${otherHead}<th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">${escapeHtml(data.balance_heading || 'Balance')}</th></tr></thead>
+                    <tbody>${rows || `<tr><td colspan="${cols}" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>`}</tbody>
+                </table></div>
+                ${data.row_rule ? `<p class="report-note" style="margin-top:8px; color:var(--gray-500);">${escapeHtml(Terms.text(data.row_rule))}</p>` : ''}`;
+        }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null, ...basisOpts.params }, prefill, toolbar: basisOpts.toolbar });
     },
 
     // Past Customers (#436): a mailing list built from the books — one row
@@ -2333,7 +2404,7 @@ const ReportsPage = {
         ReportsPage.setAddress('past-customers', ReportsPage._pastFilters);
         const f = ReportsPage._pastFilters;
         openModal(Terms.text('Past customers'), `
-            <p style="margin-bottom:10px; color:var(--gray-500); font-size:12px;">${Terms.text('A mailing list by service address and last job date. A customer marked Do not contact in their notes is flagged here and left out of the export.')}</p>
+            <div class="report-hint-row" style="margin-bottom:6px;">${hint(Terms.text('A mailing list by service address and last job date. A customer marked Do not contact in their notes is flagged here and left out of the export.'), Terms.text('Past customers'))}</div>
             <div class="form-grid" style="grid-template-columns: repeat(4, minmax(0,1fr)); gap:8px; margin-bottom:12px;">
                 <div class="form-group"><label for="pc-from">Last job from</label>
                     <input id="pc-from" type="date" value="${escapeHtml(f.last_job_from)}" onchange="ReportsPage.setPastParam('last_job_from', this.value)"></div>
@@ -2423,7 +2494,7 @@ const ReportsPage = {
     // existing openers (bank_register._LINKS): an invoice at #/invoices/<id>,
     // a credit memo at #/credit-memos/<id>, a bill at #/bills/<id>, a vendor
     // credit at #/vendor-credits/<id>.
-    _ITEM_DOC: { invoice: '#/invoices/', credit_memo: '#/credit-memos/', bill: '#/bills/', vendor_credit: '#/vendor-credits/' },
+    _ITEM_DOC: { invoice: '#/invoices/', credit_memo: '#/credit-memos/', bill: '#/bills/', vendor_credit: '#/vendor-credits/', payment: '#/payments/' },
 
     // start/end plus whichever narrowing params the report carries.
     _itemQs(range, p, idKey) {
@@ -2458,8 +2529,8 @@ const ReportsPage = {
                 <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(l.doc_type)} ${escapeHtml(l.number || '')}</a></td>
                 <td>${escapeHtml(l.party || '')}</td>
                 <td>${escapeHtml(l.description || '')}</td>
-                <td class="amount">${l.quantity}</td>
-                <td class="amount">${formatCurrency(l.rate)}</td>
+                <td class="amount">${l.quantity === null || l.quantity === undefined ? '' : l.quantity}</td>
+                <td class="amount">${l.rate === null || l.rate === undefined ? '' : formatCurrency(l.rate)}</td>
                 <td class="amount">${formatCurrency(l.amount)}</td>
             </tr>`;
         }).join('');
@@ -2474,7 +2545,9 @@ const ReportsPage = {
 
     async salesByItem(prefill) {
         prefill = prefill || {};
-        const params = { customer_id: prefill.customer_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null };
+        // the Basis switch the P&L has (#1062)
+        const basisOpts = ReportsPage._basisOpts(prefill);
+        const params = { customer_id: prefill.customer_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null, ...basisOpts.params };
         let customers = [], classes = [], jobs = [];
         try { customers = (await API.get('/customers?active_only=true&tree=1')).map(c => ({ ...c, name: customerLabel(c) })); } catch (e) { customers = []; }
         try { classes = await API.get('/classes?include_archived=true'); } catch (e) { classes = []; }
@@ -2482,9 +2555,11 @@ const ReportsPage = {
         const toolbar =
             ReportsPage._itemPicker('sbi-customer', T('Customer'), customers, params.customer_id, 'customer_id')
             + ReportsPage._itemPicker('sbi-class', T('Class'), classes, params.class_id, 'class_id')
-            + ReportsPage._itemPicker('sbi-job', T('Job'), jobs, params.job_id, 'job_id');
+            + ReportsPage._itemPicker('sbi-job', T('Job'), jobs, params.job_id, 'job_id')
+            + basisOpts.toolbar;
         await ReportsPage.openPeriodModal('Sales by Item', ReportsPage.defaultPeriod(), async (_period, range, p) => {
-            const qs = ReportsPage._itemQs(range, p, 'customer_id');
+            // the basis rides on the lines, the PDF and the CSV too
+            const qs = ReportsPage._itemQs(range, p, 'customer_id') + ReportsPage._basisQs(p);
             const data = await API.get(`/reports/sales-by-item?${qs}`);
             const money = (v) => v === null || v === undefined ? '—' : formatCurrency(v);
             const pct = (v) => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
@@ -2502,6 +2577,19 @@ const ReportsPage = {
                     <td class="amount">${pct(i.margin_pct)}</td>
                 </tr>`;
             }).join('');
+            // cash basis: money received and not applied to an invoice yet,
+            // income on the cash P&L that no item sold, on its own row in
+            // the total (W-194)
+            if (data.unapplied_amount !== null && data.unapplied_amount !== undefined) {
+                const open = escapeHtml(`ReportsPage.openItemLines('sales', 'unapplied', ${JSON.stringify(data.unapplied_label)}, ${JSON.stringify(qs)})`);
+                rows += `<tr class="sbi-unapplied">
+                    <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(data.unapplied_label)}</a>
+                        ${hint(escapeHtml(Terms.text('Money a customer paid that is not applied to an invoice yet. The cash Profit & Loss counts it as income on the day it came in, and no item sold it, so it has a row of its own.')), data.unapplied_label)}</td>
+                    <td></td><td class="amount"></td>
+                    <td class="amount">${formatCurrency(data.unapplied_amount)}</td>
+                    <td class="amount"></td><td class="amount"></td><td class="amount"></td><td class="amount"></td>
+                </tr>`;
+            }
             rows += `<tr style="font-weight:700; background:var(--gray-50);">
                 <td>TOTAL</td><td></td>
                 <td class="amount">${data.total_quantity}</td>
@@ -2512,7 +2600,7 @@ const ReportsPage = {
                 <td class="amount"></td>
             </tr>`;
             return `${ReportsPage._exportButtons('sales-by-item', qs)}
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Click an item for the lines behind it.</p>
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}${ReportsPage._basisWords(data)}. ${hint('Click an item for the lines behind it.', 'Sales by Item')}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg price</th><th scope="col" class="amount">COGS</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Margin %</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="8" style="text-align:center; color:var(--gray-400);">No sales in this period</td></tr>'}</tbody>
@@ -2553,7 +2641,7 @@ const ReportsPage = {
                 <td class="amount"></td>
             </tr>`;
             return `${ReportsPage._exportButtons('purchases-by-item', qs)}
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Bills and vendor credits only. Click an item for the lines behind it.</p>
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Bills and vendor credits only. ${hint('Click an item for the lines behind it.', 'Purchases by Item')}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg cost</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No purchases in this period</td></tr>'}</tbody>
@@ -2849,7 +2937,7 @@ const ReportsPage = {
             const payeeText = String(prm.payee || '');
             const acctOpt = (a, selected) => `<option value="${a.id}"${String(a.id) === String(selected) ? ' selected' : ''}>${accountLabel(a, null, ' ')}${a.is_active === false ? ' (inactive)' : ''}</option>`;
             const picker = `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-                    <label for="rc-account" style="font-size:11px;">Lines on</label>
+                    <label for="rc-account" style="font-size:11px;">Lines on</label>${accountId ? '' : hint('Pick the account the lines are parked on: a holding account, or one chosen by mistake. Tick the lines to move, choose where they belong, preview the move, then post it as one change. Every moved line is listed in the result and in the audit log.', 'Lines on')}
                     <select id="rc-account" data-no-search style="max-width:300px;" onchange="ReportsPage.setParam('account_id', this.value)"><option value="">Choose an account…</option>${rc.lists.accounts.map(a => acctOpt(a, accountId)).join('')}</select>
                     <label for="rc-vendor" style="font-size:11px;">Vendor</label>
                     <select id="rc-vendor" data-no-search style="max-width:260px;" onchange="ReportsPage.setParam('vendor_id', this.value)"><option value="">All payees</option>${rc.lists.vendors.map(v => `<option value="${v.id}"${String(v.id) === vendorId ? ' selected' : ''}>${escapeHtml(v.name)}${v.is_active === false ? ' (inactive)' : ''}</option>`).join('')}</select>
@@ -2858,7 +2946,7 @@ const ReportsPage = {
                 </div>`;
             if (!accountId) {
                 rc.lines = [];
-                return `${picker}<p style="color:var(--gray-500);">Pick the account the lines are parked on: a holding account, or one chosen by mistake. Tick the lines to move, choose where they belong, preview the move, then post it as one change. Every moved line is listed in the result and in the audit log.</p>`;
+                return picker;
             }
             const data = await API.get(`/reclassify/lines?account_id=${accountId}&start_date=${range.start}&end_date=${range.end}${vendorId ? `&vendor_id=${vendorId}` : ''}${payeeText ? `&payee=${encodeURIComponent(payeeText)}` : ''}`);
             rc.lines = data.lines;
@@ -3179,12 +3267,22 @@ const ReportsPage = {
             // Only what actually went out is "sent"; a customer who didn't
             // get one is named, with the reason (explore 2.17.3, W-H7).
             ReportsPage._sendResult('Statements',
-                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || []);
+                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || [], result.notes || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    _sendResult(title, headline, errors) {
-        if (!errors.length) { toast(headline); return; }
+    // What stands over the lines of a batch that did not go through. Some
+    // of them may read "… may or may not have been sent." (the message was
+    // handed over and the connection lost), so the heading never says
+    // flatly that they were not sent; it reads the same for one and many.
+    _notSentHeading(count) {
+        return Terms.text(`Not sent, or not confirmed (${count}):`);
+    },
+
+    // `notes`: sends that went out though the mail server refused a copy
+    // (each "Name: The mail server refused a copy to: …")
+    _sendResult(title, headline, errors, notes = []) {
+        if (!errors.length && !notes.length) { toast(headline); return; }
         // Each failed send is in the email_log; the Recent sends section under
         // Settings → Email (SMTP) shows the reason (#447). It is an
         // administrator's section, so only an administrator gets the link;
@@ -3193,8 +3291,10 @@ const ReportsPage = {
             ? `<a href="#/settings" class="btn btn-secondary" onclick="closeModal(); try { sessionStorage.setItem('settings_focus', 'settings-h-email-recent-sends'); } catch (e) {}">Recent sends</a>`
             : '';
         openModal(title, `
-            <p>${escapeHtml(headline)} ${errors.length} could not be sent:</p>
-            <ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+            <p>${escapeHtml(headline)}${errors.length ? ` ${escapeHtml(ReportsPage._notSentHeading(errors.length))}` : ''}</p>
+            ${errors.length ? `<ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : ''}
+            ${notes.length ? `<p>Sent, with a copy the mail server refused:</p>
+            <ul style="margin:8px 0 12px 20px;">${notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : ''}
             <div class="form-actions">
                 ${recentSends}
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
@@ -3209,7 +3309,7 @@ const ReportsPage = {
                 send_email: true,
             });
             ReportsPage._sendResult('Collection Letters',
-                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || []);
+                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || [], result.notes || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 };
@@ -3577,7 +3677,8 @@ ReportsPage.profitLossByClass = async function (prefill) {
         const dates = { period, start_date: range.start, end_date: range.end };
         return `${ReportsPage._exportButtons('profit-loss-by-class', qs)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}. Click an amount for the transactions behind it, or a heading for that column's own report.
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}.
+                ${hint("Click an amount for the transactions behind it, or a heading for that column's own report.", T('P&L by Class'))}
             </div>${ReportsPage._basisNote(data)}
             ${ReportsPage._pivotGrid({
                 title: T('P&L by Class'),
@@ -3633,8 +3734,9 @@ ReportsPage.profitLossByJob = async function (prefill) {
         const jobUrl = (c) => `#/jobs/${c.job_id}?start_date=${range.start}&end_date=${range.end}&from=profit-loss-by-job`;
         return `${ReportsPage._exportButtons('profit-loss-by-job', qs)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}. Click an amount for the transactions behind it, or a heading for the ${escapeHtml(T('job'))}'s page on these dates.
-                ${Terms.text('"No job" holds untagged activity')} <em>and</em> ${Terms.text('the applied-cost credits behind Job Cost Entries, so its costs can be negative and the totals still match the P&L')}.
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}${data.basis === 'cash' ? ', cash basis' : ''}.
+                ${hint(`Click an amount for the transactions behind it, or a heading for the ${escapeHtml(T('job'))}'s page on these dates.
+                ${Terms.text('"No job" holds untagged activity')} <em>and</em> ${Terms.text('the applied-cost credits behind Job Cost Entries, so its costs can be negative and the totals still match the P&L')}.`, `${T('P&L')} by ${T('Job')}`)}
             </div>${ReportsPage._basisNote(data)}
             ${ReportsPage._pivotGrid({
                 title: `${T('P&L')} by ${T('Job')}`,
@@ -3830,6 +3932,8 @@ ReportsPage.fixedAssetReconciliation = async function () {
         <td class="amount">${formatCurrency(t.book_value)}</td>
     </tr>`).join('');
     openModal('Fixed Asset Reconciliation', `
+        <div class="report-hint-row" style="margin-bottom:6px;">${hint(`Compare against the mapped fixed-asset and accumulated-depreciation
+            GL accounts — differences mean unposted acquisitions or manual GL edits.`, 'Fixed Asset Reconciliation')}</div>
         <div class="table-container"><table>
             <thead><tr><th scope="col">Asset Type</th><th scope="col" class="amount">Assets</th><th scope="col" class="amount">Cost</th>
             <th scope="col" class="amount">Accum. Depr.</th><th scope="col" class="amount">Book Value</th></tr></thead>
@@ -3840,11 +3944,7 @@ ReportsPage.fixedAssetReconciliation = async function () {
                 <td class="amount">${formatCurrency(data.total_accumulated)}</td>
                 <td class="amount">${formatCurrency(data.total_book_value)}</td>
             </tr></tfoot>
-        </table></div>
-        <div style="font-size:11px; color:var(--gray-500); margin-top:8px;">
-            Compare against the mapped fixed-asset and accumulated-depreciation
-            GL accounts — differences mean unposted acquisitions or manual GL edits.
-        </div>`);
+        </table></div>`);
 };
 
 // Reconciliation Reports (#395): every completed bank reconciliation, by
@@ -3982,7 +4082,8 @@ ReportsPage.jobBudgetVsActual = async function (prefill) {
         </tr>`; }).join('');
         return `${ReportsPage._exportButtons('job-budget-vs-actual', `start_date=${range.start}&end_date=${range.end}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                Actuals for ${escapeHtml(range.start)} — ${escapeHtml(range.end)}; budgets and committed cost are job-to-date. Click a job to drill down.
+                Actuals for ${escapeHtml(range.start)} — ${escapeHtml(range.end)}; budgets and committed cost are job-to-date.
+                ${hint('Click a job to drill down.', T('Job Budget vs Actual'))}
             </div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th>
@@ -4078,7 +4179,8 @@ ReportsPage.wipSchedule = async function (prefill) {
         const warningsHtml = (data.warnings || []).filter(w => w !== entry.posted_warning).map(w => `<p class="report-warning" style="margin:8px 0 0; font-size:12px; color:var(--gray-600);">${escapeHtml(w)}</p>`).join('');
         return `${ReportsPage._exportButtons('wip-schedule', `as_of=${params.as_of_date}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                As of ${escapeHtml(data.as_of)} · cost-to-cost (percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. GP to date is earned less cost; backlog is the revised contract less earned. Basis shows whether billing is from approved pay applications or posted revenue.
+                As of ${escapeHtml(data.as_of)} · cost-to-cost
+                ${hint('(percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. GP to date is earned less cost; backlog is the revised contract less earned. Basis shows whether billing is from approved pay applications or posted revenue.', 'WIP Schedule')}
             </div>
             <div class="table-container table-container--sticky"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th>
@@ -4136,7 +4238,7 @@ ReportsPage.costToComplete = async function (prefill) {
             return head + tree + uncoded + total;
         }).join('');
         return `${ReportsPage._exportButtons('cost-to-complete', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Cost to complete is the remaining budget plus open commitments; projected final is actual + cost to complete.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint('Cost to complete is the remaining budget plus open commitments; projected final is actual + cost to complete.', 'Cost to Complete')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Cost code</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th>
                 <th scope="col" class="amount">Actual</th><th scope="col" class="amount">To complete</th><th scope="col" class="amount">Projected final</th>
@@ -4251,7 +4353,7 @@ ReportsPage.costToCompleteForecast = async function (prefill) {
             return head + (rows || '<tr><td colspan="7" style="color:var(--gray-400);">No budget or cost</td></tr>') + total;
         }).join('');
         return `${ReportsPage._exportButtons('cost-to-complete-forecast', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Leave an amount blank to use the default (budget less actual, never below zero). The WIP schedule uses actual plus this cost to complete as the job's estimated cost.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint("Leave an amount blank to use the default (budget less actual, never below zero). The WIP schedule uses actual plus this cost to complete as the job's estimated cost.", 'Cost-to-Complete Forecast')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Section</th><th scope="col">Cost type</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Actual</th>
                 <th scope="col" class="amount">Default</th><th scope="col" class="amount">Cost to complete</th><th scope="col" class="amount">Projected final</th></tr></thead>
@@ -4293,7 +4395,7 @@ ReportsPage.commitmentStatus = async function (prefill) {
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('commitment-status', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Committed is the pre-tax value; received is what delivery tickets dated by then brought in, at the line rates; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint('Committed is the pre-tax value; received is what delivery tickets dated by then brought in, at the line rates; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.', 'Commitment Status')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Commitment</th><th scope="col">Vendor</th><th scope="col">Type</th><th scope="col">Status</th>
                 <th scope="col" class="amount">Committed</th><th scope="col" class="amount">Received</th><th scope="col" class="amount">Billed to date</th><th scope="col" class="amount">Retainage held</th><th scope="col" class="amount">Remaining</th></tr></thead>
@@ -4323,7 +4425,7 @@ ReportsPage.fieldTicketLog = async function (prefill) {
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('field-ticket-log', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">T&amp;M tickets dated by ${escapeHtml(data.as_of)} that are not yet billed, at their bill rates. A signed ticket on a change order that is not yet approved counts as not billed; the change order is named. Status is today's.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">T&amp;M tickets dated by ${escapeHtml(data.as_of)} that are not yet billed, at their bill rates. Status is today's. ${hint('A signed ticket on a change order that is not yet approved counts as not billed; the change order is named.', 'Field Ticket Log')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Ticket</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Description</th>
                 <th scope="col">Signed by</th><th scope="col">Priced on</th><th scope="col" class="amount">Unsigned</th><th scope="col" class="amount">Signed, not billed</th></tr></thead>
@@ -4349,8 +4451,9 @@ ReportsPage.retainage = async function (prefill) {
             <td class="amount">${m(r.held)}</td><td class="amount">${m(r.released)}</td><td class="amount">${m(r.outstanding)}</td></tr>`).join('');
         const tie = data.filtered ? '' : `Balance Sheet 1150 ${m(data.books.receivable)}, 2050 ${m(data.books.payable)}.`;
         return `${ReportsPage._exportButtons('retainage', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Held less released is what is outstanding; the totals are the Balance Sheet's Retainage Receivable and Retainage Payable. ${tie}
-                A row named “Journal entries and other” is ledger balance no pay application or bill explains. Closed jobs are included.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${tie}
+                ${hint(`Held less released is what is outstanding; the totals are the Balance Sheet's Retainage Receivable and Retainage Payable.
+                A row named “Journal entries and other” is ledger balance no pay application or bill explains. Closed jobs are included.`, 'Retainage')}</div>
             <h4 style="margin:0 0 4px 0;">Owed to me (1150)</h4>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th><th scope="col" class="amount">Held by owner</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
@@ -4376,7 +4479,7 @@ ReportsPage.subCompliance = async function (prefill) {
             <td>${escapeHtml(r.detail)}</td><td>${escapeHtml(r.date)}</td><td class="amount">${r.amount === null ? '' : ReportsPage._money(r.amount)}</td></tr>`).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('compliance', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Certificates that expire within ${data.window_days} days, subs with no W-9 on file, and paid bills whose lien waiver is missing or still pending. Nothing here blocks a payment.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. ${hint(`Certificates that expire within ${data.window_days} days, subs with no W-9 on file, and paid bills whose lien waiver is missing or still pending. Nothing here blocks a payment.`, 'Sub Compliance')}</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Sub</th><th scope="col">Issue</th><th scope="col">Detail</th><th scope="col">Date</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${rows || '<tr><td colspan="5" style="color:var(--gray-400);">Every sub is in order.</td></tr>'}</tbody>
@@ -4409,10 +4512,10 @@ ReportsPage.givingStatements = function (prefill) {
     ReportsPage.setAddress('giving-statements', { year: chosen });
     const opts = [y, y - 1, y - 2].map(v => `<option value="${v}" ${v === chosen ? 'selected' : ''}>${v}</option>`).join('');
     openModal('Year-End Giving Statements', `
+        <div class="report-hint-row" style="margin-bottom:6px;">${hint(`Every ${T('customer')} with a gift in the year gets a statement: cash contributions with the deductible portion, non-cash gifts described without a value. ${T('Customers')} who opted out in their record are skipped when emailing.`, 'Year-End Giving Statements')}</div>
         <div class="form-grid">
             <div class="form-group"><label for="gs-year">Tax year</label><select id="gs-year" onchange="ReportsPage.setAddress('giving-statements', { year: this.value })">${opts}</select></div>
         </div>
-        <p style="font-size:12px;color:var(--gray-500);margin:8px 0;">Every ${T('customer')} with a gift in the year gets a statement: cash contributions with the deductible portion, non-cash gifts described without a value. ${T('Customers')} who opted out in their record are skipped when emailing.</p>
         <div id="gs-result" style="font-size:12px;margin:8px 0;"></div>
         <div class="form-actions">
             <button class="btn btn-secondary" onclick="window.open('/api/donors/giving-statements/pdf?year=' + $('#gs-year').value, '_blank')">Download all (PDF)</button>
@@ -4428,7 +4531,8 @@ ReportsPage.emailGivingStatements = async function () {
     box.textContent = 'Sending…';
     try {
         const r = await API.post('/donors/giving-statements/batch-email', { year });
-        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? `<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '');
+        box.innerHTML = `Sent ${r.sent}, failed ${r.failed}, skipped ${r.skipped}.` + (r.errors.length ? ` ${escapeHtml(ReportsPage._notSentHeading(r.errors.length))}<ul>${r.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` : '') +
+            ((r.notes || []).length ? `<ul>${r.notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '');
     } catch (err) { box.textContent = err.message; }
 };
 
@@ -4512,8 +4616,7 @@ ReportsPage.possibleDuplicates = async function (prefill) {
                 ? ` · ${data.dismissed_count} marked not a duplicate (shown)`
                 : ` · ${data.dismissed_count} marked not a duplicate, not shown`;
         return `${ReportsPage._exportButtons('possible-duplicates', qs)}
-            <p style="margin-bottom:12px; color:var(--gray-500);">${accountLabel({ account_number: data.account.number, name: data.account.name }, null, ' ')} · ${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)} · ${data.count} ${data.count === 1 ? 'group' : 'groups'}${hidden}</p>
-            <p style="margin-bottom:12px; font-size:12px; color:var(--gray-500);">Entries with the same amount on the same side and the same or a similar payee, at most ${data.window_days} days apart. Nothing here is voided unless you void it.</p>
+            <p style="margin-bottom:12px; color:var(--gray-500);">${accountLabel({ account_number: data.account.number, name: data.account.name }, null, ' ')} · ${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)} · ${data.count} ${data.count === 1 ? 'group' : 'groups'}${hidden} ${hint(`Entries with the same amount on the same side and the same or a similar payee, at most ${data.window_days} days apart. Nothing here is voided unless you void it.`, 'Possible Duplicates')}</p>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Date</th><th scope="col">Num</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Source</th><th scope="col">Reconciled</th><th scope="col" class="amount">Amount</th><th scope="col"></th></tr></thead>
                 <tbody>${groups || '<tr><td colspan="8" style="text-align:center; color:var(--gray-400);">No possible duplicates on this account in this period</td></tr>'}</tbody>
@@ -4852,7 +4955,7 @@ ReportsPage.estimateClosingRate = async function (prefill) {
                 ${foot}</table></div>`;
         const undated = t.undated ? ` ${t.undated} decided estimate${t.undated === 1 ? ' has' : 's have'} no decision date (decided before this report existed) and ${t.undated === 1 ? 'is' : 'are'} left out of the average.` : '';
         return `${ReportsPage._exportButtons('estimate-closing-rate', qs.toString())}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Estimates dated ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, by status today. Won is accepted or converted; the closing rate is won ÷ (won + lost), so open bids count neither way. ${data.before_tax ? 'Dollars are the estimates before sales tax (subtotal and markups).' : 'Dollars are the estimate totals, sales tax included.'} Days run from the first time the estimate was emailed (else its date) to the decision.${undated}</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Estimates dated ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}, by status today. ${data.before_tax ? 'Dollars are the estimates before sales tax (subtotal and markups).' : 'Dollars are the estimate totals, sales tax included.'}${undated} ${hint('Won is accepted or converted; the closing rate is won ÷ (won + lost), so open bids count neither way. Days run from the first time the estimate was emailed (else its date) to the decision.', 'Estimate Closing Rate')}</div>
             <div style="display:flex; gap:24px; margin-bottom:6px; font-size:13px;">
                 <div><strong>${pct(t.closing_rate)}</strong> closing rate (${t.won_count} of ${t.won_count + t.lost_count} decided)</div>
                 <div><strong>${pct(t.closing_rate_amount)}</strong> by dollars</div>
@@ -4874,14 +4977,21 @@ ReportsPage._BOOKS_CHECK_PAGES = {
     journal: '/journal', pay_run: '/payroll', expense: '/expenses', cc_charge: '/cc-charges',
     job_cost: '/job-costs', customer: '/customers', vendor: '/vendors', job: '/jobs',
 };
-ReportsPage._booksCheckKind = function (kind) {
+// The company's own words for an invoice, a customer and a job; for the
+// rest the server's label (books_check.DOCUMENT_WORDS, the same table the
+// PDF and the CSV print, #928), so the window and the files never differ.
+ReportsPage._booksCheckKind = function (kind, label) {
+    const own = { invoice: T('Invoice'), customer: T('Customer'), job: T('Job'), job_cost: `${T('Job')} cost` };
     const words = {
-        invoice: T('Invoice'), customer: T('Customer'), job: T('Job'), credit_memo: 'Credit memo',
-        bill: 'Bill', bill_payment: 'Bill payment', payment: 'Payment', vendor_credit: 'Vendor credit',
-        deposit: 'Deposit', journal: 'Journal entry', pay_run: 'Pay run', expense: 'Expense',
-        cc_charge: 'Card charge', job_cost: `${T('Job')} cost`, vendor: 'Vendor', item: 'Item',
+        credit_memo: 'Credit memo', bill: 'Bill', bill_payment: 'Bill payment', payment: 'Payment',
+        vendor_credit: 'Vendor credit', deposit: 'Deposit', journal: 'Journal entry', pay_run: 'Pay run',
+        expense: 'Expense', cc_charge: 'Card charge', vendor: 'Vendor', item: 'Item',
     };
-    return words[kind] || String(kind || '').replace(/_/g, ' ');
+    // the server's label first (#950): it already carries the company's
+    // words, and an invoice-kind document's own face (Invoice, Pledge, Sales
+    // Receipt, Donation Receipt), which the company's word for "Invoice"
+    // would overwrite
+    return label || own[kind] || words[kind] || String(kind || '').replace(/_/g, ' ');
 };
 // The address a named document opens at; an item opens the Item List, a
 // job-less row ("No job") opens nothing.
@@ -4903,7 +5013,7 @@ ReportsPage.booksCheckBody = function (data) {
             : '<span style="color:var(--gray-500);">Not checked</span>';
     const docRow = (r, d, i) => {
         const href = ReportsPage.booksCheckHref(d);
-        const name = `${ReportsPage._booksCheckKind(d.type)}${d.number ? ` ${d.number}` : ''}`;
+        const name = `${ReportsPage._booksCheckKind(d.type, d.type_label)}${d.number ? ` ${d.number}` : ''}`;
         const link = href
             ? ReportsPage._rowLink(`ReportsPage.openBooksCheckDocument(${JSON.stringify(href)}, this)`, name, `books:${r.key}:${d.type}:${d.id}:${i}`)
             : escapeHtml(name);

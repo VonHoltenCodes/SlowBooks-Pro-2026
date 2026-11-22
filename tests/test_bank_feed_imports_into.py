@@ -163,6 +163,7 @@ const ctx = { console, window: {}, document: { addEventListener: () => {} },
   setTimeout: () => 0, clearTimeout: () => {} };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('app/static/js/utils.js', 'utf8')
+  + '\n' + fs.readFileSync('app/static/js/hint.js', 'utf8')
   + '\n' + fs.readFileSync('app/static/js/banking.js', 'utf8')
   + '\nthis.BankingPage = BankingPage;', ctx);
 const rows = [

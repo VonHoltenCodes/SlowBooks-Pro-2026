@@ -1,6 +1,6 @@
 // ReportsPage._cards() in business vs construction mode: the ordered list
-// of card views each produces. Construction must lead with the three
-// contractor reports and otherwise hold the same set as business.
+// of card views each produces (in their sections, #936). Construction adds
+// the job reports and otherwise holds the same set as business.
 //
 //   node tests/js/reports_cards_probe.js
 //

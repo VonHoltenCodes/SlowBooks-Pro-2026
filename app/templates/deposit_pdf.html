@@ -3,6 +3,7 @@
 <head>
     <title>Deposit</title>
 <style>
+{% include '_print_text.html' %}
     @page { size: {{ 'A4' if paper_size == 'a4' else 'letter' }}; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
     .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
@@ -14,25 +15,50 @@
     .doc-title .void { color: #b00020; }
     .as-of { font-size: 10pt; color: #666; margin-top: 4px; }
     .deposit-block { margin-bottom: 20px; padding: 12px; background: #f7f9fb; border: 1px solid #e0e0e0; }
-    .deposit-block .row { display: flex; gap: 24px; font-size: 10pt; }
-    .deposit-block .label { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.03em; }
+    /* The row is a table as wide as its text and no wider than the block:
+       the account and the slip number wrap in what the date and the count
+       leave them, whatever is typed in them, and Items is never set past
+       the margin (in a flex row it was, by a slip number of mixed Arabic
+       and Latin text, which WeasyPrint measured as needing more than the
+       row had). */
+    .deposit-block .row { display: table; font-size: 10pt; }
+    .deposit-block .row > div { display: table-cell; vertical-align: top; padding-right: 24px; }
+    .deposit-block .row > div:last-child { padding-right: 0; }
+    .deposit-block .label { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+    .deposit-block .value.nw { white-space: nowrap; }
     .deposit-block .value { font-weight: 700; color: #003366; }
     table.items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    table.items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; white-space: nowrap; }
-    table.items th.r { text-align: right; }
-    table.items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.items td.nw { white-space: nowrap; }
-    table.items td.desc { width: 100%; }
-    table.items td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    table.items tr:nth-child(even) { background: #f7f9fb; }
-    .summary { float: right; width: 300px; margin-top: 8px; }
-    .summary table { width: 100%; }
+    table.items > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; white-space: nowrap; }
+    table.items > thead > tr > th.r { text-align: right; }
+    table.items > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.items > tbody > tr > td.nw { white-space: nowrap; }
+    /* Who it is from, the reference and the method are on one line, as the
+       date is, in a column as wide as that line and no wider than this;
+       text wider than its column wraps there. The description has the rest
+       of the table and asks for no width of its own, so the Amount column
+       and the total are where they are whatever the text
+       (_print_text.html has the rule). */
+    table.items > tbody > tr > td.from { max-width: 1.3in; }
+    table.items > tbody > tr > td.ref { max-width: 0.85in; }
+    table.items > tbody > tr > td.method { max-width: 0.85in; }
+    table.items > tbody > tr > td.desc { width: 100%; max-width: 0.9in; }
+    table.items > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.items > tbody > tr.alt { background: #f7f9fb; }
+    /* The last row, the totals and the footer are one unbreakable group of
+       the table (#1047, as #1039 for the invoice): Total deposit never starts
+       a page with no row above it, on WeasyPrint's PDF and on Chromium's
+       print alike. */
+    table.items > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.items > tbody.doc-tail > tr.doc-end > td { padding: 8px 0 0; border-bottom: 0; }
+    .summary { margin-left: auto; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
+    /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .summary table { width: 300px; margin-left: auto; }
     .summary td { padding: 3px 8px; font-size: 10pt; white-space: nowrap; }
     .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
     .summary .label { font-weight: 700; color: #4a4a6a; }
     .summary .grand { font-size: 14pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .note { clear: both; font-size: 9pt; color: #666; margin-top: 16px; }
-    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
+    .footer { clear: both; margin-top: 12px; break-before: avoid; page-break-before: avoid; break-inside: avoid; page-break-inside: avoid; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -58,46 +84,16 @@
     <div class="deposit-block">
         <div class="row">
             <div><div class="label">Deposited to</div><div class="value">{{ deposit.account_name }}</div></div>
-            <div><div class="label">Date</div><div class="value">{{ deposit.date | fdate }}</div></div>
+            <div><div class="label">Date</div><div class="value nw">{{ deposit.date | fdate }}</div></div>
             {% if deposit.reference %}<div><div class="label">Slip #</div><div class="value">{{ deposit.reference }}</div></div>{% endif %}
             <div><div class="label">Items</div><div class="value">{{ (deposit.payments | length) + (deposit.other_lines | default([]) | length) }}</div></div>
         </div>
     </div>
 
     {% set others = deposit.other_lines | default([]) %}
-    {% if deposit.payments or others %}
-    <table class="items">
-        <thead><tr>
-            <th>Date</th><th>Received from</th><th>Description</th><th>Check # / Ref</th><th>Method</th><th class="r">Amount</th>
-        </tr></thead>
-        <tbody>
-        {% for p in deposit.payments %}
-            <tr>
-                <td class="nw">{{ p.date | fdate }}</td>
-                <td class="nw">{{ p.received_from }}</td>
-                <td class="desc">{{ p.description }}{% if p.document %} ({{ p.document }}){% endif %}</td>
-                <td class="nw">{{ p.check_number or p.payment_reference or p.reference }}</td>
-                <td class="nw">{{ p.method }}</td>
-                <td class="r">{{ p.amount | currency }}</td>
-            </tr>
-        {% endfor %}
-        {# money that was never invoiced (#792), with the checks: the account it goes to and the memo #}
-        {% for o in others %}
-            <tr>
-                <td class="nw">{{ deposit.date | fdate }}</td>
-                <td class="nw">{{ o.received_from }}</td>
-                <td class="desc">{{ o.account_name }}{% if o.memo %} ({{ o.memo }}){% endif %}</td>
-                <td class="nw">{{ o.check_number }}</td>
-                <td class="nw">{{ o.method }}</td>
-                <td class="r">{{ o.amount | currency }}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="note">{% if deposit.voided %}This deposit is void: its payments went back to be deposited again.{% else %}This deposit was recorded as an amount, without the list of payments it took.{% endif %}</p>
-    {% endif %}
-
+    {# The totals and the footer: in the table's last row, with the last
+       payment (#1047), or after the note when there is no list. #}
+    {% set closing %}
     <div class="summary">
         <table>
             {% set split = deposit_slip_split(deposit.payments | default([]), others) %}
@@ -111,6 +107,45 @@
         </table>
     </div>
 
-    <div class="footer">Generated by Slowbooks Pro 2026</div>
+    <div class="footer">Generated by SlowBooks Pro 2026</div>
+    {% endset %}
+    {% if deposit.payments or others %}
+    <table class="items">
+        <thead><tr>
+            <th>Date</th><th>Received from</th><th>Description</th><th>Check # / Ref</th><th>Method</th><th class="r">Amount</th>
+        </tr></thead>
+        <tbody>
+        {% for p in deposit.payments %}
+            {% if loop.last and not others %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if loop.index is even %} class="alt"{% endif %}>
+                <td class="nw">{{ p.date | fdate }}</td>
+                <td class="from">{{ p.received_from | own_width }}</td>
+                <td class="desc">{{ p.description | desc }}{% if p.document %} ({{ p.document }}){% endif %}</td>
+                {%- set ref = p.check_number or p.payment_reference or p.reference %}
+                <td class="ref">{{ ref | own_width }}</td>
+                <td class="method">{{ p.method | own_width }}</td>
+                <td class="r">{{ p.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        {# money that was never invoiced (#792), with the checks: the account it goes to and the memo #}
+        {% for o in others %}
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr{% if (loop.index + (deposit.payments | length)) is even %} class="alt"{% endif %}>
+                <td class="nw">{{ deposit.date | fdate }}</td>
+                <td class="from">{{ o.received_from | own_width }}</td>
+                <td class="desc">{{ o.account_name }}{% if o.memo %} ({{ o.memo | desc }}){% endif %}</td>
+                <td class="ref">{{ o.check_number | own_width }}</td>
+                <td class="method">{{ o.method | own_width }}</td>
+                <td class="r">{{ o.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        <tr class="doc-end"><td colspan="6">{{ closing }}</td></tr>
+        </tbody>
+    </table>
+    {% else %}
+    <p class="note">{% if deposit.voided %}This deposit is void: its payments went back to be deposited again.{% else %}This deposit was recorded as an amount, without the list of payments it took.{% endif %}</p>
+    {{ closing }}
+    {% endif %}
+
 </body>
 </html>

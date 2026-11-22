@@ -226,6 +226,7 @@ const InvoicesPage = {
         return renderListPage({
             title: T('Invoices'),
             headerHtml: `<button class="btn btn-primary" ${App.shortcutAttrs('N', T('New Invoice'))} onclick="InvoicesPage.showForm()">+ ${T('New Invoice')}</button>`
+                + (invoices.length ? ` <button class="btn btn-secondary" data-invoice-print-all onclick="InvoicesPage.printAll()" title="Print every ${T('invoice')} the list shows, each on its own page">Print all</button>` : '')
                 + (all ? '' : listCapNote(rows, 500, 'InvoicesPage.showAll()', Terms.text('invoices'))),
             filter: {
                 id: 'inv-status-filter',
@@ -248,7 +249,7 @@ const InvoicesPage = {
             ],
             sort: { id: 'inv-list' },
             items: invoices,
-            row: inv => `<tr class="inv-row" data-status="${inv.status}">
+            row: inv => `<tr class="inv-row" data-status="${inv.status}" data-id="${inv.id}">
                     <td><strong>${escapeHtml(inv.invoice_number)}</strong></td>
                     <td>${escapeHtml(inv.customer_name || '')}</td>
                     <td>${formatDate(inv.date)}</td>
@@ -258,6 +259,7 @@ const InvoicesPage = {
                     <td class="amount">${SalesLines.money(inv.balance_due, inv.currency)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.view(${inv.id})">View</button>
+                        <button class="btn btn-sm btn-secondary" onclick="window.open('/api/invoices/${inv.id}/print-preview','_blank')">Print</button>
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showForm(${inv.id})">Edit</button>
                         ${inv.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="InvoicesPage.markSent(${inv.id})">Mark Sent</button>` : ''}
                         ${inv.status !== 'void' && parseFloat(inv.balance_due) > 0 ? `<button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showWriteOff(${inv.id}, ${parseFloat(inv.balance_due)})">Write Off</button>` : ''}
@@ -265,6 +267,27 @@ const InvoicesPage = {
                 </tr>`,
         });
     },
+
+    // Print all (#1007): every invoice the list shows, as filtered and in
+    // the order it is sorted, in one print preview, each on a page of its
+    // own. The same window.open as one invoice's Print, so the desktop app
+    // opens its print window (#823). Printing marks nothing as sent.
+    printAll() {
+        const ids = $$('.inv-row')
+            .filter(row => row.style.display !== 'none')
+            .map(row => row.dataset.id)
+            .filter(Boolean);
+        if (!ids.length) {
+            toast(`No ${T('invoices')} in the list to print.`, 'error');
+            return;
+        }
+        if (ids.length > InvoicesPage.PRINT_ALL_MAX) {
+            toast(`Print all prints up to ${InvoicesPage.PRINT_ALL_MAX} ${T('invoices')} at a time. Narrow the list and print it in parts.`, 'error');
+            return;
+        }
+        window.open(`/api/invoices/print-preview?ids=${ids.join(',')}`, '_blank');
+    },
+    PRINT_ALL_MAX: 200,
 
     // Forgive an open balance (a pledge that will never be paid, a balance
     // too small to collect): a write-off credit memo to Bad Debt Expense,
@@ -352,6 +375,7 @@ const InvoicesPage = {
             </div>
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
             <div id="inv-credit-note"></div>
+            ${InvoicesPage.linkedPOsPanelHtml(inv)}
             ${InvoicesPage.attachmentsPanelHtml('invoice', inv.id)}
             ${typeof activityPanelHtml === 'undefined' ? '' : activityPanelHtml('invoice', inv.id)}
             <div class="form-actions">
@@ -520,10 +544,9 @@ const InvoicesPage = {
                 <label for="inv-show-logo">
                     <input id="inv-show-logo" type="checkbox" data-admin ${enabled ? 'checked' : ''} ${canChange ? '' : 'disabled'} onchange="InvoicesPage.setLogoOption(this)">
                     Show company logo on invoices
+                    ${canChange ? hint('Applies to all invoices: PDF, Print, and emailed attachments. Changes save immediately.', 'Show company logo on invoices') : ''}
                 </label>
-                <div class="invoice-logo-help">${canChange
-                    ? 'Applies to all invoices: PDF, Print, and emailed attachments. Changes save immediately.'
-                    : 'Applies to all invoices. Only an administrator can change this, in Settings.'}</div>
+                ${canChange ? '' : '<div class="invoice-logo-help">Applies to all invoices. Only an administrator can change this, in Settings.</div>'}
                 <div class="invoice-logo-status" role="status" aria-live="polite"></div>
             </div>
         </div>`;
@@ -632,13 +655,13 @@ const InvoicesPage = {
                 <div class="form-grid">
                     <div class="form-group full-width"><label>Recipient Email *</label>
                         <input name="recipient" type="email" required value="${escapeHtml(email)}"></div>
-                    <div class="form-group"><label>CC <span class="form-hint">Optional. Separate addresses with commas.</span></label>
+                    <div class="form-group"><label>CC ${hint('Optional. Separate addresses with commas.', 'CC')}</label>
                         <input name="cc" placeholder="office@example.com"></div>
-                    <div class="form-group"><label>BCC <span class="form-hint">Optional. Hidden from the recipient.</span></label>
+                    <div class="form-group"><label>BCC ${hint('Optional. Hidden from the recipient.', 'BCC')}</label>
                         <input name="bcc" placeholder="books@example.com"></div>
                     <div class="form-group full-width"><label>Subject</label>
                         <input name="subject" placeholder="Loading from your template…"></div>
-                    <div class="form-group full-width"><label>Message <span class="form-hint">Appears at the top of the email. Leave it blank to send your template as it is.</span></label>
+                    <div class="form-group full-width"><label>Message ${hint('Appears at the top of the email. Leave it blank to send your template as it is.', 'Message')}</label>
                         <textarea name="message" oninput="InvoicesPage.queueEmailPreview(${id})"></textarea></div>
                 </div>
                 <details style="margin-top:4px;" open>
@@ -687,14 +710,16 @@ const InvoicesPage = {
         e.preventDefault();
         const form = e.target;
         try {
-            await API.post(`/invoices/${id}/email`, {
+            const res = await API.post(`/invoices/${id}/email`, {
                 recipient: form.recipient.value,
                 cc: form.cc.value.trim() || null,
                 bcc: form.bcc.value.trim() || null,
                 subject: form.subject.value,
                 message: form.message.value,
             });
-            toast(`${T('Invoice')} emailed`);
+            // a copy the mail server refused is said with it
+            toast(res && res.note ? `${T('Invoice')} emailed. ${res.note}` : `${T('Invoice')} emailed`,
+                res && res.note ? 'warning' : 'success');
             closeModal();
         } catch (err) {
             // An administrator is offered the Recent sends section, where the
@@ -771,6 +796,8 @@ const InvoicesPage = {
         const classGroup = await classFormGroupHtml(inv.class_id);
         const jobGroup = await jobFormGroupHtml(inv.job_id, 'inv-customer-select');
         if (InvoicesPage.lineClasses()) await Nonprofit.loadFunds();
+        // construction: a line's cost code and type (#1055)
+        if (InvoicesPage.costCells()) await SalesCost.load();
         // Nonprofit: a pledge prints as one; program fees and rentals stay invoices
         const pledgeGroup = Terms.isNonprofit() ? `<div class="form-group"><label>Document</label><label style="font-weight:normal;"><input type="checkbox" name="is_pledge" ${(id ? inv.is_pledge : true) ? 'checked' : ''}> This is a pledge (prints as PLEDGE)</label></div>` : '';
         if (inv.lines.length === 0) inv.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
@@ -822,7 +849,7 @@ const InvoicesPage = {
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th scope="col">Item</th><th scope="col">Description</th>${InvoicesPage.lineClasses() ? Nonprofit.classHeadHtml() : ''}<th scope="col" class="col-qty">Qty</th>
+                        <th scope="col">Item</th><th scope="col">Description</th>${InvoicesPage.lineClasses() ? Nonprofit.classHeadHtml() : ''}${InvoicesPage.costCells() ? SalesCost.headHtml() : ''}<th scope="col" class="col-qty">Qty</th>
                         <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>
                     </tr></thead>
                     <tbody id="inv-lines">
@@ -917,6 +944,9 @@ const InvoicesPage = {
     // still renders where that helper is not loaded (the node probes build a
     // bare page from invoices.js alone), as it did before the cell existed.
     lineClasses() { return typeof Nonprofit !== 'undefined' && !!Nonprofit.classCellHtml; },
+    // The line's cost code and type cells (#1055), the shared helper in
+    // utils.js; a bare page without it keeps them on the row's attributes.
+    costCells() { return typeof SalesCost !== 'undefined'; },
     // A line's class for the payload: the cell's choice where one is drawn,
     // else the class the line already carries (data-class-id), so an edit
     // where no cell is drawn keeps a stored class.
@@ -925,21 +955,34 @@ const InvoicesPage = {
         return row.dataset.classId ? parseInt(row.dataset.classId) : null;
     },
 
+    // The line's cost code and type for the payload (#1055): the cells'
+    // choice while a job is chosen, else what the line already carries.
+    lineCostFromRow(row, form) {
+        if (InvoicesPage.costCells()) return SalesCost.fromRow(row, form);
+        return {
+            cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
+            cost_type: row.dataset.costType || null,
+        };
+    },
+
     // A line with a negative price is a discount a QuickBooks Online invoice
     // came in with (a discount item, or a negative line of its own): its
     // price box takes a negative number, so the invoice saves as it is.
     lineRowHtml(idx, line, items) {
-        // The form has no job / cost-code cells, but a line may carry them
-        // (job costing, the API). Keep them on the row so an edit sends them
-        // back instead of stripping them from the line and its posting. The
-        // class has a cell of its own (#243); the data attribute still holds
-        // a stored class where no cell is drawn.
+        // The form has no line job cell, but a line may carry one (job
+        // costing, the API). Keep it on the row so an edit sends it back
+        // instead of stripping it from the line and its posting. The class
+        // has a cell of its own (#243), and in construction mode the cost
+        // code and type do (#1055); the data attributes still hold them
+        // where no cell is drawn.
         const dim = (v) => (v == null ? '' : escapeHtml(String(v)));
-        return `<tr data-line="${idx}" data-job-id="${dim(line.job_id)}" data-class-id="${dim(line.class_id)}" data-cost-code-id="${dim(line.cost_code_id)}">
+        const costAttrs = InvoicesPage.costCells() ? SalesCost.dataAttrs(line) : `data-cost-code-id="${dim(line.cost_code_id)}" data-cost-type="${dim(line.cost_type)}"`;
+        return `<tr data-line="${idx}" data-job-id="${dim(line.job_id)}" data-class-id="${dim(line.class_id)}" ${costAttrs}>
             <td><select class="line-item" onchange="InvoicesPage.itemSelected(${idx})">
                 ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             ${InvoicesPage.lineClasses() ? Nonprofit.classCellHtml('line-class', line.class_id) : ''}
+            ${InvoicesPage.costCells() ? SalesCost.cellHtml(line) : ''}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="InvoicesPage.recalc()">${SalesLines.onHandHtml(line.item_id, items)}</td>
             <td><input class="line-rate money" type="number" step="0.0001" ${Number(line.rate) < 0 || items.some(i => i.is_discount && i.id == line.item_id) ? '' : 'min="0" '}value="${Number(line.rate) || 0}" oninput="InvoicesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="InvoicesPage.recalc()"></td>
@@ -957,8 +1000,8 @@ const InvoicesPage = {
 
     removeLine(idx) {
         const row = $(`[data-line="${idx}"]`);
-        if (row) row.remove();
-        InvoicesPage.recalc();
+        // the shared Remove line: names follow, and the keyboard stays on the form
+        if (!row || !LineOrder.removeLine(row, () => InvoicesPage.recalc())) InvoicesPage.recalc();
     },
 
     itemSelected(idx) {
@@ -971,6 +1014,8 @@ const InvoicesPage = {
 
     recalc() {
         TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'), $('#invoice-form'));
+        // the cost code and type show while a job is chosen (#1055)
+        if (InvoicesPage.costCells()) SalesCost.sync($('#invoice-form'), $('#inv-lines'));
         const cur = $('#invoice-form [name="currency"]')?.value;
         const rate = $('#invoice-form [name="tax_rate"]')?.value;
         const t = SalesLines.totals($('#inv-lines'), rate, cur);
@@ -1032,7 +1077,7 @@ const InvoicesPage = {
                 // save clears it (the server refuses one it is asked to keep)
                 job_id: JobPicker.ownJob(form, row.dataset.jobId ? parseInt(row.dataset.jobId) : null),
                 class_id: InvoicesPage.lineClassFromRow(row),
-                cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
+                ...InvoicesPage.lineCostFromRow(row, form),
                 line_order: i,
             });
         });
@@ -1057,6 +1102,9 @@ const InvoicesPage = {
             lines,
         };
 
+        // no lines, or lines that add up to $0.00: asked first (ZeroTotal)
+        const zero = ZeroTotal.ask(T('Invoice'), InvoicesPage.recalc().total);
+        if (!zero) return;
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         if (!(await ClassWarn.ok(form, { rows: '#inv-lines tr', cls: 'line-class' }))) return;
         // Past the customer's credit limit? Say so, and let the user decide.
@@ -1074,7 +1122,7 @@ const InvoicesPage = {
                 // a new invoice carries the files attached before its first save (#881)
                 if (!id) body.pending_attachments = PendingFiles.ids();
                 return id ? API.put(`/invoices/${id}`, body) : API.post('/invoices', body);
-            }, InvoicesPage._overLimitOk ? { allow_over_credit_limit: true } : {});
+            }, { ...zero, ...(InvoicesPage._overLimitOk ? { allow_over_credit_limit: true } : {}) });
             if (!saved) return; // $0.00 and the user said no: the form stays open
             if (!id) PendingFiles.saved();
             toastPosted(Terms.text(id ? 'Invoice updated' : 'Invoice created'));
@@ -1110,6 +1158,90 @@ const InvoicesPage = {
         InvoicesPage._overLimitOk = confirm(`${customer.name}'s credit limit is ${formatCurrency(limit)}. `
             + `With this ${T('invoice')} they would owe ${formatCurrency(after)}. Save it anyway?`);
         return InvoicesPage._overLimitOk;
+    },
+
+    // The purchase orders that fill this invoice (#986): one invoice, many
+    // POs, each a plain reference (nothing posts, no total changes). Each
+    // opens its PO; × unlinks it; Create PO opens a new order with this
+    // invoice set, linked on save; Link a PO… offers the open orders that
+    // fill no invoice yet. The controls that change a link carry data-write,
+    // so a read-only or accountant sign-in sees the list and nothing more.
+    // A void invoice keeps its links and takes no new one.
+    linkedPOsPanelHtml(inv) {
+        if (inv.is_sales_receipt) return '';
+        const id = Number(inv.id);
+        const pos = inv.linked_purchase_orders || [];
+        const rows = pos.map(p => `<tr>
+                <td><a href="#" onclick="PurchaseOrdersPage.view(${Number(p.id)}); return false;">${escapeHtml(p.po_number)}</a></td>
+                <td>${escapeHtml(p.vendor_name || '')}</td>
+                <td>${PurchaseOrdersPage.statusBadge(p.status)}</td>
+                <td class="amount">${formatCurrency(p.total)}</td>
+                <td><button type="button" data-write class="btn btn-sm btn-danger" aria-label="Unlink purchase order ${escapeHtml(p.po_number)}" title="Unlink" onclick="InvoicesPage.unlinkPO(${id}, ${Number(p.id)})" style="padding:0 4px; font-size:10px;">×</button></td>
+            </tr>`).join('');
+        const list = pos.length
+            ? `<div class="table-container"><table>
+                    <thead><tr><th scope="col">PO</th><th scope="col">Vendor</th><th scope="col">Status</th><th scope="col" class="amount">Total</th><th scope="col"><span class="visually-hidden">Unlink</span></th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>`
+            : `<div style="margin-bottom:8px; font-size:11px; color:var(--text-muted);">No purchase orders fill this ${T('invoice')}.</div>`;
+        const actions = inv.status === 'void' ? '' : `
+                <div style="display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:6px;">
+                    <button type="button" data-write class="btn btn-sm btn-secondary" onclick="InvoicesPage.createLinkedPO(${id})">Create PO</button>
+                    <button type="button" data-write class="btn btn-sm btn-secondary" onclick="InvoicesPage.linkPOPicker(${id})">Link a PO…</button>
+                    <span id="inv-po-picker"></span>
+                </div>`;
+        return `
+            <div id="inv-po-links" style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
+                <h3 style="font-size:13px; margin-bottom:8px;">Linked purchase orders</h3>
+                ${list}${actions}
+            </div>`;
+    },
+
+    // The orders Link a PO… offers: open (not closed) and filling no
+    // invoice yet, by number.
+    linkablePOs(pos) {
+        return (pos || [])
+            .filter(p => !p.invoice_id && p.status !== 'closed')
+            .sort((a, b) => String(a.po_number).localeCompare(String(b.po_number), undefined, { numeric: true }));
+    },
+
+    async linkPOPicker(invId) {
+        const el = $('#inv-po-picker');
+        if (!el) return;
+        let pos;
+        try { pos = await API.get('/purchase-orders'); } catch (err) { toast(err.message, 'error'); return; }
+        const open = InvoicesPage.linkablePOs(pos);
+        if (!open.length) {
+            el.innerHTML = '<span style="font-size:11px; color:var(--text-muted);">No open purchase orders to link.</span>';
+            return;
+        }
+        el.innerHTML = `<select id="inv-po-pick" data-write aria-label="Purchase order to link">${open.map(p =>
+            `<option value="${Number(p.id)}">${escapeHtml(p.po_number)} · ${escapeHtml(p.vendor_name || '')} · ${formatCurrency(p.total)}</option>`).join('')}</select>
+            <button type="button" data-write class="btn btn-sm btn-primary" onclick="InvoicesPage.linkPO(${Number(invId)})">Link</button>`;
+    },
+
+    async linkPO(invId, poId = null) {
+        const pick = poId || parseInt($('#inv-po-pick')?.value);
+        if (!pick) return;
+        try {
+            await API.post(`/invoices/${invId}/purchase-orders/${pick}`, {});
+            toast('Purchase order linked');
+            InvoicesPage.view(invId);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async unlinkPO(invId, poId) {
+        try {
+            await API.del(`/invoices/${invId}/purchase-orders/${poId}`);
+            toast('Purchase order unlinked');
+            InvoicesPage.view(invId);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Create PO: a new purchase order with this invoice set, linked when it
+    // is saved; the save comes back to the invoice.
+    createLinkedPO(invId) {
+        return PurchaseOrdersPage.showForm(null, { invoice_id: Number(invId) });
     },
 
     // A saved document's Attachments panel: an invoice's, and (#881) a

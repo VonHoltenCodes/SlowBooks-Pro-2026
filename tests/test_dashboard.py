@@ -31,7 +31,12 @@ def test_every_widget_builds_on_an_empty_company(client, seed_accounts):
     assert set(data) == set(WIDGETS) - set(CONSTRUCTION_ONLY)
     for wid, payload in data.items():
         assert "error" not in payload, f"{wid}: {payload.get('error')}"
-    assert data["receivables"] == {"total": 0.0, "overdue_count": 0}
+    assert data["receivables"] == {
+        "total": 0.0,
+        "overdue_count": 0,
+        "overdue_pledges": 0,
+        "overdue_invoices": 0,
+    }
     assert len(data["monthly_revenue"]["months"]) == 12
     assert data["cash_position"]["forecast_30"] == data["cash_position"]["cash"]
     assert data["job_budget_vs_actual"]["count"] == 0
@@ -110,7 +115,12 @@ def test_widgets_reflect_activity(client, db_session, seed_accounts, seed_custom
     d = client.get(
         "/api/dashboard/data?ids=receivables,overdue_invoices,payables,open_pos,job_budget_vs_actual,pnl_month,cash_position,monthly_revenue"
     ).json()
-    assert d["receivables"] == {"total": 400.0, "overdue_count": 1}
+    assert d["receivables"] == {
+        "total": 400.0,
+        "overdue_count": 1,
+        "overdue_pledges": 0,
+        "overdue_invoices": 1,
+    }
     assert (
         d["overdue_invoices"]["count"] == 1
         and d["overdue_invoices"]["items"][0]["days_overdue"] == 15

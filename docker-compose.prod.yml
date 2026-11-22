@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — PRODUCTION Docker Compose
+# SlowBooks Pro 2026 — PRODUCTION Docker Compose
 # Usage:  docker compose -f docker-compose.prod.yml up -d
 #
 # Pulls every secret + tunable from the environment. There are no defaults

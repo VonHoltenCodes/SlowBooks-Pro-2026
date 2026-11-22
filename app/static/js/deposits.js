@@ -42,10 +42,7 @@ const DepositsPage = {
 
         let html = `
             <div class="page-header">
-                <h2>Make Deposits</h2>
-                <div style="font-size:10px; color:var(--text-muted);">
-                    Select payments to deposit from Undeposited Funds to a bank account
-                </div>
+                <h2>Make Deposits ${hint('Select payments to deposit from Undeposited Funds to a bank account', 'Make Deposits')}</h2>
             </div>
             <div class="toolbar" data-write>
                 <label for="deposit-bank-acct" style="font-size:10px;font-weight:700;">Deposit To:</label>
@@ -83,10 +80,7 @@ const DepositsPage = {
         }
         // money never invoiced, on the same slip (#792)
         html += `<div id="dep-other" data-write>
-                <h3 style="margin:16px 0 4px; font-size:14px;">Other deposits</h3>
-                <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">
-                    Money that was never invoiced (a reimbursement, a vendor's refund, a rebate) goes on the same slip: choose the account it goes to.
-                </div>
+                <h3 style="margin:16px 0 4px; font-size:14px;">Other deposits ${hint("Money that was never invoiced (a reimbursement, a vendor's refund, a rebate) goes on the same slip: choose the account it goes to.", 'Other deposits')}</h3>
                 ${DepositsPage._otherTableHtml(DepositsPage._ctx, 'dep-other-rows', [])}
                 <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center;">
                     <div id="deposit-total" style="font-size:16px; font-weight:700; color:var(--qb-navy);" aria-live="polite">
@@ -234,9 +228,9 @@ const DepositsPage = {
     },
 
     removeOtherLine(btn) {
-        const row = btn && btn.closest('tr');
-        if (row) row.remove();
-        DepositsPage.recalcAll();
+        // the shared Remove line: the lines left are named by their place
+        // again, and the keyboard stays on the form
+        if (!LineOrder.removeLine(btn, () => DepositsPage.recalcAll())) DepositsPage.recalcAll();
     },
 
     // what the rows of one grid hold, as buildOtherLines reads them
@@ -295,10 +289,7 @@ const DepositsPage = {
             </tr>`;
         }).join('');
         return `
-            <h3 style="margin:20px 0 8px; font-size:14px;">Recent deposits</h3>
-            <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">
-                To take a payment out of a deposit, void the deposit: its payments go back on the list above to deposit again.
-            </div>
+            <h3 style="margin:20px 0 8px; font-size:14px;">Recent deposits ${hint('To take a payment out of a deposit, void the deposit: its payments go back on the list above to deposit again.', 'Recent deposits')}</h3>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Date</th><th scope="col">Deposited To</th><th scope="col">Slip #</th>
                 <th scope="col" class="amount">Payments</th><th scope="col" class="amount">Amount</th><th scope="col">Status</th><th scope="col"></th></tr></thead>
@@ -502,6 +493,7 @@ const DepositsPage = {
         cents += built.lines.reduce((sum, ln) => sum + Math.round(parseFloat(ln.amount) * 100), 0);
         const total = cents / 100;
 
+        if (!ZeroTotal.ask('Deposit', total)) return;
         if (lineIds.length === 0 && built.lines.length === 0) { toast('Tick the payments to deposit, or add a line for money that was never invoiced.', 'error'); return; }
 
         const bankAcctId = $('#deposit-bank-acct')?.value;

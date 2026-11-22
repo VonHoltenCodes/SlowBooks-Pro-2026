@@ -5,6 +5,7 @@
    joelmacklow fork's _document_theme partial. `landscape` turns the page
    on its side for a grid with a column per class or job (#232). #}
 <style>
+{% include '_print_text.html' %}
     {# The footer takes the company name from the page itself (string-set
        on .report-company below), not from text written into this style
        block: <style> is raw text, so autoescaping printed "Explore Signs
@@ -45,6 +46,28 @@
        (break-word, not anywhere, which split MARGIN into M/AR/GI/N);
        amounts stay on one line. #}
     table.report th.amount { white-space: normal; overflow-wrap: break-word; }
+    {# A column past the columns of words holds figures, each on one line,
+       and in some reports words (the General Ledger's Reference and
+       Description). A cell of words wraps in its column as words do: it is
+       on one line while the sheet has the room, and no longer holds the
+       columns of figures past the margin when it has not. Which a cell is
+       is read from what is in it (pdf_service._one_line): a figure no
+       wider than a column of words may be is on one line, and a run of
+       digits wider than that (a wire's trace number) is words, since on
+       one line it left its cell and printed over the column beside it. #}
+    table.report td.amount.words { white-space: normal; }
+    {# A word that may be wider than its column's share of the sheet (.w,
+       pdf_service._capped) counts for no more than that share when
+       WeasyPrint measures the columns (its max-width, set for each table
+       in report_pdf.html). A browser gives an inline element no max-width:
+       there the word may break at any character, which keeps it from
+       holding its column open the same. WeasyPrint does not read an
+       @supports rule, so the saved PDF sets the word as any other. #}
+    @supports (overflow-wrap: anywhere) { table.report .w { overflow-wrap: anywhere; } }
+    {# the heading: the period and the date keep their width at the right,
+       and the title and the company's name wrap in the rest #}
+    .report-header > :first-child { flex: 1 1 0%; min-width: 0; }
+    .report-header > .report-meta { flex: none; max-width: 45%; padding-left: 12px; }
     table.report td { padding: 3px 6px; border-bottom: 0.5px solid #e2e2e2; }
     table.report tr.subtotal td { font-weight: 700; border-top: 1px solid #999; }
     {# a group or family heading inside a section: Current Assets, Travel #}
@@ -61,4 +84,9 @@
        headings again at the top of each (NEW-208) #}
     table.report thead { display: table-header-group; }
     table.report tr { break-inside: avoid; page-break-inside: avoid; }
+    {# the last row and the one above it never part (#1047): the grand
+       total never starts the last page alone under the column headings,
+       on WeasyPrint's PDF and on Chromium's print alike (Chromium does
+       not honour break-before: avoid on a row) #}
+    table.report > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
 </style>

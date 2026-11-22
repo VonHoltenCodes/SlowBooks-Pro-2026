@@ -16,12 +16,9 @@ const DeductionsPage = {
 
         return `
             <div class="page-header">
-                <h2>Garnishments</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>Garnishments</h2>${hint('Orders apply to disposable earnings under CCPA limits, in priority order. Voluntary deductions, employer-paid benefits and 401(k) matches are on the <a href="#/hr/benefits">Benefits</a> page.', 'Garnishments')}</div>
                 <button class="btn btn-primary" onclick="DeductionsPage.showGarnishmentForm(DeductionsPage._garnishmentEmpId)">+ Add Garnishment</button>
             </div>
-            <p style="font-size:12px;color:var(--gray-400);margin:0 0 12px;">
-                Orders apply to disposable earnings under CCPA limits, in priority order. Voluntary deductions, employer-paid benefits and 401(k) matches are on the <a href="#/hr/benefits">Benefits</a> page.
-            </p>
             <div class="form-group" style="max-width:280px;margin-bottom:16px;">
                 <label>Employee</label>
                 <select onchange="DeductionsPage.loadGarnishments(this.value)">

@@ -14,6 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session, joinedload
 
+from app.services.terminology import said
 from app.models.transactions import LEDGER_BASIS_OPTION, READ_ALL
 from app.database import get_db
 from app.routes._helpers import refuse_unknown_filters, reject_null_updates
@@ -60,6 +61,7 @@ from app.services.job_costing import (
     budget_vs_actual_all_jobs,
     budgets_from_estimate,
     cost_type_map,
+    hide_zero_rows,
     job_cost_tree,
 )
 from app.services.jobs_service import (
@@ -97,7 +99,7 @@ def _check_name_clash(db: Session, customer_id: int, name: str, exclude_id=None)
     if clash and clash.id != exclude_id:
         raise HTTPException(
             status_code=409,
-            detail=f"This customer already has a job named '{clash.name}'",
+            detail=said("This customer already has a job named '{}'", clash.name),
         )
 
 
@@ -212,17 +214,33 @@ def get_job_transactions(
     return job_transactions(db, job_id, start_date, end_date)
 
 
+# Hide zero balances (#1052), the financial reports' choice (#625) on the
+# job's Cost Detail: the same parameter, on the tab's address and on its
+# PDF and CSV links.
+_HIDE_ZERO_Q = Query(
+    default=False,
+    description="Leave out a cost code with no budget, no committed cost, no "
+    "actual cost and no revenue (#1052); the totals are unchanged",
+)
+
+
+def _cost_tree(db: Session, job_id: int, start_date, end_date, hide_zero) -> dict:
+    tree = job_cost_tree(db, job_id, start_date, end_date)
+    return hide_zero_rows(tree) if hide_zero is True else tree
+
+
 @router.get("/{job_id}/cost-tree", dependencies=[Depends(refuse_unknown_filters)])
 def get_job_cost_tree(
     job_id: int,
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
+    hide_zero: bool = _HIDE_ZERO_Q,
     db: Session = Depends(get_db),
 ):
     """The drill-down: cost types → cost-code tree → posted lines, every
     level with budget / committed / actual / projected / variance."""
     _get(db, job_id)
-    return job_cost_tree(db, job_id, start_date, end_date)
+    return _cost_tree(db, job_id, start_date, end_date, hide_zero)
 
 
 def _cost_tree_filename(job_id: int, start_date, end_date, ext: str) -> str:
@@ -240,6 +258,7 @@ def get_job_cost_tree_pdf(
         description="The tab's expanded rows, comma-separated (type:<code>, "
         "code:<id>); left out, every row prints",
     ),
+    hide_zero: bool = _HIDE_ZERO_Q,
     db: Session = Depends(get_db),
 ):
     """The Cost Detail tab as a landscape PDF (#691): the same figures as
@@ -248,7 +267,7 @@ def get_job_cost_tree_pdf(
     from app.routes.reports.financial import _pdf_response
 
     job = _get(db, job_id)
-    tree = job_cost_tree(db, job_id, start_date, end_date)
+    tree = _cost_tree(db, job_id, start_date, end_date, hide_zero)
     opened = None if expanded is None else {k for k in expanded.split(",") if k}
     return _pdf_response(
         cost_tree_sections(tree, job.full_name, opened),
@@ -264,6 +283,7 @@ def get_job_cost_tree_csv(
     request: Request,
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
+    hide_zero: bool = _HIDE_ZERO_Q,
     db: Session = Depends(get_db),
 ):
     """The Cost Detail tab as a CSV (#691): a row per type and per cost code,
@@ -272,7 +292,7 @@ def get_job_cost_tree_csv(
     from app.routes.reports.financial import _company_name, _csv_download
 
     job = _get(db, job_id)
-    tree = job_cost_tree(db, job_id, start_date, end_date)
+    tree = _cost_tree(db, job_id, start_date, end_date, hide_zero)
     return _csv_download(
         cost_tree_csv(tree, job.full_name, _company_name(db)),
         _cost_tree_filename(job_id, start_date, end_date, "csv"),
@@ -358,7 +378,7 @@ def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get
             _locked_budget_409(db, locked_keys[key])
         if row.cost_type and row.cost_type not in types:
             raise HTTPException(
-                status_code=422, detail=f"Unknown cost type '{row.cost_type}'"
+                status_code=422, detail=said("Unknown cost type '{}'", row.cost_type)
             )
         if row.cost_code_id and not db.get(CostCode, row.cost_code_id):
             raise HTTPException(status_code=404, detail="Cost code not found")

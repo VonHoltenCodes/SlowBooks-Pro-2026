@@ -19,12 +19,18 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.bills import Bill
 from app.models.contacts import Customer, Vendor
 from app.models.invoices import Invoice
 from app.models.memorized import MemorizedTransaction
-from app.models.payment_terms import DATE_DRIVEN, STANDARD, PaymentTerm
+from app.models.payment_terms import (
+    DATE_DRIVEN,
+    END_OF_MONTH,
+    STANDARD,
+    PaymentTerm,
+)
 from app.models.recurring import RecurringInvoice
 from app.routes._helpers import get_or_404
 from app.schemas.common import MAX_REQUEST_YEAR, MIN_REQUEST_YEAR
@@ -152,6 +158,21 @@ def _check_rule(v: dict) -> None:
             )
         if v["cutoff_days"]:
             _refuse("Only a date-driven term moves to the next month.")
+    elif v["kind"] == END_OF_MONTH:
+        if v["net_days"] is None:
+            _refuse(
+                "An end-of-month term needs the number of days after the end "
+                "of the month until it's due."
+            )
+        if not 0 <= v["net_days"] <= parser.MAX_DAYS:
+            _refuse(f"Days after the end of the month must be 0 to {parser.MAX_DAYS}.")
+        if v["due_day"] is not None or v["discount_day"] is not None:
+            _refuse(
+                "An end-of-month term is due a number of days after the end of "
+                "the month; a day of the month belongs to a date-driven term."
+            )
+        if v["cutoff_days"]:
+            _refuse("Only a date-driven term moves to the next month.")
     else:
         if v["due_day"] is None:
             _refuse("A date-driven term needs the day of the month it's due.")
@@ -171,7 +192,8 @@ def _check_rule(v: dict) -> None:
             )
 
     pct = v["discount_percent"]
-    when = v["discount_days"] if v["kind"] == STANDARD else v["discount_day"]
+    by_days = v["kind"] in (STANDARD, END_OF_MONTH)
+    when = v["discount_days"] if by_days else v["discount_day"]
     if pct is None and when is None:
         return
     if pct is None or when is None:
@@ -192,6 +214,12 @@ def _check_rule(v: dict) -> None:
                 "The discount must be taken within the days until it's due, "
                 f"0 to {v['net_days']}."
             )
+    elif v["kind"] == END_OF_MONTH:
+        if not 0 <= when <= v["net_days"]:
+            _refuse(
+                "The discount must be taken by the due date: 0 to "
+                f"{v['net_days']} days after the end of the month."
+            )
     elif not 1 <= when <= 31:
         _refuse("The day of the month for the discount must be 1 to 31.")
     elif when == v["due_day"]:
@@ -210,18 +238,19 @@ def _check_name(name: str, rule: dict) -> None:
     read = parser.read_text(name)
     if read is None:
         return
-    if rule["kind"] != STANDARD or rule["net_days"] != read.net_days:
-        meaning = (
-            "due on receipt"
-            if not read.net_days
-            else f"due in {parser._days(read.net_days)}"
-        )
+    if rule["kind"] != read.kind or rule["net_days"] != read.net_days:
+        if read.kind == END_OF_MONTH:
+            # "Net 75 EOM" read from the text (#1091) is the same rule
+            meaning = parser.describe(read).replace("Due", "due", 1)
+        elif not read.net_days:
+            meaning = "due on receipt"
+        else:
+            meaning = f"due in {parser._days(read.net_days)}"
         raise HTTPException(
             status_code=409,
-            detail=(
-                f'"{name}" already means {meaning}, so a term by that name keeps '
-                "that rule. Give this term another name."
-            ),
+            detail=said('"{}" already means ', name)
+            + meaning
+            + ", so a term by that name keeps that rule. Give this term another name.",
         )
 
 
@@ -241,7 +270,7 @@ def _existing_named(db: Session, name: str, except_id: int | None = None):
 
 def _taken(name: str):
     raise HTTPException(
-        status_code=409, detail=f'"{name}" is already on the terms list.'
+        status_code=409, detail=said('"{}" is already on the terms list.', name)
     )
 
 
@@ -381,10 +410,9 @@ def update_term(
         if docs or others:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"{term.name} {_carried(docs, others)}, so its name stays. Add "
-                    "a new term and make this one inactive."
-                ),
+                detail=said("{} ", term.name)
+                + _carried(docs, others)
+                + ", so its name stays. Add a new term and make this one inactive.",
             )
     rule = {k: getattr(term, k) for k in RULE_FIELDS}
     rule["discount_percent"] = (
@@ -395,6 +423,7 @@ def update_term(
     proposed = {**rule, **{k: v for k, v in changes.items() if k in RULE_FIELDS}}
     if proposed["kind"] != rule["kind"]:
         # A term changing kind drops the other kind's fields it had.
+        # (standard and end-of-month share net_days and discount_days)
         other = (
             ("net_days", "discount_days")
             if proposed["kind"] == DATE_DRIVEN
@@ -403,20 +432,24 @@ def update_term(
         for key in other:
             if key not in changes:
                 proposed[key] = None
-        if proposed["kind"] == STANDARD and "cutoff_days" not in changes:
+        if proposed["kind"] != DATE_DRIVEN and "cutoff_days" not in changes:
             proposed["cutoff_days"] = 0
     if proposed != rule:
         if docs:
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"{term.name} {_carried(docs, None)}, so its rule stays as "
-                    "they were made under it. Add a new term and make this one "
-                    "inactive."
+                detail=said("{} ", term.name)
+                + _carried(docs, None)
+                + (
+                    ", so its rule stays as they were made under it. Add a new "
+                    "term and make this one inactive."
                 ),
             )
         _check_rule(proposed)
-    _check_name(changes.get("name", term.name), proposed)
+    if "name" in changes or proposed != rule:
+        # an entry saved before its name read as end-of-month text (#1091)
+        # keeps its rule; only a new name or a new rule is held to it
+        _check_name(changes.get("name", term.name), proposed)
     for key, val in proposed.items():
         setattr(term, key, val)
     if "name" in changes:

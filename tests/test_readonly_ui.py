@@ -58,6 +58,11 @@ def test_every_dialog_form_is_locked_except_a_document_picker():
     body = app[app.index("lockForms(root) {") :][:1200]
     assert "form:not([data-readonly-ok])" in body
     assert "el.disabled = true" in body and "form.onsubmit" in body
+    # a locked form's tortoises still open their notes (#977): the skip comes
+    # before the line that disables a button
+    assert body.index("if (b.hasAttribute('data-hint')) return;") < body.index(
+        "b.disabled = true"
+    )
     # the sentence is the read-only one for a read-only sign-in (and the
     # accountant's for an accountant, #340)
     assert "App.lockedMessage()" in body
@@ -105,7 +110,7 @@ MARKED = {
         r'data-write onclick="App\.setAccountActive\(\$\{a\.id\}, false\)">Deactivate',
         r'data-write onclick="App\.setAccountActive\(\$\{a\.id\}, true\)">Reactivate',
         r'data-write onclick="App\.deleteAccount\(\$\{a\.id\}\)">Delete',
-        r'<div class="settings-section" data-write>\s*<h3>Import</h3>',
+        r'<div class="settings-section" data-write>\s*<div class="settings-h-row"><h3>Import</h3>',
         r"data-write>Save & Next \(Ctrl\+Enter\)",
     ],
     "settings.js": [

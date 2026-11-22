@@ -29,14 +29,11 @@ const JobCostsPage = {
         </tr>`).join('');
         return `
             <div class="page-header">
-                <h2>${T('Job Cost Entries')}</h2>
+                <div style="display:flex; gap:4px; align-items:center;"><h2>${T('Job Cost Entries')}</h2>${hint("Labor, equipment hours, mileage, burden, overhead — any job cost that isn't a bill. Offsets come from Settings → Cost Types.", T('Job Cost Entries'))}</div>
                 <div>
                     <button class="btn btn-secondary" onclick="JobCostsPage.showAllocate()">Allocate a Cost</button>
                     <button class="btn btn-primary" onclick="JobCostsPage.showForm()">+ ${T('Job')} Cost Entry</button>
                 </div>
-            </div>
-            <div class="toolbar" style="font-size:11px; color:var(--gray-500);">
-                Labor, equipment hours, mileage, burden, overhead — any job cost that isn't a bill. Offsets come from Settings → Cost Types.
             </div>
             ${entries.length === 0 ? `<div class="empty-state"><p>No job cost entries yet.</p></div>` : `
             <div class="table-container"><table>
@@ -131,14 +128,10 @@ const JobCostsPage = {
                         <input name="date" type="date" required value="${todayISO()}" onchange="JobCostsPage.accrualChanged()"></div>
                     <div class="form-group full-width"><label>Memo</label>
                         <input name="memo" placeholder="What this cost is"></div>
-                    <div class="form-group" id="jc-reverses-wrap" hidden><label for="jc-reverses-on">Reverses on</label>
-                        <input id="jc-reverses-on" name="reverses_on" type="date" oninput="JobCostsPage.reversesTouched(this)">
-                        <div style="font-size:11px;color:var(--gray-500)">The accrual books itself out on this date; enter the bill the normal way when it comes. Clear it to keep the accrual open.</div></div>
+                    <div class="form-group" id="jc-reverses-wrap" hidden><label for="jc-reverses-on">Reverses on ${hint('The accrual books itself out on this date; enter the bill the normal way when it comes. Clear it to keep the accrual open.', 'Reverses on')}</label>
+                        <input id="jc-reverses-on" name="reverses_on" type="date" oninput="JobCostsPage.reversesTouched(this)"></div>
                 </div>
-                <h3 style="margin:12px 0 8px;font-size:14px;">Cost lines</h3>
-                <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">
-                    Pick equipment to charge its hourly rate; pick an employee for internal labor (enter the hours and loaded rate). Leave the accounts blank to use the cost code's / cost type's defaults. The bill not in yet? Pick ${Terms.text('2010 Accrued Job Costs')} as the offset, never Accounts Payable.
-                </div>
+                <h3 style="margin:12px 0 8px;font-size:14px;">Cost lines ${hint(`Pick equipment to charge its hourly rate; pick an employee for internal labor (enter the hours and loaded rate). Leave the accounts blank to use the cost code's / cost type's defaults. The bill not in yet? Pick ${Terms.text('2010 Accrued Job Costs')} as the offset, never Accounts Payable.`, 'Cost lines')}</h3>
                 <div class="table-container table-container--scroll"><table class="line-items-table line-items-table--wide">
                     <thead><tr><th scope="col">Cost code</th><th scope="col">Type</th><th scope="col">Description</th><th scope="col">Employee / Equipment</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col">Cost acct</th><th scope="col">Offset acct</th><th scope="col" title="Billable">Bill?</th><th scope="col"></th></tr></thead>
                     <tbody id="jc-lines">${JobCostsPage.lineHtml(0)}</tbody>
@@ -206,6 +199,7 @@ const JobCostsPage = {
         });
         const el = $('#jc-total');
         if (el) el.textContent = `Total: ${formatCurrency(total)}`;
+        return total;
     },
 
     async save(e) {
@@ -232,6 +226,10 @@ const JobCostsPage = {
                 is_billable: !!row.querySelector('.jc-billable')?.checked,
             });
         });
+        // $0.00 is asked about first, as every line form asks (ZeroTotal); a
+        // job cost is never posted for nothing, so Yes is answered in a sentence
+        // (the total the form shows decides it: each line to the cent, as drawn)
+        if (!ZeroTotal.ask(T('Job Cost Entry'), JobCostsPage.recalc())) return;
         if (!lines.length) { toast('Add at least one line with a quantity and rate', 'error'); return; }
         if (!(await TxnWarn.ok(form))) return;
         try {

@@ -138,6 +138,20 @@ def test_the_far_date_question_is_asked_once_not_for_the_carried_date(browser):
         page.close()
 
 
+# The register drawn again from the From date: a newer drawing than `was`,
+# done (its bar carries the drawing in hand, BankingPage._drawing), on that
+# date. The address changes as the filter is applied, before the drawing:
+# waited for on its own, a key pressed then went to the old bar, which the
+# drawing in flight then replaced, and the date never moved (CI, once).
+REDRAWN_FROM = """([was, date]) => {
+    const bar = document.getElementById('reg-filters');
+    const box = document.getElementById('reg-start');
+    return !!bar && !!box && bar.dataset.drawn !== was
+        && bar.dataset.drawn === String(BankingPage._drawing)
+        && location.hash.includes('start_date=' + date) && box.value === date;
+}"""
+
+
 def test_plus_minus_and_t_move_the_row_date(browser):
     page = _register_page(browser, [])
     try:
@@ -162,17 +176,13 @@ def test_plus_minus_and_t_move_the_row_date(browser):
         assert page.input_value("#qe-memo") == "a+b-c"
         # the register's From filter is a date box too: the key moves it
         # and its onchange redraws the register
+        drawn = page.get_attribute("#reg-filters", "data-drawn")
         page.fill("#reg-start", "2026-09-01")  # its change redraws the register
-        page.wait_for_function(
-            "() => location.hash.includes('start_date=2026-09-01')"
-            " && document.getElementById('reg-start').value === '2026-09-01'"
-        )
+        page.wait_for_function(REDRAWN_FROM, arg=[drawn, "2026-09-01"])
+        drawn = page.get_attribute("#reg-filters", "data-drawn")
         page.focus("#reg-start")
         page.keyboard.press("-")
-        page.wait_for_function(
-            "() => location.hash.includes('start_date=2026-08-31')"
-            " && document.getElementById('reg-start').value === '2026-08-31'"
-        )
+        page.wait_for_function(REDRAWN_FROM, arg=[drawn, "2026-08-31"])
     finally:
         page.close()
 
@@ -927,6 +937,13 @@ def test_a_date_picked_from_the_calendar_applies_at_once(browser):
         page.wait_for_function(
             "() => location.hash === '#/banking/1?start_date=2026-08-03'"
         )
+        # the register is drawn again for the new From (a bar without the
+        # mark); a pick made before that lands on the old bar, which the
+        # redraw then replaces, and the To is lost (#1095, under CI's load)
+        page.wait_for_function(
+            f"() => !!document.getElementById('reg-start')"
+            f" && {BAR}.dataset.probe !== 'typing'"
+        )
         assert page.input_value("#reg-start") == "2026-08-03"
         # and To, with nothing typed in it
         page.evaluate(PICK, ["#reg-end", "2026-08-31"])
@@ -1267,7 +1284,8 @@ def test_the_review_actions_say_when_the_dates_leave_the_entry_out(browser):
         )
         page.wait_for_function(GONE_FROM_REVIEW, arg=71)
 
-        page.click("text=Add all categorised")
+        # the button, not the words in the To review note (#977)
+        page.click("button:has-text('Add all categorised')")
         _toast_with(
             page,
             "Added 2. 2 of them are dated before the From date or after the To"

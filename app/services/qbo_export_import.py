@@ -2081,9 +2081,16 @@ _AP_PAID_PART = "The part of QuickBooks Online bill"
 # account a void of a carried payables document moves its amount to.
 PAYABLE_SETTING = "qbo_export_payable_name"
 _DEFAULT_PAYABLE = "Accounts Payable (A/P)"
-# The source type of the entry such a void posts: not the document's own
-# "<kind>_void", which Books Check reads as the reversal of its posting.
-CARRY_VOID_SOURCE = "qbo_carry_void"
+# The source types of the entry such a void posts, by the document's kind:
+# not the document's own "<kind>_void", which Books Check reads as the
+# reversal of its posting. Each is document-keyed in app/services/voids.py
+# (its source_id is the document's id), and the document has no posting, so
+# the register finds nothing of its own voided by it.
+CARRY_VOID_SOURCES = {
+    "bill": "qbo_carry_bill_void",
+    "vendor_credit": "qbo_carry_vendor_credit_void",
+    "bill_payment": "qbo_carry_bill_payment_void",
+}
 
 # The vendor column of the A/P Aging Detail report: "Vendor display name"
 # as QuickBooks Online writes it, the older "Vendor" and "Vendor full name",
@@ -2384,14 +2391,24 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
     except Exception:  # MissingControlAccount
         control = None
     if len(payables) != 1 or control is None:
-        plan["errors"].append(
-            "The open bills cannot be carried over: "
-            + (
-                "the books have no Accounts Payable account (2000)"
-                if control is None
-                else "the export has no one payable account (the Balance "
-                "Sheet's Accounts Payable) for them to sit on"
+        read = sum((i["open"] for i in items), Decimal("0"))
+        if control is None:
+            why = "these books have no Accounts Payable account (2000)."
+        elif not payables:
+            why = (
+                "the export's Balance Sheet has no Accounts Payable account. "
+                "Check that the report and the Export data zip come from the "
+                "same company."
             )
+        else:
+            why = (
+                "the export's Balance Sheet has more than one Accounts Payable "
+                "account and none is named Accounts Payable (A/P)."
+            )
+        plan["errors"].append(
+            f"The A/P Aging Detail report lists {len(items)} open "
+            f"{'item' if len(items) == 1 else 'items'} ({read:,.2f}), and they "
+            f"cannot be carried over: {why}"
         )
         return plan
     payable = spec_path(payables[0])
@@ -2498,13 +2515,22 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
             "across as its bills, vendor credits and bill payments with no "
             f"posting of their own, and A/P Aging equals {control_name}."
         )
-    else:
+    elif total < left:
         plan["notes"].append(
             f"The A/P Aging Detail report's open balances come to {total:,.2f}, "
             f"and the Journal leaves {left:,.2f} on {payable}, which is "
             f"{control_name} here: the difference, {left - total:,.2f}, stays on "
             f"{control_name} with no bill behind it (a report run on another day "
             "than the export, or a row not carried over)."
+        )
+    else:
+        plan["notes"].append(
+            f"The A/P Aging Detail report's open balances come to {total:,.2f}, "
+            f"{total - left:,.2f} more than the {left:,.2f} the Journal leaves on "
+            f"{payable}, which is {control_name} here: A/P Aging will show "
+            f"{total - left:,.2f} more than {control_name}, and Books Check will "
+            "show the difference. Check that the report was run on the same day "
+            "as the export and for the same company."
         )
     return plan
 
@@ -2590,6 +2616,11 @@ def void_carried_payable_posting(
     doc = bill if bill is not None else credit if credit is not None else payment
     if doc is None or not is_carried_payable(db, doc, control.id):
         return None
+    kind = (
+        "bill"
+        if bill is not None
+        else "vendor_credit" if credit is not None else "bill_payment"
+    )
     if bill is not None:
         amount = Decimal(str(bill.balance_due or 0))
         what = f"Bill {bill.bill_number}"
@@ -2627,7 +2658,7 @@ def void_carried_payable_posting(
                 "description": memo,
             },
         ],
-        source_type=CARRY_VOID_SOURCE,
+        source_type=CARRY_VOID_SOURCES[kind],
         source_id=doc.id,
         reference=reference,
     )
@@ -3201,27 +3232,90 @@ def _payable_balance(prepared: dict, path: str) -> Decimal:
     return total
 
 
-def _payable_note(prepared: dict) -> list[str]:
+def _payable_named(db: Session, prepared: dict, path: str) -> Decimal:
+    """Of what the Journal leaves owed on the payable account, the part whose
+    entries name a vendor the import will know: one on the Vendors list in
+    the upload, or already in the books. Those entries age as that vendor's
+    once imported (#915); the rest is the balance W-117 spoke of."""
+    key = strip_code_suffix(path)
+    known = {v.lower() for (v,) in db.query(Vendor.name)}
+    if "vendors" in prepared:
+        known |= {
+            spec["name"].lower()
+            for spec in parse_contacts(prepared["vendors"], "Vendor")
+        }
+    total = Decimal("0")
+    if "gl" in prepared and known:
+        groups, _ = parse_gl(prepared["gl"])
+        for group in groups:
+            for row in group:
+                if strip_code_suffix(row["account"]) != key:
+                    continue
+                if str(row.get("name") or "").strip().lower() in known:
+                    total += (row["credit"] or Decimal("0")) - (
+                        row["debit"] or Decimal("0")
+                    )
+    return total
+
+
+def _payable_note(db: Session, prepared: dict) -> list[str]:
     """W-117: the export brings the payable account's balance and none of
-    the bills behind it, so A/P Aging cannot show it; said when it is not
-    zero."""
+    the bills behind it. Since #915 the entries that name a vendor age as
+    that vendor's, so the note says where each part of the balance shows
+    (NEW-226): the named part on the A/P Aging and the vendors' balances,
+    with Pay Bills still empty; the unnamed part nowhere until the bills
+    are entered. Said when either part is not zero."""
     if len(_COA_PAYABLE) != 1:
         return []
     path, control = _COA_PAYABLE[0]
     owed = _payable_balance(prepared, path)
     if not owed:
         return []
-    what = (
-        f"{owed:,.2f} owed to vendors"
-        if owed > 0
-        else f"{-owed:,.2f} paid to vendors ahead of their bills"
-    )
-    return [
-        f"The export brings {what} as a balance on {control}, with no bills "
-        f"behind it. A/P Aging lists only bills entered here, so it will not "
-        f"show that {abs(owed):,.2f} until those bills are entered here or "
-        f"paid off against {control}."
-    ]
+    named = _payable_named(db, prepared, path)
+    unnamed = owed - named
+    notes = []
+    if named:
+        what = (
+            f"{named:,.2f} owed to vendors"
+            if named > 0
+            else f"{-named:,.2f} paid to vendors ahead of their bills"
+        )
+        notes.append(
+            f"The export brings {what} on {control} as the Journal's own entries, "
+            f"each with its vendor, and none of the bills behind them: the A/P "
+            f"Aging and the vendors' balances show it by vendor, and Pay Bills has "
+            f"nothing to pay until those open bills are entered here."
+        )
+    if unnamed:
+        what = (
+            f"{unnamed:,.2f} owed to vendors"
+            if unnamed > 0
+            else f"{-unnamed:,.2f} paid to vendors ahead of their bills"
+        )
+        notes.append(
+            f"The export brings {what} as a balance on {control}, with no bills "
+            f"behind it and no vendor on the Vendors list named on its entries. "
+            f"A/P Aging lists only bills entered here and the vendors' own entries, "
+            f"so it will not show that {abs(unnamed):,.2f} until those bills are "
+            f"entered here or paid off against {control}."
+        )
+    return notes
+
+
+def has_carried_documents(db: Session) -> bool:
+    """Whether the books hold a document the carry-over wrote: an open
+    invoice or a payment with no entry of its own, covered by the imported
+    Journal (#914, #919)."""
+    from app.models.invoices import Invoice
+    from app.models.payments import Payment
+
+    for invoice in db.query(Invoice).filter(Invoice.transaction_id.is_(None)):
+        if is_carried_invoice(db, invoice):
+            return True
+    for payment in db.query(Payment).filter(Payment.transaction_id.is_(None)):
+        if is_carried_payment(db, payment):
+            return True
+    return False
 
 
 _NOT_ON_STATEMENTS = re.compile(
@@ -3255,12 +3349,49 @@ def _payables_counts(plan: dict, verdict: dict) -> None:
     verdict["open_payables_total"] = float(plan["total"])
 
 
-def _payable_note_unless_carried(prepared: dict, ap_plan: dict) -> list[str]:
+def _payable_note_unless_carried(
+    db: Session, prepared: dict, ap_plan: dict
+) -> list[str]:
     """W-117's note that the payables come as a balance with no bills, left
     out when the A/P Aging Detail report carries the bills behind it."""
     if ap_plan["payable"] is not None:
         return []
-    return _payable_note(prepared)
+    return _payable_note(db, prepared)
+
+
+_EXPORT_DATA = (
+    "QuickBooks Online's Export data zip (the gear → Export data → Reports "
+    "tab, All dates → Export to Excel), uploaded as it downloads, with the "
+    "Account List, A/R Aging Detail and A/P Aging Detail reports beside it"
+)
+
+
+def _missing_files(bundle: dict) -> list[str]:
+    """What an upload without the Journal, or without the statements, lacks,
+    in this source's words (#910). The shared sentence asked for "a file
+    whose name has 'general', 'ledger' or 'journal' in it" while a General
+    Ledger report sat in the upload: this path reads the Journal inside the
+    Export data zip and leaves the General Ledger alone (it repeats the
+    Journal by account), and reports downloaded one by one from the Reports
+    page are not that export."""
+    errors: list[str] = []
+    if "gl" not in bundle:
+        sentence = f"No Journal was uploaded. The import reads the Journal inside {_EXPORT_DATA}."
+        if "gl_order" in bundle:
+            sentence += (
+                " The General Ledger report was uploaded and is not read: it "
+                "repeats the Journal by account, and the import needs the "
+                "Journal itself."
+            )
+        errors.append(sentence)
+    if "coa" not in bundle:
+        errors.append(
+            "No Balance Sheet or Profit and Loss was uploaded. The chart is read "
+            f"from the two statements inside {_EXPORT_DATA}; a chart of accounts "
+            "report downloaded on its own from the Reports page is not it, "
+            "though the Account List report is read beside the zip."
+        )
+    return errors
 
 
 def dry_run(db: Session, bundle: dict) -> dict:
@@ -3270,7 +3401,7 @@ def dry_run(db: Session, bundle: dict) -> dict:
     prepared, notes = _prepare(bundle)
     _COA_PAYABLE.clear()
     verdict = dry_run_bundle(
-        db, prepared, _parsers(prepared, db, plan), LABEL, SOURCE_TYPE
+        db, prepared, _parsers(prepared, db, plan), LABEL, SOURCE_TYPE, _missing_files
     )
     if _COA_UNREAD:
         # A statement refused for its shape leaves its accounts out of the
@@ -3285,7 +3416,7 @@ def dry_run(db: Session, bundle: dict) -> dict:
     verdict["warnings"] = (
         notes
         + list(_COA_NOTES)
-        + _payable_note_unless_carried(prepared, ap_plan)
+        + _payable_note_unless_carried(db, prepared, ap_plan)
         + verdict["warnings"]
     )
     unplaced = _unplaced_problem(verdict["errors"])
@@ -3302,6 +3433,59 @@ def dry_run(db: Session, bundle: dict) -> dict:
     if ap_plan["given"]:
         _payables_counts(ap_plan, verdict)
     return verdict
+
+
+def _name_control_lines(db: Session, named: list[dict], plan: dict) -> int:
+    """The Journal names a transaction's party once, on its first row
+    ("Bill · BN-24827 · Brookside Nursery · Job Materials", then the A/P
+    line with no Name), and the parser puts that name on every line of the
+    block. Here, once the Vendors and Customers lists are in, an A/P entry
+    whose name is a vendor's takes that vendor (Transaction.vendor_id) and
+    an A/R line whose name is a customer's takes that customer
+    (TransactionLine.customer_id), the shape the IIF import gives them, so
+    the agings, the balances and Books Check read them as that party's
+    (#897, #915). A name on neither list is left as it is.
+
+    Not when carried documents cover that side: with the A/R Aging Detail
+    given, the open invoices and unapplied payments ARE the receivable, and
+    naming the Journal's A/R lines too would count the balance twice; the
+    same holds for A/P once the A/P Aging Detail carries the open bills
+    (#713, ``plan["ap_given"]``)."""
+    if not named:
+        return 0
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services import control_accounts
+
+    vendors = {v.name.lower(): v.id for v in db.query(Vendor.id, Vendor.name)}
+    customers = {c.qb_name.lower(): c.id for c in db.query(Customer)}
+    ar_id = control_accounts.find(db, "1100")
+    count = 0
+    for entry in named:
+        key = entry["name"].lower()
+        if entry["kind"] == "payable":
+            if plan.get("ap_given"):
+                continue
+            vid = vendors.get(key)
+            txn = db.get(Transaction, entry["transaction_id"]) if vid else None
+            if txn is not None and txn.vendor_id is None:
+                txn.vendor_id = vid
+                count += 1
+        else:
+            if plan.get("given"):
+                continue
+            cid = customers.get(key)
+            if cid is None or ar_id is None:
+                continue
+            for line in db.query(TransactionLine).filter(
+                TransactionLine.transaction_id == entry["transaction_id"],
+                TransactionLine.account_id == ar_id,
+                TransactionLine.customer_id.is_(None),
+            ):
+                line.customer_id = cid
+                count += 1
+    if count:
+        db.flush()
+    return count
 
 
 def _refused_counts(refused: dict, plan: dict, ap_plan: dict) -> dict:
@@ -3342,11 +3526,13 @@ def run_import(db: Session, bundle: dict) -> dict:
             # a statement refused for its shape: the dry run's one sentence,
             # and nothing written (W-142)
             return _refused_counts(dry_run(db, bundle), plan, ap_plan)
-    result = run_import_bundle(db, prepared, parsers, SOURCE_TYPE, LABEL)
+    result = run_import_bundle(
+        db, prepared, parsers, SOURCE_TYPE, LABEL, _missing_files
+    )
     result["warnings"] = (
         notes
         + list(_COA_NOTES)
-        + _payable_note_unless_carried(prepared, ap_plan)
+        + _payable_note_unless_carried(db, prepared, ap_plan)
         + result["warnings"]
         + plan["notes"]
         + ap_plan["notes"]
@@ -3356,10 +3542,16 @@ def run_import(db: Session, bundle: dict) -> dict:
         _payables_counts(ap_plan, result)
     invoices = payments = 0
     bills = credits = bill_payments = 0
+    named = result.pop("named_control_lines", [])
     if result["ok"]:
         _retire_deleted(db)
         customers, vendors = _import_contacts(db, bundle)
         employees = _import_employees(db, bundle)
+        # the carried bills are the payable by vendor, so the Journal's A/P
+        # entries are not named for their vendors as well (#713)
+        _name_control_lines(
+            db, named, {**plan, "ap_given": ap_plan["payable"] is not None}
+        )
         invoices, payments = _import_carried(db, plan)
         bills, credits, bill_payments = _import_carried_payables(db, ap_plan)
         db.commit()

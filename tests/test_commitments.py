@@ -10,9 +10,6 @@ release (#555) and the buyout report / job cost by vendor (#556); this one
 leaves those seams.
 """
 
-import os
-import subprocess
-import sys
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -1070,20 +1067,9 @@ def test_retainage_line_carries_the_job(
     assert lines and all(ln.job_id == job["id"] for ln in lines)
 
 
-@pytest.mark.timeout(300)  # three alembic walks of the whole chain in subprocesses
-def test_migration_upgrades_downgrades_and_backfills(tmp_path):
+def test_migration_upgrades_downgrades_and_backfills(tmp_path, alembic_cli):
     db = tmp_path / "mig.db"
-    env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}"}
-
-    def run(*args):
-        return subprocess.run(
-            [sys.executable, "-m", "alembic", *args],
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
+    run = alembic_cli(db)  # one time budget for the walks (tests/conftest.py)
 
     own = "f3b5d7e9a2c4"  # construction buyout and commitments (#553)
     # Up to the revision just before this one, seed a closed PO with a bill.

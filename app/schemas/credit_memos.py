@@ -1,14 +1,22 @@
 from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, field_validator, model_validator, field_serializer
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+    field_serializer,
+)
 
 from app.schemas.common import (
     check_line_fits,
     check_lines_fit,
+    clean_line_cost_type,
     quantity_text,
     StrictModel,
-    TaxRateFloat,
+    NewTaxRateFloat,
+    TAX_RATE_DESCRIPTION,
     TaxRateOut,
     validate_non_negative_line,
     WholeCents,
@@ -29,7 +37,13 @@ class CreditMemoLineCreate(StrictModel):
     # the memo's, as an invoice line does. A job must be the customer's.
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    # The cost code and type the credit takes revenue back from (#1055), as
+    # on an invoice line; blank type takes the code's own.
+    cost_code_id: Optional[int] = None
+    cost_type: Optional[str] = None
     line_order: int = 0
+
+    _cost_type = field_validator("cost_type")(clean_line_cost_type)
 
     @model_validator(mode="after")
     def _check_non_negative(self):
@@ -50,6 +64,8 @@ class CreditMemoLineResponse(BaseModel):
     amount: Decimal = Decimal("0")
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    cost_type: Optional[str] = None
     line_order: int = 0
     model_config = {"from_attributes": True}
 
@@ -67,9 +83,18 @@ class CreditMemoCreate(StrictModel):
     customer_id: int
     date: dt_date
     original_invoice_id: Optional[int] = None
-    # Left out: the original invoice's rate when one is named, else 0 (the
-    # Credit Memo form fills in the company's default rate itself).
-    tax_rate: Optional[TaxRateFloat] = None
+    # Left out: the original invoice's rate when one is named, else the
+    # company's Default Tax Rate (#1129), as the Credit Memo form starts.
+    tax_rate: NewTaxRateFloat = Field(
+        None,
+        description=(
+            TAX_RATE_DESCRIPTION
+            + " Left out (or null): the rate of original_invoice_id when one is "
+            "named, else the company's Default Tax Rate from Settings, as the "
+            "app's form starts a credit memo; send 0 for no tax. A non-taxable "
+            "customer keeps that rate and is credited no tax."
+        ),
+    )
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -92,6 +117,12 @@ class CreditMemoResponse(BaseModel):
     memo_number: str
     customer_id: int
     customer_name: Optional[str] = None
+    # On the answer to a create or an update only: the exemption certificate
+    # behind an exempt sale (the tax-exempt customer's, or the exempt job's)
+    # is missing, or expired as of the document's date
+    # (services/tax_exemption.certificate_warning). The sale is exempt all
+    # the same; this is for the person to be told. Null otherwise.
+    tax_note: Optional[str] = None
     status: str
     original_invoice_id: Optional[int] = None
     date: dt_date

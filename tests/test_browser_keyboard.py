@@ -20,8 +20,10 @@ bakery's books of tests/test_theme_contrast.py (2.22.0 gate, round 2):
   fires, on any platform (W-6), and over a form being filled in Alt+N, P,
   Q and H do nothing from any of its controls, as Back does; ⌘K finds
   like Ctrl+K; Ctrl+Alt (AltGr) is left alone.
-- #695: Ctrl+F (⌘F) finds in the desktop window and is the browser's own
-  find in a browser; the search box names its keys (aria-keyshortcuts).
+- #695: Ctrl+F (⌘F) opens Find on this screen in the desktop window and is
+  the browser's own find in a browser; the search box names its keys
+  (aria-keyshortcuts), Ctrl+K (⌘K) and /. The find bar itself is
+  tests/test_browser_find.py.
 - NEW-30: the toolbar's Back, enabled only while an app page is behind,
   with Alt+← (⌘[ on a Mac); a reload keeps it.
 - NEW-32: no dialog opens with focus on Void or Delete; a dialog whose
@@ -40,6 +42,7 @@ import sys
 import pytest
 
 pytest.importorskip("playwright.sync_api")
+from playwright.sync_api import TimeoutError as PlaywrightTimeout  # noqa: E402
 
 from tests.test_browser_classes import classed as _classed  # noqa: E402,F401
 from tests.test_browser_grid import (  # noqa: E402,F401  (eleven classes)
@@ -441,6 +444,7 @@ BLUR = "() => document.activeElement && document.activeElement.blur()"
 SEARCH_KEYS = (
     "() => document.getElementById('global-search').getAttribute('aria-keyshortcuts')"
 )
+FIND_OPEN = "() => !!window.FindBar && FindBar.isOpen()"
 
 
 def test_ctrl_f_finds_in_the_desktop_app_and_is_the_browsers_in_a_browser(
@@ -457,30 +461,35 @@ def test_ctrl_f_finds_in_the_desktop_app_and_is_the_browsers_in_a_browser(
         for mods in ({"ctrlKey": True}, {"metaKey": True}):
             assert page.evaluate(PRESS, ["f", "KeyF", mods]) is False
             assert page.evaluate("() => document.activeElement.id") != "global-search"
-        # the desktop window (pywebview): Ctrl+F and ⌘F find, as Ctrl+K does
+            assert page.evaluate(FIND_OPEN) is False
+        # the desktop window (pywebview): Ctrl+F and ⌘F open the find bar,
+        # and the search box keeps Ctrl+K and /
         page.evaluate(
             "() => { window.pywebview = { api: {} };"
             " window.dispatchEvent(new Event('pywebviewready')); }"
         )
         assert page.evaluate("() => App.inDesktopShell()") is True
-        assert page.evaluate(SEARCH_KEYS) == f"{mod}+K {mod}+F /"
+        assert page.evaluate(SEARCH_KEYS) == f"{mod}+K /"
         for mods in ({"ctrlKey": True}, {"metaKey": True}):
             page.evaluate(BLUR)
             assert page.evaluate(PRESS, ["f", "KeyF", mods]) is True
-            assert page.evaluate("() => document.activeElement.id") == "global-search"
+            assert page.evaluate(FIND_OPEN) is True
+            assert page.evaluate("() => document.activeElement.id") == "find-input"
+            page.evaluate("() => FindBar.close()")
         # Ctrl+Alt+F (AltGr) types a character and is left alone
         page.evaluate(BLUR)
         assert (
             page.evaluate(PRESS, ["f", "KeyF", {"ctrlKey": True, "altKey": True}])
             is False
         )
-        assert page.evaluate("() => document.activeElement.id") != "global-search"
-        # over an open dialog it does nothing but keep the window's own
+        assert page.evaluate(FIND_OPEN) is False
+        # over an open dialog it opens the find bar too, for the dialog
         page.evaluate("() => openModal('A dialog', '<p>Hello</p>')")
         page.wait_for_function(MODAL_SHOWN)
         assert page.evaluate(PRESS, ["f", "KeyF", {"ctrlKey": True}]) is True
+        assert page.evaluate(FIND_OPEN) is True
         assert page.evaluate("() => document.activeElement.id") != "global-search"
-        page.evaluate("() => closeModal()")
+        page.evaluate("() => { FindBar.close(); closeModal(); }")
     finally:
         page.close()
 
@@ -697,6 +706,58 @@ def test_a_nonprofits_dialogs_open_safely_too(
         assert all(focused[c]["id"] == "modal" for c in views), {
             c: focused[c] for c in views
         }
+    finally:
+        page.close()
+
+
+# The views whose Activity panel (#894) sits ahead of Void: the toggle was
+# the first control, so each opened on it, a history rather than the record
+# (#1095). The landing passes over it as it does a skip link or a tortoise.
+ACTIVITY_FIRST_VIEWS = [
+    ("#/payments", "PaymentsPage.view({payment})"),
+    ("#/credit-memos", "CreditMemosPage.view({memo})"),
+    ("#/deposits", "DepositsPage.view({deposit})"),
+]
+
+
+def test_a_view_with_activity_ahead_of_void_opens_at_its_top(browser, company, books):
+    """The payment, credit memo and deposit views open at their top with
+    focus neither on Void or Delete nor on the Activity toggle; the toggle
+    is still in the Tab order, and opens the panel from the keyboard."""
+    page, handled = _open(browser, company)
+    try:
+        for route, opener in ACTIVITY_FIRST_VIEWS:
+            call = opener.format(**books)
+            _visit(page, handled, route)
+            page.evaluate("() => closeModal()")
+            page.evaluate(f"async () => {{ await {call}; }}")
+            page.wait_for_function(MODAL_SHOWN)
+            settle(page, handled)
+            assert page.locator("#modal-body [data-activity-toggle]").count() == 1, call
+            at = page.evaluate("""() => {
+                const a = document.activeElement;
+                return { id: a.id || '', text: a.textContent.trim().slice(0, 40),
+                         destructive: a.hasAttribute('data-destructive'),
+                         activity: a.hasAttribute('data-activity-toggle'),
+                         scrolled: [document.getElementById('modal').scrollTop,
+                                    document.getElementById('modal-body').scrollTop] };
+            }""")
+            assert not at["destructive"] and not DESTRUCTIVE.match(at["text"]), (
+                call,
+                at,
+            )
+            assert not at["activity"], (call, at)
+            assert at["scrolled"] == [0, 0], (call, at)
+            # still a Tab stop, and Return there opens the panel
+            _tab_until(
+                page,
+                "() => document.activeElement.hasAttribute('data-activity-toggle')",
+            )
+            page.keyboard.press("Enter")
+            page.wait_for_function(
+                "() => document.querySelector('#modal-body details.activity-panel').open"
+            )
+            page.evaluate("() => closeModal()")
     finally:
         page.close()
 
@@ -2607,8 +2668,17 @@ def test_a_link_in_running_text_has_the_halo_where_the_gate_reads_its_ground(
         _no_splash(page)
         # (Settings' developer.intuit.com link left with the QuickBooks
         # Online connector in 2.23.2)
-        for route, link in (("#/banking", 'a[href="https://bridge.simplefin.org"]'),):
+        # (the SimpleFIN card's line, link and all, is in its tortoise's
+        # note since #977: opened first, as a reader does)
+        for route, link, note in (
+            (
+                "#/banking",
+                'a[href="https://bridge.simplefin.org"]',
+                'button[aria-label="About Bank Feeds (SimpleFIN)"]',
+            ),
+        ):
             _visit(page, handled, route)
+            page.click(note)
             _keyed(page, f"document.querySelector('#page-content {link}')")
             _both_themes(page, (route, link), GOLD)
     finally:
@@ -2801,7 +2871,8 @@ def test_tab_through_settings_never_lands_under_its_save_bar(browser, company, b
             """() => { const bar = document.getElementById('settings-savebar'),
                     content = document.getElementById('content');
                 const b = [...document.querySelectorAll('#settings-form button')]
-                    .find(el => !bar.contains(el) && !el.disabled && el.offsetHeight > 14);
+                    .find(el => !bar.contains(el) && !el.disabled && el.offsetHeight > 14
+                        && !el.hasAttribute('data-hint'));  // past the headings' tortoises (#977)
                 content.scrollTop += b.getBoundingClientRect().top - (bar.getBoundingClientRect().top - 8);
                 const r = b.getBoundingClientRect();
                 b.dataset.half = '1';
@@ -3351,6 +3422,96 @@ ACTIVE_KEY = """() => { const a = document.activeElement;
     return (a.dataset && a.dataset.rowKey) || a.id || a.tagName.toLowerCase(); }"""
 NOTED = "() => (history.state && history.state.focus) || null"
 
+# What the page saw of a click: each pointer and mouse event, its target and
+# keys as it started, and whether anything prevented it by the end.
+_WATCH_CLICK = """() => {
+    window.__clickSeen = [];
+    if (window.__clickWatched) return;
+    window.__clickWatched = true;
+    const name = (t) => !t || t.nodeType !== 1 ? String(t)
+        : t.tagName.toLowerCase() + (t.id ? '#' + t.id : '')
+          + (t.dataset && t.dataset.rowKey ? '[' + t.dataset.rowKey + ']' : '');
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'auxclick']) {
+        window.addEventListener(type, (e) => window.__clickSeen.push({ type, target: name(e.target),
+            connected: !!(e.target && e.target.isConnected), ctrl: e.ctrlKey, meta: e.metaKey,
+            shift: e.shiftKey, button: e.button }), true);
+        window.addEventListener(type, (e) => window.__clickSeen.push({ type, prevented: e.defaultPrevented }));
+    }
+}"""
+
+_PAGE_STATE = """(sel) => {
+    const el = document.querySelector(sel);
+    const r = el && el.getBoundingClientRect();
+    const at = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    const overlay = document.getElementById('modal-overlay');
+    return { hash: location.hash, visibility: document.visibilityState, focused: document.hasFocus(),
+        link: el ? { href: el.getAttribute('href'), box: [r.left, r.top, r.width, r.height] } : null,
+        under_its_middle: at ? at.outerHTML.slice(0, 200) : null,
+        dialog: overlay && !overlay.classList.contains('hidden')
+            ? document.getElementById('modal-title').textContent : null,
+        active: document.activeElement ? document.activeElement.outerHTML.slice(0, 120) : null,
+        events: window.__clickSeen || [] };
+}"""
+
+
+def _answer_the_new_tab(route):
+    """What a tab the browser opens is answered with: a document."""
+    route.fulfill(body="<!doctype html><title>Opened</title>", content_type="text/html")
+
+
+def _click_to_a_new_tab(page, handled, selector, held):
+    """A click on `selector` with `held`, which the browser opens in a new
+    tab (or window): that page, closed. A click that opens none fails with
+    what the page saw and showed, its console's errors and the last
+    requests the app served, so a miss explains itself. The new tab is
+    answered with a document of its own (below)."""
+    errors = []
+
+    def console(msg):
+        if msg.type in ("error", "warning"):
+            errors.append(f"console {msg.type}: {msg.text}")
+
+    def pageerror(err):
+        errors.append(f"page error: {err}")
+
+    page.on("console", console)
+    page.on("pageerror", pageerror)
+    # The new tab loads the link's address on the test's made-up origin,
+    # which only `page`'s own route answered: the tab's request went out to
+    # the network, found no such host and the tab showed the browser's
+    # error page. When that failure came while Playwright was still
+    # attaching to the tab, Playwright found no document yet and waited for
+    # the tab's first commit, but the error page's commit had already gone
+    # by unreported: no "page" came, though the browser had opened the tab
+    # (CI, 4 of ~6 runs; ~1 click in 100 here with four browsers running).
+    # The context answers the new tab with a document instead: the tab
+    # cannot commit before Playwright has answered its request, so the
+    # commit is seen. Page routes come first, so `page` itself is still
+    # answered by its own route.
+    page.context.route("**/*", _answer_the_new_tab)
+    try:
+        page.evaluate(_WATCH_CLICK)
+        try:
+            with page.context.expect_page() as opened:
+                page.click(selector, modifiers=[held])
+        except PlaywrightTimeout as exc:
+            try:
+                state = page.evaluate(_PAGE_STATE, selector)
+            except Exception as read:  # the page itself gone or stuck
+                state = f"(the page could not be read: {read})"
+            raise AssertionError(
+                f"{held}+click on {selector} opened no new page: {exc}\n"
+                f"pages in the context: {len(page.context.pages)}\n"
+                f"page: {state}\n"
+                f"console: {errors or 'nothing'}\n"
+                f"last requests served: {handled[-15:]}"
+            ) from exc
+        opened.value.close()
+    finally:
+        page.context.unroute("**/*", _answer_the_new_tab)
+        page.remove_listener("console", console)
+        page.remove_listener("pageerror", pageerror)
+
 
 def test_a_click_that_opens_elsewhere_notes_nothing_and_steals_nothing(
     browser, company, books
@@ -3373,9 +3534,7 @@ def test_a_click_that_opens_elsewhere_notes_nothing_and_steals_nothing(
         link = '#page-content a[data-row-key^="account:"]'
         key = page.get_attribute(link, "data-row-key")
         for held in ("ControlOrMeta", "Shift"):
-            with page.context.expect_page() as opened:
-                page.click(link, modifiers=[held])
-            opened.value.close()
+            _click_to_a_new_tab(page, handled, link, held)
             assert page.evaluate("location.hash") == "#/accounts", held
             assert page.evaluate(NOTED) is None, held
             page.focus("#global-search")
@@ -3399,9 +3558,7 @@ def test_a_click_that_opens_elsewhere_notes_nothing_and_steals_nothing(
         page.wait_for_selector(report)
         settle(page, handled)
         here = page.evaluate("location.hash")
-        with page.context.expect_page() as opened:
-            page.click(report, modifiers=["ControlOrMeta"])
-        opened.value.close()
+        _click_to_a_new_tab(page, handled, report, "ControlOrMeta")
         assert page.evaluate("location.hash") == here
         assert page.evaluate(NOTED) is None
         page.focus("#modal-body textarea")
@@ -3511,6 +3668,10 @@ def test_every_report_center_card_is_reached_and_opened_by_the_keyboard(
     try:
         _no_splash(page)
         _visit(page, handled, "#/reports")
+        # All reports is folded under the stars (#794), and since its
+        # sections (#936) a folded list is hidden for real: open it to
+        # read its cards' names
+        page.click('#all-reports-toggle[aria-expanded="false"]')
         cards = page.evaluate(CARD_LIST)
         assert (
             len(cards) == 31
@@ -3586,12 +3747,22 @@ def test_a_nonprofits_report_center_cards_are_reached_and_opened_by_the_keyboard
             "report:ar-aging",
             "report:ap-aging",
         ], keys
-        assert keys[4:8] == [
+        # the rest under All reports in sections (#936): its own statements
+        # under Statements, the pledge report and giving statements on the
+        # donor side
+        for k in (
             "report:fund-balances",
             "report:functional-expenses",
             "report:pledges",
             "report:giving-statements",
-        ], keys
+        ):
+            assert keys.count(k) == 1, (k, keys)
+        statements = page.evaluate(
+            "() => [...document.querySelectorAll('#all-reports [data-section=statements] a.card-link')].map(a => a.dataset.rowKey)"
+        )
+        assert {"report:fund-balances", "report:functional-expenses"} <= set(
+            statements
+        ), statements
         assert "report:profit-loss" not in keys and "report:balance-sheet" not in keys
         _cards_by_keyboard(
             page, handled, cards, opened={"report:statement-of-activities"}
@@ -4566,6 +4737,54 @@ SKIP_IN_MODAL = "() => document.querySelector('#modal-body a.skip-link--inline')
 ACTIVE = """() => { const a = document.activeElement;
     return { tag: a.tagName.toLowerCase(), id: a.id, cls: a.className, inLines: !!a.closest('#inv-lines, #bill-lines, #je-lines'),
              ring: a.matches(':focus-visible') }; }"""
+
+
+def test_a_form_whose_scan_is_off_still_opens_on_its_first_field(
+    browser, company, books
+):
+    """Enter Bill, Expense and Sales Receipt open on Scan Receipt, their
+    first control, and the OCR status answers after that: on a computer
+    without Tesseract, wire() then disabled the focused button and focus
+    fell to the page, so the form opened with focus nowhere. The status is
+    held until the dialog has placed focus, as a slow answer does, and the
+    form must end on its first field, where it would have opened with Scan
+    already off."""
+    page, handled = _open(browser, company)
+    held = []
+    page.route("**/api/ocr/status", lambda route: held.append(route))
+    try:
+        for route, call, ready in (
+            ("#/bills", "BillsPage.showForm()", "#bill-lines tr"),
+            ("#/expenses", "ExpensesPage.showForm()", "#expense-lines tr"),
+            ("#/sales-receipts", "SalesReceiptsPage.showForm()", "#sr-lines tr"),
+        ):
+            _visit(page, handled, route)
+            page.evaluate("() => { ScanHelper._status = null; }")
+            held.clear()
+            page.evaluate(f"async () => {{ await {call}; }}")
+            page.wait_for_function(MODAL_SHOWN, timeout=5000)
+            page.wait_for_selector(ready)
+            page.wait_for_function(
+                "() => document.activeElement && document.activeElement.id === 'scan-btn'",
+                timeout=5000,
+            )
+            assert len(held) == 1, (route, len(held))
+            held[0].fulfill(
+                json={"available": False, "version": None, "languages": None}
+            )
+            page.wait_for_function(
+                "() => document.getElementById('scan-btn').disabled", timeout=5000
+            )
+            settle(page, handled)
+            at = page.evaluate(ACTIVE)
+            assert at["tag"] != "body" and at["id"] != "scan-btn", (route, at)
+            assert page.evaluate("() => document.activeElement === _modalLanding()"), (
+                route,
+                at,
+            )
+            page.evaluate("() => closeModal()")
+    finally:
+        page.close()
 
 
 def test_the_long_forms_skip_to_their_lines_and_the_chart_to_its_filter(

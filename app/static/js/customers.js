@@ -99,9 +99,9 @@ const CustomersPage = {
     // payments. Avoid the "click here to see notes, click here to see
     // invoices" gated-screen pattern.
     async showDetails(id) {
-        let customer, invoices, payments, permits, jobs, credits, subs;
+        let customer, invoices, payments, permits, jobs, credits, subs, exemption;
         try {
-            [customer, invoices, payments, permits, jobs, credits, subs] = await Promise.all([
+            [customer, invoices, payments, permits, jobs, credits, subs, exemption] = await Promise.all([
                 API.get(`/customers/${id}`),
                 fetchAllPages(`/invoices?customer_id=${id}`).catch(() => []),
                 fetchAllPages(`/payments?customer_id=${id}`).catch(() => []),
@@ -109,6 +109,9 @@ const CustomersPage = {
                 API.get(`/jobs?customer_id=${id}&include_inactive=true`).catch(() => []),
                 API.get(`/customers/${id}/credits`).catch(() => null),
                 API.get(`/customers/${id}/subs`).catch(() => null),
+                // a tax-exempt customer with no certificate on file, or an
+                // expired one: said beside "Tax exempt" (never blocks a sale)
+                API.get(`/customers/${id}/exemption-warning`).catch(() => null),
             ]);
         } catch (err) {
             toast(err.message, 'error');
@@ -218,6 +221,7 @@ const CustomersPage = {
                         ${customer.credit_limit ? ` · Credit limit: ${formatCurrency(customer.credit_limit)}` : ''}
                         ${customer.tax_id ? ` · Tax ID: <code>${escapeHtml(customer.tax_id)}</code>` : ''}
                     </div>
+                    ${exemption && exemption.warning ? `<div class="tax-exempt-warning" role="status" style="margin-top:4px;font-size:12px;font-weight:600;color:var(--text-warning)">${escapeHtml(exemption.warning)}</div>` : ''}
                     <div style="margin-top:4px;font-size:12px;color:var(--text-muted)">
                         ${T('Invoice')} reminders: ${customer.invoice_reminders_enabled === false ? 'Off' : 'Enabled'}
                         &nbsp;·&nbsp; Monthly statement: ${customer.monthly_statement ? 'Enabled' : 'Off'}
@@ -435,11 +439,11 @@ const CustomersPage = {
         const parentHtml = `
                 <h3 id="cust-parent-heading" style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Sub-customer</h3>
                 <div class="form-grid" role="group" aria-labelledby="cust-parent-heading">
-                    <div class="form-group"><label for="cust-parent-select">Sub-customer of</label>
+                    <div class="form-group"><label for="cust-parent-select">Sub-customer of${hasSubs ? '' : ` ${hint('A tenant under a property, say: the sub-customer is invoiced and paid on its own, can be made inactive on its own, and rolls up to its parent.', 'Sub-customer')}`}</label>
                         <select name="parent_customer_id" id="cust-parent-select" ${hasSubs ? 'disabled' : ''} onchange="CustomersPage._parentChanged(this.value)">
                             <option value="">None: a customer of its own</option>${parentOpts}
                         </select>
-                        ${hasSubs ? `<div class="form-hint">This customer has ${c.sub_count} sub-customer${c.sub_count === 1 ? '' : 's'} of its own, so it cannot sit under another.</div>` : '<div class="form-hint">A tenant under a property, say: the sub-customer is invoiced and paid on its own, can be made inactive on its own, and rolls up to its parent.</div>'}</div>
+                        ${hasSubs ? `<div class="form-hint">This customer has ${c.sub_count} sub-customer${c.sub_count === 1 ? '' : 's'} of its own, so it cannot sit under another.</div>` : ''}</div>
                     <div class="form-group"><label>Billing</label>
                         <label style="font-weight:normal;"><input type="checkbox" name="bill_with_parent" id="cust-bill-with-parent" ${c.bill_with_parent ? 'checked' : ''} ${c.parent_customer_id && !hasSubs ? '' : 'disabled'}>
                             ${Terms.text("Bill with parent: invoices to this sub-customer are billed to the parent, go on the parent's statement and A/R Aging row, and are paid by the parent's payments")}</label></div>

@@ -444,7 +444,13 @@ def test_the_settings_page_draws_the_pickers_and_payroll_asks_about_the_right_ba
     helper = helper[: helper.index("\n    },")]
     # one picker per piece, the default named first, a saved id kept even
     # when it is no longer in the list, and the problem said under it
-    assert "<select name=\"' + p.key + '\" data-admin>" in helper
+    assert "<select name=\"' + p.key + '\"'" in helper
+    # #977: a piece's hint is its entry in the Payroll Accounts note
+    assert (
+        "(p.hint ? ' aria-describedby=\"' + SettingsPage._payrollHintId(p.key)"
+        in helper
+    )
+    assert "' data-admin>';" in helper
     assert "'Default (' + p.default.label + ')'" in helper
     assert "(unavailable) #" in helper
     assert "escapeHtml(p.problem)" in helper

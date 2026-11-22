@@ -166,7 +166,7 @@ def test_frontend_pages():
     print("\n[1/6] SPA Shell (index.html)")
     r = session.get(f"{BASE_URL}/")
     assert r.status_code == 200, f"Index GET failed: {r.status_code}"
-    assert "Slowbooks Pro" in r.text, "Title not in HTML"
+    assert "SlowBooks Pro" in r.text, "Title not in HTML"
     assert "app.js" in r.text, "app.js script tag missing"
     print("      ✓ SPA shell loads")
 

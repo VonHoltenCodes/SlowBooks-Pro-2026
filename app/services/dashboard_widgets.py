@@ -76,14 +76,36 @@ def receivables(db: Session) -> dict:
     # What customers owe net of the credits they hold (unapplied payments,
     # credit memos), in home currency: the A/R Aging total and account 1100.
     # Summing invoice balances alone read $782.13 against a balance sheet of
-    # $555.74 (explore 2.17.3, F17).
+    # $555.74 (explore 2.17.3, F17). The count is overdue invoices, the
+    # documents themselves, and the card's label says so (#943, the owner's
+    # call): a customer-named journal entry is in the total and on the A/R
+    # Aging card, not in this count.
     total = _ar_aging_totals(db)["total"]
     overdue = (
         db.query(func.count(Invoice.id))
         .filter(*_owing(), _past_due(Invoice.due_date))
         .scalar()
     )
-    return {"total": _f(total), "overdue_count": int(overdue or 0)}
+    # pledges apart from invoices (#952): a nonprofit's program-fee invoice
+    # is an Invoice on its own face, and only a flagged pledge is a Pledge,
+    # so the label names each kind it counts. Only a nonprofit has pledges
+    # (#960): any other company reads every invoice as an invoice, flag or
+    # not, as Books Check and the Overdue rows do.
+    from app.services.terminology import terms_from_db
+
+    pledges = 0
+    if terms_from_db(db).is_nonprofit:
+        pledges = (
+            db.query(func.count(Invoice.id))
+            .filter(*_owing(), _past_due(Invoice.due_date), Invoice.is_pledge.is_(True))
+            .scalar()
+        )
+    return {
+        "total": _f(total),
+        "overdue_count": int(overdue or 0),
+        "overdue_pledges": int(pledges or 0),
+        "overdue_invoices": int(overdue or 0) - int(pledges or 0),
+    }
 
 
 def overdue_invoices(db: Session) -> dict:
@@ -100,12 +122,18 @@ def overdue_invoices(db: Session) -> dict:
         .scalar()
     )
     today = date.today()
+    from app.services.donor_documents import document_label
+    from app.services.terminology import terms_from_db
+
+    t = terms_from_db(db)
     return {
         "count": int(count or 0),
         "items": [
             {
                 "id": i.id,
                 "invoice_number": i.invoice_number,
+                # the document's own face (#952): Invoice, Pledge, …
+                "label": document_label(i, t),
                 "customer": i.customer.name if i.customer else "",
                 "balance_due": _f(i.balance_due),
                 "days_overdue": (today - i.due_date).days if i.due_date else 0,
@@ -248,12 +276,18 @@ def monthly_revenue(db: Session) -> dict:
 
 
 def recent_invoices(db: Session) -> dict:
+    from app.services.donor_documents import document_label
+    from app.services.terminology import terms_from_db
+
+    t = terms_from_db(db)
     rows = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
     return {
         "items": [
             {
                 "id": i.id,
                 "invoice_number": i.invoice_number,
+                # the document's own face (#958), as the Overdue rows carry
+                "label": document_label(i, t),
                 "customer": i.customer.name if i.customer else "",
                 "total": _f(i.total),
                 "balance_due": _f(i.balance_due),
@@ -704,7 +738,7 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "receivables": (
         "Total Receivables",
         "stat",
-        "Open invoice balances, with the overdue count",
+        "What customers owe (the A/R Aging total), with how many invoices are overdue",
         receivables,
     ),
     "overdue_invoices": (
@@ -722,7 +756,7 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
     "payables": (
         "Total Payables",
         "stat",
-        "Open bill balances, with the overdue count",
+        "What is owed to vendors (the A/P Aging total), with how many bills are overdue",
         payables,
     ),
     "bank_balances": (
@@ -914,6 +948,18 @@ def catalog(t=None) -> list[dict]:
 
         t = Terms()
     construction = t.is_construction
+
+    def describe(wid, desc):
+        text = t.text(desc)
+        if wid == "receivables" and t.is_nonprofit:
+            # the card counts pledges and program-fee invoices both (#952,
+            # #969, #983); the vocabulary alone would call them all pledges
+            text = text.replace(
+                "how many pledges are overdue",
+                "how many pledges and invoices are overdue",
+            )
+        return text
+
     return [
         {
             "id": wid,
@@ -921,7 +967,7 @@ def catalog(t=None) -> list[dict]:
                 CONSTRUCTION_TITLES.get(title, title) if construction else title
             ),
             "size": size,
-            "description": t.text(desc),
+            "description": describe(wid, desc),
         }
         for wid, (title, size, desc, _) in WIDGETS.items()
         if construction or wid not in CONSTRUCTION_ONLY

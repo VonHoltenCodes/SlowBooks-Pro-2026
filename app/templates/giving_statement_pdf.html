@@ -3,6 +3,7 @@
 <head>
     <title>Giving statement</title>
 <style>
+{% include '_print_text.html' %}
     /* With a ministry footer the bottom margin widens to hold it (#415
        review): the footer is a running element printed in the @bottom-center
        margin box, so it never overprints the last rows of the gift table the
@@ -33,14 +34,47 @@
     .customer-name { font-size: 14pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
     .customer-info { font-size: 9pt; color: #333; }
     table.activity { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-    table.activity th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
-    table.activity th.r { text-align: right; }
-    table.activity td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.activity td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    .summary { float: right; width: 300px; margin-top: 8px; }
+    table.activity > thead > tr > th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.activity > thead > tr > th.r { text-align: right; }
+    table.activity > tbody > tr > td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.activity > tbody > tr > td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    /* The last gift, the summary and the IRS statement are one unbreakable
+       group of the last gift table (#1047, as #1039 for the invoice): the
+       summary never starts a page with no gift above it, nor splits, nor
+       the IRS statement stands alone, on WeasyPrint's PDF and on Chromium's
+       print alike. */
+    table.activity > tbody.doc-tail { break-inside: avoid; page-break-inside: avoid; }
+    table.activity > tbody.doc-tail > tr.doc-end > td { padding: 0; border-bottom: 0; font-size: 10pt; }
+    /* The summary and the IRS text sit in a cell spanning the gift table, but
+       take no part in its column widths (NEW-260): a box of no width of its
+       own, as wide as the cell once the columns are set. Dates, figures and
+       their headings never wrap. */
+    table.activity .closing { width: 0; min-width: 100%; }
+    table.activity > thead > tr > th, table.activity > tbody > tr > td.d, table.activity > tbody > tr > td.r { white-space: nowrap; }
+    /* A reference is on one line in a column as wide as that line and no
+       wider than this, and a longer one wraps there; the description has
+       the rest of the table and asks for no width of its own, so the
+       figures' columns are as wide as their figures and headings and stay
+       where they are whatever the text (_print_text.html has the rule). */
+    table.activity > tbody > tr > td.ref { max-width: 0.8in; }
+    table.activity > tbody > tr > td.desc { width: 100%; max-width: 0.6in; }
+    /* Seven columns of six- and seven-figure amounts, and headings, none of
+       which wrap, ran the gift table, and the summary in its last cell,
+       past the page's width (W-226: 8.5 pt at six figures). Its figures
+       take less room as they grow, so the summary ends where it does at
+       $12.34 whatever the amounts. */
+    table.activity.figures-6 > thead > tr > th, table.activity.figures-6 > tbody > tr > td { padding-left: 5px; padding-right: 5px; }
+    table.activity.figures-6 > tbody > tr > td { font-size: 8.5pt; }
+    table.activity.figures-7 > thead > tr > th, table.activity.figures-7 > tbody > tr > td { padding-left: 4px; padding-right: 4px; }
+    table.activity.figures-7 > thead > tr > th { font-size: 7pt; }
+    table.activity.figures-7 > tbody > tr > td { font-size: 8pt; }
+    table.activity > tbody.doc-tail > tr.doc-end > td { padding-left: 0; padding-right: 0; }
+    .summary { margin-left: auto; margin-top: 8px; break-inside: avoid; page-break-inside: avoid; }
+    /* the table is 300px at the right, and wider, to the left, when a label and its figure need it: no label wraps (W-214, NEW-273) */
+    .summary table { width: 300px; margin-left: auto; }
     .summary td { padding: 3px 8px; font-size: 10pt; }
-    .summary td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    .summary .label { font-weight: 700; color: #4a4a6a; }
+    .summary td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .summary .label { font-weight: 700; color: #4a4a6a; white-space: nowrap; }
     .summary .grand { font-size: 13pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .irs { clear: both; margin-top: 18px; padding: 10px 12px; border: 1px solid #999; font-size: 9pt; line-height: 1.45; }
     h3 { font-size: 10pt; color: #003366; margin: 14px 0 4px; }
@@ -91,41 +125,9 @@
 
     {% if opening_message %}<div class="opening-message">{{ opening_message }}</div>{% endif %}
 
-    <h3>Contributions</h3>
-    <table class="activity">
-        <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th class="r">Amount</th><th class="r">Goods / services</th><th class="r">Deductible</th><th class="r">Running total</th></tr></thead>
-        <tbody>
-        {% set ns = namespace(running=0) %}
-        {% for g in st.cash %}
-            {% set ns.running = ns.running + (g.amount | float) %}
-            <tr>
-                <td>{{ g.date | fdate }}</td>
-                <td>{{ g.number or '' }}</td>
-                <td>{{ g.description or '' }}</td>
-                <td class="r">{{ g.amount | currency }}</td>
-                <td class="r">{% if g.fair_value_amount %}{{ g.fair_value_amount | currency }}{% endif %}</td>
-                <td class="r">{{ g.deductible | currency }}</td>
-                <td class="r">{{ ns.running | currency }}</td>
-            </tr>
-        {% else %}
-            <tr><td colspan="7">No cash contributions recorded for {{ year }}.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-
-    {% if st.in_kind %}
-    <h3>Non-cash gifts</h3>
-    <table class="activity">
-        <thead><tr><th>Date</th><th>Reference</th><th>Property</th></tr></thead>
-        <tbody>
-        {% for g in st.in_kind %}
-            <tr><td>{{ g.date | fdate }}</td><td>{{ g.number }}</td><td>{% for ln in g.in_kind_lines %}{{ ln.description }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    <div style="font-size:8.5pt;color:#555;">Values of non-cash gifts are not stated; the donor determines fair market value.</div>
-    {% endif %}
-
+    {# The summary and the IRS statement: in the last row of the last gift
+       table, with the last gift (#1047). #}
+    {% set closing %}<div class="closing">
     <div class="summary">
         <table>
             <tr><td class="label">Total contributions</td><td class="r">{{ st.totals.amount | currency }}</td></tr>
@@ -135,6 +137,51 @@
     </div>
 
     <div class="irs">{{ st.irs_text }}</div>
+    </div>{% endset %}
+    <h3>Contributions</h3>
+    {# the largest figure the gift table prints (the running total ends at the total) decides how much room each gets (W-226) #}
+    {% set widest = [st.totals.amount | float, st.totals.fair_value | float, st.totals.deductible | float] | map('abs') | max %}
+    <table class="activity{% if widest >= 1000000 %} figures-7{% elif widest >= 10000 %} figures-6{% endif %}">
+        <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th class="r">Amount</th><th class="r">Goods / services</th><th class="r">Deductible</th><th class="r">Running total</th></tr></thead>
+        <tbody>
+        {% set ns = namespace(running=0) %}
+        {% for g in st.cash %}
+            {% set ns.running = ns.running + (g.amount | float) %}
+            {% if loop.last and not st.in_kind %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr>
+                <td class="d">{{ g.date | fdate }}</td>
+                <td class="ref">{{ (g.number or '') | own_width }}</td>
+                <td class="desc">{{ g.description | desc }}</td>
+                <td class="r">{{ g.amount | currency }}</td>
+                <td class="r">{% if g.fair_value_amount %}{{ g.fair_value_amount | currency }}{% endif %}</td>
+                <td class="r">{{ g.deductible | currency }}</td>
+                <td class="r">{{ ns.running | currency }}</td>
+            </tr>
+        {% else %}
+            {% if not st.in_kind %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr><td colspan="7">No cash contributions recorded for {{ year }}.</td></tr>
+        {% endfor %}
+        {% if not st.in_kind %}<tr class="doc-end"><td colspan="7">{{ closing }}</td></tr>{% endif %}
+        </tbody>
+    </table>
+
+    {% if st.in_kind %}
+    <h3>Non-cash gifts</h3>
+    <table class="activity">
+        <thead><tr><th>Date</th><th>Reference</th><th>Property</th></tr></thead>
+        <tbody>
+        {% for g in st.in_kind %}
+            {% if loop.last %}</tbody><tbody class="doc-tail">{% endif %}
+            <tr><td class="d">{{ g.date | fdate }}</td><td class="ref">{{ g.number | own_width }}</td><td class="desc">{% for ln in g.in_kind_lines %}{{ ln.description }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
+        {% endfor %}
+        <tr class="doc-end"><td colspan="3">
+    <div style="font-size:8.5pt;color:#555;">Values of non-cash gifts are not stated; the donor determines fair market value.</div>
+    {{ closing }}
+        </td></tr>
+        </tbody>
+    </table>
+    {% endif %}
+
     </div>
 {% endfor %}
 </body>

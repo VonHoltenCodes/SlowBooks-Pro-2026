@@ -32,7 +32,7 @@ def _clean(value):
 
 # The documents' terms column is String(50), so a name fits it.
 TermName = Annotated[str, AfterValidator(_clean)]
-TermKind = Literal["standard", "date_driven"]
+TermKind = Literal["standard", "date_driven", "end_of_month"]
 
 
 class PaymentTermCreate(StrictModel):

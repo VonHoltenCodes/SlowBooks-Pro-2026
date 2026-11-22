@@ -423,11 +423,10 @@ const VendorsPage = {
                         <input name="account_number" value="${escapeHtml(v.account_number || '')}"></div>
                     <div class="form-group"><label>Default Expense or COGS Account</label>
                         <select name="default_expense_account_id" onchange="VendorsPage.bankRuleAccountChanged(this)"><option value="">-- None --</option>${acctOpts}</select></div>
-                    <div class="form-group"><label for="vendor-bank-rule">Bank feed</label>
+                    <div class="form-group"><label for="vendor-bank-rule">Bank feed ${hint(v.default_expense_account_id ? 'A bank rule: a statement line whose payee has this vendor\'s name is categorised to that account and added for this vendor.' : 'Choose the default account first.', 'Bank feed', 'vendor-bank-rule-hint')}</label>
                         <label style="font-weight:normal; display:flex; gap:6px; align-items:flex-start;">
                             <input type="checkbox" id="vendor-bank-rule" name="bank_feed_rule" value="true" ${v.bank_feed_rule ? 'checked' : ''} ${v.default_expense_account_id ? '' : 'disabled'} aria-describedby="vendor-bank-rule-hint">
-                            <span>Lines from this payee post to the default account</span></label>
-                        <div id="vendor-bank-rule-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">${v.default_expense_account_id ? 'A bank rule: a statement line whose payee has this vendor\'s name is categorised to that account and added for this vendor.' : 'Choose the default account first.'}</div></div>
+                            <span>Lines from this payee post to the default account</span></label></div>
                     ${id ? `<div class="form-group"><label>Status</label>
                         <select name="is_active" title="An inactive vendor keeps its history but leaves the pickers on bills, expenses and orders">
                             <option value="true" ${v.is_active !== false ? 'selected' : ''}>Active</option>
@@ -552,13 +551,12 @@ const VendorsPage = {
     // The bank-feed box needs the default account it posts to (#493).
     bankRuleAccountChanged(sel) {
         const box = document.getElementById('vendor-bank-rule');
-        const hint = document.getElementById('vendor-bank-rule-hint');
         if (!box) return;
         box.disabled = !sel.value;
         if (!sel.value) box.checked = false;
-        if (hint) hint.textContent = sel.value
+        Hints.setText('vendor-bank-rule-hint', sel.value
             ? "A bank rule: a statement line whose payee has this vendor's name is categorised to that account and added for this vendor."
-            : 'Choose the default account first.';
+            : 'Choose the default account first.');
     },
 
     _confirmDuplicate(formEl, id, data, duplicates) {

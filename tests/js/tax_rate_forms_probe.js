@@ -68,6 +68,8 @@ const ctx = {
   },
 };
 vm.createContext(ctx);
+// the tortoise helper the forms' teaching text sits behind (#977)
+vm.runInContext(fs.readFileSync('app/static/js/hint.js', 'utf8'), ctx);
 const pages = {
   'item_quick_add.js': ['ItemQuickAdd'],  // every line's item picker (#445)
   'account_quick_add.js': ['AccountQuickAdd'],  // a purchase line's Account (#485)

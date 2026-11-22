@@ -3,6 +3,7 @@ from typing import Iterable, Type, TypeVar
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import Base
 
 T = TypeVar("T", bound=Base)
@@ -96,11 +97,15 @@ def refuse_unknown_filters(request: Request) -> None:
     accepted = _declared_query_names(route.dependant)
     unknown = sorted(set(request.query_params) - accepted)
     if unknown:
+        # the names are the request's and the API's, said as they are
         listed = ", ".join(sorted(accepted)) or "none"
         if len(unknown) == 1:
-            named = f"{unknown[0]} is not a filter here."
+            named = said("{} is not a filter here.", unknown[0])
         else:
-            named = f"{', '.join(unknown[:-1])} and {unknown[-1]} are not filters here."
+            named = said(
+                "{} and {} are not filters here.", ", ".join(unknown[:-1]), unknown[-1]
+            )
         raise HTTPException(
-            status_code=422, detail=f"{named} This request accepts: {listed}."
+            status_code=422,
+            detail=named + said(" This request accepts: {}.", listed),
         )

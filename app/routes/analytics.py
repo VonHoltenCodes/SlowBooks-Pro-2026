@@ -1,5 +1,5 @@
 # ============================================================================
-# Slowbooks Pro 2026 — Analytics API
+# SlowBooks Pro 2026 — Analytics API
 # Built 2026-04-14; integrated 2026-04-15; enhanced 2026-04-15 (Phase 1).
 #
 # Read-only endpoints powered by AnalyticsEngine. Every endpoint accepts a
@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import Field
 
+from app.services.terminology import said
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
@@ -256,7 +257,7 @@ def export_csv(
     # Branded header — written as comment-style rows above the data table.
     # Excel/Sheets will treat them as text rows above the headerline. The
     # _csv_safe wrapping prevents formula-injection on company_name.
-    writer.writerow(["# Slowbooks Pro 2026 — Analytics Snapshot"])
+    writer.writerow(["# SlowBooks Pro 2026 — Analytics Snapshot"])
     writer.writerow([f"# Company: {_csv_safe(company_name)}"])
     writer.writerow([f"# Period: {label} ({s.isoformat()} to {e.isoformat()})"])
     writer.writerow([f"# Generated: {datetime.now(timezone.utc).isoformat()}"])
@@ -680,8 +681,11 @@ def put_ai_config(
     if provider and provider not in AI_PROVIDERS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown AI provider '{provider}'. Valid: "
-            f"{sorted(AI_PROVIDERS.keys())}",
+            detail=said(
+                "Unknown AI provider '{}'. Valid: {}",
+                provider,
+                sorted(AI_PROVIDERS.keys()),
+            ),
         )
 
     model = (payload.model or "").strip()
@@ -789,7 +793,9 @@ def _list_models_for(db: Session, overrides: dict) -> dict:
             detail="Pick a provider first, then list its models.",
         )
     if provider not in AI_PROVIDERS:
-        raise HTTPException(status_code=400, detail=f"Unknown AI provider: {provider}")
+        raise HTTPException(
+            status_code=400, detail=said("Unknown AI provider: {}", provider)
+        )
     # a typed key is the form's; the saved one counts only for the provider
     # it was saved with (a provider picked in the form but not saved yet has
     # no key of its own)
@@ -1017,7 +1023,7 @@ def run_ai_action(
     if action_key not in AI_ACTIONS:
         raise HTTPException(
             status_code=404,
-            detail=f"Unknown analysis action '{action_key}'.",
+            detail=said("Unknown analysis action '{}'.", action_key),
         )
 
     cfg = _read_ai_config(db)
