@@ -155,7 +155,8 @@ def test_a_construction_bill_shows_every_column_at_the_agents_window(
     the window less a margin, the line cells' sides are 2px, and the move
     controls fold where the table is tight, so every column shows at 1264,
     the move controls with them; with room, the controls keep one row. At
-    the cap (1300px, 2.31.11 gate, L-1) the row has slack to spare: the
+    the cap (1324px since #1189's fifth control, Remove line; 1300px at the
+    2.31.11 gate, L-1) the row has slack to spare: the
     controls' widths are set in CSS, not by the font (one font set's wider
     handle folded them at the old 1280px cap), the column has 16px more
     than a row of them needs, and each glyph sits in the middle of its
@@ -183,13 +184,13 @@ def test_a_construction_bill_shows_every_column_at_the_agents_window(
                 if width == 1440:
                     assert rows == 1, (width, rows)  # room: one row
                     slack = page.evaluate(SLACK)
-                    assert slack["need"] <= 84, slack  # set in CSS, not by the font
+                    assert slack["need"] <= 106, slack  # set in CSS, not by the font
                     assert slack["content"] - slack["need"] >= 16, slack
                     # the glyphs sit in the middle of their 22px buttons: a
                     # flex box with no justify-content put them at the left
                     # (2.31.11 gate, NEW-214)
                     offsets = page.evaluate(GLYPH_OFFSETS)
-                    assert len(offsets) == 3 and all(
+                    assert len(offsets) == 4 and all(
                         abs(o) <= 1.5 for o in offsets
                     ), offsets
                 else:
