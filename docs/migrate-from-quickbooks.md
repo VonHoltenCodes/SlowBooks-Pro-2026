@@ -135,9 +135,9 @@ formulas in the download; the import works TOTAL out from the sheet's own
 cells and refuses the report when the rows it read do not add up to it. The
 dates are read month first (MM/DD/YYYY), as QuickBooks Online writes them
 for a US company. A row is refused by its number when it has an amount but
-no date or type, no open balance, no vendor, an open balance larger than
-its amount, a due date before its own date, or a date after the day the
-report was run. A vendor name with a colon (a sub-vendor) that the Vendor
+no date or type, no open balance, no vendor, or an open balance larger
+than its amount. A due date before the bill's own date, or a bill dated
+after the day the report was run, is carried as QuickBooks has it. A vendor name with a colon (a sub-vendor) that the Vendor
 list lacks is refused too. The vendor
 column is read under QuickBooks' Vendor display name,
 Vendor or Vendor full name, or the Supplier spellings some regions use; a

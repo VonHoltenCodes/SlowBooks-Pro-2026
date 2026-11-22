@@ -1082,18 +1082,6 @@ def _real_row_changed(**cells):
     "cells,error",
     [
         (
-            {"c5": "09/01/2026"},
-            "A/P Aging Detail row 7: the Bill of 09/14/2026 for Harbor Paint Supply "
-            "is due on 09/01/2026, before its own date. Correct its due date in "
-            "QuickBooks Online and export the report again",
-        ),
-        (
-            {"c1": "12/01/2026", "c5": "12/31/2026"},
-            "A/P Aging Detail row 7: the Bill of 12/01/2026 for Harbor Paint Supply "
-            "is dated after the report was run (11/22/2026). Check its date in "
-            "QuickBooks Online and export the report again",
-        ),
-        (
             {"c1": "14/09/2026", "c5": "14/10/2026"},
             "A/P Aging Detail row 7: the date 14/09/2026 reads day first. SlowBooks "
             "Pro reads this report's dates month first (MM/DD/YYYY), as QuickBooks "
@@ -1128,8 +1116,6 @@ def _real_row_changed(**cells):
         ),
     ],
     ids=[
-        "due before its date",
-        "dated after the run",
         "day first",
         "open above amount",
         "amount the other sign",
@@ -1291,3 +1277,20 @@ def test_a_voided_unapplied_payment_is_not_carried_again(
     assert data["imported_unapplied_bill_payments"] == 0
     assert db_session.query(BillPayment).count() == 2
     _ties(client, db_session, Decimal("1100.00"))
+
+
+def test_odd_dates_are_carried_as_quickbooks_has_them():
+    """A due date before the bill's own date, and a bill dated after the day
+    the report was run, are things QuickBooks Online lets a person enter:
+    both are carried as the report gives them, not refused."""
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[6][5] = "09/01/2026"  # due before its own date (09/14/2026)
+    items, errors, _notes = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == []
+    assert len(items) == 5
+
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[6][1], rows[6][5] = "12/01/2026", "12/31/2026"  # after the run date
+    items, errors, _notes = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == []
+    assert len(items) == 5

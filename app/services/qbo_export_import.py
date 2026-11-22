@@ -67,7 +67,6 @@ from __future__ import annotations
 import csv
 import io
 import re
-from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
@@ -2136,12 +2135,6 @@ _CELL_REF = re.compile(r"([A-Z]{1,3})([0-9]+)")
 _SUM_FORMULA = re.compile(
     r"=\s*[+-]?\s*(?:[A-Z]{1,3}[0-9]+|[0-9.]+)(?:\s*[+-]\s*(?:[A-Z]{1,3}[0-9]+|[0-9.]+))*\s*"
 )
-# The time a report was run, as its footer writes it ("Sunday, November 22,
-# 2026 03:41 PM GMTZ").
-_RUN_DATE = re.compile(
-    r"\b(January|February|March|April|May|June|July|August|September|October"
-    r"|November|December) ([0-9]{1,2}), ([0-9]{4})\b"
-)
 _DAY_FIRST = re.compile(r"\s*([0-9]{1,2})/([0-9]{1,2})/([0-9]{2,4})\s*")
 
 
@@ -2261,17 +2254,6 @@ def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
             "QuickBooks labels it): export it with the report's own columns"
         )
         return items, errors, notes
-    run_on = None
-    for row in rows[header_at + 1 :]:
-        found = _RUN_DATE.search(_cell(row, 0))
-        if found:
-            try:
-                run_on = parse_date(
-                    f"{found.group(1)} {found.group(2)} {found.group(3)}",
-                    ("%B %d %Y",),
-                )
-            except Exception:  # DataProblem: no such day
-                run_on = None
     if i_due is None:
         notes.append(
             "The A/P Aging Detail report has no Due date column: each bill is "
@@ -2346,22 +2328,6 @@ def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
             continue
         if not vendor:
             errors.append(f"A/P Aging Detail row {n}: the {what} names no vendor")
-            continue
-        if due < day:
-            errors.append(
-                f"A/P Aging Detail row {n}: the {what} is due on {due:%m/%d/%Y}, "
-                "before its own date. Correct its due date in QuickBooks Online "
-                "and export the report again"
-            )
-            continue
-        # a day's margin: the footer's time is GMT, the bill's date the
-        # company's own
-        if run_on is not None and day > run_on + timedelta(days=1):
-            errors.append(
-                f"A/P Aging Detail row {n}: the {what} is dated after the report "
-                f"was run ({run_on:%m/%d/%Y}). Check its date in QuickBooks Online "
-                "and export the report again"
-            )
             continue
         if not open_:
             notes.append(
