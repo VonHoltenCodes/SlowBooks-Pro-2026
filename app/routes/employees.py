@@ -20,6 +20,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
 from app.models.attachments import Attachment
@@ -442,7 +443,7 @@ def add_bank_account(
         kind = BankAccountKind(data.account_kind)
         deposit = DepositType(data.deposit_type)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
+        raise HTTPException(status_code=400, detail=said("Invalid value: {}", e))
 
     routing = (data.routing_number or "").strip()
     account = (data.account_number or "").strip()
@@ -536,11 +537,12 @@ async def upload_employee_document(
     extension = Path(safe_filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(
-            status_code=400, detail=f"File extension '{extension}' not allowed"
+            status_code=400, detail=said("File extension '{}' not allowed", extension)
         )
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
-            status_code=400, detail=f"MIME type '{file.content_type}' not allowed"
+            status_code=400,
+            detail=said("MIME type '{}' not allowed", file.content_type),
         )
 
     content = await read_limited(file, label="The document")

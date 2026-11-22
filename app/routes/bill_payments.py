@@ -8,6 +8,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.bills import Bill, BillStatus, BillPayment, BillPaymentAllocation
 from app.models.contacts import Vendor
@@ -474,7 +475,7 @@ def add_discount(
     if request is not None and request.query_params:
         key = next(iter(request.query_params.keys()))
         raise HTTPException(
-            status_code=422, detail=f"'{key}' is not a parameter this accepts."
+            status_code=422, detail=said("'{}' is not a parameter this accepts.", key)
         )
     replay = request_keys.reserve(
         db,

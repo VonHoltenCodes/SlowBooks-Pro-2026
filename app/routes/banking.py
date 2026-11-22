@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.services.accounting import _q
 from app.services.check_numbers import refuse_duplicate
@@ -536,7 +537,7 @@ def statement_payout(txn_id: int, data: StatementPayout, db: Session = Depends(g
 
     if data.provider not in PROVIDER_NAMES:
         raise HTTPException(
-            status_code=400, detail=f"Unknown payment provider: {data.provider}"
+            status_code=400, detail=said("Unknown payment provider: {}", data.provider)
         )
     # Allowed while clearing is on, and after it is turned off until the
     # clearing balance is paid out.

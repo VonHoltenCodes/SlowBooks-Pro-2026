@@ -3,6 +3,7 @@
 # Feature 1: DR Expense, CR AP (2000) on create; DR AP, CR Bank on payment
 # ============================================================================
 
+from app.services.terminology import said
 from app.routes._print import print_html
 from decimal import Decimal
 
@@ -435,7 +436,7 @@ def _flush_number(db: Session, number: str) -> None:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail=f"Bill number {number!r} already exists for this vendor",
+            detail=said("Bill number {!r} already exists for this vendor", number),
         )
 
 
@@ -527,7 +528,11 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     if dup:
         raise HTTPException(
             status_code=409,
-            detail=f"Bill number {bill_number!r} already exists for this vendor (bill #{dup.id})",
+            detail=said(
+                "Bill number {!r} already exists for this vendor (bill #{})",
+                bill_number,
+                dup.id,
+            ),
         )
 
     # Terms the caller didn't send are the vendor's (Blue Heron is Net 15;
@@ -702,7 +707,11 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         if dup:
             raise HTTPException(
                 status_code=409,
-                detail=f"Bill number {number!r} already exists for this vendor (bill #{dup.id})",
+                detail=said(
+                    "Bill number {!r} already exists for this vendor (bill #{})",
+                    number,
+                    dup.id,
+                ),
             )
 
     date_changed = new_date != bill.date

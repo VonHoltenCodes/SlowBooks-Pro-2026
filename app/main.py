@@ -886,10 +886,11 @@ async def _method_not_allowed_handler(request: Request, exc: StarletteHTTPExcept
     ):
         terms = _company_terms()
         if terms.has_words:
-            # an email address in a sentence is data, not prose: the words
-            # around it are reworded, the address never is (in time that
+            # data in a sentence is not prose: what a person typed (a
+            # Sentence's data, said()) and any email address keep their
+            # words, and only ours around them are reworded (in time that
             # grows only with the length of the sentence)
-            worded = terms.text_keeping_addresses(exc.detail)
+            worded = terms.worded(exc.detail)
             if worded != exc.detail:
                 return JSONResponse(
                     status_code=exc.status_code,
@@ -935,7 +936,7 @@ async def _missing_control_account_handler(request: Request, exc: Exception):
     # "what customers owe — every invoice and payment" is written in the
     # business words; the company may not use them (see the handler above).
     return JSONResponse(
-        status_code=409, content={"detail": _company_terms().text(str(exc))}
+        status_code=409, content={"detail": _company_terms().worded(str(exc))}
     )
 
 

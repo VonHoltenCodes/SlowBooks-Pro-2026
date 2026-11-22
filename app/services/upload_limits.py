@@ -30,8 +30,7 @@ async def read_limited(
     if len(content) > max_bytes:
         raise HTTPException(
             status_code=413,
-            detail=(
-                f"{label} is too large " f"(limit {max_bytes // (1024 * 1024)} MB)."
-            ),
+            # label + ...: a label built with said() keeps the file's name
+            detail=label + f" is too large (limit {max_bytes // (1024 * 1024)} MB).",
         )
     return content

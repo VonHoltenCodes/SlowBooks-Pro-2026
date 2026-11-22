@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
+from app.services.terminology import said
 from app.database import get_db
 from app.models.attachments import Attachment
 from app.models.bills import Bill
@@ -208,12 +209,12 @@ async def _read_upload(file: UploadFile) -> tuple[str, bytes]:
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"File extension '{extension}' not allowed",
+            detail=said("File extension '{}' not allowed", extension),
         )
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"MIME type '{file.content_type}' not allowed",
+            detail=said("MIME type '{}' not allowed", file.content_type),
         )
 
     content = await file.read()

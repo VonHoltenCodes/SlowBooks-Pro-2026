@@ -27,7 +27,7 @@ from app.services.statement_layout import (
     mark_bs_lines,
     family_rows,
 )
-from app.services.terminology import Terms, terms_from_db
+from app.services.terminology import Terms, said, terms_from_db
 
 # Debit-normal account types. For these, natural balance = debit - credit.
 # For the rest (liability, equity, income), natural balance = credit - debit.
@@ -1714,7 +1714,7 @@ def _ids_param(values, name: str) -> Optional[set[int]]:
                 continue
             if not part.lstrip("-").isdigit():
                 raise HTTPException(
-                    status_code=400, detail=f"{name}: {part!r} is not an id"
+                    status_code=400, detail=said("{}: {!r} is not an id", name, part)
                 )
             out.add(int(part))
     return out or None
