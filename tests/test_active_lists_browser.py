@@ -47,9 +47,29 @@ def _start(browser, company, show="active"):
     return page, handled
 
 
-def _show(page, handled, value):
-    page.select_option("#list-show", value)
+# The list drawn again: what #page-content held before (`old`) is gone and
+# a list with its Show picker is in its place.
+REDRAWN = """(old) => !old.isConnected
+    && !!document.querySelector('#page-content #list-show')"""
+
+
+def _redrawn(page, handled, act):
+    """`act` (a Show choice, a Make Inactive) and the list drawn again after
+    it. Each of them goes on through App.navigate, which is not awaited: a
+    change, the settings check, then the list's read and its drawing. settle
+    alone is a quiet moment in the requests, and a slow runner's gap between
+    two of them was one: the list was read before it was drawn again, with
+    the row still in it (CI, once). The wait is for the redraw itself."""
+    old = page.evaluate_handle(
+        "() => document.getElementById('page-content').firstElementChild"
+    )
+    act()
+    page.wait_for_function(REDRAWN, arg=old)
     settle(page, handled)
+
+
+def _show(page, handled, value):
+    _redrawn(page, handled, lambda: page.select_option("#list-show", value))
 
 
 def _rows(page):
@@ -112,8 +132,11 @@ def test_make_inactive_moves_the_row_and_make_active_brings_it_back(
     try:
         _visit(page, handled, "#/vendors")
         assert any("Lakeside Ice" in r for r in _rows(page))
-        page.get_by_role("button", name="Make inactive: Lakeside Ice").click()
-        settle(page, handled)
+        _redrawn(
+            page,
+            handled,
+            page.get_by_role("button", name="Make inactive: Lakeside Ice").click,
+        )
         assert not any("Lakeside Ice" in r for r in _rows(page))
         assert _active(company, "/api/vendors", "Lakeside Ice") is False
         toast = page.evaluate(
@@ -122,8 +145,11 @@ def test_make_inactive_moves_the_row_and_make_active_brings_it_back(
         assert toast.startswith("Lakeside Ice is inactive")
 
         _show(page, handled, "inactive")
-        page.get_by_role("button", name="Make active: Lakeside Ice").click()
-        settle(page, handled)
+        _redrawn(
+            page,
+            handled,
+            page.get_by_role("button", name="Make active: Lakeside Ice").click,
+        )
         assert _active(company, "/api/vendors", "Lakeside Ice") is True
         assert not any("Lakeside Ice" in r for r in _rows(page))  # back in Active
     finally:
