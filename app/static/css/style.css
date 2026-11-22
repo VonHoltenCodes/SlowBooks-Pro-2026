@@ -1565,13 +1565,19 @@ a:hover { text-decoration: underline; }
 }
 
 /* A dialog for a form with a wide line-item table: as wide as the window
-   allows, up to 1300px. Opened with openModal(title, html, { wide: true }).
+   allows, up to 1324px. Opened with openModal(title, html, { wide: true }).
    The width too, not only the cap: the 90% of .modal left the bill's lines,
    with 2.31.0's move column, scrolling at the 1264px window the gate's
    agents use, the Amount column out of view at rest. */
 .modal.modal--wide {
     width: calc(100% - 12px);
-    max-width: 1300px;
+    /* 1324, not 1300: #1189's Remove line is a fifth control in the move
+       column (NEW-278 gave it the purchase order and vendor credit; the
+       bill's twelve-column construction grid had no room). Each control is
+       24px wide with its gap, and the move column is the dialog's slack, so
+       the fifth control's 24px is added to the cap, as the twelve-column
+       bill's twenty were at 1300 (2.31.11 gate, L-1). */
+    max-width: 1324px;
 }
 /* The register entry's split lines (NEW-204, 2.31.6 gate): six columns
    share the dialog's width, the controls filling their cells, so the table
@@ -1589,10 +1595,11 @@ a:hover { text-decoration: underline; }
    the 1264px window and at the dialog's cap alike (2.31.1 gate, NEW-187):
    with the move controls able to fold (.line-order-controls) and the line
    cells' 2px sides, it fits at 1264px, the table scrolling only below. The
-   cap is 1300px, not 1280: a construction bill's twelve columns left the
+   cap is 1324px, not 1280: a construction bill's twelve columns left the
    move column 97px at 1280, and one font set's wider glyphs folded its
-   controls there (2.31.11 gate, L-1); the twenty more are the column's
-   slack, with the controls' own widths fixed. */
+   controls there (2.31.11 gate, L-1); the twenty to 1300 were the four
+   controls' slack, and #1189's Remove line is a fifth, so 24px more carry
+   it at the cap too, with the controls' own widths fixed. */
 .modal.modal--wide #modal-body {
     padding-left: 8px;
     padding-right: 8px;

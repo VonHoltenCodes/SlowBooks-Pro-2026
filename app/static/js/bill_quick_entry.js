@@ -78,6 +78,17 @@ const BillQuickEntry = {
             <div id="bqe-log" style="margin-top:16px;"></div>`;
     },
 
+    // Once the page is on the screen: the line grid opts into the shared
+    // move/insert/remove controls (#1189), remove: true since the quick
+    // entry grid has no Remove line button of its own. Returns the route's
+    // cleanup, which discards any files left attached to the form (#881).
+    mount() {
+        if (typeof LineOrder !== 'undefined') {
+            LineOrder.attach('#bqe-lines', { add: () => BillQuickEntry.addLine(), changed: () => BillQuickEntry.recalc(), remove: true });
+        }
+        return () => PendingFiles.discard();
+    },
+
     // A Class on each line (#1051), drawn where the company has a class of
     // its own (Nonprofit.lineClassShown, Enter Bill's rule); the empty
     // choice is "No class", there being no header class here. A new line,
