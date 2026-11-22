@@ -1231,9 +1231,12 @@ _PENDING_FIELDS = ("relay", "slug", "credential")
 WHY_AWAY, WHY_UNCONFIRMED, WHY_REFUSED = "away", "unconfirmed", "refused"
 
 _pending_lock = threading.Lock()
+# The running retry, and its own two events: `stop` ends it and is never
+# undone, `wake` cuts its wait short. Each retry gets new ones, so a stop
+# that ran out of time cannot be cleared under a retry still trying, and a
+# wake-up left by one retry cannot hurry the next one's first try.
 _retry_thread = None
-_retry_wake = threading.Event()
-_retry_stop = threading.Event()
+_retry_events = {"stop": None, "wake": None}  # under _pending_lock
 # relay names whose refusal has been heard since the app started: not asked
 # again until the next start
 _refused_heard: set = set()
@@ -1390,9 +1393,11 @@ def _waits(item: dict) -> bool:
     return not (_why(item) == WHY_REFUSED and item["slug"] in _refused_heard)
 
 
-def retry_pending_once() -> int:
+def retry_pending_once(stop: threading.Event | None = None) -> int:
     """Try every pending deletion once; returns how many are left to try
-    (an entry the relay refused stays kept, and is not counted)."""
+    (an entry the relay refused stays kept, and is not counted). With
+    `stop` (the retry's own), a stop that came during the tries leaves the
+    file as it is: what came after the stop has it now."""
     with _pending_lock:
         items = [i for i in _load_pending() if _waits(i)]
     fates = {i["slug"]: _relay_forget(i["relay"], i["credential"]).fate for i in items}
@@ -1400,6 +1405,8 @@ def retry_pending_once() -> int:
     gone = sorted(s for s, f in fates.items() if f in _TOLD and f != DELETED)
     refused = sorted(s for s, f in fates.items() if f == REFUSED)
     with _pending_lock:
+        if stop is not None and stop.is_set():
+            return 0
         left = [i for i in _load_pending() if fates.get(i["slug"]) not in _TOLD]
         for i in left:
             if i["slug"] in refused:
@@ -1436,27 +1443,32 @@ def retry_pending_once() -> int:
     return waiting
 
 
-def _retry_loop() -> None:
+def _retry_loop(stop: threading.Event, wake: threading.Event) -> None:
     global _retry_thread
     delay = RETRY_FIRST
     try:
         while True:
-            _retry_wake.wait(delay)
-            _retry_wake.clear()
-            if _retry_stop.is_set():
+            wake.wait(delay)
+            wake.clear()
+            if stop.is_set():
                 return
             try:
-                left = retry_pending_once()
+                left = retry_pending_once(stop)
             except Exception as exc:
                 _log_fault("a pending relay deletion could not be tried", exc)
                 left = 1
-            if not left:
+            if not left or stop.is_set():
                 return
             delay = min(delay * 2, RETRY_MAX)
     finally:
         with _pending_lock:
-            _retry_thread = None
-            more = not _retry_stop.is_set() and any(_waits(i) for i in _load_pending())
+            mine = _retry_events["stop"] is stop
+            if mine:
+                _retry_thread = None
+                _retry_events["stop"] = _retry_events["wake"] = None
+            more = (
+                mine and not stop.is_set() and any(_waits(i) for i in _load_pending())
+            )
         # an entry added while this one was ending gets its own loop
         if more:
             _start_retry()
@@ -1464,14 +1476,28 @@ def _retry_loop() -> None:
 
 def stop_retry(timeout: float = 5.0) -> None:
     """End the quiet retry (the app's shutdown, the tests); the entries stay
-    kept for the next start."""
-    _retry_stop.set()
-    _retry_wake.set()
+    kept for the next start. Waits up to timeout for a try under way; a try
+    that takes longer (one can take the press's deadline) still ends the
+    retry, which writes nothing after this returns."""
+    global _retry_thread
     with _pending_lock:
-        made = _retry_thread
-    if made is not None:
+        made, stop, wake = (
+            _retry_thread,
+            _retry_events["stop"],
+            _retry_events["wake"],
+        )
+        _retry_thread = None
+        _retry_events["stop"] = _retry_events["wake"] = None
+    if stop is None:
+        return
+    stop.set()
+    wake.set()
+    if made is not None and made.ident is not None:
         made.join(timeout)
-    _retry_stop.clear()
+    # A retry still trying writes the pending file only under
+    # _pending_lock, after seeing its stop: past this, it writes nothing.
+    with _pending_lock:
+        pass
 
 
 def _start_retry() -> None:
@@ -1479,10 +1505,21 @@ def _start_retry() -> None:
     with _pending_lock:
         if _retry_thread is not None:
             return
-        _retry_thread = threading.Thread(
-            target=_retry_loop, name="claude-relay-forget", daemon=True
+        stop, wake = threading.Event(), threading.Event()
+        made = threading.Thread(
+            target=_retry_loop,
+            args=(stop, wake),
+            name="claude-relay-forget",
+            daemon=True,
         )
-        _retry_thread.start()
+        _retry_thread = made
+        _retry_events["stop"], _retry_events["wake"] = stop, wake
+        try:
+            made.start()
+        except RuntimeError:
+            _retry_thread = None
+            _retry_events["stop"] = _retry_events["wake"] = None
+            logger.warning("the retry of pending relay deletions did not start")
 
 
 def new_start() -> None:
