@@ -130,8 +130,15 @@ own (the history already put their balance on 2000), so A/P Aging equals
 2000, every vendor's balance is their aging row, and Pay Bills offers the
 bills. A bill the report gives no number gets the number SlowBooks Pro
 would give it, from the vendor and the date. The report's aging headings,
-its "Total for" rows and its TOTAL row are not carried; they are formulas
-in the download, and the rows themselves are what comes across. The vendor
+its "Total for" rows and its TOTAL row are not carried. The totals are
+formulas in the download; the import works TOTAL out from the sheet's own
+cells and refuses the report when the rows it read do not add up to it. The
+dates are read month first (MM/DD/YYYY), as QuickBooks Online writes them
+for a US company. A row is refused by its number when it has an amount but
+no date or type, no open balance, no vendor, an open balance larger than
+its amount, a due date before its own date, or a date after the day the
+report was run. A vendor name with a colon (a sub-vendor) that the Vendor
+list lacks is refused too. The vendor
 column is read under QuickBooks' Vendor display name,
 Vendor or Vendor full name, or the Supplier spellings some regions use; a
 vendor the report names that the Vendor list lacks is created. The dry run
@@ -149,7 +156,10 @@ between 2000 and QuickBooks' own payable account ("Accounts Payable (A/P)",
 made then), so A/P Aging still equals 2000; a carried bill's lines and
 amount are not edited (its dates, terms and notes are). Without the report
 the payables come across as a balance on 2000 with no bills behind it, and
-the dry run says so.
+the dry run says so. Importing again with the report afterward carries the
+bills, and clears the vendor names the first import put on the Journal's
+entries on 2000, so the balance is not counted twice; a document carried
+once is not carried again, even after its notes are edited or it is voided.
 
 ## Path 2 — QuickBooks Desktop (IIF files)
 

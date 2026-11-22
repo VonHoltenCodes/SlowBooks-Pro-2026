@@ -67,6 +67,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
@@ -2128,15 +2129,74 @@ def _place_agings(bundle: dict) -> dict:
     return out
 
 
+# A cell reference in a report's formula ("H7"), and a formula of figures
+# and cell references added and taken away ("=H8+H13+H16"), the only kind
+# QuickBooks Online writes in the A/P Aging Detail report's totals.
+_CELL_REF = re.compile(r"([A-Z]{1,3})([0-9]+)")
+_SUM_FORMULA = re.compile(
+    r"=\s*[+-]?\s*(?:[A-Z]{1,3}[0-9]+|[0-9.]+)(?:\s*[+-]\s*(?:[A-Z]{1,3}[0-9]+|[0-9.]+))*\s*"
+)
+# The time a report was run, as its footer writes it ("Sunday, November 22,
+# 2026 03:41 PM GMTZ").
+_RUN_DATE = re.compile(
+    r"\b(January|February|March|April|May|June|July|August|September|October"
+    r"|November|December) ([0-9]{1,2}), ([0-9]{4})\b"
+)
+_DAY_FIRST = re.compile(r"\s*([0-9]{1,2})/([0-9]{1,2})/([0-9]{2,4})\s*")
+
+
+def _column_index(letters: str) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - ord("A") + 1)
+    return n - 1
+
+
+def _formula_value(rows: list[list[str]], text: str, depth: int = 0) -> Decimal | None:
+    """A total cell's figure: the figure itself, or a formula of figures and
+    cells added and taken away worked out from the sheet's own cells (a
+    cell that is a formula in turn is worked out the same way). None for
+    anything else, or a cell beyond the sheet."""
+    text = (text or "").strip()
+    if not text.startswith("="):
+        try:
+            return parse_amount(text)
+        except Exception:  # DataProblem
+            return None
+    if depth > 20 or not _SUM_FORMULA.fullmatch(text):
+        return None
+    total = Decimal("0")
+    for sign, term in re.findall(r"([+-]?)\s*([A-Z]{1,3}[0-9]+|[0-9.]+)", text[1:]):
+        ref = _CELL_REF.fullmatch(term)
+        if ref:
+            r, c = int(ref.group(2)) - 1, _column_index(ref.group(1))
+            if r >= len(rows):
+                return None
+            value = _formula_value(rows, _cell(rows[r], c), depth + 1)
+        else:
+            try:
+                value = Decimal(term)
+            except Exception:  # InvalidOperation
+                value = None
+        if value is None:
+            return None
+        total += -value if sign == "-" else value
+    return total
+
+
 def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
     """The A/P Aging Detail report's rows as {kind, type, row, date, num,
     vendor, due_date, amount, open}: kind "bill" for a bill with an open
     balance, "credit" for a vendor credit not (fully) applied and "payment"
     for a bill payment not (fully) applied, whose open balances are
-    negative. The report's layout: the company, the title, the period, a
-    blank row, the header (Date, Transaction type, Num, Vendor display
-    name, Due date, Past due, Amount, Open balance), a section per aging
-    bucket with its "Total for" row, a TOTAL row and the time it was run.
+    negative. The report's layout, as the 2026-11-22 download writes it:
+    the company, the title, the period, a blank row, the header (an empty
+    first column, then Date, Transaction type, Num, Vendor display name, Due
+    date, Past due, Amount, Open balance; an earlier download had no empty
+    first column, and both are read), a section per aging bucket opened by
+    its heading in the first column and closed by its "Total for" row, a
+    TOTAL row and the time it was run. The totals are formulas, worked out
+    from the rows' cells and checked against the rows read.
     Returns the rows, the errors (a row that cannot be read: nothing is
     carried) and the notes (a row left where it is, by its row number)."""
     rows = _rows(csv_text)
@@ -2150,11 +2210,20 @@ def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
             header_at = i
             break
     if header_at is None:
-        errors.append(
-            "The A/P Aging Detail report has no row with Date and Open balance "
-            "columns: export it from QuickBooks Online (Reports → A/P Aging "
-            "Detail → Export to Excel) and upload it as it downloads"
-        )
+        title = " ".join(c.strip() for r in rows[:4] for c in r if c.strip())
+        if re.search(r"\bsummary\b", title, re.I):
+            errors.append(
+                "This is the A/P Aging Summary report, which lists each vendor's "
+                "total and none of the bills behind it. Upload the A/P Aging "
+                "Detail report instead (Reports → A/P Aging Detail → Export to "
+                "Excel), as it downloads"
+            )
+        else:
+            errors.append(
+                "The A/P Aging Detail report has no row with Date and Open balance "
+                "columns: export it from QuickBooks Online (Reports → A/P Aging "
+                "Detail → Export to Excel) and upload it as it downloads"
+            )
         return items, errors, notes
     header = [c.strip().lower() for c in rows[header_at]]
 
@@ -2164,6 +2233,18 @@ def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
                 return header.index(n)
         return None
 
+    twice = [
+        name
+        for name in ("date", "transaction type", "amount", "open balance", "due date")
+        if header.count(name) > 1
+    ]
+    if twice:
+        errors.append(
+            f"The A/P Aging Detail report has more than one {twice[0].capitalize()} "
+            "column, so the import cannot tell which to read: export it with the "
+            "report's own columns"
+        )
+        return items, errors, notes
     i_date, i_type = col("date"), col("transaction type", "type")
     i_num, i_due = col("num", "no.", "number"), col("due date")
     i_vendor = col("vendor display name", "vendor", "vendor full name")
@@ -2180,36 +2261,113 @@ def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
             "QuickBooks labels it): export it with the report's own columns"
         )
         return items, errors, notes
+    run_on = None
+    for row in rows[header_at + 1 :]:
+        found = _RUN_DATE.search(_cell(row, 0))
+        if found:
+            try:
+                run_on = parse_date(
+                    f"{found.group(1)} {found.group(2)} {found.group(3)}",
+                    ("%B %d %Y",),
+                )
+            except Exception:  # DataProblem: no such day
+                run_on = None
+    if i_due is None:
+        notes.append(
+            "The A/P Aging Detail report has no Due date column: each bill is "
+            "carried with its own date as its due date. Export the report with "
+            "its own columns to keep the due dates."
+        )
     stated_total = None
+    total_unread = False
     left_alone = Decimal("0")  # the open balances of rows not carried over
     for n, row in enumerate(rows[header_at + 1 :], start=header_at + 2):
         label = _cell(row, 0).strip()
         if label.upper() == "TOTAL":
-            try:
-                stated_total = parse_amount(_cell(row, i_open))
-            except Exception:  # the total as a formula ("=H29+H33"): no figure
-                stated_total = None
+            stated_total = _formula_value(rows, _cell(row, i_open))
+            total_unread = stated_total is None and bool(_cell(row, i_open).strip())
             continue
+        if label.lower().startswith("total for "):
+            continue  # a bucket's total: TOTAL is checked
         raw_date = _cell(row, i_date).strip()
         ttype = _cell(row, i_type).strip()
+        raw_open = _cell(row, i_open).strip()
+        raw_amount = _cell(row, i_amount).strip() if i_amount is not None else ""
         if not raw_date or not ttype:
-            continue  # a section's heading or its total, a blank, the footer
+            if raw_open or raw_amount:
+                errors.append(
+                    f"A/P Aging Detail row {n} has an amount but no "
+                    f"{'date' if not raw_date else 'transaction type'}: export "
+                    "the report again with its own columns"
+                )
+            continue  # a bucket's heading, a blank, the footer
         vendor = _cell(row, i_vendor).strip()
         num = _cell(row, i_num).strip() if i_num is not None else ""
+        doc = " ".join(p for p in (ttype, num) if p)
+        raw_due = _cell(row, i_due).strip() if i_due is not None else ""
         try:
             day = parse_date(raw_date, _DATE_FORMATS)
-            raw_due = _cell(row, i_due).strip() if i_due is not None else ""
             due = parse_date(raw_due, _DATE_FORMATS) if raw_due else day
-            open_ = parse_amount(_cell(row, i_open))
-            amount = (
-                parse_amount(_cell(row, i_amount)) if i_amount is not None else open_
+        except Exception as exc:  # DataProblem: an unreadable date
+            day_first = [
+                m
+                for m in (_DAY_FIRST.fullmatch(raw_date), _DAY_FIRST.fullmatch(raw_due))
+                if m and int(m.group(1)) > 12 and int(m.group(2)) <= 12
+            ]
+            if day_first:
+                errors.append(
+                    f"A/P Aging Detail row {n}: the date {day_first[0].group(0).strip()} "
+                    "reads day first. SlowBooks Pro reads this report's dates month "
+                    "first (MM/DD/YYYY), as QuickBooks Online writes them for a US "
+                    "company: set the company's date format to MM/DD/YYYY and export "
+                    "the report again"
+                )
+            else:
+                errors.append(f"A/P Aging Detail row {n}: {exc}")
+            continue
+        what = f"{doc} of {day:%m/%d/%Y}" + (f" for {vendor}" if vendor else "")
+        if not raw_open:
+            errors.append(
+                f"A/P Aging Detail row {n}: the {what} has no Open balance: "
+                "export the report again"
             )
-        except Exception as exc:  # DataProblem: an unreadable cell
+            continue
+        if i_amount is not None and not raw_amount:
+            errors.append(
+                f"A/P Aging Detail row {n}: the {what} has no Amount: export the "
+                "report again"
+            )
+            continue
+        try:
+            open_ = parse_amount(raw_open)
+            amount = parse_amount(raw_amount) if i_amount is not None else open_
+        except Exception as exc:  # DataProblem: an unreadable amount
             errors.append(f"A/P Aging Detail row {n}: {exc}")
             continue
-        what = f"{ttype} {num}".strip() + f" of {day:%m/%d/%Y} for {vendor}"
         if not vendor:
-            errors.append(f"A/P Aging Detail row {n}: {what} names no vendor")
+            errors.append(f"A/P Aging Detail row {n}: the {what} names no vendor")
+            continue
+        if due < day:
+            errors.append(
+                f"A/P Aging Detail row {n}: the {what} is due on {due:%m/%d/%Y}, "
+                "before its own date. Correct its due date in QuickBooks Online "
+                "and export the report again"
+            )
+            continue
+        # a day's margin: the footer's time is GMT, the bill's date the
+        # company's own
+        if run_on is not None and day > run_on + timedelta(days=1):
+            errors.append(
+                f"A/P Aging Detail row {n}: the {what} is dated after the report "
+                f"was run ({run_on:%m/%d/%Y}). Check its date in QuickBooks Online "
+                "and export the report again"
+            )
+            continue
+        if not open_:
+            notes.append(
+                f"A/P Aging Detail row {n}: the {what} has nothing open, so "
+                "there is nothing to carry over for it."
+            )
             continue
         lowered = ttype.lower()
         if lowered == "bill":
@@ -2232,11 +2390,23 @@ def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
                 "names this row's type for none of them"
             )
             notes.append(
-                f"A/P Aging Detail row {n}: {what} ({open_:,.2f} open) is not "
+                f"A/P Aging Detail row {n}: the {what} ({open_:,.2f} open) is not "
                 f"carried over: {why}. Its balance stays on Accounts Payable with "
                 "no document behind it; enter it after the import."
             )
             continue
+        if not amount or (amount > 0) != (open_ > 0) or abs(open_) > abs(amount):
+            errors.append(
+                f"A/P Aging Detail row {n}: the {what} is open for {open_:,.2f}, "
+                f"which does not fit within its amount of {amount:,.2f}. Check "
+                "the row in QuickBooks Online and export the report again"
+            )
+            continue
+        if len(num) > 50:
+            notes.append(
+                f"A/P Aging Detail row {n}: the number {num} is longer than 50 "
+                f"characters and is carried over as {num[:50]}."
+            )
         items.append(
             {
                 "kind": kind,
@@ -2254,7 +2424,13 @@ def parse_ap_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
     if stated_total is not None and not errors and carried + left_alone != stated_total:
         errors.append(
             f"The A/P Aging Detail report's TOTAL ({stated_total:,.2f}) is not "
-            "the sum of its rows: export it again"
+            f"the sum of the rows read ({carried + left_alone:,.2f}): export it "
+            "again and upload it as it downloads"
+        )
+    elif total_unread and not errors:
+        notes.append(
+            "The A/P Aging Detail report's TOTAL could not be worked out, so the "
+            "rows read were not checked against it."
         )
     return items, errors, notes
 
@@ -2350,6 +2526,36 @@ def _bill_at_total(item: dict, journal: list[tuple]) -> None:
     item.update(total=item["amount"], paid=paid, paid_on=paid_on, paid_ref=paid_ref)
 
 
+def _carried_shape(doc, ap_id: int) -> bool:
+    """A bill or a vendor credit as the A/P carry-over writes one, whatever
+    its status: no posting, and every line on 2000 itself."""
+    if doc.transaction_id is not None:
+        return False
+    lines = list(doc.lines)
+    return bool(lines) and all(ln.account_id == ap_id for ln in lines)
+
+
+def _named_payable_entries(db: Session, ap_id: int) -> list[int]:
+    """The entries an earlier import of this export brought onto 2000 and
+    named for a vendor (#915)."""
+    from app.models.transactions import Transaction, TransactionLine
+
+    return [
+        tid
+        for (tid,) in db.query(Transaction.id)
+        .filter(
+            Transaction.source_type == SOURCE_TYPE,
+            Transaction.vendor_id.isnot(None),
+            Transaction.id.in_(
+                db.query(TransactionLine.transaction_id).filter(
+                    TransactionLine.account_id == ap_id
+                )
+            ),
+        )
+        .order_by(Transaction.id)
+    ]
+
+
 def _payables_plan(db: Session, bundle: dict) -> dict:
     """What the A/P Aging Detail report carries over, checked against the
     Journal and the books before anything is written: the bills, vendor
@@ -2372,6 +2578,7 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
         "vendors_matched": 0,
         "vendors_created": 0,
         "total": Decimal("0"),
+        "unname": [],
     }
     if not plan["given"] or "gl" not in bundle or "coa" not in bundle:
         return plan  # the engine names what is missing; W-117's note stands
@@ -2427,26 +2634,68 @@ def _payables_plan(db: Session, bundle: dict) -> dict:
         item["vendor"] = name
     plan["vendors_matched"] = len(matched)
     plan["vendors_created"] = len({n.lower() for n in unknown})
+    # A vendor name with a colon is how QuickBooks writes a sub-vendor
+    # (Parent:Child). No download has shown one, so one the Vendor list does
+    # not hold is refused by its row rather than made a vendor of that name.
+    for item in items:
+        if item["vendor"] in unknown and ":" in item["vendor"]:
+            plan["errors"].append(
+                f"A/P Aging Detail row {item['row']}: the vendor "
+                f"{item['vendor']} is not on the Vendor list, and its name reads "
+                "as a sub-vendor (Parent:Child), which the import does not carry "
+                "over. Upload the Vendors list from the same Export data zip, or "
+                "enter this bill after the import"
+            )
+    if plan["errors"]:
+        return plan
     for name in sorted(unknown):
         plan["notes"].append(
             f"{name} is on the A/P Aging Detail report but not on the Vendor "
             "list: the vendor is created with the carried-over documents"
         )
-    # what an earlier import carried, so a second upload does not twice
+    # What an earlier import carried, so a second upload does not carry it
+    # twice: known by its shape (no posting, every line on 2000; a bill
+    # payment paid from 2000 with no posting and applied to no bill), which
+    # an edit of its notes does not change, voided ones included (a void
+    # has moved its amount off the aging already).
     carried_bills: dict[tuple, int] = {}
-    for bill in db.query(Bill).filter(Bill.notes.like(f"{_AP_CARRIED}%")):
+    for bill in db.query(Bill).filter(Bill.transaction_id.is_(None)):
+        if not _carried_shape(bill, control.id):
+            continue
         key = (bill.vendor.name.lower(), bill.date, Decimal(str(bill.total)))
         carried_bills[key] = carried_bills.get(key, 0) + 1
     carried_credits: dict[tuple, int] = {}
-    for vc in db.query(VendorCredit).filter(VendorCredit.notes.like(f"{_AP_CARRIED}%")):
+    for vc in db.query(VendorCredit).filter(VendorCredit.transaction_id.is_(None)):
+        if not _carried_shape(vc, control.id):
+            continue
         key = (vc.vendor.name.lower(), vc.date, Decimal(str(vc.total)))
         carried_credits[key] = carried_credits.get(key, 0) + 1
     carried_payments: dict[tuple, int] = {}
     for bp in db.query(BillPayment).filter(
-        BillPayment.notes.like(f"{_AP_CARRIED}%"), BillPayment.is_voided.isnot(True)
+        BillPayment.transaction_id.is_(None),
+        BillPayment.pay_from_account_id == control.id,
     ):
+        if bp.allocations or (bp.notes or "").startswith(_AP_PAID_PART):
+            continue  # a carried bill's paid part, not an unapplied payment
         key = (bp.vendor.name.lower(), bp.date, Decimal(str(bp.amount)))
         carried_payments[key] = carried_payments.get(key, 0) + 1
+    # An earlier import of this export without the report named the
+    # Journal's A/P entries for their vendors (#915), so A/P Aging shows the
+    # balance by vendor already: the carried documents take their place,
+    # and those entries' vendor names are cleared, or the balance would
+    # age twice.
+    plan["unname"] = _named_payable_entries(db, control.id)
+    if plan["unname"]:
+        count = len(plan["unname"])
+        plan["notes"].append(
+            f"{count} of the Journal's entries on {label_for(control, db)}, from an "
+            f"earlier import of this export, {'is' if count == 1 else 'are'} "
+            "named for "
+            f"{'its vendor' if count == 1 else 'their vendors'}, so A/P Aging "
+            "already shows that balance by vendor. The carried-over bills, vendor "
+            "credits and bill payments take their place: those entries' vendor "
+            "names are cleared, so the balance is not counted twice."
+        )
     numbers = {n for (n,) in db.query(VendorCredit.credit_number).all()}
     lists = {"bill": "bills", "credit": "credits", "payment": "payments"}
     seen = {"bill": carried_bills, "credit": carried_credits}
@@ -3488,6 +3737,16 @@ def _name_control_lines(db: Session, named: list[dict], plan: dict) -> int:
     return count
 
 
+def _unname_payable_entries(db: Session, ids: list[int]) -> None:
+    """Clear the vendor an earlier import put on the Journal's A/P entries
+    (#915), once carried documents stand for that balance (#713)."""
+    from app.models.transactions import Transaction
+
+    for txn in db.query(Transaction).filter(Transaction.id.in_(ids)):
+        txn.vendor_id = None
+    db.flush()
+
+
 def _refused_counts(refused: dict, plan: dict, ap_plan: dict) -> dict:
     refused.update(
         imported_accounts=0,
@@ -3552,6 +3811,8 @@ def run_import(db: Session, bundle: dict) -> dict:
         _name_control_lines(
             db, named, {**plan, "ap_given": ap_plan["payable"] is not None}
         )
+        if ap_plan["payable"] is not None and ap_plan["unname"]:
+            _unname_payable_entries(db, ap_plan["unname"])
         invoices, payments = _import_carried(db, plan)
         bills, credits, bill_payments = _import_carried_payables(db, ap_plan)
         db.commit()

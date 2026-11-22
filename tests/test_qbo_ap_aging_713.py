@@ -554,15 +554,52 @@ def test_a_header_with_no_rows_is_no_open_bills(header):
     assert qbo.parse_ap_aging(text) == ([], [], [])
 
 
-def test_the_totals_as_formulas_are_left_alone():
-    # the bucket totals and TOTAL are formulas with no figure: not read, as
-    # the A/R Aging Detail reader leaves its own; a wrong formula is not an
-    # error, the rows are what is carried
+def test_the_totals_as_formulas_are_worked_out_and_checked():
+    # TOTAL is a formula of the bucket totals, each a formula of its rows'
+    # cells, with no figure of its own in the upload: it is worked out from
+    # the sheet and checked against the rows read; a bucket's own total is
+    # not checked
     rows = [list(r) for r in REAL_LAYOUT]
-    rows[16][8] = "=I8"
     rows[12][8] = "=I10"
+    rows[16][8] = "=I8+I15"  # leaves the 1 - 30 days bucket out
     items, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [
+        "The A/P Aging Detail report's TOTAL (262.40) is not the sum of the "
+        "rows read (1,025.00): export it again and upload it as it downloads"
+    ]
+    rows[16][8] = "=I7+I10+I11+I12+I15"
+    items, errors, notes = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [] and notes == [] and len(items) == 5
+
+
+def test_a_row_the_reader_skips_is_caught_by_the_total():
+    # a row with an open balance but no date: refused by its row, and the
+    # formula TOTAL would not have matched the rows read either
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[6][1] = None
+    items, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [
+        "A/P Aging Detail row 7 has an amount but no date: export the report "
+        "again with its own columns"
+    ]
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[6][2] = None
+    _, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [
+        "A/P Aging Detail row 7 has an amount but no transaction type: export "
+        "the report again with its own columns"
+    ]
+
+
+def test_a_total_that_cannot_be_worked_out_is_said():
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[16][8] = "=SUM(I7:I15)"
+    items, errors, notes = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
     assert errors == [] and len(items) == 5
+    assert notes == [
+        "The A/P Aging Detail report's TOTAL could not be worked out, so the "
+        "rows read were not checked against it."
+    ]
 
 
 def test_a_total_given_as_a_figure_is_checked_against_the_rows():
@@ -576,8 +613,8 @@ def test_a_total_given_as_a_figure_is_checked_against_the_rows():
     rows[16][8] = 999.0
     _, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
     assert errors == [
-        "The A/P Aging Detail report's TOTAL (999.00) is not the sum of its "
-        "rows: export it again"
+        "The A/P Aging Detail report's TOTAL (999.00) is not the sum of the "
+        "rows read (1,025.00): export it again and upload it as it downloads"
     ]
 
 
@@ -1026,3 +1063,231 @@ def test_a_carried_bills_lines_stay_as_they_came(client, db_session, seed_accoun
     r = client.post(f"/api/bills/{bill.id}/void")
     assert r.status_code == 200, r.text
     _ties(client, db_session, Decimal("625.00"))
+
+
+# ── rows that do not read right are refused by their row ─────────────────
+
+
+def _real_row_changed(**cells):
+    """REAL_LAYOUT with the first bill's cells (row 7) changed, by column
+    index: 1 Date, 2 Transaction type, 3 Num, 4 Vendor, 5 Due date,
+    7 Amount, 8 Open balance."""
+    rows = [list(r) for r in REAL_LAYOUT]
+    for i, value in cells.items():
+        rows[6][int(i[1:])] = value
+    return qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+
+
+@pytest.mark.parametrize(
+    "cells,error",
+    [
+        (
+            {"c5": "09/01/2026"},
+            "A/P Aging Detail row 7: the Bill of 09/14/2026 for Harbor Paint Supply "
+            "is due on 09/01/2026, before its own date. Correct its due date in "
+            "QuickBooks Online and export the report again",
+        ),
+        (
+            {"c1": "12/01/2026", "c5": "12/31/2026"},
+            "A/P Aging Detail row 7: the Bill of 12/01/2026 for Harbor Paint Supply "
+            "is dated after the report was run (11/22/2026). Check its date in "
+            "QuickBooks Online and export the report again",
+        ),
+        (
+            {"c1": "14/09/2026", "c5": "14/10/2026"},
+            "A/P Aging Detail row 7: the date 14/09/2026 reads day first. SlowBooks "
+            "Pro reads this report's dates month first (MM/DD/YYYY), as QuickBooks "
+            "Online writes them for a US company: set the company's date format to "
+            "MM/DD/YYYY and export the report again",
+        ),
+        (
+            {"c7": 12.4},
+            "A/P Aging Detail row 7: the Bill of 09/14/2026 for Harbor Paint Supply "
+            "is open for 112.40, which does not fit within its amount of 12.40. "
+            "Check the row in QuickBooks Online and export the report again",
+        ),
+        (
+            {"c7": -112.4},
+            "A/P Aging Detail row 7: the Bill of 09/14/2026 for Harbor Paint Supply "
+            "is open for 112.40, which does not fit within its amount of -112.40. "
+            "Check the row in QuickBooks Online and export the report again",
+        ),
+        (
+            {"c7": None},
+            "A/P Aging Detail row 7: the Bill of 09/14/2026 for Harbor Paint Supply "
+            "has no Amount: export the report again",
+        ),
+        (
+            {"c8": None},
+            "A/P Aging Detail row 7: the Bill of 09/14/2026 for Harbor Paint Supply "
+            "has no Open balance: export the report again",
+        ),
+        (
+            {"c4": None},
+            "A/P Aging Detail row 7: the Bill of 09/14/2026 names no vendor",
+        ),
+    ],
+    ids=[
+        "due before its date",
+        "dated after the run",
+        "day first",
+        "open above amount",
+        "amount the other sign",
+        "no amount",
+        "no open balance",
+        "no vendor",
+    ],
+)
+def test_a_row_that_does_not_read_right_is_refused_by_its_row(cells, error):
+    items, errors, _ = _real_row_changed(**cells)
+    assert errors == [error]
+
+
+def test_a_row_with_nothing_open_is_said_and_not_carried():
+    items, errors, notes = _real_row_changed(c8=0)
+    assert errors == [] and len(items) == 4
+    assert notes == [
+        "A/P Aging Detail row 7: the Bill of 09/14/2026 for Harbor Paint Supply "
+        "has nothing open, so there is nothing to carry over for it."
+    ]
+
+
+def test_a_long_number_is_said_when_it_is_cut():
+    items, errors, notes = _real_row_changed(c3="N" * 60)
+    assert errors == [] and items[0]["num"] == "N" * 50
+    assert notes == [
+        f"A/P Aging Detail row 7: the number {'N' * 60} is longer than 50 "
+        f"characters and is carried over as {'N' * 50}."
+    ]
+
+
+def test_a_report_without_due_dates_says_so():
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[4] = [None] + ["Due" if h == "Due date" else h for h in HEADER]
+    items, errors, notes = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [] and len(items) == 5
+    assert all(i["due_date"] == i["date"] for i in items)
+    assert notes == [
+        "The A/P Aging Detail report has no Due date column: each bill is "
+        "carried with its own date as its due date. Export the report with "
+        "its own columns to keep the due dates."
+    ]
+
+
+def test_two_open_balance_columns_are_refused():
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[4] = [None] + HEADER + ["Open balance"]
+    _, errors, _ = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
+    assert errors == [
+        "The A/P Aging Detail report has more than one Open balance column, so "
+        "the import cannot tell which to read: export it with the report's own "
+        "columns"
+    ]
+
+
+def test_the_summary_report_is_named_as_the_wrong_report():
+    text = _csv(
+        [
+            ["Fieldstone Renovations"],
+            ["A/P Aging Summary Report"],
+            ["As of November 22, 2026"],
+            [""],
+            ["", "Current", "1 - 30", "31 - 60", "61 - 90", "91 and over", "Total"],
+            ["Harbor Paint Supply", "", "", "112.40", "", "", "112.40"],
+            ["TOTAL", "", "", "112.40", "", "", "112.40"],
+        ]
+    )
+    assert qbo.parse_ap_aging(text) == (
+        [],
+        [
+            "This is the A/P Aging Summary report, which lists each vendor's "
+            "total and none of the bills behind it. Upload the A/P Aging Detail "
+            "report instead (Reports → A/P Aging Detail → Export to Excel), as it "
+            "downloads"
+        ],
+        [],
+    )
+
+
+def test_a_sub_vendor_the_list_lacks_is_refused_by_its_row(
+    client, db_session, seed_accounts
+):
+    rows = [list(r) for r in REAL_LAYOUT]
+    rows[10][4] = "Copperline Group:Copperline Electric"
+    data = client.post(
+        "/api/migration/qbo_export/import", files=_real_files(rows)
+    ).json()
+    assert data["ok"] is False
+    assert data["errors"][-1] == (
+        "A/P Aging Detail row 11: the vendor Copperline Group:Copperline Electric "
+        "is not on the Vendor list, and its name reads as a sub-vendor "
+        "(Parent:Child), which the import does not carry over. Upload the Vendors "
+        "list from the same Export data zip, or enter this bill after the import"
+    )
+    assert db_session.query(Bill).count() == 0
+    assert db_session.query(Vendor).count() == 0
+
+
+# ── a second import keeps A/P Aging on 2000 ───────────────────────────────
+
+
+def test_a_first_import_without_the_report_then_one_with_it(
+    client, db_session, seed_accounts
+):
+    data = client.post(
+        "/api/migration/qbo_export/import", files=_files(aging=False)
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    named = db_session.query(Transaction).filter(Transaction.vendor_id.isnot(None))
+    assert named.count() > 0  # the Journal's A/P entries age by vendor (#915)
+
+    dry = client.post("/api/migration/qbo_export/dry-run", files=_real_files()).json()
+    assert dry["ok"] is True, dry["errors"]
+    assert any("vendor names are cleared" in w for w in dry["warnings"]), dry
+    db_session.expire_all()
+    assert named.count() > 0  # the dry run cleared nothing
+
+    data = client.post("/api/migration/qbo_export/import", files=_real_files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert data["imported_open_bills"] == 5
+    db_session.expire_all()
+    ap = db_session.query(Account).filter(Account.account_number == "2000").one()
+    on_ap = db_session.query(TransactionLine.transaction_id).filter(
+        TransactionLine.account_id == ap.id
+    )
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.vendor_id.isnot(None), Transaction.id.in_(on_ap))
+        .count()
+        == 0
+    )
+    _ties(client, db_session, Decimal("1025.00"))
+
+
+def test_a_carried_bill_with_its_notes_edited_is_not_carried_again(
+    client, db_session, seed_accounts
+):
+    client.post("/api/migration/qbo_export/import", files=_files())
+    bill = db_session.query(Bill).filter(Bill.bill_number == "B-100").one()
+    r = client.put(f"/api/bills/{bill.id}", json={"notes": "Call first"})
+    assert r.status_code == 200, r.text
+    data = client.post("/api/migration/qbo_export/import", files=_files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert data["imported_open_bills"] == 0
+    assert db_session.query(Bill).count() == 3
+    _ties(client, db_session, Decimal("1025.00"))
+
+
+def test_a_voided_unapplied_payment_is_not_carried_again(
+    client, db_session, seed_accounts
+):
+    client.post("/api/migration/qbo_export/import", files=_files())
+    r = client.post(
+        f"/api/bill-payments/{_carried_id(db_session, 'unapplied_payment')}/void"
+    )
+    assert r.status_code == 200, r.text
+    data = client.post("/api/migration/qbo_export/import", files=_files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert data["imported_unapplied_bill_payments"] == 0
+    assert db_session.query(BillPayment).count() == 2
+    _ties(client, db_session, Decimal("1100.00"))
