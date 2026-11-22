@@ -14,7 +14,9 @@ pressed again.
 import json
 import os
 import logging
+import secrets
 import socket
+import threading
 import time
 
 import pytest
@@ -231,6 +233,77 @@ def test_the_relay_name_outlives_a_restart_and_is_deleted_when_the_relay_is_back
     assert relay.paths().count(("POST", "/v1/forget")) > forgets_before
     assert client.get("/api/switchboard/status").json()["pending"] == []
     assert away["relay"] != relay.url
+
+
+@pytest.fixture
+def held_retry(tmp_path, monkeypatch):
+    """A pending deletion whose try at the relay is held until released, as
+    a try at a relay that is away can take as long as the press's deadline
+    (Windows refuses a closed port only after a few seconds)."""
+    monkeypatch.setattr(link, "link_path", lambda: tmp_path / link.LINK_FILE)
+    monkeypatch.setattr(link, "RETRY_FIRST", 0.05)
+    monkeypatch.setattr(link, "RETRY_MAX", 0.1)
+    held = {"entered": threading.Event(), "release": threading.Event()}
+    held["tries"], held["saves"] = [], []
+
+    def forget(relay, credential, deadline=None):
+        held["tries"].append(threading.current_thread().name)
+        held["entered"].set()
+        held["release"].wait(10)
+        return link._Forgot(link.AWAY)
+
+    save = link._save_pending
+
+    def saved(items):
+        held["saves"].append(threading.current_thread().name)
+        save(items)
+
+    monkeypatch.setattr(link, "_relay_forget", forget)
+    monkeypatch.setattr(link, "_save_pending", saved)
+    held["record"] = {
+        "relay": f"http://127.0.0.1:{_free_port()}",
+        "slug": "".join(secrets.choice("abcdefghjkmnpqrstvwxyz") for _ in range(10)),
+        "credential": "sbd_" + secrets.token_urlsafe(32),
+    }
+    try:
+        yield held
+    finally:
+        held["release"].set()
+        link.stop_retry()
+
+
+def test_a_stop_that_runs_out_of_time_still_ends_the_retry(held_retry):
+    """The app's shutdown gives the retry a second; a try can take ten. A
+    stop that ran out of time used to undo itself: the retry went on trying
+    and writing the pending file after it, over what came next (in the
+    tests, a pending file a test had just rewritten: Windows CI, once). Now
+    the retry ends with the try it was on, and writes nothing after its
+    stop."""
+    link._add_pending(held_retry["record"])
+    retry = link._retry_thread
+    assert held_retry["entered"].wait(5)
+    link.stop_retry(timeout=0.2)
+    del held_retry["saves"][:]
+    # what comes after the stop has the file: here, Dismiss
+    link.dismiss_pending(held_retry["record"]["slug"])
+    held_retry["release"].set()
+    retry.join(5)
+    assert not retry.is_alive()
+    assert held_retry["tries"] == ["claude-relay-forget"]
+    assert "claude-relay-forget" not in held_retry["saves"]
+    assert link._load_pending()[0]["dismissed"] is True
+    assert link._retry_thread is None
+
+
+def test_the_first_try_waits_its_time_after_an_earlier_stop(held_retry, monkeypatch):
+    """A stop with no retry running (the app's shutdown, a test's) left its
+    wake-up set, and the next retry tried at once instead of after
+    RETRY_FIRST: the try was then under way when the next stop came."""
+    monkeypatch.setattr(link, "RETRY_FIRST", 3.0)
+    link.stop_retry()
+    link._add_pending(held_retry["record"])
+    assert link._retry_thread is not None
+    assert not held_retry["entered"].wait(0.5)
 
 
 def test_only_an_administrator_dismisses(relay, client):
