@@ -3454,13 +3454,17 @@ _PAGE_STATE = """(sel) => {
 }"""
 
 
+def _answer_the_new_tab(route):
+    """What a tab the browser opens is answered with: a document."""
+    route.fulfill(body="<!doctype html><title>Opened</title>", content_type="text/html")
+
+
 def _click_to_a_new_tab(page, handled, selector, held):
     """A click on `selector` with `held`, which the browser opens in a new
     tab (or window): that page, closed. A click that opens none fails with
     what the page saw and showed, its console's errors and the last
-    requests the app served, so a miss explains itself. (On CI the
-    customer page's Ctrl+click once opened no tab in 30 s; the cause was
-    not found from the log, which said only that.)"""
+    requests the app served, so a miss explains itself. The new tab is
+    answered with a document of its own (below)."""
     errors = []
 
     def console(msg):
@@ -3472,6 +3476,19 @@ def _click_to_a_new_tab(page, handled, selector, held):
 
     page.on("console", console)
     page.on("pageerror", pageerror)
+    # The new tab loads the link's address on the test's made-up origin,
+    # which only `page`'s own route answered: the tab's request went out to
+    # the network, found no such host and the tab showed the browser's
+    # error page. When that failure came while Playwright was still
+    # attaching to the tab, Playwright found no document yet and waited for
+    # the tab's first commit, but the error page's commit had already gone
+    # by unreported: no "page" came, though the browser had opened the tab
+    # (CI, 4 of ~6 runs; ~1 click in 100 here with four browsers running).
+    # The context answers the new tab with a document instead: the tab
+    # cannot commit before Playwright has answered its request, so the
+    # commit is seen. Page routes come first, so `page` itself is still
+    # answered by its own route.
+    page.context.route("**/*", _answer_the_new_tab)
     try:
         page.evaluate(_WATCH_CLICK)
         try:
@@ -3491,6 +3508,7 @@ def _click_to_a_new_tab(page, handled, selector, held):
             ) from exc
         opened.value.close()
     finally:
+        page.context.unroute("**/*", _answer_the_new_tab)
         page.remove_listener("console", console)
         page.remove_listener("pageerror", pageerror)
 
