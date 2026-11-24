@@ -441,6 +441,13 @@ def void_vendor_credit_unchecked(db: Session, vc: VendorCredit) -> None:
 
     check_closing_date(db, vc.date)
 
+    # A vendor credit the QuickBooks Online import carried onto 2000 with no
+    # posting: its amount comes back onto 2000 from QuickBooks' payable, so
+    # the A/P aging still equals 2000 (#713)
+    from app.services.qbo_export_import import void_carried_payable_posting
+
+    void_carried_payable_posting(db, credit=vc)
+
     for app_row in list(vc.applications):
         bill = (
             db.query(Bill).filter(Bill.id == app_row.bill_id).with_for_update().first()
