@@ -1066,7 +1066,8 @@ lifecycle is draft → submitted (*pending*) → approved, with reject and void
 beside it; a PCO runs
 draft → pending → promoted (asking to *promote* rather than approve). On
 screen: a new change order is **Draft** and nothing moves; **Submit** makes it
-**Pending** (sent to the owner, still nothing moves); **Approve** makes it
+**Pending** (sent to the owner, or to the sub for a sub change order; still
+nothing moves); **Approve** makes it
 **Approved**, and only then does it take effect. A change order carries no
 contract time: there is no field for the days it adds (see *What this mode
 does not do yet*).
@@ -1117,7 +1118,7 @@ a draft or a submitted application). So when the owner's architect or rep
 certifies less than you asked for, open the submitted application, change its
 amounts to the certified figures, then Approve. The PDF (titled *Application
 for Payment*) prints the application's **Status** (Draft, Submitted,
-Approved), the contract sums, the summary and the line detail. It has no
+Approved or Void), the contract sums, the summary and the line detail. It has no
 certification, signature or notary block, so it is a summary and line detail
 laid out the way AIA's G702 and G703 are, not the AIA form itself. The form's **Lien
 waiver** select (not required, pending, conditional, unconditional) records
@@ -1562,10 +1563,12 @@ Two ways out, from the tab (tick the signed tickets first):
   ticket's bill rates are not used on this path, **so the PCO can differ from
   what the owner's rep signed**: a ticket whose bill rates were left blank
   (cost rate plus the job's markup) comes to the same figures, give or take a
-  cent of rounding; one with bill rates typed in does not. To make it match,
-  set the job's **Markup on change orders** before making the change order,
-  or edit the PCO while it is a draft (its **Markup %**, or a line's own
-  Markup %). A sub's ticket is
+  cent of rounding a line, as long as the job's **Markup on change orders**
+  has not changed since the ticket was saved (the ticket's bill rate was
+  figured at the markup of that day; a draft or pending PCO with no markup of
+  its own reads the job's markup as it is now). One with bill rates typed in
+  does not. To make it match, edit the PCO while it is a draft or pending:
+  its **Markup %**, or a line's own Markup %. A sub's ticket is
   subcontract cost on the PCO, and also goes, at cost with no markup, on a
   draft **sub change order** on its commitment (one per commitment), so the
   sub's contract rises with the owner's; link it to the owner CO once the PCO
@@ -1730,7 +1733,8 @@ job had on the day: a job closed after it reads in progress.
 of cost posted and no forecast entered, so it is 50% complete and has earned $50,000. Billed $60,000,
 it is **over-billed** $10,000 (billed ahead of the work: a liability). Billed
 $45,000, it is **under-billed** $5,000 (work done not yet billed: an asset).
-The percent is always cost to date ÷ estimated total cost, never the % complete
+The percent is cost to date ÷ estimated total cost (at most 100%, and 100% for
+a closed job), never the % complete
 on the pay applications, and the cost still to come is the
 **Cost-to-Complete Forecast**'s (below), not the older Cost to Complete
 report's.
