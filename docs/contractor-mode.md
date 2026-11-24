@@ -9,7 +9,9 @@ trade packages, a Sub vendor type, construction estimating, the contract and
 schedule of values, commitments, change orders, progress billing with
 retainage, field tickets (T&M tickets, material slips, delivery tickets), a
 contractor's dashboard, and ten job reports. Every role reaches these screens; only
-payroll and HR are the administrator's alone.
+payroll and HR are the administrator's alone, and posting or voiding the WIP
+adjusting entry is the administrator's or the accountant's (a bookkeeper is
+refused).
 
 The five starting cost types (labor, material, subcontract, equipment,
 other) appear in the Cost Types list once the company has saved something
@@ -86,9 +88,9 @@ whatever the number-and-name rule would otherwise guess.
 | ------ | --------------------------------------------------- | --------- | ----------------------- |
 | 1150   | Retainage Receivable                                | Asset     | Other Current Asset     |
 | 1350   | Construction in Progress                            | Asset     | Other Current Asset     |
-| 1360   | Costs and Estimated Earnings in Excess of Billings  | Asset     | Other Current Asset     |
+| 1360   | Costs and Estimated Earnings in Excess of Billings *(under-billed: an asset)* | Asset     | Other Current Asset     |
 | 2050   | Retainage Payable                                   | Liability | Other Current Liability |
-| 2060   | Billings in Excess of Costs and Estimated Earnings  | Liability | Other Current Liability |
+| 2060   | Billings in Excess of Costs and Estimated Earnings *(over-billed: a liability)* | Liability | Other Current Liability |
 | 2070   | Provision for Loss on Uncompleted Contracts         | Liability | Other Current Liability |
 | 2210   | Customer Deposits                                   | Liability | Other Current Liability |
 | 2220   | Use Tax Payable                                     | Liability | Other Current Liability |
@@ -104,7 +106,7 @@ a sub. Construction in Progress is for a company that capitalises job cost
 until it bills: nothing posts there on its own (job cost goes to the 5100–5500
 job-cost accounts, and the WIP schedule's adjusting entry is the over- and
 under-billing mechanism), so a company that wants it books it by journal
-entry. Customer Deposits holds money taken before work. Use Tax Payable is the
+entry; left alone, it stays at zero. Customer Deposits holds money taken before work. Use Tax Payable is the
 use tax a contractor self-assesses on materials: a material bill on a job
 whose contractor pays the tax accrues it there (see *Sales tax and use tax on
 a job*). Contract Revenue is where a pay
@@ -192,7 +194,7 @@ its own posts to the code's account, else the default account of the line's
 cost type (its own, else the code's) — the accounts construction setup maps
 (subcontract → 5300, equipment → 5400 …) — before the vendor's default
 expense account is tried. The account chosen on the line, then the item's
-expense account, still come first. The **Sub pay app** / To Bill dialog
+expense account, still come first. The **Sub pay app** dialog
 pre-fills each line's account the same way, and the bill form saves a costed
 line with no account picked. A Job Cost Entry already resolves this way
 (line account, then code, then type). A Business or Nonprofit company's lines
@@ -386,6 +388,18 @@ converted estimate can't be marked lost. The list carries a **Status** filter
 (Pending / Accepted / Lost / Converted); `GET /api/estimates?status=` filters
 the same way.
 
+**Void Estimate** (on the estimate's view) is for one made in error: a
+duplicate, the wrong customer. It keeps its number, marked void, and leaves
+the **Estimate Closing Rate** report (won against lost, by count and dollars,
+per customer and job type, on the Report Center). It is refused once
+something is built on the estimate (its invoice, or the contract, schedule of
+values or budget its acceptance made), and it can't be undone.
+
+**Set a job you are bidding to Pending.** A new job starts **In progress**,
+and Accept moves a job to Awarded only when it is Pending. Pending does not
+keep a job off the job reports (only Closed and Not awarded are left out by
+default), so set a lost bid's job to **Not awarded**.
+
 ### The bid the owner receives
 
 The customer PDF (and Print) of a construction estimate is built to go out
@@ -437,7 +451,10 @@ left it.
 An accepted estimate prices the work; the **contract** is the deal with the
 owner. A construction job grows a **Contract** tab (construction mode only;
 every other company sees the job pages exactly as before) that holds the
-terms, a few summary tiles and the owner's schedule of values. A job with no
+terms, a few summary tiles and the owner's schedule of values. A
+construction job's tabs are **Overview**, **Cost Detail**, **Budget**,
+**Contract**, **Buyout**, **Change orders**, **Pay apps**, **Field tickets**,
+**Transactions** and **Time**. A job with no
 contract type set behaves the way it always has — the plain Contract amount on
 the job form still works for everyone. A newly created job opens on its
 **Overview**; each job you open keeps the tab you left it on for the rest of
@@ -456,6 +473,11 @@ not-to-exceed). The type decides how the fee and the cap read:
 - **Cap** — the guaranteed maximum on a GMP (normally the contract sum, and
   defaulted to it), or an optional not-to-exceed on cost-plus. *Cap remaining*
   is the cap less cost-to-date and fee.
+- **Billing a cost-plus or GMP job.** Nothing bills "cost to date + fee": the
+  fee and the cap are figures on the Contract tab, not an invoice. Bill such
+  a job on pay applications against its schedule of values (each period's
+  cost plus fee typed as *This period*), or, on a job with no schedule of
+  values, by invoice (**Bill it** on its T&M tickets, or an ordinary invoice).
 - **Contingency** — the owner's contingency carried inside the contract sum
   (it rides the schedule as its own line, and building from an estimate adds
   it to the sum so the schedule still balances), drawn down as change orders
@@ -513,7 +535,7 @@ installs:
   with its job, section and cost type / CR **2220 Use Tax Payable** with the
   job. Accounts Payable is still the bill's total (the use tax is owed to the
   state, not the vendor), and the job's cost carries the tax, as it would
-  had the vendor charged it. A commitment billed through **To Bill** accrues
+  had the vendor charged it. A commitment billed through **Sub pay app** accrues
   the same way. Voiding the bill reverses the accrual with the rest of its
   journal; editing it re-posts it. A stock item (received into Inventory)
   accrues none.
@@ -524,8 +546,9 @@ installs:
   A memorized bill keeps the box on each line (Memorize Bill carries it from
   the bill), and every bill entered from it accrues as the box says, at the
   rate in force when that bill is entered.
-- **The rate** is Settings → Invoice Defaults → **Use tax rate**, a percent
-  like the default tax rate; blank (the default) uses the default tax rate.
+- **The rate** is Settings → Sales documents → Invoice Defaults → **Use tax
+  rate (%)** (shown once the company is Construction), a percent like the
+  default tax rate; blank (the default) uses the default tax rate.
   **A bill keeps the rate it was booked at.** The rate is stored on each bill
   line when its use tax first accrues (`bill_lines.use_tax_rate`), and every
   edit of the bill re-posts at it: changing the setting from 6.5 to 7 and then
@@ -541,7 +564,7 @@ installs:
   **When both are 0 nothing accrues, and the program says so:** saving the
   Contract tab with *Contractor pays tax on materials* returns a warning
   (`warnings` on the response, shown as a toast) naming the Use tax rate
-  setting, and a bill (or a commitment billed through To Bill) with a line that
+  setting, and a bill (or a commitment billed through Sub pay app) with a line that
   would owe use tax at 0% carries the same kind of sentence in its response.
   The bill still posts.
 - **The Sales Tax report** has a **Use tax** section: each accrual in the
@@ -667,14 +690,17 @@ its license and insurance aren't tracked; nothing is blocked.
 
 **The schedule of values is the lines.** A commitment's lines are its schedule
 of values: each line's amount is its scheduled value, and the commitment bills
-against those lines a period at a time. **Partial billing** — *To Bill* on a
+against those lines a period at a time. **Partial billing** — **Sub pay app** on a
 commitment opens the usual convert dialog with an amount-this-period column
 prefilled with each line's remaining (scheduled value less what's already
 billed). Bill some or all of it: each line tallies its billed-to-date, the
 commitment reads **partial** while anything remains and **closed** once every
 line is fully billed. A billed line cannot be removed or cut below what was
 billed on it (409, code `commitment_billed`): on a subcontract, change it with
-a sub change order; on a supplier PO, void the bill first. A business company's PO bills in one go exactly as before. The dialog takes a
+a sub change order; on a supplier PO, void the bill first. In construction
+mode every purchase order shows **Sub pay app**, never To Bill, plain
+supplier POs included: it is also how a supplier's invoice on a PO is
+entered (the dialog is titled "Turn *PO number* into a bill"). A business company's PO bills in one go with **To Bill**, exactly as before. The dialog takes a
 **bill date**, defaulting to today: the bill, its journal entry and the
 closing-date check all use it, so a progress bill ages from the day it is
 billed and a later period can still be billed once the PO's own month is
@@ -823,6 +849,14 @@ Numbers from before this (`CO-0001`) keep theirs.
   lines to the sub's scope. A sub change order moves a commitment by **cost**;
   it carries no markup, because the markup is the contractor's and lives on the
   owner side.
+
+**On the Change orders tab.** **+ New change order** opens the form (its **Kind**
+is picked there), and **Promote selected PCOs** rolls up the ticked PCOs. Each row
+offers, as its status allows: **Edit** (or **View**), **Submit**, **Approve**,
+**Reject**, **Promote** and **Revise** (a PCO), **Void**, **Make sub order**
+and **PDF**. **Make sub order**, on an approved owner change order, asks for
+one of the job's commitments and the lines to carry (its subcontract lines are
+ticked first) and makes a draft sub change order on it, at cost.
 
 **Material and labor priced separately, with markup.** Each line is a cost
 type (labor, material, subcontract, equipment, other), a quantity and a unit
@@ -1030,7 +1064,13 @@ carries it with no amounts, so the draft no longer lists a voided change or
 a balance to finish on it; an approved application keeps the line as history. The
 lifecycle is draft → submitted (*pending*) → approved, with reject and void
 beside it; a PCO runs
-draft → pending → promoted (asking to *promote* rather than approve).
+draft → pending → promoted (asking to *promote* rather than approve). On
+screen: a new change order is **Draft** and nothing moves; **Submit** makes it
+**Pending** (sent to the owner, or to the sub for a sub change order; still
+nothing moves); **Approve** makes it
+**Approved**, and only then does it take effect. A change order carries no
+contract time: there is no field for the days it adds (see *What this mode
+does not do yet*).
 
 **Billed change orders are locked.** Once a pay application has billed a
 change order's schedule-of-values line (#555, below), that change order can no
@@ -1070,6 +1110,21 @@ says why there is nothing on it to bill and offers Delete in place of Submit
 and Approve. While an application is open, New is refused with a sentence that
 names it and says to submit, approve or delete it. An approved application with
 no lines and a zero total is voided like any other (#723).
+
+**Submit, Approve and the printed application.** **Submit** marks the
+application as sent to the owner; nothing posts. **Approve** is the
+contractor's own button, not the owner's approval: it posts the invoice (from
+a draft or a submitted application). So when the owner's architect or rep
+certifies less than you asked for, open the submitted application, change its
+amounts to the certified figures, then Approve. The PDF (titled *Application
+for Payment*) prints the application's **Status** (Draft, Submitted,
+Approved or Void), the contract sums, the summary and the line detail. It has no
+certification, signature or notary block, so it is a summary and line detail
+laid out the way AIA's G702 and G703 are, not the AIA form itself. The form's **Lien
+waiver** select (not required, pending, conditional, unconditional) records
+which waiver went with the application; it is a note only: nothing else reads
+it and the PDF does not print it (the waivers themselves are under *Lien
+waivers* below).
 
 **A draft follows the schedule of values.** A change order approved, or a line
 added to the SOV, after a draft was made would leave the draft without it.
@@ -1114,7 +1169,8 @@ and change-order lines all bill the same way) carries, per period:
 - **Scheduled value** — the line's amount.
 - **Previous** — the sum of *this period* on this job's earlier approved
   applications for the line.
-- **This period** — the work completed this period.
+- **This period** — the work completed this period, typed in **dollars**,
+  not as a percent complete (the % column is figured from it).
 - **Stored** — materials presently stored, not yet in the work (not
   cumulative). A new application starts each line at the stored balance the
   earlier approved applications left on it; lower it as the materials go into
@@ -1123,7 +1179,7 @@ and change-order lines all bill the same way) carries, per period:
 - **% complete** = completed ÷ scheduled.
 - **Balance to finish** = scheduled − completed.
 - **Retainage** = completed × the retainage percent (copied from the contract
-  at creation, editable while the application is a draft).
+  at creation, editable while the application is a draft or submitted).
 
 The application totals read the way the owner's payment application does:
 completed and stored to date, **retainage to date** (the sum of the line
@@ -1136,6 +1192,14 @@ previous payment applications + tax), then the balance to finish. A release is
 just retainage going down, so the figures keep lining up with the invoices and
 account 1150. A **deposit applied** (below) nets off the current due to the
 **net due**.
+
+**Releasing the owner's retainage.** Type the amount to bill back in
+**Release retainage** on the pay application form (App 3 below).
+**Lowering Retainage % is not a step-down.** The one percent applies to all
+the work completed to date, so dropping 10% to 5% on a job 50% complete
+releases half of what was already held, on that application. It is not the
+"5% on later payments" many contracts use: the app has no way to hold a
+different percent on later billing.
 
 **A worked two-period example with stored materials and a release.** A
 $100,000 contract on two lines, 10% retainage:
@@ -1367,7 +1431,7 @@ carries the cost code.
 | … with a deposit applied | 2210 Customer Deposits | 1100 Accounts Receivable | A payment from the deposit, applied to the application's invoice. |
 | … with retainage released | 1100 Accounts Receivable (job) | 1150 Retainage Receivable (job) | Inside the application's own entry; a release-only application bills nothing else. |
 | **Pay application voided** | — | — | Reverses the invoice's entry and any deposit payment, on their original dates. |
-| **Sub or supplier bill** (Sub pay app / To Bill, or entered by hand) | each line's cost account (job, section, cost type), with its share of the bill's tax: the line's account, else the item's expense account, else (construction) the code's account, else the cost type's default — 5100 material, 5200 labor, 5300 subcontract, 5400 equipment, 5500 other — else the vendor's default expense account | 2000 Accounts Payable for the net; 2050 Retainage Payable for the retainage held (job) | A stock item posts to Inventory. A line nothing names is refused with a sentence. |
+| **Sub or supplier bill** (Sub pay app, or entered by hand) | each line's cost account (job, section, cost type), with its share of the bill's tax: the line's account, else the item's expense account, else (construction) the code's account, else the cost type's default — 5100 material, 5200 labor, 5300 subcontract, 5400 equipment, 5500 other — else the vendor's default expense account | 2000 Accounts Payable for the net; 2050 Retainage Payable for the retainage held (job) | A stock item posts to Inventory. A line nothing names is refused with a sentence. |
 | … with use tax (a material line on a *contractor pays* job, no tax on the bill; or a line's Use tax box) | the line's cost account (job, section, cost type) for the rate × the line | 2220 Use Tax Payable (job) | In the bill's own journal, so a void or an edit reverses or re-posts it. |
 | **Sub retainage released** (Release retainage on the commitment) | 2050 Retainage Payable (job) | 2000 Accounts Payable | A bill with no expense line, paid through Pay Bills. |
 | **Bill payment** | 2000 Accounts Payable | the bank (1000 Checking unless another is chosen) | |
@@ -1377,7 +1441,7 @@ carries the cost code.
 | **Sales tax paid** | 2200 Sales Tax Payable | the bank | |
 | **Material slip posted** (field ticket) | the line's cost account (material type; job, section) at the item's average cost | the item's inventory asset account | A Job Cost Entry; a return slip is the reverse, and a void reverses at the booked cost. T&M and delivery tickets post nothing. |
 | **Use tax paid** (a check or bill to the tax agency) | 2220 Use Tax Payable | the bank (or A/P) | The Sales Tax report's Use tax section shows it as paid. |
-| **WIP adjusting entry posted** (Post on the WIP schedule) | 1360 Costs and Estimated Earnings in Excess of Billings for an under-billing (job); 4060 Contract Revenue – WIP Adjustment when over-billed (job); 5600 Loss on Uncompleted Contracts for a loss provision (job) | 2060 Billings in Excess of Costs and Estimated Earnings for an over-billing (job); 4060 when under-billed (job); 2070 Provision for Loss on Uncompleted Contracts (job) | Dated the as-of date, reversed the next day. Each line carries its job, so P&L by Job and Job Profitability show each job's adjustment and its gross profit there ties to the WIP's gross profit to date (less any loss provision). The WIP's own inputs, the cost tree, Budget vs Actual, Cost to Complete and Job Cost by Vendor leave it out. |
+| **WIP adjusting entry posted** (Post adjusting entry on the WIP schedule) | 1360 Costs and Estimated Earnings in Excess of Billings for an under-billing (job); 4060 Contract Revenue – WIP Adjustment when over-billed (job); 5600 Loss on Uncompleted Contracts for a loss provision (job) | 2060 Billings in Excess of Costs and Estimated Earnings for an over-billing (job); 4060 when under-billed (job); 2070 Provision for Loss on Uncompleted Contracts (job) | Dated the as-of date, reversed the next day. Each line carries its job, so P&L by Job and Job Profitability show each job's adjustment and its gross profit there ties to the WIP's gross profit to date (less any loss provision). The WIP's own inputs, the cost tree, Budget vs Actual, Cost to Complete and Job Cost by Vendor leave it out. |
 | **Construction in Progress** | — | — | 1350 takes nothing on its own: job cost posts to 5100–5500 and the WIP entry carries over- and under-billing. A company that capitalises cost until billing books it by journal entry. |
 
 Because each pay-application line credits its own revenue account with its
@@ -1446,8 +1510,10 @@ kind).
 A blank cost rate takes the employee's loaded rate (the same rate time
 entries post at), the equipment's hourly rate, or the item's average cost
 (its cost when it has no average yet); a blank bill rate is the cost rate
-plus the job's **Markup on change orders**. A line's cost type follows its
-kind (labor, equipment, material), else its cost code's.
+plus the job's **Markup on change orders**. Until the ticket is saved, a
+blank rate and its amount show **Set on save** on the form, with a note under
+the lines saying the rate is filled in on save as above. A line's cost type
+follows its kind (labor, equipment, material), else its cost code's.
 
 **Figures are held to what the books store.** A line's quantity, cost rate
 and bill rate (a filled-in bill rate too) are each less than 100,000,000,000,
@@ -1465,8 +1531,8 @@ signs it, `closed` once it has had its effect (billed, its change order
 approved, posted), and `void`. Only a draft is edited or deleted; a signed
 ticket is what was signed, so a change means voiding it and writing another.
 **Signing** in this version is the signer's typed name and the date (`POST
-/api/field-tickets/{id}/sign`), with a photo of the signed paper attached to
-the ticket (attachments take `field_ticket` as their record type); deleting a draft
+/api/field-tickets/{id}/sign`): **Sign** asks only for the name, so use
+**Attach** on the ticket for the photo of the signed paper (attachments take `field_ticket` as their record type); deleting a draft
 ticket deletes its attachments too. A T&M or material line that names a
 purchase order line must name one that exists on the ticket's own job. An
 on-screen signature pad is a later issue. A ticket is voided while nothing it
@@ -1494,7 +1560,15 @@ Two ways out, from the tab (tick the signed tickets first):
   several signed tickets on one job become one **potential change order** to
   the owner, a line per ticket line **at cost** (quantity × cost rate, the
   line's cost type and code), marked up by the job's change-order markup. The
-  ticket's bill rates are not used on this path. A sub's ticket is
+  ticket's bill rates are not used on this path, **so the PCO can differ from
+  what the owner's rep signed**: a ticket whose bill rates were left blank
+  (cost rate plus the job's markup) comes to the same figures, give or take a
+  cent of rounding a line, as long as the job's **Markup on change orders**
+  has not changed since the ticket was saved (the ticket's bill rate was
+  figured at the markup of that day; a draft or pending PCO with no markup of
+  its own reads the job's markup as it is now). One with bill rates typed in
+  does not. To make it match, edit the PCO while it is a draft or pending:
+  its **Markup %**, or a line's own Markup %. A sub's ticket is
   subcontract cost on the PCO, and also goes, at cost with no markup, on a
   draft **sub change order** on its commitment (one per commitment), so the
   sub's contract rises with the owner's; link it to the owner CO once the PCO
@@ -1509,7 +1583,8 @@ Two ways out, from the tab (tick the signed tickets first):
   them again. A job with a schedule of values bills on pay applications, so
   it is refused there: make a change order instead.
 
-Job Cost Entry's **Bill?** box (`is_billable`) is left as it is: nothing
+Job Cost Entry's **Bill?** box (`is_billable`) is left as it is: it is
+still on the form in construction mode, but it does nothing there: nothing
 reads it, and Bill it does not either. Its lines are at cost and carry no bill
 rate, and work billed from both would be billed twice. In construction mode,
 extra work to bill goes on a T&M ticket.
@@ -1551,7 +1626,7 @@ quantity back. Editing the order moves it too: a received order whose line is
 raised (or a line added) goes back to `partial`, and one cut to what arrived
 is `received`. Nothing posts: received-not-billed accruals are the
 accountant's. When the supplier's bill is entered from the PO, the
-construction **To Bill** dialog of an order being received this way shows
+construction **Sub pay app** dialog of an order being received this way shows
 ordered and received per line beside what is billed, and **warns** (never
 refuses) when a line would bill more than the value received (received
 quantity × the line's rate); the convert's response carries the same
@@ -1606,7 +1681,8 @@ a `status` filter matches the job's status on that date.
 
 Ten reports sit on the Report Center for a construction company, after the
 three job reports that always existed (thirteen cards in all; a Business or
-Nonprofit company never sees the ten), each a plain grid with a JSON route, a PDF and a CSV
+Nonprofit company sees none of the ten cards, though Job Cost by Vendor still
+opens for it by address, see *The reports*), each a plain grid with a JSON route, a PDF and a CSV
 like P&L by Job. Each takes an `as_of` date (or
 `start_date`/`end_date` where a period applies) and optional `job_id`,
 `customer_id`, `status` and `include_closed`; by default closed and not-awarded
@@ -1652,6 +1728,16 @@ the approved pay applications' completed-to-date when the job has one by the dat
 A job whose **contract date** is after the as-of date had no contract then and
 is not on that schedule (nor in its entry). Each row's `status` is the one the
 job had on the day: a job closed after it reads in progress.
+
+**In plain words.** A $100,000 job budgeted at $80,000 of cost has $40,000
+of cost posted and no forecast entered, so it is 50% complete and has earned $50,000. Billed $60,000,
+it is **over-billed** $10,000 (billed ahead of the work: a liability). Billed
+$45,000, it is **under-billed** $5,000 (work done not yet billed: an asset).
+The percent is cost to date ÷ estimated total cost (at most 100%, and 100% for
+a closed job), never the % complete
+on the pay applications, and the cost still to come is the
+**Cost-to-Complete Forecast**'s (below), not the older Cost to Complete
+report's.
 
 **Gross profit to date** is earned revenue less cost to date; **backlog** is the
 revised contract less earned revenue (the work still to earn); **estimated gross
@@ -1708,7 +1794,7 @@ account not yet created shows the number setup would give it; a chart that
 already owns that number shows the name alone). These are the balances to carry
 **as of the date**.
 
-**Post** (on screen under the entry, or `POST /api/reports/wip-schedule/post?as_of=`)
+**Post adjusting entry** (on screen under the entry, or `POST /api/reports/wip-schedule/post?as_of=`)
 books it: an adjusting journal dated the as-of date, per job (each line carries
 its job and its memo names it), with an automatic **reversal dated the next
 day**, so each month's entry carries that month's balances and the next starts
@@ -1989,7 +2075,8 @@ and **P&L by Job** — then the ten construction reports: **WIP Schedule**,
 **Cost to Complete**, **Change Order Log**, **Buyout Report**, **Job Cost by
 Vendor**, **Cost-to-Complete Forecast**, **Commitment Status**, **Field Ticket
 Log** (see *Field tickets*), **Retainage** and **Sub Compliance** (see *Job
-reports* above). The ten show in construction mode only, except Job Cost by Vendor (below).
+reports* above). The ten cards show in construction mode only; of the ten
+reports, all but Job Cost by Vendor are construction mode's alone (below).
 Every other report stays where it is.
 
 A Business or Nonprofit company that opens **WIP Schedule**, **Cost to
@@ -2029,6 +2116,14 @@ estimate list's `status` takes `lost` for the estimates marked lost (stored as
   Nonprofit is. A "what kind of company is this?" step at creation is a
   later issue.
 - **Customer:Job** still prints with a space; the no-space form is deferred.
+- **No cost-plus billing.** Nothing bills a cost-plus or GMP job's cost to
+  date plus its fee; enter it on a pay application or an invoice (see *The
+  contract on the job*).
+- **No retainage step-down.** One Retainage % covers all the work completed
+  to date on an application; a lower percent on later billing only is not
+  possible (see *Progress billing and retainage*).
+- **No contract time on a change order.** A change order moves money and
+  budget only; it has no field for the days it adds to the schedule.
 - **No full section catalog** (the numbered catalog isn't ours to publish);
   the division titles and a set of common sections ship, and you import the
   rest.

@@ -52,7 +52,9 @@ const MigrationPage = {
                     <strong>Account List</strong> report (Reports → Account List → Export to Excel)
                     to give every account its number, type and description, and the
                     <strong>A/R Aging Detail</strong> report (Reports → A/R Aging Detail →
-                    Export to Excel) to carry the open invoices and unapplied payments over.
+                    Export to Excel) to carry the open invoices and unapplied payments over,
+                    and the <strong>A/P Aging Detail</strong> report (Reports → A/P Aging
+                    Detail → Export to Excel) to carry the open bills over.
                     Reports downloaded one at a time from the Reports page, such as the
                     General Ledger or a chart of accounts, are not the export and are not read.`;
         }
@@ -134,6 +136,13 @@ const MigrationPage = {
         const unapplied = imported ? data.imported_unapplied_payments : data.unapplied_payments;
         if (open != null) parts.push(n(open, 'open invoice'));
         if (unapplied != null) parts.push(n(unapplied, 'unapplied payment'));
+        // and its A/P Aging Detail report (#713)
+        const bills = imported ? data.imported_open_bills : data.open_bills;
+        const credits = imported ? data.imported_vendor_credits : data.vendor_credits;
+        const billPays = imported ? data.imported_unapplied_bill_payments : data.unapplied_bill_payments;
+        if (bills != null) parts.push(n(bills, 'open bill'));
+        if (credits != null) parts.push(n(credits, 'vendor credit'));
+        if (billPays != null) parts.push(n(billPays, 'unapplied bill payment'));
         return parts;
     },
 

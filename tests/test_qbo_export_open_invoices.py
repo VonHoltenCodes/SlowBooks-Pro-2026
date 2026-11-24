@@ -422,9 +422,16 @@ def test_an_ap_aging_report_is_not_read_as_invoices(client, db_session, seed_acc
         .replace("A/R Aging Detail Report", "A/P Aging Detail Report")
     )
     data = client.post("/api/migration/qbo_export/import", files=_files(text)).json()
-    assert data["ok"] is True, data["errors"]
-    assert data["imported_open_invoices"] == 0
-    assert any("is not read" in w for w in data["warnings"]), data["warnings"]
+    # Since #713 an A/P Aging Detail report is read as one, whatever its file
+    # is called: placed by its title on the payables side, never as invoices.
+    # This one names customers, not vendors, so it is refused for that.
+    assert data["ok"] is False
+    assert "imported_open_invoices" not in data
+    assert data["imported_open_bills"] == 0
+    assert any(
+        e.startswith("The A/P Aging Detail report lacks its Transaction type or Vendor")
+        for e in data["errors"]
+    ), data["errors"]
     assert db_session.query(Invoice).count() == 0
 
 

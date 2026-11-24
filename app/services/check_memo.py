@@ -14,7 +14,8 @@
 # check. Under the reference choice such a bill falls back to its memo, and
 # then to nothing. A check paying several bills lists the references of the
 # ones that have one ("Invoices 196132, 196140"); several memos are not
-# joined, as before.
+# joined, as before. The note the QuickBooks Online import writes on a bill
+# it carried over (#713) is no memo: it is about the migration, not the bill.
 # ============================================================================
 
 import re
@@ -78,5 +79,17 @@ def memo_for_bills(which: str, bills, vendor_name) -> str | None:
             return "Invoices " + ", ".join(refs)
         # no bill has a reference: one bill's memo, as the memo choice would
     if len(bills) == 1:
-        return (bills[0].notes or "").strip() or None
+        return bill_memo(bills[0])
     return None
+
+
+def bill_memo(bill) -> str | None:
+    """The bill's memo, or None. The note the QuickBooks Online import
+    writes on a bill it carried over (#713) is ours, about the migration,
+    and means nothing on the vendor's check: it is no memo."""
+    from app.services.qbo_export_import import _AP_CARRIED
+
+    note = (bill.notes or "").strip()
+    if not note or note.startswith(_AP_CARRIED):
+        return None
+    return note
