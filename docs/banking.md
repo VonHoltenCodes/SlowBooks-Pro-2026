@@ -504,7 +504,7 @@ or card account posts as a transfer and keeps its class and job.
 ## Bank feeds and file imports: the review queue
 
 A statement line arriving by a bank feed (SimpleFIN, [setup-bank-feeds.md](setup-bank-feeds.md),
-or Mercury, [setup-mercury.md](setup-mercury.md)), or an OFX/QFX or CSV
+or Mercury, [setup-mercury.md](setup-mercury.md)), or an OFX/QFX/QBO or CSV
 import. A feed's **Imports into** list offers every bank and card account in
 the chart, and picking one makes the feed for it (2.31.1). CSV
 files: the Bank of America, Chase and PayPal layouts, or any file whose
