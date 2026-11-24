@@ -217,7 +217,10 @@ def test_an_account_list_without_numbers_says_the_company_has_none():
     accounts, errors = qbo.parse_coa(listed + "\n" + sheet)
     assert errors == []
     assert all(a["code"] is None for a in accounts)
-    assert {"19 Fern Gate", "31 Birch Way:Roof"} <= {a["path"] for a in accounts}
+    paths = [a["path"] for a in accounts]
+    assert {"19 Fern Gate", "31 Birch Way:Roof"} <= set(paths)
+    # the statements' "Roof" is the list's, not a second "Birch Way:Roof"
+    assert len(paths) == 6, paths
 
 
 def test_the_company_setting_off_keeps_names_whole_unless_the_files_say_numbers():
@@ -323,3 +326,134 @@ def test_the_setting_off_reads_unique_street_numbers_as_names(
     names = {a.name for a in db_session.query(Account).all()}
     assert {"88 Larkspur Ln", "31 Birch Way", "412 Quarry Rd"} <= names
     assert not {"Larkspur Ln", "Birch Way", "Quarry Rd"} & names
+
+
+# ── the receivable, read the way the chart is ─────────────────────────────
+
+RECEIVABLE_SHEET = """Harrow Lane Properties,
+Balance Sheet,
+All Dates,
+,
+,Total
+ASSETS,
+   Current Assets,
+      Bank Accounts,
+         Operating Account,=1000.00
+      Total Bank Accounts,=1000.00
+      Accounts Receivable,
+         Accounts Receivable (A/R),
+            31 Birch Way,=250.00
+            412 Quarry Rd,=0.00
+         Total Accounts Receivable (A/R),=250.00
+      Total Accounts Receivable,=250.00
+   Total Current Assets,=1250.00
+   Fixed Assets,
+      19 Fern Gate,=7000.00
+   Total Fixed Assets,=7000.00
+TOTAL ASSETS,=8250.00
+LIABILITIES AND EQUITY,
+   Equity,
+      Opening Balance Equity,=8250.00
+   Total Equity,=8250.00
+TOTAL LIABILITIES AND EQUITY,=8250.00
+,
+,
+"Monday, Nov 23, 2026 09:00:00 AM GMT-6 - Accrual Basis",
+"""
+
+
+def test_the_receivable_is_spelled_the_way_the_chart_reads_it(db_session):
+    # three street numbers, none shared, so the labels alone say
+    # "numbered"; the Journal's "Accounts Receivable (A/R):31 Birch Way"
+    # says the names are whole, and the receivable the open invoices are
+    # carried from is that sub-account as the Journal writes it
+    receivable = "Accounts Receivable (A/R):31 Birch Way"
+    journal = "\n".join(
+        [
+            ",Harrow Lane Properties,,,,,,,",
+            ",Journal,,,,,,,",
+            ",All Dates,,,,,,,",
+            ",,,,,,,,",
+            ",Date,Transaction Type,Num,Name,Memo/Description,Account,Debit,Credit",
+            f",01/05/2026,Invoice,1001,Tenant A,Rent,{receivable},=250.00,",
+            ",,,,,Rent,Rental Income,,=250.00",
+            ",,,,,,,=250.00,=250.00",
+            ",,,,,,,,",
+        ]
+    )
+    bundle = {"coa": RECEIVABLE_SHEET, "gl": journal + "\n"}
+    assert qbo.chart_numbered(RECEIVABLE_SHEET) is True  # the labels alone
+    plan = qbo._carry_plan(db_session, bundle)
+    assert plan["receivable"] == receivable
+
+
+def test_a_street_account_is_not_the_books_account_without_its_number(
+    client, db_session, seed_accounts
+):
+    # the books already have "Quarry Rd"; the export's "412 Quarry Rd" is
+    # another account, not that one with a number in front (#767's rule is
+    # for numbered companies only)
+    quarry = Account(name="Quarry Rd", account_type=AccountType.ASSET)
+    db_session.add(quarry)
+    db_session.commit()
+    resp = client.post("/api/migration/qbo_export/import", files=_upload(**_bundle()))
+    assert resp.status_code == 200 and resp.json()["ok"] is True, resp.text
+    street = db_session.query(Account).filter(Account.name == "412 Quarry Rd").one()
+    assert street.id != quarry.id
+
+
+FLAT_NUMBERED = """Flat Co,
+Balance Sheet,
+All Dates,
+,
+,Total
+ASSETS,
+   Current Assets,
+      Bank Accounts,
+         1010 Checking,=700.00
+         1020 Savings,=300.00
+      Total Bank Accounts,=1000.00
+   Total Current Assets,=1000.00
+   Fixed Assets,
+      1500 Equipment,=500.00
+   Total Fixed Assets,=500.00
+TOTAL ASSETS,=1500.00
+LIABILITIES AND EQUITY,
+   Equity,
+      3900 Owner Capital,=1500.00
+   Total Equity,=1500.00
+TOTAL LIABILITIES AND EQUITY,=1500.00
+,
+,
+"Monday, Nov 23, 2026 09:00:00 AM GMT-6 - Accrual Basis",
+"""
+
+
+def test_a_second_upload_reads_the_chart_as_the_first_did(
+    client, db_session, seed_accounts
+):
+    # a numbered company with no sub-accounts and no Account List, imported
+    # with Use account numbers on; the setting is turned off afterwards and
+    # the same export goes in again: the accounts the first upload made
+    # say "numbered", and no "1010 Checking" is made beside them
+    files = {
+        "Balance_sheet.csv": FLAT_NUMBERED,
+        "Journal.csv": _journal(
+            [
+                ("01/05/2026", "1010 Checking", "3900 Owner Capital", "1000.00"),
+                ("01/06/2026", "1020 Savings", "1010 Checking", "300.00"),
+                ("01/07/2026", "1500 Equipment", "3900 Owner Capital", "500.00"),
+            ]
+        ),
+    }
+    resp = client.post("/api/migration/qbo_export/import", files=_upload(**files))
+    assert resp.status_code == 200 and resp.json()["ok"] is True, resp.text
+    before = {a.id for a in db_session.query(Account).all()}
+    assert (
+        client.put("/api/settings", json={"use_account_numbers": "false"}).status_code
+        == 200
+    )
+    resp = client.post("/api/migration/qbo_export/import", files=_upload(**files))
+    assert resp.status_code == 200 and resp.json()["ok"] is True, resp.text
+    made = db_session.query(Account).filter(Account.id.notin_(before)).all()
+    assert [a.name for a in made] == []

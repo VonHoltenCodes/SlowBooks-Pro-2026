@@ -304,6 +304,7 @@ def _chart_numbered(
     listed: list[dict],
     names_in_books=(),
     numbers_off: bool = False,
+    here: tuple[frozenset, frozenset] = (frozenset(), frozenset()),
 ) -> bool:
     """Whether the company numbers its accounts, from the files themselves
     first (#767, #1220):
@@ -316,6 +317,10 @@ def _chart_numbered(
       St:Roof" under "123 Main St" and "Roof"): that reading;
     - the Account List names an account by the whole label ("123 Main St"
       beside the Balance Sheet's "123 Main St"): not numbered;
+    - an earlier import of these files says which: SlowBooks' chart
+      (``here``, from _chart_here) holds a statement label as a numbered
+      account ("1010 Checking" is Checking, number 1010) or as a whole
+      name with no number ("88 Larkspur Ln"), and not both ways;
     - SlowBooks' own Settings → Use account numbers is off: not numbered;
     - else the labels as before (uses_numbers), leaving out a book name
       whose parent is a statement account spelled whole, which an
@@ -335,6 +340,18 @@ def _chart_numbered(
     leaves = {spec["name"].strip().lower() for spec in listed}
     if any(label.lower() in leaves for label in looks):
         return False
+    # a second upload of the same export reads it as the first one did,
+    # whatever the setting says now: else a company imported with numbers
+    # and the setting turned off afterwards gets "1010 Checking" beside its
+    # Checking (1010)
+    by_number, whole = here
+    held_numbered = any(
+        "{} {}".format(*_split_code(label, True)).lower() in by_number
+        for label in looks
+    )
+    held_whole = any(label.lower() in whole for label in looks)
+    if held_numbered != held_whole:
+        return held_numbered
     if numbers_off:
         return False
     evidence = [
@@ -345,14 +362,39 @@ def _chart_numbered(
     return uses_numbers(labels, evidence)
 
 
-def chart_numbered(csv_text: str, names_in_books=(), numbers_off: bool = False) -> bool:
+def chart_numbered(
+    csv_text: str,
+    names_in_books=(),
+    numbers_off: bool = False,
+    here: tuple[frozenset, frozenset] = (frozenset(), frozenset()),
+) -> bool:
     """_chart_numbered for the chart text (the statements, and the Account
     List when the upload has it), the decision parse_coa and ledger_order
     share."""
     rows = _rows(csv_text)
     return _chart_numbered(
-        _statement_reports(rows), _account_list(rows)[0], names_in_books, numbers_off
+        _statement_reports(rows),
+        _account_list(rows)[0],
+        names_in_books,
+        numbers_off,
+        here,
     )
+
+
+def _chart_here(db: Session) -> tuple[frozenset, frozenset]:
+    """SlowBooks' top-level accounts as _chart_numbered weighs them,
+    lowercased: (a numbered one's number and name, "1010 checking"; an
+    unnumbered one's name, "88 larkspur ln") (#1220)."""
+    by_number: set[str] = set()
+    whole: set[str] = set()
+    for acct, path in account_paths(db):
+        if acct.parent_id is not None:
+            continue
+        if acct.account_number:
+            by_number.add(f"{acct.account_number} {path}".lower())
+        else:
+            whole.add(path.lower())
+    return frozenset(by_number), frozenset(whole)
 
 
 def _split_code(label: str, numbered: bool) -> tuple[str | None, str]:
@@ -1495,15 +1537,20 @@ def parse_ar_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
     return items, errors, notes
 
 
-def _receivable_name(bundle: dict, groups: list[list[dict]]) -> str | None:
+def _receivable_name(
+    bundle: dict, groups: list[list[dict]], numbered: bool | None = None
+) -> str | None:
     """The export's receivable account: the one the Balance Sheet lists
     under Accounts Receivable (if there are several, the one the Journal's
-    invoices post to), else the account the invoices debit."""
+    invoices post to), else the account the invoices debit. ``numbered`` is
+    the chart's decision (chart_numbered), so a sub-account named for a
+    street ("Accounts Receivable (A/R):88 Larkspur Ln") is spelled here as
+    the chart spells it (#1220)."""
     saved = list(_COA_NOTES)  # parse_coa keeps its notes for the dry run
     saved_unplaced = list(_COA_UNPLACED)
     saved_unread = list(_COA_UNREAD)
     try:
-        accounts, _ = parse_coa(bundle.get("coa", ""))
+        accounts, _ = parse_coa(bundle.get("coa", ""), numbered=numbered)
     finally:
         _COA_NOTES[:] = saved
         _COA_UNPLACED[:] = saved_unplaced
@@ -1614,6 +1661,7 @@ def _carry_plan(db: Session, bundle: dict) -> dict:
     from app.models.invoices import Invoice
     from app.models.payments import Payment
     from app.services.accounting import get_ar_account_id
+    from app.services.settings_service import use_account_numbers
 
     plan = {
         "given": "ar_aging" in bundle,
@@ -1631,7 +1679,14 @@ def _carry_plan(db: Session, bundle: dict) -> dict:
     if "gl" not in bundle or "coa" not in bundle:
         return plan  # the engine names what is missing
     groups, _ = parse_gl(bundle["gl"])
-    receivable = _receivable_name(bundle, groups)
+    # read the chart the way the import's own chart parser does (#1220)
+    numbered = chart_numbered(
+        bundle["coa"],
+        _names_in_use(bundle),
+        not use_account_numbers(db),
+        _chart_here(db),
+    )
+    receivable = _receivable_name(bundle, groups, numbered)
     plan["receivable"] = receivable
     left = sum(
         (
@@ -2372,7 +2427,8 @@ def _parsers(bundle: dict, db: Session | None = None, plan: dict | None = None):
             held = frozenset(p.lower() for p in paths) | {
                 strip_code_suffix(p) for p in paths
             }
-        numbered = chart_numbered(text, also, numbers_off)
+        here = _chart_here(db) if db is not None else (frozenset(), frozenset())
+        numbered = chart_numbered(text, also, numbers_off, here)
         # the General Ledger's headings, for the accounts the statements and
         # the Trial Balance leave off (#767), read the way the chart is
         ledger = (
