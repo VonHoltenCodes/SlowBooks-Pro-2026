@@ -675,7 +675,9 @@ jobs:
           # test_pdf_last_line_new271.py.
           # 475 with the field ticket's "Set on save" note:
           # test_browser_set_on_save_reason_r31.py, one module without playwright.
-          MAX_SKIPS: "475"
+          # 476 with the register's sub-account paths:
+          # test_browser_register_sub_account_paths.py, one module without playwright.
+          MAX_SKIPS: "476"
         run: |
           total=0
           for f in shards/*/skips.txt; do
