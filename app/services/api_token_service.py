@@ -7,6 +7,7 @@
 # ============================================================================
 
 import hashlib
+import hmac
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
@@ -40,6 +41,48 @@ LINK_TOKEN_LABEL = "AI assistant (relay)"
 def is_link_label(label: str | None) -> bool:
     """A label the AI assistant connection's own tokens carry."""
     return isinstance(label, str) and label.startswith(LINK_TOKEN_LABEL)
+
+
+# The AI assistant connection's own requests to this app carry this header,
+# and the gate honors a connection token only with it. Where a request seems
+# to come from is not proof: a tunnel or a plain forward on this computer
+# that adds no X-Forwarded-For makes an outside request look like loopback.
+# The value is derived from this server's session key, so every process of
+# one server (Docker's uvicorn workers, a desktop window's server) knows it
+# without its being written anywhere, and someone who could read the key
+# could sign themselves in as anyone already. It is never logged, stored or
+# sent in an answer; only the connection's own transport sends it, to this
+# app's own address.
+LINK_ORIGIN_HEADER = "X-SlowBooks-Link-Origin"
+_LINK_ORIGIN_CONTEXT = b"SlowBooks Pro AI assistant connection origin v1"
+_link_origin: str | None = None
+
+
+def link_origin_secret() -> str:
+    """The header's value for this server (the same in each of its
+    processes)."""
+    global _link_origin
+    if _link_origin is None:
+        from app.services.auth import get_session_secret
+
+        key = get_session_secret().encode("utf-8")
+        _link_origin = hmac.new(key, _LINK_ORIGIN_CONTEXT, hashlib.sha256).hexdigest()
+    return _link_origin
+
+
+def from_the_link_itself(headers) -> bool:
+    """The request carries the connection's own header with this server's
+    value (constant time; a missing or repeated header never matches)."""
+    if hasattr(headers, "getlist"):
+        values = headers.getlist(LINK_ORIGIN_HEADER)
+    else:
+        values = [headers.get(LINK_ORIGIN_HEADER)]
+    if len(values) != 1 or not values[0]:
+        return False
+    given = values[0]
+    return hmac.compare_digest(
+        given.encode("utf-8", "replace"), link_origin_secret().encode("utf-8")
+    )
 
 
 # A token whose name starts with this (in any letter case) is an AI

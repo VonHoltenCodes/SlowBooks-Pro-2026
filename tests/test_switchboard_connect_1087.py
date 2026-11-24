@@ -301,6 +301,15 @@ def relay(monkeypatch, tmp_path):
 _THIS_COMPUTER = ("127.0.0.1", 50000)
 
 
+def _link_itself() -> dict:
+    """The header the connection's own requests carry (_books_transport):
+    without it the gate turns a connection token away, whatever address
+    the request seems to come from."""
+    from app.services.api_token_service import LINK_ORIGIN_HEADER, link_origin_secret
+
+    return {LINK_ORIGIN_HEADER: link_origin_secret()}
+
+
 def _in_process_transport(entry):
     """One company's requests, as _books_transport makes them: its own
     token, its own company's header, and the answer's headers handed back
@@ -315,6 +324,7 @@ def _in_process_transport(entry):
             if k.lower() != "x-slowbooks-company"
         }
         hdrs["Authorization"] = f"Bearer {entry['token']}"
+        hdrs.update(_link_itself())
         if company:
             hdrs["X-SlowBooks-Company"] = company
         r = api.request(method, path, params=params or None, json=body, headers=hdrs)
@@ -618,6 +628,8 @@ def test_no_api_token_reaches_the_connection(relay, client):
     ):
         bot = TestClient(app, client=_THIS_COMPUTER)
         bot.headers["Authorization"] = f"Bearer {token}"
+        # even as the connection itself
+        bot.headers.update(_link_itself())
         assert bot.get("/api/switchboard/status").status_code == 403
         for what in ("connect", "code", "disconnect"):
             assert bot.post(f"/api/switchboard/{what}").status_code == 403

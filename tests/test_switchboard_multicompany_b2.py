@@ -44,6 +44,7 @@ from tests.test_switchboard_connect_1087 import (
     _THIS_COMPUTER,
     FakeRelay,
     _in_process_transport,
+    _link_itself,
     _wait,
 )
 
@@ -288,6 +289,7 @@ def test_only_an_administrator_adds_and_no_token_reaches_the_presses(three, rela
     record = _record()
     bot = TestClient(app, client=_THIS_COMPUTER)
     bot.headers["Authorization"] = f"Bearer {record['token']}"
+    bot.headers.update(_link_itself())  # even as the connection itself
     assert bot.get("/api/switchboard/status").status_code == 403
     assert bot.post("/api/switchboard/add").status_code == 403
     r = bot.post("/api/switchboard/take-off", json={"file": "harbor.db"})

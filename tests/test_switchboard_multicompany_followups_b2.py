@@ -38,7 +38,7 @@ from app.main import app
 from app.services import served_companies
 from app.services import switchboard_link as link
 from app.switchboard.server import build_registry
-from tests.test_switchboard_connect_1087 import _THIS_COMPUTER
+from tests.test_switchboard_connect_1087 import _THIS_COMPUTER, _link_itself
 from tests.test_switchboard_multicompany_b2 import (  # noqa: F401  (fixtures)
     COMPANIES,
     _connected_with,
@@ -57,9 +57,13 @@ LAN = ("192.168.1.50", 50000)
 REFUSED_HEADER = "X-SlowBooks-Token-Refused"
 
 
-def _bot(secret, company=None, client=_THIS_COMPUTER):
+def _bot(secret, company=None, client=_THIS_COMPUTER, as_the_link=True):
+    """A program with the token; by default it is the connection itself,
+    sending the connection's own header (_link_itself)."""
     bot = TestClient(app, client=client)
     bot.headers["Authorization"] = f"Bearer {secret}"
+    if as_the_link:
+        bot.headers.update(_link_itself())
     if company:
         bot.headers["X-SlowBooks-Company"] = company
     return bot

@@ -1561,16 +1561,20 @@ def _books_transport(entry: dict):
     """The requests of one company's token to this app: that token only,
     naming that company's file in X-SlowBooks-Company (never another
     spelling of it, and none on PostgreSQL, where the company is not a
-    file)."""
+    file), with the connection's own header, without which the gate turns
+    a connection token away (api_token_service.LINK_ORIGIN_HEADER)."""
+    from app.services.api_token_service import LINK_ORIGIN_HEADER, link_origin_secret
+
     config = Config(_app_base_url(), entry["token"], API_TIMEOUT)
     send = urllib_transport(config)
     company = entry.get("file") or ""
-    lower = COMPANY_HEADER.lower()
+    ours = {COMPANY_HEADER.lower(), LINK_ORIGIN_HEADER.lower()}
 
     def with_company(method, path, params, body, headers):
-        extra = {k: v for k, v in (headers or {}).items() if k.lower() != lower}
+        extra = {k: v for k, v in (headers or {}).items() if k.lower() not in ours}
         if company:
             extra[COMPANY_HEADER] = company
+        extra[LINK_ORIGIN_HEADER] = link_origin_secret()
         return send(method, path, params, body, extra)
 
     return with_company
