@@ -64,7 +64,7 @@ const App = {
         // Phase 2: Accounts Payable
         '/purchase-orders': { page: 'purchase-orders', label: 'Purchase Orders',  render: () => PurchaseOrdersPage.render() },
         '/bills':         { page: 'bills',           label: 'Bills',              render: () => BillsPage.render() },
-        '/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',   render: () => BillQuickEntry.render(), mount: () => () => PendingFiles.discard() },
+        '/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',   render: () => BillQuickEntry.render(), mount: () => BillQuickEntry.mount() },
         '/bills/:id':         { page: 'bills',      label: 'Bill',          document: true, render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.view(id)) },
         '/bill-payments/:id': { page: 'bills',      label: 'Bill Payment',  document: true, render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.viewPayment(id)) },
         '/credit-memos':  { page: 'credit-memos',    label: 'Credit Memos',       render: () => CreditMemosPage.render() },

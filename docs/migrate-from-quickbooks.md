@@ -494,7 +494,7 @@ Desktop does not export transactions to IIF natively. Two other options:
   IIF) so account and item names resolve — deposit and check blocks
   whose accounts are missing are reported with a pointer to do exactly
   that. All four are safe to re-upload; duplicates are skipped.
-- **A bank or credit card statement (CSV, OFX, QFX) is not an
+- **A bank or credit card statement (CSV, OFX, QFX, QBO) is not an
   Interoperability import.** It goes in from the account itself, under
   **Banking → Bank Accounts → the account → Import file**. The vendors and accounts on the
   statement do not need to exist first: each line comes in as a statement

@@ -352,6 +352,7 @@ def _forms(client):
             "#bqe-number",
             "Enter what the vendor charged: an amount on at least one line.",
             ready="() => !!document.querySelector('#bqe-lines tr')",
+            still="() => !!document.querySelector('#bqe-form')",
         ),
         _Form(
             "field ticket",
