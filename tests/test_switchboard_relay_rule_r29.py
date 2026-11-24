@@ -40,6 +40,13 @@ ADDRESS = re.compile(r"127\.0\.0\.1|https?://|localhost")
 STATUS_CODE = re.compile(r"\b[1-5]\d\d\b")
 
 
+def _link_itself() -> dict:
+    """The header the connection's own requests carry (_books_transport)."""
+    from app.services.api_token_service import LINK_ORIGIN_HEADER, link_origin_secret
+
+    return {LINK_ORIGIN_HEADER: link_origin_secret()}
+
+
 def http(status, body=b"", ctype="application/json", extra=""):
     if isinstance(body, (dict, list)):
         body = json.dumps(body).encode()
@@ -787,6 +794,7 @@ def test_the_revoked_token_no_longer_reads_the_books(raw, client, db_session):
     record = _connect(client)
     bot = TestClient(app, client=("127.0.0.1", 50000))
     bot.headers["Authorization"] = f"Bearer {record['token']}"
+    bot.headers.update(_link_itself())  # as the connection's own requests
     assert bot.get("/api/customers").status_code == 200
     link.link_path().write_text("")
     assert client.post("/api/switchboard/disconnect").status_code == 200
@@ -1184,6 +1192,7 @@ def test_disconnect_revokes_the_token_whatever_it_was_renamed_to(
     record = _connect(client)
     bot = TestClient(app, client=("127.0.0.1", 50000))
     bot.headers["Authorization"] = f"Bearer {record['token']}"
+    bot.headers.update(_link_itself())  # as the connection's own requests
     assert bot.get("/api/customers").status_code == 200
     renamed = "Assistant on the office phone"
     r = client.put(f"/api/tokens/{record['token_id']}", json={"label": renamed})

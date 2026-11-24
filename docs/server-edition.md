@@ -250,9 +250,11 @@ date; it is added again with **Add** in its own
 panel, by someone who is an administrator of it and of every other company on
 the connection. A token you make whose name starts with "AI assistant"
 (SlowBooks Switchboard's, for example) is held to the same rule. The
-connection's own tokens work only for the connection on this server: one sent
-from another computer is refused, so a copy of the connection file is no use
-elsewhere on the network. When a company turns its token away, the server
+connection's own tokens work only for the connection itself, inside
+SlowBooks Pro on this server: any other program that sends one is refused,
+from another computer or from this one, so a copy of the connection file is
+no use, and neither is a tunnel or a port forward into this server (one that
+reaches the app as `localhost`). When a company turns its token away, the server
 deletes that token's secret from the connection file at once (a moment later
 when another change to the connection is under way). A token reads
 only its own company from the company list and from the sign-in status. The

@@ -175,6 +175,7 @@ from app.services.closing_date import (
     password_from_header as _closing_password_from_header,
 )
 from app.services.api_token_service import ADMIN_TOKEN_REFUSAL
+from app.services.api_token_service import from_the_link_itself as _from_the_link
 from app.services.api_token_service import is_link_label as _is_link_label
 from app.services.api_token_service import resolve as _resolve_api_token
 from app.services.served_companies import CompanyUnavailable, sentence_of
@@ -195,8 +196,9 @@ UNSERVED_COMPANY_REFUSAL = (
     "This server does not serve that company for this request. Nothing was done."
 )
 # The AI assistant connection's tokens are used by this app's own line to
-# itself, never from another computer: a copied connection file is no use
-# elsewhere on the network.
+# itself, never by another program or from another computer: a copied
+# connection file is no use anywhere else, and neither is a tunnel or a
+# forward into this computer.
 LINK_TOKEN_ADDRESS_REFUSAL = (
     "This token works only for the AI assistant connection on this computer. "
     "Nothing was done."
@@ -1508,7 +1510,14 @@ def api_token_refusal(request: Request):
         )
     if (
         token_principal.get("link") or _is_link_label(token_principal.get("label"))
-    ) and not _from_this_apps_own_address(request):
+    ) and not (
+        _from_the_link(request.headers) and _from_this_apps_own_address(request)
+    ):
+        # Honored only from the connection itself: its own header (see
+        # api_token_service.LINK_ORIGIN_HEADER), and from this app's own
+        # address as well. The address alone is not proof: a tunnel or a
+        # plain forward on this computer that adds no X-Forwarded-For makes
+        # an outside request look like loopback.
         return token_principal, JSONResponse(
             status_code=401,
             content={"detail": LINK_TOKEN_ADDRESS_REFUSAL},
