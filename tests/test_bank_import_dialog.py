@@ -23,7 +23,7 @@ def _handler(name):
 
 def test_the_file_picker_names_every_format_the_parser_detects():
     label = re.search(
-        r"<label>Select an OFX/QFX file, or a CSV export \((.*?)\)</label>", JS
+        r"<label>Select an OFX/QFX/QBO file, or a CSV export \((.*?)\)</label>", JS
     )
     assert label, "import dialog label not found"
     named = label.group(1)
