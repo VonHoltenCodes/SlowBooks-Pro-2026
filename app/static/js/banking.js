@@ -1395,15 +1395,19 @@ const BankingPage = {
             }
         }
         const filterQs = Object.entries(f).filter(([, v]) => v).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
-        const [reg, overview, classes, chart, vendors, customers, jobs] = await Promise.all([
+        const [reg, overview, classes, chartAll, vendors, customers, jobs] = await Promise.all([
             API.get(`/banking/check-register?account_id=${id}${filterQs}`),
             API.get('/banking/overview'),
             API.get('/classes?include_archived=true').catch(() => []),
-            API.get('/accounts?active_only=true').catch(() => []),
+            API.get('/accounts').catch(() => []),
             API.get('/vendors?active_only=true').catch(() => null),
             API.get('/customers?active_only=true&tree=1').catch(() => null),
             API.get('/jobs').catch(() => []),
         ]);
+        // the whole chart names a sub-account by its path; the active
+        // accounts are the ones offered
+        BankingPage._chartAll = chartAll;
+        const chart = chartAll.filter(a => a.is_active !== false);
         BankingPage._accounts = chart;
         BankingPage._setVendors(vendors);
         BankingPage._customerNames = customers ? new Set(customers.map(c => c.name.toLowerCase())) : null;
@@ -1768,7 +1772,8 @@ const BankingPage = {
     },
 
     async _fillCategorySelects(kind) {
-        const accounts = await API.get('/accounts?active_only=true');
+        BankingPage._chartAll = await API.get('/accounts');
+        const accounts = BankingPage._chartAll.filter(a => a.is_active !== false);
         BankingPage._reviewAccounts = accounts.filter(a => BankingPage.CATEGORY_TYPES.includes(a.account_type));
         BankingPage._fillReviewCats();
     },
@@ -1777,6 +1782,25 @@ const BankingPage = {
     // now; a line keeps its own choice (one picked a moment ago, not yet
     // reloaded, included).
     _reviewAccounts: null,
+    // The whole chart as last read, inactive accounts too: what a category
+    // picker's sub-account path is read from.
+    _chartAll: [],
+    // The register's category pickers name a sub-account by its path,
+    // "Telephone Expense: 8127", as the chart nests it (a QuickBooks import
+    // names it by its leaf alone), and list it under its parent, in the
+    // chart's order. The path comes from the whole chart, so a parent of
+    // another type, or an inactive one, still names itself. Each account
+    // shown, with the name to label it by.
+    _categoryNames(shown) {
+        const all = BankingPage._chartAll || [];
+        const known = new Set(all.map(a => a.id));
+        const chart = all.concat(shown.filter(a => !known.has(a.id)));
+        const path = App._accountTree(chart).path;
+        const wanted = new Set(shown.map(a => a.id));
+        return App._accountTreeOrder(chart, false)
+            .filter(({ a }) => wanted.has(a.id))
+            .map(({ a }) => ({ a, name: path(a) }));
+    },
     // The bank and card accounts under their own heading (#948): a line
     // whose category is another bank or card account posts as a transfer,
     // and the heading says so where the hand goes; the kind label stays.
@@ -1784,9 +1808,10 @@ const BankingPage = {
         const usable = BankingPage._reviewAccounts || [];
         document.querySelectorAll('select.review-cat, select.review-bulk-cat').forEach(sel => {
             const current = sel.value || sel.dataset.current;
-            const opt = (a) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
-            const transfers = usable.filter(a => a.bank_kind);
-            const categories = usable.filter(a => !a.bank_kind);
+            const opt = ({ a, name }) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a, name)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
+            const named = BankingPage._categoryNames(usable);
+            const transfers = named.filter(({ a }) => a.bank_kind);
+            const categories = named.filter(({ a }) => !a.bank_kind);
             sel.innerHTML = '<option value="">Pick a category…</option>'
                 + `<optgroup label="Categories">${categories.map(opt).join('')}</optgroup>`
                 + (transfers.length ? `<optgroup label="Transfer to another account">${transfers.map(opt).join('')}</optgroup>` : '');
@@ -2577,10 +2602,17 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // The row's category box is narrow: a sub-account's path is cut short
+    // when the list is closed, so the whole name is its tooltip.
+    _titleCategory(sel) {
+        const o = sel.options[sel.selectedIndex];
+        sel.title = o && o.value ? o.text : '';
+    },
+
     _quickEntryRow(accountId, kind, chart, outLabel, inLabel) {
-        const cats = (chart || [])
-            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type))
-            .map(a => `<option value="${a.id}">${accountLabel(a, a.account_path || a.name)}${a.bank_kind ? ' (transfer)' : ''}</option>`).join('');
+        const cats = BankingPage._categoryNames((chart || [])
+            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type)))
+            .map(({ a, name }) => `<option value="${a.id}">${accountLabel(a, name)}${a.bank_kind ? ' (transfer)' : ''}</option>`).join('');
         const key = `onkeydown="BankingPage._quickKey(event, ${accountId})"`;
         const now = new Date();
         const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -2595,7 +2627,7 @@ const BankingPage = {
                     <td><input type="text" id="qe-memo" aria-label="New entry memo" placeholder="Memo" style="width:100%; font-size:11px; padding:2px 4px;" ${key}></td>
                     <td><input type="text" id="qe-ref" aria-label="New entry check or reference number" placeholder="Ref" style="width:60px; font-size:11px; padding:2px 4px;" ${key}></td>
                     <td></td>
-                    <td>${AccountQuickAdd.picker('<select id="qe-category" aria-label="New entry category" data-no-search ' + key + ' style="font-size:11px; padding:2px 4px; max-width:150px;"><option value="">Category…</option>' + cats + '</select>', 'register', { ctx: accountId, id: 'qe-category-add', style: 'font-size:11px; padding:2px 6px;' })}${BankingPage._quickClassHtml(key)}</td>
+                    <td>${AccountQuickAdd.picker('<select id="qe-category" aria-label="New entry category" data-no-search ' + key + ' onchange="BankingPage._titleCategory(this)" style="font-size:11px; padding:2px 4px; max-width:150px;"><option value="">Category…</option>' + cats + '</select>', 'register', { ctx: accountId, id: 'qe-category-add', style: 'font-size:11px; padding:2px 6px;' })}${BankingPage._quickClassHtml(key)}</td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-out" class="money" aria-label="New entry ${escapeHtml(outLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-in" class="money" aria-label="New entry ${escapeHtml(inLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td></td><td></td>
@@ -2749,12 +2781,13 @@ const BankingPage = {
     // + Entry (posts) and Transfer
     // ------------------------------------------------------------------
     async showEntryForm(accountId, entry = null) {
-        const accounts = await API.get('/accounts?active_only=true');
+        BankingPage._chartAll = await API.get('/accounts');
+        const accounts = BankingPage._chartAll.filter(a => a.is_active !== false);
         const me = accounts.find(a => a.id === accountId) || {};
         const isCard = me.bank_kind === 'credit_card';
-        const catOpts = accounts
-            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type))
-            .map(a => `<option value="${a.id}">${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`).join('');
+        const catOpts = BankingPage._categoryNames(accounts
+            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type)))
+            .map(({ a, name }) => `<option value="${a.id}">${accountLabel(a, name)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`).join('');
         BankingPage._accounts = accounts;
         if (!BankingPage._vendorNames) {
             const vendors = await API.get('/vendors?active_only=true').catch(() => null);
@@ -3444,8 +3477,10 @@ const BankingPage = {
             chart: () => (BankingPage._accounts = BankingPage._accounts || []),
             excludeId: (accountId) => accountId,
             host: (select) => (select.id === 'qe-category' ? document.getElementById('qe-category-host') : null),
-            added: (made) => {
-                const opt = `<option value="${made.id}">${accountLabel(made)}</option>`;
+            added: (made, select) => {
+                const name = BankingPage._categoryNames([made])[0].name;
+                const opt = `<option value="${made.id}">${accountLabel(made, name)}</option>`;
+                if (select && select.id === 'qe-category') select.title = accountWords(made, name);
                 for (const id of ['qe-category', 'entry-category']) {
                     const s = document.getElementById(id);
                     if (s && !s.querySelector(`option[value="${made.id}"]`)) s.insertAdjacentHTML('beforeend', opt);

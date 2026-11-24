@@ -141,7 +141,11 @@ def test_a_new_account_is_made_and_control_accounts_are_not_offered(browser):
                 "account_number": None,
             }
         ]
-        assert page.locator("#qe-category option:checked").inner_text() == "Truck Fuel"
+        # a sub-account of Automobile, named by its path as the chart nests it
+        assert (
+            page.locator("#qe-category option:checked").inner_text()
+            == "Automobile: Truck Fuel"
+        )
         assert not page.is_visible("#qe-category-new")
         assert page.evaluate("() => document.activeElement.id") == "qe-out"
     finally:
