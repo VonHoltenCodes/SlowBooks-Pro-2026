@@ -46,7 +46,7 @@ function context(withStore, localStorage) {
     openModal() {}, closeModal() {}, toast() {},
     T: (s) => s,
     Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
-    App: { navigate() {}, _tabsOwner: 'kim|Main Street' },
+    App: { _accountTree: () => ({ path: (a) => a.name || '' }), _accountTreeOrder: (list) => list.map((a) => ({ a, depth: 0 })), navigate() {}, _tabsOwner: 'kim|Main Street' },
     API: {
       get: async (path) => {
         if (!(path in answers)) throw new Error('unexpected ' + path);

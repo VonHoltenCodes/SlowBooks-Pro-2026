@@ -48,7 +48,7 @@ const ctx = {
   toast() {},
   T: (s) => s,
   Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
-  App: { navigate() {} },
+  App: { _accountTree: () => ({ path: (a) => a.name || '' }), _accountTreeOrder: (list) => list.map((a) => ({ a, depth: 0 })), navigate() {} },
   API: {
     get: async (path) => {
       if (!(path in answers)) throw new Error('unexpected ' + path);
