@@ -124,7 +124,9 @@ it. Each open **Bill** comes across as a bill with its vendor, number, date,
 due date and open balance (a bill partly paid there comes at its full
 amount with a bill payment for the part paid, so its open balance is the
 same); each **Vendor Credit** not yet applied as a vendor
-credit; each **Bill Payment (Check)** or **Bill Payment (Credit Card)** not
+credit, dated as the report dates it (its Due date is empty there; one the
+report gives no number is numbered QBO-VC- and its date, QBO-VC-20261122
+say); each **Bill Payment (Check)** or **Bill Payment (Credit Card)** not
 yet applied as a bill payment applied to no bill. They post nothing of their
 own (the history already put their balance on 2000), so A/P Aging equals
 2000, every vendor's balance is their aging row, and Pay Bills offers the

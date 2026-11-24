@@ -26,10 +26,13 @@ cell with invented vendors and amounts. A company with nothing open
 (exported 2026-11-13) writes the header from the FIRST column and no
 rows.
 
-The real downloads hold only bills. The partly paid bill, the vendor
-credit and the unapplied bill payment in AGING_ROWS are invented to
-exercise what the import does with those types; no real export has shown
-them yet.
+A later download of the same company (2026-11-22, All Dates) added a
+partly paid bill and an unapplied vendor credit: the bill's Amount above
+its Open balance (205.00, 105.00 open), the credit's Amount and Open
+balance both negative, its Due date and Past due empty strings, Num empty
+on every row. REAL_LAYOUT_PAID_AND_CREDIT below is that layout with
+invented vendors and amounts. No real download has shown an unapplied
+bill payment yet: the one in AGING_ROWS and that layout is invented.
 
 The books here are invented: three vendors on the list, three open bills
 (one partly paid), a vendor credit and a bill payment not applied,
@@ -1294,3 +1297,119 @@ def test_odd_dates_are_carried_as_quickbooks_has_them():
     items, errors, _notes = qbo.parse_ap_aging(_as_uploaded(_real_workbook(rows)))
     assert errors == []
     assert len(items) == 5
+
+
+# The later download's new row kinds, row by row as it writes them (the
+# vendors and amounts invented, the Journal's own): a bill partly paid (its
+# Amount above its Open balance) and a vendor credit not applied, whose Due
+# date and Past due are empty strings and whose Amount and Open balance are
+# both negative, in the CURRENT section; Num empty on every row; the totals
+# formulas. The unapplied bill payment is invented: no download has one.
+REAL_LAYOUT_PAID_AND_CREDIT = [
+    ["Fieldstone Renovations"],
+    ["A/P Aging Detail Report"],
+    ["All Dates"],
+    [],
+    [None] + HEADER,
+    ["31 - 60 days past due"],
+    [None, "09/01/2026", "Bill", "", "Harbor Paint Supply", "10/01/2026"]
+    + [52, 400.0, 400.0],
+    [None, "09/10/2026", "Bill", "", "Ridge Lumber Co", "10/10/2026"]
+    + [43, 900.0, 600.0],
+    ["Total for 31 - 60 days past due"] + [None] * 6 + ["=H7+H8", "=I7+I8"],
+    ["1 - 30 days past due"],
+    [None, "10/01/2026", "Bill", "", "Quill Trade Goods", "10/31/2026"]
+    + [22, 150.0, 150.0],
+    [None, "10/20/2026", "Bill Payment (Check)", "", "Ridge Lumber Co"]
+    + ["10/20/2026", 33, -75.0, -75.0],
+    ["Total for 1 - 30 days past due"] + [None] * 6 + ["=H11+H12", "=I11+I12"],
+    ["CURRENT"],
+    [None, "10/05/2026", "Vendor Credit", "", "Harbor Paint Supply", ""]
+    + ["", -50.0, -50.0],
+    ["Total for CURRENT"] + [None] * 6 + ["=H15", "=I15"],
+    ["TOTAL"] + [None] * 6 + ["=H9+H13+H16", "=I9+I13+I16"],
+    [],
+    [],
+    [],
+    [" Sunday, November 22, 2026 05:08 PM GMTZ"],
+]
+
+
+def test_the_real_layout_of_a_partly_paid_bill_and_a_credit_reads_and_imports(
+    client, db_session, seed_accounts
+):
+    content = _real_workbook(REAL_LAYOUT_PAID_AND_CREDIT)
+    items, errors, notes = qbo.parse_ap_aging(_as_uploaded(content))
+    assert errors == [] and notes == []
+    assert [
+        (i["kind"], i["row"], i["date"].isoformat(), i["amount"], i["open"])
+        for i in items
+    ] == [
+        ("bill", 7, "2026-09-01", Decimal("400"), Decimal("400")),
+        ("bill", 8, "2026-09-10", Decimal("900"), Decimal("600")),
+        ("bill", 11, "2026-10-01", Decimal("150"), Decimal("150")),
+        ("payment", 12, "2026-10-20", Decimal("-75"), Decimal("-75")),
+        ("credit", 15, "2026-10-05", Decimal("-50"), Decimal("-50")),
+    ]
+    # the credit's empty Due date reads as its own date
+    assert items[4]["due_date"].isoformat() == "2026-10-05"
+
+    files = _real_files(REAL_LAYOUT_PAID_AND_CREDIT)
+    data = client.post("/api/migration/qbo_export/import", files=files).json()
+    assert data["ok"] is True, data["errors"]
+    assert (data["imported_open_bills"], data["imported_vendor_credits"]) == (3, 1)
+    assert data["imported_unapplied_bill_payments"] == 1
+    said = " ".join(data["warnings"])
+    assert (
+        "row 15: carried over as vendor credit QBO-VC-20261005 (the report "
+        "gives it no number)" in said
+    )
+    # the partly paid bill at its 900.00 with the Journal's 300.00 payment
+    (partly,) = [
+        b for b in db_session.query(Bill) if b.vendor.name == "Ridge Lumber Co"
+    ]
+    assert (partly.total, partly.amount_paid, partly.balance_due) == (
+        Decimal("900.00"),
+        Decimal("300.00"),
+        Decimal("600.00"),
+    )
+    (alloc,) = db_session.query(BillPaymentAllocation).all()
+    paid = db_session.get(BillPayment, alloc.bill_payment_id)
+    assert (paid.date.isoformat(), paid.amount, paid.check_number) == (
+        "2026-09-15",
+        Decimal("300.00"),
+        "3001",
+    )
+    (credit,) = db_session.query(VendorCredit).all()
+    assert (
+        credit.credit_number,
+        credit.vendor.name,
+        credit.date.isoformat(),
+        credit.total,
+        credit.amount_applied,
+        credit.balance_remaining,
+    ) == (
+        "QBO-VC-20261005",
+        "Harbor Paint Supply",
+        "2026-10-05",
+        Decimal("50.00"),
+        Decimal("0.00"),
+        Decimal("50.00"),
+    )
+    _ties(client, db_session, Decimal("1025.00"))
+
+    again = client.post(
+        "/api/migration/qbo_export/import",
+        files=_real_files(REAL_LAYOUT_PAID_AND_CREDIT),
+    ).json()
+    assert again["ok"] is True, again["errors"]
+    assert (again["imported_open_bills"], again["imported_vendor_credits"]) == (0, 0)
+    assert again["imported_unapplied_bill_payments"] == 0
+    db_session.expire_all()
+    counts = (
+        db_session.query(Bill).count(),
+        db_session.query(VendorCredit).count(),
+        db_session.query(BillPayment).count(),
+    )
+    assert counts == (3, 1, 2)
+    _ties(client, db_session, Decimal("1025.00"))
