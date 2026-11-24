@@ -198,10 +198,13 @@ test('New Vendor Credit holds files until the create answers', async () => {
 
 test('the Quick Entry pages discard their files when the page is left', () => {
     const app = read('app.js');
-    for (const route of ["'/quick-entry':", "'/bill-entry':"]) {
-        const line = app.split('\n').find((l) => l.includes(route));
-        assert.match(line, /mount: \(\) => \(\) => PendingFiles\.discard\(\)/, route);
-    }
+    const quick = app.split('\n').find((l) => l.includes("'/quick-entry':"));
+    assert.match(quick, /mount: \(\) => \(\) => PendingFiles\.discard\(\)/);
+    // Bill Quick Entry mounts its line controls too (#1189); its mount
+    // still hands back the discard as the route's cleanup.
+    const bill = app.split('\n').find((l) => l.includes("'/bill-entry':"));
+    assert.match(bill, /mount: \(\) => BillQuickEntry\.mount\(\)/);
+    assert.match(read('bill_quick_entry.js'), /return \(\) => PendingFiles\.discard\(\);/);
     // Save & Next: the files go with this document, and the next starts with none
     for (const [file, create] of [['app.js', "API.post('/invoices', { ...data, pending_attachments: PendingFiles.ids() })"],
         ['bill_quick_entry.js', 'pending_attachments: PendingFiles.ids(),']]) {

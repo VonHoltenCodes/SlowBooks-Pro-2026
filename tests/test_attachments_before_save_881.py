@@ -391,9 +391,14 @@ def test_a_dialog_form_discards_on_close_and_a_page_form_on_leaving():
         js = (JS / name).read_text(encoding="utf-8")
         assert "onClose: () => PendingFiles.discard()" in js, name
     app_js = (JS / "app.js").read_text(encoding="utf-8")
-    for route in ("'/quick-entry':", "'/bill-entry':"):
-        line = next(ln for ln in app_js.splitlines() if route in ln)
-        assert "mount: () => () => PendingFiles.discard()" in line, route
+    line = next(ln for ln in app_js.splitlines() if "'/quick-entry':" in ln)
+    assert "mount: () => () => PendingFiles.discard()" in line
+    # Bill Quick Entry mounts its line controls too (#1189); its mount
+    # still hands back the discard as the route's cleanup.
+    line = next(ln for ln in app_js.splitlines() if "'/bill-entry':" in ln)
+    assert "mount: () => BillQuickEntry.mount()" in line
+    bqe = (JS / "bill_quick_entry.js").read_text(encoding="utf-8")
+    assert "return () => PendingFiles.discard();" in bqe
 
 
 def test_an_existing_document_keeps_its_own_attachments_panel():

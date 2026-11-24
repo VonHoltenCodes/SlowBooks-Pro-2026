@@ -13,8 +13,9 @@ purchase order, vendor credit, bill, journal entry, expense, recurring
 template, deposit (its other lines), change order and pay application. A pay
 application's lines are its schedule of values: they cannot be inserted,
 removed or moved, and two of them can carry the same item number, so they
-too are named by their place. The bill form has no Remove line. Every form
-lets its last line be removed like any other (the expense form used to keep
+too are named by their place. The bill form and bill quick entry got Remove
+line in #1189, through the same shared module as the purchase order's. Every
+form lets its last line be removed like any other (the expense form used to keep
 one); what a save with no lines does is another module's
 (test_browser_zero_total_ask_r29.py).
 
@@ -88,7 +89,7 @@ FORMS = [
         True,
         True,
     ),
-    ("bill", "#/bills", "BillsPage.showForm()", "#bill-lines", True, False),
+    ("bill", "#/bills", "BillsPage.showForm()", "#bill-lines", True, True),
     ("journal entry", "#/journal", "JournalPage.showForm()", "#je-lines", False, True),
     ("expense", "#/expenses", "ExpensesPage.showForm()", "#expense-lines", False, True),
     (
@@ -607,7 +608,12 @@ def _sweep_split(browser, client, form):
             page.wait_for_function(f"(sel) => ({ROW_COUNT})(sel) === 5", arg=sel)
             order = "BCA*+"
             _split_named(page, sel, name, "Insert line below, chooser open", order)
-        if removes:
+        if removes and not orders:
+            # Remove around a chooser, from the opening three lines (the
+            # journal entry, whose lines don't reorder). The bill both
+            # reorders and removes, so by here its lines are not the opening
+            # three; its plain Remove line is swept by the two tests above,
+            # and here it walks Split's move, insert and Apply instead.
             # a line above the chooser's line goes: the chooser stays with
             # its line, the keyboard on the line that took the place
             _press_words(page, sel, 2, "Split")
