@@ -111,3 +111,45 @@ def test_every_register_category_picker_names_the_path(browser, company, books):
         settle(page, handled)
     finally:
         page.close()
+
+
+def test_an_account_quick_added_under_a_quick_added_one_names_its_path(
+    browser, company, books
+):
+    """Two accounts quick-added in a row from the quick-entry row, the second
+    under the first: the second is named by its whole path too, not by its
+    own name alone (the first was not in the chart the paths are read from
+    until the page was drawn again)."""
+    phone = _account(company, name="Phone Lines", account_number="6420")
+
+    page, handled = _open_at(browser, company, f"#/banking/{books['checking']}")
+    settle(page, handled)
+    try:
+        page.wait_for_selector("#qe-category")
+
+        def quick_add(name, parent_id):
+            page.click("#qe-category-add")
+            page.wait_for_selector("#qe-category-new", state="visible")
+            page.fill("#qe-category-new-name", name)
+            page.select_option("#qe-category-new-type", "expense")
+            page.select_option("#qe-category-new-parent", str(parent_id))
+            page.click("#qe-category-new >> text=Add account")
+            page.wait_for_function(
+                "n => { const s = document.getElementById('qe-category');"
+                " const o = s.options[s.selectedIndex];"
+                " return o && o.text.endsWith(n); }",
+                arg=name,
+            )
+            settle(page, handled)
+            return page.evaluate(
+                "() => { const s = document.getElementById('qe-category');"
+                " return [s.value, s.options[s.selectedIndex].text, s.title]; }"
+            )
+
+        first = quick_add("Long Distance", phone["id"])
+        assert first[1:] == ["Phone Lines: Long Distance"] * 2
+        second = quick_add("Night Rate", first[0])
+        assert second[1:] == ["Phone Lines: Long Distance: Night Rate"] * 2
+        settle(page, handled)
+    finally:
+        page.close()

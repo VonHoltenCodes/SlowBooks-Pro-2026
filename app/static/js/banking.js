@@ -3478,6 +3478,10 @@ const BankingPage = {
             excludeId: (accountId) => accountId,
             host: (select) => (select.id === 'qe-category' ? document.getElementById('qe-category-host') : null),
             added: (made, select) => {
+                // into the chart the paths are read from, so an account
+                // added under this one is named by its path too
+                const all = (BankingPage._chartAll = BankingPage._chartAll || []);
+                if (!all.some(a => a.id === made.id)) all.push(made);
                 const name = BankingPage._categoryNames([made])[0].name;
                 const opt = `<option value="${made.id}">${accountLabel(made, name)}</option>`;
                 if (select && select.id === 'qe-category') select.title = accountWords(made, name);
