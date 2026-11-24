@@ -1413,3 +1413,35 @@ def test_the_real_layout_of_a_partly_paid_bill_and_a_credit_reads_and_imports(
     )
     assert counts == (3, 1, 2)
     _ties(client, db_session, Decimal("1025.00"))
+
+
+@pytest.mark.parametrize("choice", ["reference", "memo"])
+def test_paying_a_carried_bill_puts_no_carry_over_note_on_the_check(
+    client, db_session, seed_accounts, choice
+):
+    """A real report gives no bill a number, so a carried bill has no
+    reference, and its notes are the carry-over's own sentence about the
+    migration. Paid in Pay Bills with no memo typed, that sentence is no
+    check memo under either choice: the vendor would read it on the check."""
+    r = client.put("/api/settings", json={"check_memo": choice})
+    assert r.status_code == 200, r.text
+    data = client.post("/api/migration/qbo_export/import", files=_real_files()).json()
+    assert data["ok"] is True, data["errors"]
+    (bill,) = [
+        b for b in db_session.query(Bill) if b.vendor.name == "Copperline Electric"
+    ]
+    assert bill.notes.startswith(qbo._AP_CARRIED)
+    r = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": bill.vendor_id,
+            "date": "2026-11-24",
+            "amount": 207.6,
+            "check_number": "5001",
+            "allocations": [{"bill_id": bill.id, "amount": 207.6}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["notes"] is None
+    db_session.expire_all()
+    _ties(client, db_session, Decimal("1025.00") - Decimal("207.60"))
