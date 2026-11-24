@@ -1565,13 +1565,16 @@ a:hover { text-decoration: underline; }
 }
 
 /* A dialog for a form with a wide line-item table: as wide as the window
-   allows, up to 1300px. Opened with openModal(title, html, { wide: true }).
+   allows, up to 1324px. Opened with openModal(title, html, { wide: true }).
    The width too, not only the cap: the 90% of .modal left the bill's lines,
    with 2.31.0's move column, scrolling at the 1264px window the gate's
-   agents use, the Amount column out of view at rest. */
+   agents use, the Amount column out of view at rest. 1324, not 1300:
+   #1189's Remove line is a fifth control in the bill's move column (NEW-278
+   gave it the purchase order and vendor credit), and the bill's column is
+   wider for it (.bill-lines-table .col-order below). */
 .modal.modal--wide {
     width: calc(100% - 12px);
-    max-width: 1300px;
+    max-width: 1324px;
 }
 /* The register entry's split lines (NEW-204, 2.31.6 gate): six columns
    share the dialog's width, the controls filling their cells, so the table
@@ -1589,10 +1592,11 @@ a:hover { text-decoration: underline; }
    the 1264px window and at the dialog's cap alike (2.31.1 gate, NEW-187):
    with the move controls able to fold (.line-order-controls) and the line
    cells' 2px sides, it fits at 1264px, the table scrolling only below. The
-   cap is 1300px, not 1280: a construction bill's twelve columns left the
+   cap is 1324px, not 1280: a construction bill's twelve columns left the
    move column 97px at 1280, and one font set's wider glyphs folded its
-   controls there (2.31.11 gate, L-1); the twenty more are the column's
-   slack, with the controls' own widths fixed. */
+   controls there (2.31.11 gate, L-1); the twenty to 1300 were the four
+   controls' slack, and #1189's Remove line is a fifth, so 24px more carry
+   it at the cap too, with the controls' own widths fixed. */
 .modal.modal--wide #modal-body {
     padding-left: 8px;
     padding-right: 8px;
@@ -2129,6 +2133,11 @@ a:hover { text-decoration: underline; }
 .line-items-table .col-actions{ width: 30px; text-align: center; }
 .line-items-table .col-order  { width: 120px; white-space: nowrap; text-align: center; }
 .line-order-cell { text-align: center; }
+/* The bill's move column carries five controls since #1189 (handle, up,
+   down, insert, Remove line): 106px of them, with the 16px to spare the
+   2.31.11 gate (L-1) asks for at the dialog's cap. The other grids keep
+   120px. */
+.bill-lines-table .col-order { width: 130px; }
 /* The move controls sit in a row where the table has the room and fold two
    by two where it is tight: the column's least width is two controls, so a
    crowded line table gives up this column's spare width before it scrolls

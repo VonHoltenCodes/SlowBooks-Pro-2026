@@ -4010,7 +4010,7 @@ const BankingPage = {
     },
 
     // ------------------------------------------------------------------
-    // File import (OFX/QFX; CSV: Bank of America, Chase checking/credit,
+    // File import (OFX/QFX/QBO; CSV: Bank of America, Chase checking/credit,
     // PayPal, or any file whose header names a date, a description and an
     // amount — and, for one that doesn't, a step that asks which column is
     // which) — needs a feed on the account; offers to create one.
@@ -4031,8 +4031,8 @@ const BankingPage = {
         openModal('Import Bank File', `
             <form id="ofx-form" onsubmit="BankingPage.previewOFX(event, ${feedId}, ${accountId})">
                 <div class="form-group">
-                    <label>Select an OFX/QFX file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal, or any file with date, description and amount columns)</label>
-                    <input type="file" name="file" accept=".ofx,.qfx,.csv" required id="ofx-file" onchange="BankingPage._csvMapping = null">
+                    <label>Select an OFX/QFX/QBO file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal, or any file with date, description and amount columns)</label>
+                    <input type="file" name="file" accept=".ofx,.qfx,.qbo,.csv" required id="ofx-file" onchange="BankingPage._csvMapping = null">
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
