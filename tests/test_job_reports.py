@@ -1846,6 +1846,12 @@ _AS_OF_REPORTS = {
     "commitments": lambda db, **kw: job_reports.commitment_status(
         db, as_of=kw.pop("as_of"), **kw
     ),
+    "cost_to_complete": lambda db, **kw: job_reports.cost_to_complete(
+        db, as_of=kw.pop("as_of"), **kw
+    ),
+    "ctc_forecast": lambda db, **kw: job_reports.ctc_forecast_report(
+        db, as_of=kw.pop("as_of"), **kw
+    ),
     "vendor": lambda db, **kw: job_reports.job_cost_by_vendor(
         db, end_date=kw.pop("as_of"), **kw
     ),
@@ -1863,7 +1869,12 @@ def test_as_of_reports_keep_a_job_closed_after_the_date(
     assert [j["job_id"] for j in run(db_session, as_of=date(2026, 7, 1))["jobs"]] == [
         job.id
     ]
-    # after the close it is gone, as before
+    # on the close day itself it was still on the books; from the next day
+    # it is gone, as before
+    assert [j["job_id"] for j in run(db_session, as_of=date(2026, 9, 1))["jobs"]] == [
+        job.id
+    ]
+    assert run(db_session, as_of=date(2026, 9, 2))["jobs"] == []
     assert run(db_session, as_of=date(2026, 10, 1))["jobs"] == []
     wip = job_reports.wip_schedule(db_session, as_of=date(2026, 7, 1))
     assert job.id in [r["job_id"] for r in wip["rows"]]
