@@ -6,8 +6,9 @@
 // and card accounts read that as open bills "not showing". Now, with no
 // candidates, the pay panel opens by itself, the sentence names Pay bills
 // (or Receive payment), and the vendor is guessed when the line does not
-// say: the only one with an open bill of the line's amount, else the one
-// whose name begins the payee; else the panel says to pick one.
+// say: the one whose name begins the payee, else the only one with an open
+// bill of the line's amount; else the panel says to pick one. When one open
+// bill is due exactly the line's amount, only that bill is filled.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -86,15 +87,15 @@ const CHARGE = { id: 7, amount: '-90.00', payee: 'PARTS DEPOT #4411' };
 test('a money-out line with nothing to match opens Pay bills and names it', async () => {
     const bills = [{ id: 21, vendor_id: 5, balance_due: '90.00', status: 'unpaid', date: '2026-10-01' }];
     const { BP, calls, elements } = load({ bills, vendors: VENDORS, rowVendor: '' });
-    BP._reviewLines = { 7: CHARGE };
+    BP._reviewLines = { 7: { id: 7, amount: '-90.00', payee: 'ACH DEBIT 5521' } };
     await BP.showMatch(7, 2);
     const html = calls.modal[0][1];
-    assert.match(html, /Nothing in the books has this amount[^<]*If it pays open bills, pick the vendor under <strong>Pay bills<\/strong> above\./);
+    assert.match(html, /Nothing in the books has this amount[^<]*If it pays open bills, pick or check the vendor under <strong>Pay bills<\/strong> above\./);
     assert.match(html, /use <strong>Add<\/strong> to post it/);
     const panel = elements['feed-pay-panel'];
     assert.equal(panel.hidden, false, 'the pay panel is open by itself');
     assert.equal(elements['feed-pay-open'].attrs['aria-expanded'], 'true');
-    // the only vendor with an open bill of 90.00 is picked, over the payee's name
+    // the payee names no one: the only vendor with an open bill of 90.00 is picked
     assert.match(panel.innerHTML, /<option value="5" selected>Egg Farm/);
     assert.ok(calls.pages.includes('/bills?open_only=true'));
     assert.ok(calls.pages.includes('/bills?vendor_id=5&open_only=true'), 'its bills are fetched');
@@ -159,7 +160,7 @@ test('a money-in line opens Receive payment with the one customer owed that amou
     const { BP, calls, elements } = load({ invoices, customers });
     BP._reviewLines = { 7: { id: 7, amount: '175.00', payee: 'DEPOSIT' } };
     await BP.showMatch(7, 2);
-    assert.match(calls.modal[0][1], /If it is a customer's payment, pick the customer under <strong>Receive payment<\/strong> above\./);
+    assert.match(calls.modal[0][1], /If it is a customer's payment, pick or check the customer under <strong>Receive payment<\/strong> above\./);
     assert.equal(elements['feed-pay-panel'].hidden, false);
     // billed to the parent: the payment comes from the parent
     assert.match(elements['feed-pay-panel'].innerHTML, /<option value="8" selected>Corner Deli</);
@@ -184,4 +185,47 @@ test('Pay bills... on a panel already open keeps the vendor picked, no re-render
     assert.equal(elements['feed-pay-panel'].innerHTML, before);
     assert.equal(calls.pages.length, fetched);
     assert.equal(elements['feed-pay-party'].focused, true);
+});
+
+test('the vendor the bank names beats another vendor with a bill of that amount', async () => {
+    // Parts Depot is named; Egg Farm has the only open 90.00 bill
+    const bills = [
+        { id: 26, vendor_id: 3, balance_due: '40.00', status: 'unpaid', date: '2026-10-01' },
+        { id: 27, vendor_id: 5, balance_due: '90.00', status: 'unpaid', date: '2026-10-01' },
+    ];
+    const { BP, calls, elements } = load({ bills, vendors: VENDORS, rowVendor: '' });
+    BP._reviewLines = { 7: CHARGE };
+    await BP.showMatch(7, 2);
+    assert.match(elements['feed-pay-panel'].innerHTML, /<option value="3" selected>Parts Depot/);
+    assert.doesNotMatch(elements['feed-pay-panel'].innerHTML, /value="5" selected/);
+    assert.ok(!calls.pages.includes('/bills?open_only=true'), 'a name match needs no fetch of every open bill');
+    assert.ok(calls.pages.includes('/bills?vendor_id=3&open_only=true'));
+});
+
+test('one open bill due exactly the line amount is the one filled, not the oldest', async () => {
+    const bills = [
+        { id: 41, vendor_id: 3, balance_due: '40.00', status: 'unpaid', date: '2026-09-01' },
+        { id: 42, vendor_id: 3, balance_due: '90.00', status: 'unpaid', date: '2026-10-01' },
+    ];
+    const { BP, elements } = load({ bills, vendors: VENDORS, rowVendor: '' });
+    BP._reviewLines = { 7: CHARGE };
+    await BP.showMatch(7, 2);
+    const box = elements['feed-pay-docs'].innerHTML;
+    assert.match(box, /data-doc="42"[^>]*value="90.00"/);
+    assert.match(box, /data-doc="41"[^>]*value=""/);
+});
+
+test('two open bills due the line amount: filled oldest first as before', async () => {
+    const bills = [
+        { id: 43, vendor_id: 3, balance_due: '90.00', status: 'unpaid', date: '2026-09-01' },
+        { id: 44, vendor_id: 3, balance_due: '90.00', status: 'unpaid', date: '2026-10-01' },
+        { id: 45, vendor_id: 3, balance_due: '30.00', status: 'unpaid', date: '2026-08-01' },
+    ];
+    const { BP, elements } = load({ bills, vendors: VENDORS, rowVendor: '' });
+    BP._reviewLines = { 7: CHARGE };
+    await BP.showMatch(7, 2);
+    const box = elements['feed-pay-docs'].innerHTML;
+    assert.match(box, /data-doc="45"[^>]*value="30.00"/);
+    assert.match(box, /data-doc="43"[^>]*value="60.00"/);
+    assert.match(box, /data-doc="44"[^>]*value=""/);
 });

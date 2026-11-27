@@ -2421,8 +2421,8 @@ const BankingPage = {
             const t = (BankingPage._reviewLines || {})[lineId];
             const moneyIn = t && parseFloat(t.amount) > 0;
             const payWay = !offer ? ''
-                : moneyIn ? ` If it is a ${T('customer').toLowerCase()}'s payment, pick the ${T('customer').toLowerCase()} under <strong>Receive payment</strong> above.`
-                : ' If it pays open bills, pick the vendor under <strong>Pay bills</strong> above.';
+                : moneyIn ? ` If it is a ${T('customer').toLowerCase()}'s payment, pick or check the ${T('customer').toLowerCase()} under <strong>Receive payment</strong> above.`
+                : ' If it pays open bills, pick or check the vendor under <strong>Pay bills</strong> above.';
             openModal('Match to a posting', bar + offer + (rows
                 ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Payee / description</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col"></th></tr></thead><tbody>${rows}</tbody></table></div>`
                 : `<p>Nothing in the books has this amount ${within}.${payWay} Otherwise look further back, or use <strong>Add</strong> to post it.</p>`));
@@ -2465,7 +2465,7 @@ const BankingPage = {
             return;
         }
         const moneyIn = parseFloat(t.amount) > 0;
-        const ctx ={ lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
+        const ctx = { lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
         BankingPage._feedPayCtx = ctx;
         let picked = '';
         let options = '';
@@ -2501,11 +2501,20 @@ const BankingPage = {
         if (party && focus) party.focus();
     },
 
-    // The one to pay or receive from when the line does not say: the only
-    // one with an open bill (or invoice) of exactly the line's amount, else
-    // the one whose name begins the bank's payee text ("PARTS DEPOT #4411"
-    // is Parts Depot), the longest such name; else none ('').
+    // The one to pay or receive from when the line does not say: the one
+    // whose name begins the bank's payee text ("PARTS DEPOT #4411" is Parts
+    // Depot), the longest such name, since the bank naming someone beats an
+    // amount that happens to agree; else the only one with an open bill (or
+    // invoice) of exactly the line's amount; else none ('').
     async _feedPayGuess(moneyIn, amount, payee, parties) {
+        const text = String(payee || '').trim().toLowerCase();
+        let best = null;
+        for (const p of parties) {
+            const name = String(p.name || '').trim().toLowerCase();
+            if (!name || !text.startsWith(name) || /[a-z0-9]/.test(text.charAt(name.length))) continue;
+            if (!best || name.length > best.name.length) best = { id: String(p.id), name };
+        }
+        if (best) return best.id;
         const known = new Set(parties.map(p => String(p.id)));
         const cents = Math.round((amount || 0) * 100);
         try {
@@ -2517,20 +2526,14 @@ const BankingPage = {
                 const [id] = who;
                 if (known.has(id)) return id;
             }
-        } catch (err) { /* the payee's name below still guesses */ }
-        const text = String(payee || '').trim().toLowerCase();
-        let best = null;
-        for (const p of parties) {
-            const name = String(p.name || '').trim().toLowerCase();
-            if (!name || !text.startsWith(name) || /[a-z0-9]/.test(text.charAt(name.length))) continue;
-            if (!best || name.length > best.name.length) best = { id: String(p.id), name };
-        }
-        return best ? best.id : '';
+        } catch (err) { /* no guess: the panel says to pick one */ }
+        return '';
     },
 
     // the open invoices or bills of the one picked, oldest first, each
     // filled with what the line covers, oldest first, as Receive Payments
-    // fills them
+    // fills them; but when just one of them is still due exactly the line's
+    // amount, the line plainly pays that one, so only it is filled
     async loadFeedPayDocs() {
         const ctx = BankingPage._feedPayCtx;
         const party = document.getElementById('feed-pay-party');
@@ -2560,9 +2563,11 @@ const BankingPage = {
             return;
         }
         let left = Math.round(ctx.amount * 100);
+        const dueOf = d => Math.round((parseFloat(d.balance_due) || 0) * 100);
+        const exact = docs.filter(d => dueOf(d) === left);
         const rows = docs.map(d => {
-            const due = Math.round((parseFloat(d.balance_due) || 0) * 100);
-            const put = Math.max(0, Math.min(due, left));
+            const due = dueOf(d);
+            const put = exact.length === 1 ? (d === exact[0] ? due : 0) : Math.max(0, Math.min(due, left));
             left -= put;
             const num = ctx.moneyIn ? d.invoice_number : (d.bill_number || d.id);
             return `<tr>
