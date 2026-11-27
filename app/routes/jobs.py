@@ -380,7 +380,8 @@ def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get
     whole-job row for its own key. A row sent with the amounts already stored
     changes nothing, also on a locked budget. A changed row replaces what it
     stands for with one manual row (zero amounts clear it); a changed row
-    over a locked one (#551) or a change order's key (#554) is refused.
+    over a locked one (#551) or a change order's key (#554) is refused, but
+    a code set back to its estimate rows' sum drops its manual extras.
     Manual rows not sent are deleted; estimate rows not sent are kept.
     Change-order rows are never touched."""
     _get(db, job_id)
@@ -422,6 +423,16 @@ def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get
             ):
                 group[0].notes = row.notes
             continue
+        # set back to the estimate (or locked) rows' own sum: the code's
+        # manual rows are extras, such as the stray row an older save wrote
+        # past the lock, and are dropped so the code reads as its estimate
+        kept = [r for r in group if r.source != "manual"]
+        if kept and len(kept) < len(group):
+            if _budget_sum(kept) == (_q(row.amount), _q(row.revenue_amount)):
+                for r in group:
+                    if r.source == "manual":
+                        db.delete(r)
+                continue
         # a locked row is the contract budget, moved only by a change order
         locked = next((r for r in group if r.locked), None)
         if locked is not None:

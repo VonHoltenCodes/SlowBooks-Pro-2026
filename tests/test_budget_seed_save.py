@@ -60,7 +60,10 @@ def _cents(v):
 def _screen(client, job_id):
     """What jobs.js budgetHtml() shows: {key: (cost, revenue, source)} per
     screen line, summing a code's non-change rows and leaving out an old
-    Save Budget twin (a manual untyped row equal to the code's other rows)."""
+    Save Budget twin (a manual untyped row equal to the code's other rows).
+    This mirrors the grouping in budgetHtml() (its `groups` / `line` helpers);
+    tests/js/job_budget_screen.test.cjs runs the real function on the same
+    cases, so keep the two in step."""
     groups = {}
     for r in client.get(f"/api/jobs/{job_id}/budgets").json():
         if r["source"] == "change":
@@ -363,3 +366,40 @@ def test_change_order_rows_stay_out(setup, db_session):
         (a["id"], "material", 250.0, "change"),
         (b["id"], "material", 300.0, "estimate"),
     ]
+
+
+def test_a_stray_manual_row_on_a_locked_code_can_be_set_back(setup, db_session):
+    """The old lock bypass left a manual row beside a locked estimate row.
+    Setting the code back to the contract amount removes it; anything else
+    on that code is still refused."""
+    client, job, est, a, b = setup
+    r = client.post(f"/api/estimates/{est['id']}/accept", json={})
+    assert r.status_code == 200, r.text
+    before = client.get(f"/api/jobs/{job['id']}/budgets").json()
+    _twin(db_session, job["id"], a["id"], "1", "0")
+    assert _tree_original(client, job["id"]) == 901.0
+    assert _screen(client, job["id"])[("c", a["id"])] == (
+        601.0,
+        600.0,
+        "mixed · locked",
+    )
+    # another amount, or a blank line, is still refused by the lock
+    for amount in (5, 0):
+        r = _save(client, job["id"], edits={a["id"]: amount})
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "budget_locked"
+    r = _save(client, job["id"], edits={a["id"]: 600})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/jobs/{job['id']}/budgets").json() == before
+    assert _tree_original(client, job["id"]) == 900.0
+    assert _screen(client, job["id"])[("c", a["id"])][2] == "estimate · locked"
+
+
+def test_an_unlocked_code_set_back_to_its_estimate_drops_the_extra(setup, db_session):
+    client, job, est, a, b = setup
+    _seed(client, job, est)
+    _twin(db_session, job["id"], a["id"], "25", "0")
+    assert _screen(client, job["id"])[("c", a["id"])][:2] == (625.0, 600.0)
+    r = _save(client, job["id"], edits={a["id"]: 600})
+    assert r.status_code == 200, r.text
+    assert _rows(client, job["id"]) == _seeded(a, b)
+    assert _tree_original(client, job["id"]) == 900.0
