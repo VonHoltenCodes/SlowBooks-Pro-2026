@@ -847,9 +847,12 @@ const JobsPage = {
             `<option value="${a.id}" ${String(line.revenue_account_id) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.account_number ? a.account_number + ' ' + a.name : a.name)}</option>`)).join('');
         const kindOpts = Object.entries(JobsPage.SOV_KINDS).filter(([k]) => k !== 'change_order').map(([k, v]) =>
             `<option value="${k}" ${(line.kind || 'work') === k ? 'selected' : ''}>${v}</option>`).join('');
-        // An allowance line shows its change-order draw-down (used / remaining).
+        // An allowance line shows its change-order draw-down (used / remaining)
+        // and the job cost actually posted on its cost code beside it.
+        const hasPosted = usage && usage.cost_posted !== null && usage.cost_posted !== undefined;
+        const postedNote = hasPosted ? ` · Cost posted ${formatCurrency(usage.cost_posted)}` : '';
         const allowanceNote = (line.kind === 'allowance' && usage)
-            ? `<div style="font-size:11px;color:var(--text-muted)">Used ${formatCurrency(usage.used)} · ${formatCurrency(usage.remaining)} left${(line.id && usage.remaining > 0) ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coReturnAllowance(${line.id}, ${usage.remaining})" title="Make a change order that gives the unspent amount back to the owner">Return unspent</button>` : ''}</div>` : '';
+            ? `<div style="font-size:11px;color:var(--text-muted)">Used ${formatCurrency(usage.used)}${postedNote} · ${formatCurrency(usage.remaining)} left${(line.id && usage.remaining > 0) ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coReturnAllowance(${line.id}, ${usage.remaining}, ${usage.used}, ${hasPosted ? usage.cost_posted : 'null'})" title="Make a change order that gives the unspent amount back to the owner">Return unspent</button>` : ''}</div>` : '';
         return `<tr class="sov-row" data-id="${line.id || ''}">
             <td><input class="sov-item" data-write maxlength="10" value="${escapeHtml(line.item_no || '')}" style="width:46px"></td>
             <td><input class="sov-desc" data-write maxlength="200" value="${escapeHtml(line.description || '')}" style="width:100%">${allowanceNote}</td>
@@ -1369,13 +1372,21 @@ const JobsPage = {
             }
         } catch (err) { toast(err.message, 'error'); }
     },
-    // Make a draft owner change order for the allowance's unspent amount
-    // (the Contract tab's allowance row offers it).
-    coReturnAllowance(sovLineId, remaining) {
+    // Make a draft owner change order returning some or all of the
+    // allowance's unspent amount (the Contract tab's allowance row offers
+    // it). "Used" counts only allowance-funded change orders, so when more
+    // cost has posted on the allowance's code than they record, say so
+    // before the return is made: the full remaining may not be unspent.
+    coReturnAllowance(sovLineId, remaining, used, costPosted) {
         const iso = new Date().toISOString().slice(0, 10);
         const contractDate = ((JobsPage._contract && JobsPage._contract.contract) || {}).contract_date || '';
+        const spentWarning = (costPosted !== null && costPosted !== undefined && costPosted > (used || 0))
+            ? `<p id="co-return-cost-warning" class="report-warning" style="color:var(--text-danger)">${formatCurrency(costPosted)} of cost has posted on this allowance's cost code, but its allowance-funded change orders record only ${formatCurrency(used || 0)} as used. Returning ${formatCurrency(remaining)} may give the owner back money that was spent. Enter only what is really unspent, or record the owner's selections as allowance-funded change orders first.</p>` : '';
         openModal('Return unspent allowance', `<form id="co-return-form" onsubmit="JobsPage.coReturnAllowanceSubmit(event, ${sovLineId})">
-            <p>Return the ${formatCurrency(remaining)} left on this allowance to the owner. This makes a draft change order for minus that amount, with no markup.</p>
+            <p>Return unspent allowance to the owner: up to the ${formatCurrency(remaining)} left on it. This makes a draft change order for minus the amount, with no markup.</p>
+            ${spentWarning}
+            <div class="form-group"><label for="co-return-amount">Amount to return</label>
+                <input id="co-return-amount" type="number" required step="0.01" min="0.01" max="${remaining}" value="${remaining}"></div>
             <div class="form-group"><label for="co-return-date">Change order date ${hint('Approving it cannot take effect before this date, so use the day the allowance closed out (for a month-end return, a date in that month). It cannot be before the contract date or in a closed period.', 'Change order date')}</label>
                 <input id="co-return-date" type="date" required value="${iso}"${contractDate ? ` min="${escapeHtml(contractDate)}"` : ''}></div>
             <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1385,8 +1396,9 @@ const JobsPage = {
     async coReturnAllowanceSubmit(e, sovLineId) {
         if (e) e.preventDefault();
         const date = $('#co-return-date').value;
+        const amount = $('#co-return-amount').value;
         try {
-            await API.post('/change-orders/allowance-return', { allowance_sov_line_id: sovLineId, date });
+            await API.post('/change-orders/allowance-return', { allowance_sov_line_id: sovLineId, date, amount });
             toast('Draft change order made: submit and approve it to take effect');
             closeModal();
             await JobsPage.setTab('changeorders');

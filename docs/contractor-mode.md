@@ -995,7 +995,7 @@ approve click.
   budget cell (a schedule typed by hand) just gets the change order's cost.
   The draw counts against the allowance line (refused 409
   `allowance_exceeded` when it would pass the allowance). The Contract tab
-  shows each allowance's used and remaining.
+  shows each allowance's used, cost posted and remaining.
 - *Sub CO* — appends the lines to its commitment, which must be on the **same
   job** and **open** (refused 409 `commitment_job_mismatch` or
   `commitment_not_open` otherwise), and recomputes the commitment's total; the
@@ -1008,11 +1008,12 @@ not the owner's choices used it all. The Contract tab's allowance row shows
 **Return unspent** (when something is left; or
 `POST /api/change-orders/allowance-return` with the allowance line, an
 optional `amount` (default everything unspent) and an optional `date`
-(default today; the dialog asks for it). The date is the change order's date,
+(default today). The dialog asks for both: the amount starts at everything
+left on the allowance and cannot be more than that. The date is the change order's date,
 and approving it cannot take effect earlier, so a month-end return is dated in
 that month; it cannot be before the contract date (422) or in a closed period
 (403). It makes a **draft owner
-change order for minus the unspent amount**, no markup (whatever the job's
+change order for minus the amount returned**, no markup (whatever the job's
 default says), funded against that allowance: it is contract-funded, because
 it takes the money off the contract, and it names the allowance line. Submit
 and approve it like any other (it takes effect on its date, in the open
@@ -1029,7 +1030,16 @@ period). Approving it:
 
 "Unspent" is what the Contract tab shows as **remaining**: the allowance line's
 scheduled value less the allowance-funded change orders that drew it (and any
-earlier return's credit). A return of an allowance with nothing unspent is
+earlier return's credit). Billing the allowance line and posting cost on its
+cost code do not count as used: only an allowance-funded change order does. So
+the Contract tab also shows the **cost posted** on the allowance line's cost
+code (job cost on that code, from bills, checks and journals), and when more
+cost has posted there than the change orders record, the Return dialog warns
+before the return is made, naming both figures. The return is not refused:
+enter only what is really unspent (with 11,650 of fixture cost posted on a
+12,000 allowance and no change order recording it, return 350, not 12,000), or
+record the owner's selections as allowance-funded change orders first. A return
+of an allowance with nothing unspent is
 refused (409 `allowance_nothing_unspent`, "… has nothing unspent to return");
 so is a second return while one is still draft or pending (409
 `allowance_return_open`) and one for more than is unspent (422). Its funding,
