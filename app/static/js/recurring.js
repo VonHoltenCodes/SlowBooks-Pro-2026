@@ -170,7 +170,7 @@ const RecurringPage = {
     itemSelected(idx) {
         const row = $(`[data-recline="${idx}"]`);
         if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), RecurringPage._items, () => RecurringPage.itemSelected(idx))) return;
-        if (row && SalesLines.fillFromItem(row, RecurringPage._items)) RecurringPage.recalc();
+        if (row && SalesLines.fillFromItem(row, RecurringPage._items, { allowNegative: false })) RecurringPage.recalc();
     },
 
     recalc() {

@@ -202,7 +202,7 @@ const CreditMemosPage = {
     itemSelected(idx) {
         const row = $(`[data-cmline="${idx}"]`);
         if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), CreditMemosPage._items, () => CreditMemosPage.itemSelected(idx))) return;
-        if (row && SalesLines.fillFromItem(row, CreditMemosPage._items)) CreditMemosPage.recalc();
+        if (row && SalesLines.fillFromItem(row, CreditMemosPage._items, { allowNegative: false })) CreditMemosPage.recalc();
     },
 
     // The customer's invoices, for "For Invoice" (optional).

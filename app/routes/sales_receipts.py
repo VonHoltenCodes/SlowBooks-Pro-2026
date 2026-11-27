@@ -19,7 +19,7 @@ from app.models.accounts import Account
 from app.models.contacts import Customer
 from app.models.invoices import Invoice
 from app.routes.invoices.crud import create_invoice, get_invoice, list_invoices
-from app.routes.invoices.helpers import _compute_totals
+from app.routes.invoices.helpers import _compute_totals, negative_sale_sentence
 from app.routes.invoices.lifecycle import void_invoice
 from app.routes.payments import create_payment
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse
@@ -103,7 +103,16 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     # (#1129); a rate sent, 0 included, is kept.
     if data.tax_rate is None:
         data.tax_rate = default_sales_tax_rate(db)
-    _, _, total = _compute_totals(data.lines, data.tax_rate)
+    subtotal, _, total = _compute_totals(data.lines, data.tax_rate)
+    # Discounts past the other lines: said as such, not "must be positive".
+    # Only the subtotal is judged here, since the lines' tax flags are not
+    # settled until the invoice step (resolve_line_taxable), which refuses
+    # a taxable discount past the taxed lines in its own sentence.
+    if subtotal < 0:
+        raise HTTPException(
+            status_code=422,
+            detail=negative_sale_sentence(data.lines, 0, subtotal, "sales receipt"),
+        )
     if total <= 0:
         raise HTTPException(
             status_code=400,

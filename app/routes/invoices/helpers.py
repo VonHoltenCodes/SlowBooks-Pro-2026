@@ -24,6 +24,13 @@ from app.services.terminology import document_reference
 ZERO_TOTAL_CODE = "zero_total"
 CREDIT_LIMIT_CODE = "credit_limit"
 MONEY_APPLIED_CODE = "money_applied"
+# A negative price on a line whose item takes none (refuse_negative_lines).
+# The "(API: ...)" note stays in "msg"; the sentence ("message") drops it.
+NEGATIVE_LINE_REFUSAL = (
+    "Value error, a negative price is a discount, and a discount goes on an "
+    'item marked "Discount or concession"; a refund belongs on a credit memo '
+    "(API: the item's allows_negative_price is true)"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +58,54 @@ def refuse_zero_total(total, noun: str = "invoice", action: str = "saving it") -
         raise HTTPException(status_code=400, detail=_zero_total_sentence(noun, action))
 
 
+def negative_sale_sentence(lines, tax_rate, total, noun: str = "invoice"):
+    """Why a sales document's lines cannot be priced, as a sentence, or None
+    when they can. Two ways a discount line breaks a sale:
+
+    - the discounts come to more than the other lines, so the total is
+      below zero: an invoice can't owe the customer money;
+    - with a tax rate, a taxable discount is more than the taxable lines
+      above it, so the tax comes out below zero, and the sale's posting
+      skips a negative tax line and is out of balance.
+
+    Both ended in an unhandled DataProblem from create_journal_entry (a
+    500), or, on a negative total, in the "$0.00" question first. ``lines``
+    must carry their settled tax flags (after resolve_line_taxable or
+    taxed_copy_lines). When the discounts do not come to more than the
+    other lines, the taxable base is what is wrong, so that is said."""
+    from app.services.accounting import taxable_subtotal
+
+    total = Decimal(str(total or 0))
+    taxed = Decimal(str(tax_rate or 0)) > 0
+    lines = list(lines)
+    subtotal = compute_line_totals(lines, 0)[0]
+    over = (
+        f"The discounts on this {noun} come to more than its other lines. "
+        "A refund belongs on a credit memo."
+    )
+    base = (
+        "A taxable discount is more than the taxable lines above it. Untick "
+        "Tax on the discount line, or discount the taxable lines."
+    )
+    if total < 0 and subtotal < 0:
+        return over
+    if taxed and taxable_subtotal(lines) < 0:
+        return base
+    if total < 0:
+        return over
+    return None
+
+
+def refuse_negative_sale(lines, tax_rate, total, noun: str = "invoice") -> None:
+    """Refuse, with a 422 and negative_sale_sentence, a sale whose lines
+    cannot be priced. Called right after the totals, at every place an
+    invoice is priced (create, edit, duplicate, estimate conversion, sales
+    receipt), before the zero-total question and anything is written."""
+    sentence = negative_sale_sentence(lines, tax_rate, total, noun)
+    if sentence:
+        raise HTTPException(status_code=422, detail=sentence)
+
+
 def confirm_zero_total(
     total,
     allowed: bool,
@@ -66,8 +121,11 @@ def confirm_zero_total(
     is refused with 409 and ``detail = {"code": "zero_total", "message",
     "question"}``: the page asks the question ("This invoice adds up to
     $0.00. Save it anyway?") and sends the same request again with the
-    flag. Nothing is written by the refused request."""
-    if allowed or Decimal(str(total or 0)) > 0:
+    flag. Nothing is written by the refused request.
+
+    Only a total of exactly $0.00 is asked about: one below zero is no
+    "$0.00" (refuse_negative_sale says what it is)."""
+    if allowed or Decimal(str(total or 0)) != 0:
         return
     raise HTTPException(
         status_code=409,
@@ -395,8 +453,10 @@ def refuse_negative_lines(db: Session, lines, invoice=None) -> None:
     came in on), or on an item (or no item) the invoice being edited
     already has a negative line on: a QuickBooks Online document keeps the
     negative lines it came with, and an edit saves them back. Any other is
-    refused as it always was, in the same words: a refund belongs on a
-    credit memo."""
+    refused with where each belongs: a discount on an item marked
+    "Discount or concession", a refund on a credit memo. (It said only
+    "use a credit memo for refunds", which taught an API or AI client that
+    tried a discount on an ordinary item to book it as a credit memo.)"""
     from app.services.discount_items import takes_negative_price
 
     had = {
@@ -414,8 +474,7 @@ def refuse_negative_lines(db: Session, lines, invoice=None) -> None:
                 {
                     "type": "value_error",
                     "loc": ("body", "lines", index),
-                    "msg": "Value error, rate must be non-negative; use a credit "
-                    "memo for refunds",
+                    "msg": NEGATIVE_LINE_REFUSAL,
                     "input": None,
                 }
             ]

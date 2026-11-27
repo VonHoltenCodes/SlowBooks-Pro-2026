@@ -8,7 +8,7 @@ credit memo for refunds". An item now says so itself (allows_negative_price,
 the item form's "Discount or concession" box), one rule covers both kinds
 (services/discount_items.py), the discount comes off the item's income
 account on the accrual and the cash basis, and every other item is refused
-as before, in the same words. The migration that added the flag marks the
+as before, now saying where a discount and a refund belong. The migration that added the flag marks the
 items a QuickBooks Online discount mapping names."""
 
 from decimal import Decimal
@@ -26,7 +26,13 @@ from app.models.transactions import (
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = "d2f7a9c4e6b1"
 BEFORE = "b1a26772cc4e"  # the credit memo line classes migration (#640), which this one follows
-REFUSAL = "Value error, rate must be non-negative; use a credit memo for refunds"
+# every other item's refusal says where a discount goes and where a refund
+# does (it said only "use a credit memo for refunds")
+REFUSAL = (
+    "Value error, a negative price is a discount, and a discount goes on an "
+    'item marked "Discount or concession"; a refund belongs on a credit memo '
+    "(API: the item's allows_negative_price is true)"
+)
 
 
 def _item(client, name, **extra):
