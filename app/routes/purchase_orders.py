@@ -4,6 +4,7 @@
 # ============================================================================
 
 from app.routes._print import print_html
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -580,7 +581,12 @@ def release_retainage(
                 "retainage held on this commitment."
             ),
         )
-    when = data.date or po.date
+    # The release is dated the day it is made, not the PO's date (#1227):
+    # the vendor is paid now, so a bill back-dated to a commitment opened in
+    # May posts the release into an already-reported period and shows up in
+    # A/P Aging past due the day it was released. An explicit date (the
+    # caller's, e.g. a back-office import) still wins.
+    when = data.date or date.today()
     check_closing_date(db, when)
     vendor = po.vendor
     terms = (vendor.terms if vendor else None) or "Net 30"
