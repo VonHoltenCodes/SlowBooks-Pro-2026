@@ -165,6 +165,29 @@ test('Bill Quick Entry draws the Class cell, sends each line its class and keeps
     assert.match(state.added.pop(), /<option value="8" selected>South Building<\/option>/);
 });
 
+// "Insert line below" gives the new line the class of the line it goes
+// under, not the last line's: LineOrder hands the add function that line.
+test('Bill Quick Entry inserts a line below with the class of the line above it', async () => {
+    const { B, state } = billPage(CLASSES);
+    await B.render();
+    const first = row({ '.line-item': '', '.line-account': '60', '.line-desc': 'Plumbing', '.line-amt': '200', '.line-class-fund': '7' });
+    state.rows = [
+        first,
+        row({ '.line-item': '', '.line-account': '60', '.line-desc': 'Roofing', '.line-amt': '90', '.line-class-fund': '8' }),
+    ];
+    B.addLine(first);
+    assert.match(state.added.pop(), /<option value="7" selected>North Building<\/option>/);
+    // + Add Line still starts from the last line
+    B.addLine();
+    assert.match(state.added.pop(), /<option value="8" selected>South Building<\/option>/);
+    // the mount hands LineOrder's line to addLine, and LineOrder passes it
+    const src = read('bill_quick_entry.js');
+    assert.match(src, /LineOrder\.attach\('#bqe-lines', \{ add: \(under\) => BillQuickEntry\.addLine\(under\),/);
+    const lo = read('line_order.js');
+    const insert = lo.slice(lo.indexOf('insertBelow(tbody, row) {'), lo.indexOf('focusFirst(row) {'));
+    assert.ok(insert.includes('opts.add(row);'));
+});
+
 test('Bill Quick Entry with Uncategorized alone has no Class cell and sends none', async () => {
     const { B, state } = billPage([CLASSES[0]]);
     const html = await B.render();
