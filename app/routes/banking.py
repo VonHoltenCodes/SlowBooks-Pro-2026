@@ -1343,6 +1343,23 @@ def update_bank_entry(
         data.customer_id if "customer_id" in given else now["customer_id"],
         own_customers,
     )
+    # a job picked now is checked as a new entry's is: it exists, is
+    # active and belongs to the entry's customer; the job the entry keeps
+    # is checked only against a customer picked now
+    new_job = keep("job_id", txn.job_id)
+    line_customer = None if splits else new_customer
+    if new_job != txn.job_id:
+        require_dimensions(db, None, new_job, line_customer)
+    elif new_job is not None and line_customer is not None:
+        if line_customer != now["customer_id"]:
+            from app.models.jobs import Job
+
+            job = db.get(Job, new_job)
+            if job is not None and job.customer_id != line_customer:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"The job {job.full_name} belongs to another customer.",
+                )
     uncleared = replace_bank_entry(
         db,
         txn,
@@ -1354,9 +1371,9 @@ def update_bank_entry(
         memo=keep("description", now["description"] or None),
         reference=keep("check_number", txn.reference or None),
         class_id=keep("class_id", txn.class_id),
-        job_id=keep("job_id", txn.job_id),
+        job_id=new_job,
         splits=splits,
-        customer_id=None if splits else new_customer,
+        customer_id=line_customer,
     )
     if relink:
         _link_vendor(txn, vendor)

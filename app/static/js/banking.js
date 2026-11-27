@@ -2832,7 +2832,7 @@ const BankingPage = {
                         <input name="description"></div>
                     ${classGroup}
                     ${jobGroup}
-                    <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from)</span></label>
+                    <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from or went to)</span></label>
                         ${BankingPage.nameSelectHtml('entry-name', 'customer_id', null, `${T('Customer')}`)}</div>
                     <div class="form-group full-width" id="entry-splits" style="display:none;">
                         <label>Split across accounts ${hint("(each line's share of the amount; a loan payment's principal and interest, a check that pays several things, a card processor's deposit as the gross with the fee taken out)", 'Split across accounts')}</label>
@@ -2929,8 +2929,9 @@ const BankingPage = {
     // The form as "Edit entry": the entry's fields in the boxes, its split
     // lines when it has them, and the entry id on the form for saveEntry.
     // What the form has no box for rides along on it and goes back with
-    // the save (#388 review): the entry's job when there is no Job box, and each split line's own
-    // class and job. A class archived since keeps its place in the list.
+    // the save (#388 review): the entry's job when there is no Job box,
+    // and each split line's own class and job. A class archived since
+    // keeps its place in the list.
     _fillEntryForm(entry) {
         const form = document.querySelector('#modal-body form');
         if (!form) return;
@@ -3258,8 +3259,10 @@ const BankingPage = {
             job_id: jobIdFromForm(form),
             ...(splits ? { splits } : {}),
         };
-        // the plain entry's name (#606), money in or out: null clears it
-        if (!splits) data.customer_id = form.customer_id.value ? parseInt(form.customer_id.value, 10) : null;
+        // the plain entry's name (#606), money in or out: null clears it;
+        // a box left on "+ New" is not sent, so an edit keeps the name
+        const name = form.customer_id.value;
+        if (!splits && name !== '__new__') data.customer_id = name ? parseInt(name, 10) : null;
         // an edit with no Job box (the company has no active job) sends the
         // entry's own job back; with a box, what the box holds is sent
         if (form.dataset.entryId && !form.job_id) data.job_id = form.dataset.jobId ? parseInt(form.dataset.jobId, 10) : null;

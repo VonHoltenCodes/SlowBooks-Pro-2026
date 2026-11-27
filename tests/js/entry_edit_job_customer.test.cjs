@@ -90,6 +90,13 @@ test('a customer picked on money out is sent, and clearing it sends null', () =>
     assert.equal(BP._entryData(form({ amount: '50.00', customer: '5' }), 1).customer_id, 5);
 });
 
+test('a Customer box left on "+ New" is not sent, so an edit keeps the name', () => {
+    const BP = loadBankingPage();
+    const edit = { entryId: '12', jobId: '' };
+    assert.ok(!('customer_id' in BP._entryData(form({ customer: '__new__', dataset: edit }), 1)));
+    assert.ok(!('customer_id' in BP._entryData(form({ amount: '50.00', customer: '__new__' }), 1)));
+});
+
 test('a split sends no entry-level customer', () => {
     const BP = loadBankingPage();
     BP._splitLines = () => [{ category_account_id: 7, amount: '-50.00' }];
