@@ -2742,7 +2742,7 @@ const SettingsPage = {
     // of them (st.companies) only to someone who is an administrator of
     // every company on it; anyone else hears about this company alone. Each
     // button's name says which company it is for, so no two are alike.
-    switchboardHtml(st, code, error, fallback, busy) {
+    switchboardHtml(st, code, error, fallback, busy, tone) {
         st = st || {};
         const admin = !!st.can_manage;
         // a press is being worked on: no second one until it answers
@@ -2759,8 +2759,11 @@ const SettingsPage = {
             + '</div>';
         if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
         if (error) {
-            html += '<div id="claude-relay-error" role="alert" style="margin-top:4px;">'
-                + `<div style="color:var(--text-danger);">${escapeHtml(error)}</div>`
+            // the message's tone: a refusal (red), a Disconnect that is done
+            // ('ok', green) or one the relay has not finished ('warn', amber)
+            const color = tone === 'ok' ? 'var(--text-success)' : (tone === 'warn' ? 'var(--text-warning)' : 'var(--text-danger)');
+            html += `<div id="claude-relay-error" role="${tone === 'ok' ? 'status' : 'alert'}" style="margin-top:4px;">`
+                + `<div style="color:${color};">${escapeHtml(error)}</div>`
                 + '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-error-dismiss" aria-label="Dismiss the relay message" onclick="SettingsPage.dismissClaudeError()">Dismiss</button></div>'
                 + '</div>';
         }
@@ -3069,7 +3072,10 @@ const SettingsPage = {
             && (c.goes === 'linked') === !!c.status.linked
             && !(c.goes === 'linked' && c.status.can_add)) { c.error = ''; }
         if (!c.error) { c.goes = ''; c.looks = 0; }
-        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback, c.busy);
+        // a tone belongs to the message it was set with: any other message
+        // (a refusal set after it) is drawn as an error
+        const tone = c.error && c.tone && c.tone.text === c.error ? c.tone.tone : '';
+        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback, c.busy, tone);
         // A refresh that changes nothing draws nothing: the keyboard focus, a
         // selection (the relay name being copied) and the screen reader's
         // place stay where they are, and an alert is not announced again.
@@ -3329,10 +3335,27 @@ const SettingsPage = {
         const done = 'The AI assistant is disconnected' + (r && r.revoked ? ' and the token revoked. ' : '. ');
         // companies not open now: their tokens are turned off when they open
         const later = ((r && r.results) || []).filter(x => x && x.result === 'later').map(x => x.name || x.file);
-        if (later.length && r && (r.unlinked || r.pending)) {
-            // the relay was told (or its name is in the notice below): what
-            // is left to say is which companies are not open now
-            SettingsPage._claude.error = 'Disconnected.' + later.map(name => ` ${name} is not open now; its token will be turned off the next time it is opened.`).join('');
+        // why the relay still holds its record, as it answered
+        const held = r && r.why === 'refused'
+            ? 'The relay did not accept the request to delete its record: see the relay name below.'
+            : (r && r.why === 'unconfirmed'
+                ? 'The relay did not confirm that it deleted its record: see the relay name below.'
+                : 'The relay was out of reach: see the relay name below.');
+        if (later.length && r && r.unlinked) {
+            // the relay was told: its own sentence says what became of its
+            // record, and which companies are not open now. Done, so it is
+            // drawn as a success, not an error.
+            const text = done + (r.sentence || later.map(name => `${name} is not open now; its token will be turned off the next time it is opened.`).join(' '));
+            SettingsPage._claude.error = text;
+            SettingsPage._claude.tone = { text, tone: 'ok' };
+            toast('The AI assistant is disconnected. See the message on the panel.');
+        } else if (later.length && r && r.pending) {
+            // not finished: the relay still holds its record (its name is in
+            // the notice below, and SlowBooks Pro keeps asking), and the
+            // companies not open now are still to be turned off
+            const text = done + held + later.map(name => ` ${name} is not open now; its token will be turned off the next time it is opened.`).join('');
+            SettingsPage._claude.error = text;
+            SettingsPage._claude.tone = { text, tone: 'warn' };
             toast('The AI assistant is disconnected. See the message on the panel.');
         } else if (r && r.say && r.sentence) {
             // something the relay could not do, with no notice kept for
@@ -3343,11 +3366,7 @@ const SettingsPage = {
             // the relay still holds its record: the relay name is on the
             // panel, from the server's status (NEW-269), and the toast
             // says why, as the relay answered
-            toast(done + (r.why === 'refused'
-                ? 'The relay did not accept the request to delete its record: see the relay name below.'
-                : (r.why === 'unconfirmed'
-                    ? 'The relay did not confirm that it deleted its record: see the relay name below.'
-                    : 'The relay was out of reach: see the relay name below.')));
+            toast(done + held);
         } else {
             toast(r && r.deleted
                 ? 'The AI assistant is disconnected, and the relay deleted its record of these books.'
