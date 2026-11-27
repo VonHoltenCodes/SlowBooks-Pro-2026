@@ -54,7 +54,12 @@ services:
     # NOT published to the host — only the app container should reach it.
 
   slowbooks:
-    build: .
+    build:
+      context: .
+      args:
+        # The commit for About's version line (Dockerfile). Optional:
+        # SLOWBOOKS_COMMIT=$(git rev-parse HEAD) docker compose ... up -d --build
+        SLOWBOOKS_COMMIT: "${SLOWBOOKS_COMMIT:-}"
     restart: unless-stopped
     depends_on:
       postgres:

@@ -104,11 +104,19 @@ cd ~/slowbooks
 cp .env.example .env
 chmod 600 .env
 
-# generate the two secrets and a database password
-echo "PAYROLL_ENCRYPTION_SECRET=$(openssl rand -base64 32)" >> .env
-echo "SESSION_SECRET_KEY=$(openssl rand -hex 32)"           >> .env
-echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"            >> .env
+# fill in the two secrets and a database password. Each key already has a
+# line in the file, so these edit that line instead of adding a second one.
+sed -i "s|^PAYROLL_ENCRYPTION_SECRET=.*|PAYROLL_ENCRYPTION_SECRET=$(openssl rand -base64 32)|" .env
+sed -i "s|^# *SESSION_SECRET_KEY=.*|SESSION_SECRET_KEY=$(openssl rand -hex 32)|" .env
+sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" .env
+grep -c '^\(PAYROLL_ENCRYPTION_SECRET\|SESSION_SECRET_KEY\|POSTGRES_PASSWORD\)=.' .env   # prints 3
 ```
+
+If you would rather edit by hand: open `.env`, find the existing
+`PAYROLL_ENCRYPTION_SECRET=`, `# SESSION_SECRET_KEY=` and `POSTGRES_PASSWORD=`
+lines, and put a freshly generated value after each `=` (removing the `# `
+in front of `SESSION_SECRET_KEY`). Do not add new lines for these keys: the
+file would then hold each one twice.
 
 Then open `.env` and set the rest by hand:
 
@@ -140,6 +148,10 @@ sudo chown 70:70 certs/postgres/server.key   # the postgres user inside the alpi
 # openssl wrote the key readable by its owner only, which is what postgres wants
 ```
 
+The `chown` is for this production compose file only, which is the one that
+mounts the certificate pair. The plain `docker-compose.yml` and a native
+PostgreSQL install use no certificate from this folder and need no `chown`.
+
 ## 5. Start it
 
 The production compose file publishes nothing to the host: the app is only
@@ -154,7 +166,8 @@ services:
     ports:
       - "127.0.0.1:3001:3001"
 YML
-docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
+SLOWBOOKS_COMMIT=$(git rev-parse HEAD) \
+  docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
 docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml logs -f slowbooks
 ```
 
@@ -232,25 +245,57 @@ chmod +x ~/backup.sh
 (crontab -l 2>/dev/null; echo "15 2 * * * /home/books/backup.sh >> /home/books/backup.log 2>&1") | crontab -
 ```
 
-Restoring, on a stack that has run once (the app's first start migrates and
-seeds the database, so the dump has to replace what is there; the
-`--clean --if-exists` above makes it do that, and `ON_ERROR_STOP` makes a
-failure say so instead of exiting 0 with the old data in place):
+Restoring: stop the app, drop the database and create it empty, then load
+the dump into it in one transaction. Always drop and recreate first. A
+restore over the existing database fails partway whenever that database was
+upgraded by a newer version than the one that took the dump, which is
+exactly the case when you go back to an older version: tables only the newer
+version has still hold foreign keys, and those block the dump's own drops.
 
 ```bash
 cd /home/books/slowbooks
 docker compose -f docker-compose.prod.yml stop slowbooks
+docker compose -f docker-compose.prod.yml exec -T postgres dropdb -U bookkeeper bookkeeper
+docker compose -f docker-compose.prod.yml exec -T postgres createdb -U bookkeeper bookkeeper
 gunzip -c /home/books/backups/the-file.sql.gz | \
-  docker compose -f docker-compose.prod.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
+  docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql --single-transaction -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
 docker compose -f docker-compose.prod.yml start slowbooks
 ```
 
-A dump made without `--clean` restores only into an empty database: drop
-and recreate it first (`dropdb`/`createdb -U bookkeeper bookkeeper` in the
-postgres container). Uploaded receipts, attachments and the logo are in the
-database from 2.18, so the dump carries them; the `slowbooks_uploads` volume
-holds what earlier versions wrote, which 2.18's first start copies in. Keep
-it mounted.
+- `--single-transaction` makes the restore all or nothing, and
+  `ON_ERROR_STOP` makes psql stop at the first error with a non-zero exit
+  instead of reporting the error and exiting 0.
+- **If psql stops with an error**, nothing from the file was kept: the
+  database is left empty. Do not start the app on it, because its first
+  start would set up a new, empty company there. Fix what the error names
+  and run the `dropdb`, `createdb` and restore lines again.
+- `dropdb` says the database "is being accessed by other users": the app is
+  still running. Run the `stop` line again, then `dropdb`.
+- A restore that failed by the steps in earlier versions of this guide
+  (no drop, no `--single-transaction`) may have left most keys and indexes
+  dropped while the app still starts and serves the books. Restore again by
+  the steps above.
+
+**Going back to an older version.** Use the backup you took before the
+upgrade, and restore it with the steps above before the older version
+starts: the older version cannot start on a database a newer version
+upgraded. It restarts over and over, the browser only gets "connection
+refused", and the reason (`Can't locate revision`) is only in
+`docker compose -f docker-compose.prod.yml logs slowbooks`. In order:
+
+```bash
+cd /home/books/slowbooks
+docker compose -f docker-compose.prod.yml stop slowbooks
+git checkout v2.31.14          # the version the backup was taken on
+# drop, create and restore exactly as above, then build and start that version:
+SLOWBOOKS_COMMIT=$(git rev-parse HEAD) \
+  docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
+```
+
+Uploaded receipts, attachments and the logo are in the database from 2.18,
+so the dump carries them; the `slowbooks_uploads` volume holds what earlier
+versions wrote, which 2.18's first start copies in. Keep it mounted.
 
 **Provider snapshots** of the whole disk, weekly, from the control panel.
 They are cheap and they restore the proxy and the secrets along with the data.
@@ -264,11 +309,18 @@ are in [operations.md](operations.md). Remember the encryption secret.
 cd ~/slowbooks
 git fetch --tags
 git checkout v2.32.0          # the new tag
-docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
+SLOWBOOKS_COMMIT=$(git rev-parse HEAD) \
+  docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
 ```
 
+`SLOWBOOKS_COMMIT` puts the commit into the image, so the **About** box reads
+`Version 2.32.0+<commit>` and two builds of one version can be told apart.
+Leave it out and About shows the version alone; nothing else changes.
+
 The app migrates the database on start. Take a backup first; a release never
-needs one, and the one time it does you will be glad. The Docker image is
+needs one, and the one time it does you will be glad. To go back to the
+version you came from, see "Going back to an older version" in step 8: the
+older version needs that backup restored before it can start. The Docker image is
 built and started in CI on every change, and every release is gated on
 Linux as well as Windows and macOS.
 
