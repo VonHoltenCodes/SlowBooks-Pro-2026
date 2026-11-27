@@ -86,6 +86,10 @@ newer version than the one that took the dump has upgraded it, which is
 always the case when you go back to an older version: tables only the newer
 version has still hold foreign keys, and those block the dump's own drops.
 
+- Check the file first with `gunzip -t bookkeeper_20260523_020000.sql.gz`
+  and stop if it reports an error. It reads the whole file before anything
+  is dropped; a cut-short or damaged file piped into psql could still load
+  partway and report success.
 - `--single-transaction` makes the restore all or nothing.
 - `-v ON_ERROR_STOP=1` makes psql stop at the first error and exit non-zero;
   without it psql reports each failed statement and still exits 0.
@@ -101,6 +105,7 @@ version has still hold foreign keys, and those block the dump's own drops.
 Docker, plain `docker-compose.yml`:
 
 ```bash
+gunzip -t bookkeeper_20260523_020000.sql.gz   # stop here if it reports an error
 docker compose stop slowbooks
 docker compose exec -T postgres dropdb -U bookkeeper bookkeeper
 docker compose exec -T postgres createdb -U bookkeeper bookkeeper
@@ -113,6 +118,7 @@ Docker, `docker-compose.prod.yml` (the same steps; see also
 [cloud-hosting.md](cloud-hosting.md), "Backups that leave the machine"):
 
 ```bash
+gunzip -t bookkeeper_20260523_020000.sql.gz   # stop here if it reports an error
 docker compose -f docker-compose.prod.yml stop slowbooks
 docker compose -f docker-compose.prod.yml exec -T postgres dropdb -U bookkeeper bookkeeper
 docker compose -f docker-compose.prod.yml exec -T postgres createdb -U bookkeeper bookkeeper
@@ -126,6 +132,7 @@ Native PostgreSQL (Linux; on macOS run `dropdb` and `createdb` as yourself,
 without `sudo -u postgres`, as INSTALL.md set the database up):
 
 ```bash
+gunzip -t bookkeeper_20260523_020000.sql.gz   # stop here if it reports an error
 sudo systemctl stop slowbooks    # or stop the app however you run it
 sudo -u postgres dropdb bookkeeper
 sudo -u postgres createdb bookkeeper -O bookkeeper
@@ -138,14 +145,20 @@ sudo systemctl start slowbooks
 still running. Stop it, then run `dropdb` again.
 
 **Going back to an older version.** Restore the backup you took before the
-upgrade, by the steps above, before the older version starts. The older
-version cannot start on a database a newer version upgraded: under Docker it
+upgrade, by the steps above, before the older version starts. An older
+version usually cannot start on a database a newer version upgraded (whenever
+the newer version changed the database): under Docker it
 restarts over and over and the browser only gets "connection refused"; the
 reason (`Can't locate revision`) is only in the log
 (`docker compose logs slowbooks`). The order is: stop the app, check out the
 older version (`git checkout v2.31.14`, the version the backup was taken
-on), drop, create and restore, then build and start that version
-(`docker compose up -d --build`, or the native start).
+on), check the file, drop, create and restore, then build and start that
+version (`docker compose up -d --build`, or the native start). Under Docker,
+leave out the last line of the restore block (`docker compose start
+slowbooks`): `git checkout` does not change the image already built, so
+`start` would boot the newer version, which upgrades the restored data
+again, and the older version then fails the same way. `up -d --build` builds
+the older version and starts it.
 
 `pg_dump` not found?
 - Docker: included automatically; nothing to do.

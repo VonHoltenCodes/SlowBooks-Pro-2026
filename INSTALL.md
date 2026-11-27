@@ -227,7 +227,9 @@ Open **http://localhost:3001** in your browser.
 > The **About** box of a Docker build shows the version alone, such as
 > `2.32.0`. To show the commit after it (`2.32.0+<commit>`), so two builds of
 > one version can be told apart, build with
-> `SLOWBOOKS_COMMIT=$(git rev-parse HEAD) docker compose up --build`.
+> `SLOWBOOKS_COMMIT=$(git rev-parse HEAD) docker compose up --build` (Linux
+> and macOS shells; in PowerShell run `$env:SLOWBOOKS_COMMIT = git rev-parse HEAD`
+> first, then `docker compose up --build`). It is optional.
 
 > On Windows, **Option 0** avoids all of this (no Docker at all, secret
 > generated for you, opens a desktop window, and serves the office as Server

@@ -254,6 +254,7 @@ version has still hold foreign keys, and those block the dump's own drops.
 
 ```bash
 cd /home/books/slowbooks
+gunzip -t /home/books/backups/the-file.sql.gz   # check the file first; stop if it reports an error
 docker compose -f docker-compose.prod.yml stop slowbooks
 docker compose -f docker-compose.prod.yml exec -T postgres dropdb -U bookkeeper bookkeeper
 docker compose -f docker-compose.prod.yml exec -T postgres createdb -U bookkeeper bookkeeper
@@ -263,6 +264,9 @@ gunzip -c /home/books/backups/the-file.sql.gz | \
 docker compose -f docker-compose.prod.yml start slowbooks
 ```
 
+- `gunzip -t` reads the whole file before anything is dropped. A cut-short
+  or damaged file fails there, with the database untouched; piped into
+  psql, it could still load partway and report success.
 - `--single-transaction` makes the restore all or nothing, and
   `ON_ERROR_STOP` makes psql stop at the first error with a non-zero exit
   instead of reporting the error and exiting 0.
@@ -279,19 +283,30 @@ docker compose -f docker-compose.prod.yml start slowbooks
 
 **Going back to an older version.** Use the backup you took before the
 upgrade, and restore it with the steps above before the older version
-starts: the older version cannot start on a database a newer version
-upgraded. It restarts over and over, the browser only gets "connection
+starts: an older version usually cannot start on a database a newer version
+upgraded (whenever the newer version changed the database). It restarts over and over, the browser only gets "connection
 refused", and the reason (`Can't locate revision`) is only in
 `docker compose -f docker-compose.prod.yml logs slowbooks`. In order:
 
 ```bash
 cd /home/books/slowbooks
+gunzip -t /home/books/backups/the-file.sql.gz   # check the file first; stop if it reports an error
 docker compose -f docker-compose.prod.yml stop slowbooks
 git checkout v2.31.14          # the version the backup was taken on
-# drop, create and restore exactly as above, then build and start that version:
+docker compose -f docker-compose.prod.yml exec -T postgres dropdb -U bookkeeper bookkeeper
+docker compose -f docker-compose.prod.yml exec -T postgres createdb -U bookkeeper bookkeeper
+gunzip -c /home/books/backups/the-file.sql.gz | \
+  docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql --single-transaction -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
 SLOWBOOKS_COMMIT=$(git rev-parse HEAD) \
   docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
 ```
+
+There is no `start` line here, unlike the restore above. `git checkout`
+does not change the image already built, so `start` would boot the newer
+version, which upgrades the restored data again; then the older version
+fails the same way and you have to restore once more. The `up -d --build`
+line builds the older version and starts it.
 
 Uploaded receipts, attachments and the logo are in the database from 2.18,
 so the dump carries them; the `slowbooks_uploads` volume holds what earlier
