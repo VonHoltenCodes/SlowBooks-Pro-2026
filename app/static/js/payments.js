@@ -222,7 +222,10 @@ const PaymentsPage = {
     async replace(id) {
         const p = await API.get(`/payments/${id}`);
         if (p.is_voided) { toast('This payment is void; there is nothing to change.', 'error'); return; }
-        await PaymentsPage.showForm(null, null, p.deposit_to_account_id || null);
+        // its own Deposit To and Method, even when the form's lists leave
+        // them out (#1237): a liability such as Customer Deposits, a method
+        // an import or the API wrote
+        await PaymentsPage.showForm(null, null, p.deposit_to_account_id || null, p.method || null);
         const form = $('#payment-form');
         if (!form) return;
         const back = {};
@@ -255,8 +258,11 @@ const PaymentsPage = {
     _giveBack: null,
 
     // `keepDepositId`: Edit's payment's own Deposit To account, offered even
-    // when Settings' "Deposit into these accounts" leaves it out (#735)
-    async showForm(_ignoredId = null, prefillCustomerId = null, keepDepositId = null) {
+    // when Settings' "Deposit into these accounts" leaves it out (#735), or
+    // when it is no bank account at all (#1237: a pay application's deposit
+    // applied to Customer Deposits, a retainer imported to a liability).
+    // `keepMethod`: its own Method, offered when the list lacks it (#1237).
+    async showForm(_ignoredId = null, prefillCustomerId = null, keepDepositId = null, keepMethod = null) {
         PaymentsPage._requestKey = null; // a new form, a new key (#292)
         PaymentsPage._giveBack = null;
         const [customers, accounts] = await Promise.all([
@@ -281,7 +287,12 @@ const PaymentsPage = {
         const depositBanks = typeof DepositAccounts !== 'undefined'
             ? DepositAccounts.defaultFirst(DepositAccounts.banks(bankAccts, null, keepDepositId)) : bankAccts;
         const startBank = !undeposited && typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(depositBanks) : '';
-        const bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
+        let bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
+        bankOpts += PaymentsPage._keptAccountOption(accounts, depositBanks, keepDepositId);
+        const methods = ['Check', 'Cash', 'Credit Card', 'ACH/EFT', 'Other'];
+        const methodOpts = methods.map(m => `<option>${m}</option>`).join('')
+            + (keepMethod && !methods.includes(String(keepMethod))
+                ? `<option value="${escapeHtml(keepMethod)}">${escapeHtml(keepMethod)}</option>` : '');
 
         openModal('Record Payment', `
             <form id="payment-form" onsubmit="PaymentsPage.save(event)" onkeydown="PaymentsPage._keys(event)">
@@ -295,9 +306,7 @@ const PaymentsPage = {
                         <input name="amount" class="money" type="number" step="0.01" min="0.01" required oninput="PaymentsPage._autoApply()"></div>
                     <div class="form-group"><label>Method</label>
                         <select name="method">
-                            <option value="">--</option>
-                            <option>Check</option><option>Cash</option>
-                            <option>Credit Card</option><option>ACH/EFT</option><option>Other</option>
+                            <option value="">--</option>${methodOpts}
                         </select></div>
                     <div class="form-group"><label>Check #</label>
                         <input name="check_number"></div>
@@ -327,6 +336,19 @@ const PaymentsPage = {
         // already selected but the change event didn't fire — trigger the
         // invoice list manually so the operator sees the unpaid invoices.
         if (prefillCustomerId) PaymentsPage.loadInvoices(prefillCustomerId);
+    },
+
+    // Edit's own Deposit To when no list above offers it (#1237): the
+    // account itself, so Save sends it back instead of a blank that would
+    // move the payment to Undeposited Funds. Undeposited Funds is the blank
+    // option already; '' when there is nothing to add.
+    _keptAccountOption(accounts, listed, keepId) {
+        if (keepId === null || keepId === undefined || keepId === '') return '';
+        const keep = String(keepId);
+        if ((listed || []).some(a => String(a.id) === keep)) return '';
+        const acct = (accounts || []).find(a => String(a.id) === keep);
+        if (!acct || (acct.is_control && acct.account_number === '1200')) return '';
+        return `<option value="${Number(acct.id)}">${escapeHtml(acct.name)}</option>`;
     },
 
     async loadInvoices(customerId) {
