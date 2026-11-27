@@ -165,13 +165,15 @@ class BankEntryDetail(BankEntryResponse):
     class and job; `reconciled_on` is the statement date of the completed
     reconciliation that holds it, if one does, and `reconciled_note` the
     sentence the form shows for it; `class_name` names the class (an
-    archived one too, which the class list leaves out). After an edit,
+    archived one too, which the class list leaves out) and `job_name` the
+    job (an inactive one too, which the job list leaves out). After an edit,
     `uncleared` names the lines whose amount changed and so lost their
     cleared mark, and `note` says so in a sentence."""
 
     class_id: Optional[int] = None
     class_name: Optional[str] = None
     job_id: Optional[int] = None
+    job_name: Optional[str] = None
     splits: Optional[list[BankSplitOut]] = None
     # the lines that are gifts from a named donor (#606), each of which can
     # get an acknowledgment letter: [{line_id, customer_name, amount}]

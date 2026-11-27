@@ -1103,6 +1103,7 @@ def _entry_detail(
     says, plus class, job, the split lines when there are several, and
     the statement it was reconciled on."""
     from app.models.classes import TxnClass
+    from app.models.jobs import Job
 
     out = _entry_out(txn, account_id, db, status)
     bank_line = next(ln for ln in txn.lines if ln.account_id == account_id)
@@ -1123,6 +1124,9 @@ def _entry_detail(
     cls = db.get(TxnClass, txn.class_id) if txn.class_id else None
     out["class_name"] = cls.name if cls else None
     out["job_id"] = txn.job_id
+    # its name, so an inactive job keeps its place in the form's Job box
+    job = db.get(Job, txn.job_id) if txn.job_id else None
+    out["job_name"] = job.full_name if job else None
 
     def own(ln, key):
         # a line's own class or job: one set apart from the entry's
