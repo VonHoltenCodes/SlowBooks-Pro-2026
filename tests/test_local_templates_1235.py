@@ -484,13 +484,16 @@ def test_an_unreadable_data_folder_names_the_data_folder_not_the_setting(
 
 
 def test_emailing_an_invoice_with_a_broken_local_template_names_it(
-    client, seed_accounts, seed_customer, local_dir
+    client, seed_accounts, seed_customer, local_dir, caplog
 ):
     _write(local_dir, "invoice_pdf.html", "<p>{{ 1 // 0 }}</p>")
     inv = _invoice(client, seed_customer.id)
-    r = client.post(
-        f"/api/invoices/{inv['id']}/email", json={"recipient": "a@example.test"}
-    )
+    with caplog.at_level(logging.WARNING):
+        r = client.post(
+            f"/api/invoices/{inv['id']}/email", json={"recipient": "a@example.test"}
+        )
+    # the path and the error's own text are in the server log
+    assert str(local_dir) in caplog.text and "modulo by zero" in caplog.text
     assert r.status_code == 500
     detail = r.json()["detail"]
     assert detail.startswith("Email failed: ")

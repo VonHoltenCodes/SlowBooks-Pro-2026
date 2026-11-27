@@ -227,8 +227,15 @@ def email_invoice(
         # the response gets — SMTP and provider errors carry hostnames.
         from app.models.email_log import EmailLog
         from app.services.email_errors import stored_text
+        from app.services.local_templates import LocalTemplateError
         from app.services.safe_errors import safe_message
 
+        if isinstance(e, LocalTemplateError):
+            # safe_message logs only the sentence; the path and the error
+            # behind a refused local template (#1235) belong in the log
+            import logging
+
+            logging.getLogger(__name__).warning("%s", e, exc_info=True)
         message = safe_message(e, "invoice email")
         log = EmailLog(
             entity_type="invoice",
