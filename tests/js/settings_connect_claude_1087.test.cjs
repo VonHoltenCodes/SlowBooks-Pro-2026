@@ -234,6 +234,27 @@ test('disconnect: a sentence with no notice kept for it stays on the panel, esca
     assert.ok(buttons(f.panel.innerHTML).includes('Dismiss'));
 });
 
+// The same finished Disconnect is drawn the same way whether or not another
+// company is closed: with every company open, a relay that was told is a
+// success, and one that was not is unfinished; neither is drawn as an error.
+test('disconnect: a sentence kept on the panel is drawn as done or unfinished, not as an error', async () => {
+    const drawn = async (unlinked, sentence) => {
+        const f = fixture({
+            '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true },
+            'POST /switchboard/disconnect': { unlinked, revoked: true, deleted: false, slug: 'ztnqj8djvg', sentence, why: '', pending: false, say: true },
+        });
+        await f.page.disconnectClaude();
+        f.page._drawSwitchboard();
+        assert.equal(f.page._claude.error, sentence);
+        assert.doesNotMatch(f.panel.innerHTML, /text-danger/);
+        return f.panel.innerHTML;
+    };
+    const told = 'This computer is unlinked (relay name ztnqj8djvg). This relay cannot delete its record of these books by itself; to have it removed, send that name to support.';
+    assert.match(await drawn(true, told), /<div id="claude-relay-error" role="status" style="margin-top:4px;"><div style="color:var\(--text-success\);">This computer is unlinked/);
+    const lost = 'The relay\'s own record of these books could not be removed, because the relay name was lost with the file.';
+    assert.match(await drawn(false, lost), /<div id="claude-relay-error" role="alert" style="margin-top:4px;"><div style="color:var\(--text-warning\);">The relay/);
+});
+
 test('a refresh that changes nothing draws nothing', async () => {
     const f = fixture({ '/switchboard/status': CONNECTED });
     await f.page.loadSwitchboard();

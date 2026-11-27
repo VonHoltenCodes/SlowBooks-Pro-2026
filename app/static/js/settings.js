@@ -3359,8 +3359,12 @@ const SettingsPage = {
             toast('The AI assistant is disconnected. See the message on the panel.');
         } else if (r && r.say && r.sentence) {
             // something the relay could not do, with no notice kept for
-            // it: the server's sentence stays on the panel until dismissed
+            // it: the server's sentence stays on the panel until dismissed,
+            // drawn as the other Disconnect messages are: a success when
+            // the relay was told, unfinished when it was not; never as an
+            // error, since the Disconnect itself was done
             SettingsPage._claude.error = r.sentence;
+            SettingsPage._claude.tone = { text: r.sentence, tone: r.unlinked ? 'ok' : 'warn' };
             toast('The AI assistant is disconnected. See the message on the panel.');
         } else if (r && r.unlinked === false && r.slug) {
             // the relay still holds its record: the relay name is on the

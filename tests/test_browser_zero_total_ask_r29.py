@@ -39,9 +39,9 @@ REMOVE_ONE = """(sel) => {
     b.click();
     return true;
 }"""
-# A grid with no Remove line (invoice Quick Entry's; the bill's, the memorized
-# bill's and Bill Quick Entry's have one since #1189): its amounts are cleared,
-# which is the other way a document comes to $0.00.
+# A grid with no Remove line (invoice Quick Entry's; the bill's and Bill Quick
+# Entry's have one since #1189, the memorized bill's since #1189's follow-up):
+# its amounts are cleared, which is the other way a document comes to $0.00.
 HAS_REMOVE = """(sel) => !!document.querySelector(sel).querySelector(
     '[aria-label^="Remove line"], [data-line-order="remove"],'
     + ' button[onclick*="emoveLine"]')"""
