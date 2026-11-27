@@ -353,8 +353,9 @@ def void_field_ticket(
 def make_change_order(data: TicketIdsIn, db: Session = Depends(get_db)):
     """Price one or several signed T&M tickets on one job as a potential
     change order to the owner: a line per ticket line at cost, with the
-    job's change-order markup. A sub's ticket (one naming a commitment) also
-    goes on a draft sub change order on that commitment, at cost. Each ticket
+    markup that sells it at the ticket's bill amount. A sub's ticket (one
+    naming a commitment) also goes on a draft sub change order on that
+    commitment, at cost. Each ticket
     links to them and closes when the owner change order is approved
     (promote the PCO, then approve)."""
     from app.routes.change_orders import _co_out
@@ -366,6 +367,7 @@ def make_change_order(data: TicketIdsIn, db: Session = Depends(get_db)):
         "change_order": _co_out(db, made["change_order"]),
         "sub_change_orders": [_co_out(db, s) for s in made["sub_change_orders"]],
         "tickets": [_out(db, t) for t in made["tickets"]],
+        "warnings": made["warnings"],
     }
 
 

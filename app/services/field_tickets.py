@@ -12,7 +12,7 @@
 
 import re
 from datetime import date, datetime, time, timezone
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import HTTPException
@@ -367,7 +367,38 @@ def _co_cost_type(t: FieldTicket, ln: FieldTicketLine) -> str:
     return "subcontract" if t.commitment_id else (ln.cost_type or "other")
 
 
-def _co_lines(tickets) -> list:
+# A change order line's own markup is Numeric(7, 4), above -100 and at most
+# 999.9999 (app/schemas/change_orders.py).
+_MARKUP_STEP = Decimal("0.0001")
+_MARKUP_MIN = Decimal("-99.9999")
+_MARKUP_MAX = Decimal("999.9999")
+
+
+def markup_for_bill(cost: Decimal, bill: Decimal) -> Optional[Decimal]:
+    """The line markup that sells a cost at a ticket's billed amount, to the
+    cent, so a change order made from a signed ticket carries what the owner's
+    rep signed while its cost stays cost (#1226). None when no markup a line
+    can hold gets there (no cost to mark up, or a bill more than 11 times the
+    cost); the nearest one when a large cost cannot land on the exact cent."""
+    from app.services.change_orders import line_sell
+
+    if cost <= 0:
+        return None
+    # the smallest markup that rounds up to the bill, else the nearest
+    lowest = ((bill - _CENT / 2) / cost - 1) * 100
+    nearest = ((bill / cost - 1) * 100).quantize(_MARKUP_STEP, rounding=ROUND_HALF_UP)
+    for pct in (lowest.quantize(_MARKUP_STEP, rounding=ROUND_CEILING), nearest):
+        pct = max(pct, _MARKUP_MIN)
+        if pct <= _MARKUP_MAX and line_sell(cost, pct, "pco") == bill:
+            return pct
+    return nearest if _MARKUP_MIN <= nearest <= _MARKUP_MAX else None
+
+
+def _co_lines(tickets, at_bill: bool = False) -> list:
+    """A change order line per ticket line with a quantity, at cost. On the
+    owner's PCO (at_bill) each line also carries the markup that sells it at
+    the ticket's bill amount; a line with no bill rate takes the change
+    order's or the job's markup."""
     from app.models.change_orders import ChangeOrderLine
 
     out = []
@@ -375,6 +406,7 @@ def _co_lines(tickets) -> list:
         for ln in t.lines:
             if _d(ln.quantity) == 0:
                 continue
+            bill = line_bill(ln) if at_bill else None
             out.append(
                 ChangeOrderLine(
                     line_order=len(out),
@@ -384,15 +416,42 @@ def _co_lines(tickets) -> list:
                     quantity=ln.quantity,
                     unit=ln.unit,
                     unit_cost=ln.cost_rate,
+                    markup_pct=(
+                        markup_for_bill(line_cost(ln), bill)
+                        if bill is not None
+                        else None
+                    ),
                 )
             )
     return out
 
 
+def _bill_mismatch_warnings(pco: ChangeOrder, tickets) -> list[str]:
+    """A sentence when the PCO does not sell for what the tickets bill: a line
+    with no cost to mark up, or a markup past what a line holds."""
+    billed = _ZERO
+    for t in tickets:
+        for ln in t.lines:
+            if _d(ln.quantity) == 0:
+                continue
+            bill = line_bill(ln)
+            if bill is None:
+                return []  # a ticket with no bill rates: nothing to match
+            billed += bill
+    sell = sum((_q(ln.sell_amount) for ln in pco.lines), _ZERO)
+    if sell == billed:
+        return []
+    return [
+        f"{pco.number} sells for {sell:,.2f} but the tickets bill "
+        f"{billed:,.2f}. Edit its lines' Markup % on the Change orders tab "
+        "to match what was signed."
+    ]
+
+
 def make_change_order(db: Session, ticket_ids: list[int]) -> dict:
     """Price signed T&M tickets as one potential change order to the owner:
-    a line per ticket line at cost, marked up by the job's change-order
-    markup, each ticket linked to it. A sub's ticket (one with a commitment)
+    a line per ticket line at cost, each with the markup that sells it at
+    the ticket's bill amount, each ticket linked to it. A sub's ticket (one with a commitment)
     also goes on a draft sub change order on that commitment, at cost, so
     the sub's contract rises with the owner's. The tickets close when the
     owner change order is approved."""
@@ -405,7 +464,7 @@ def make_change_order(db: Session, ticket_ids: list[int]) -> dict:
 
     job, tickets = billable_tickets(db, ticket_ids)
     numbers = ", ".join(t.number for t in tickets)
-    lines = _co_lines(tickets)
+    lines = _co_lines(tickets, at_bill=True)
     if not lines:
         raise HTTPException(
             status_code=422, detail="The tickets have no lines with a quantity."
@@ -464,7 +523,12 @@ def make_change_order(db: Session, ticket_ids: list[int]) -> dict:
     for t in tickets:
         t.change_order_id = pco.id
     db.flush()
-    return {"change_order": pco, "sub_change_orders": subs, "tickets": tickets}
+    return {
+        "change_order": pco,
+        "sub_change_orders": subs,
+        "tickets": tickets,
+        "warnings": _bill_mismatch_warnings(pco, tickets),
+    }
 
 
 def bill_tickets(db: Session, ticket_ids: list[int], invoice_date: Optional[date]):

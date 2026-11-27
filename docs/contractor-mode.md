@@ -1559,16 +1559,21 @@ Two ways out, from the tab (tick the signed tickets first):
 - **Make change order** (`POST /api/field-tickets/make-change-order`): one or
   several signed tickets on one job become one **potential change order** to
   the owner, a line per ticket line **at cost** (quantity × cost rate, the
-  line's cost type and code), marked up by the job's change-order markup. The
-  ticket's bill rates are not used on this path, **so the PCO can differ from
-  what the owner's rep signed**: a ticket whose bill rates were left blank
-  (cost rate plus the job's markup) comes to the same figures, give or take a
-  cent of rounding a line, as long as the job's **Markup on change orders**
-  has not changed since the ticket was saved (the ticket's bill rate was
-  figured at the markup of that day; a draft or pending PCO with no markup of
-  its own reads the job's markup as it is now). One with bill rates typed in
-  does not. To make it match, edit the PCO while it is a draft or pending:
-  its **Markup %**, or a line's own Markup %. A sub's ticket is
+  line's cost type and code), each with its own **Markup %** set so the line
+  sells for the ticket line's **bill amount** (quantity × bill rate): the PCO
+  comes to what the owner's rep signed, and its cost stays the cost. A bill
+  rate left blank on the ticket was filled in as the cost rate plus the job's
+  **Markup on change orders** of the day it was saved, so that line carries
+  that figure too, even if the job's markup has changed since. The markup is
+  the line's own, so the PCO's **Markup %** does not move these lines; edit a
+  line's Markup % to change one. When a line cannot get there (a bill amount
+  on a line with no cost, or one more than 11 times its cost, past the
+  999.9999% a markup holds, or a cost so large that four decimal places of
+  markup miss the cent), the response's `warnings` names both totals and
+  the tab shows it: "…-PCO-001 sells for 1,000.00 but the tickets bill
+  1,200.00. Edit its lines' Markup % on the Change orders tab to match what
+  was signed." A ticket with no bill rates at all (saved before T&M tickets
+  had them) is priced at the PCO's or the job's markup. A sub's ticket is
   subcontract cost on the PCO, and also goes, at cost with no markup, on a
   draft **sub change order** on its commitment (one per commitment), so the
   sub's contract rises with the owner's; link it to the owner CO once the PCO
