@@ -270,6 +270,7 @@ def test_print_check(
     check_blank_stock: str = Query(default=None),
     check_micr_amount: str = Query(default=None),
     check_amount_no_dollar_sign: str = Query(default=None),
+    check_amount_asterisk_fill: str = Query(default=None),
     check_field_layout: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
@@ -285,8 +286,9 @@ def test_print_check(
     it prints sample bank details and a sample MICR line, never a saved
     account's, so a test print is never a check a bank would take. The
     per-field layout (#749, check_field_layout) is sent the same way, as
-    its JSON, and so is the dollar sign on the amount (#799,
-    check_amount_no_dollar_sign)."""
+    its JSON, and so are the dollar sign on the amount (#799,
+    check_amount_no_dollar_sign) and its asterisks (#1239,
+    check_amount_asterisk_fill)."""
     check_data = {
         "payee": "Sample Payee",
         "date": date.today(),
@@ -323,6 +325,7 @@ def test_print_check(
         ("check_blank_stock", check_blank_stock),
         ("check_micr_amount", check_micr_amount),
         ("check_amount_no_dollar_sign", check_amount_no_dollar_sign),
+        ("check_amount_asterisk_fill", check_amount_asterisk_fill),
     ):
         if value is not None:
             if value not in ENUM_SETTINGS[key]:

@@ -97,7 +97,7 @@ def test_the_settings_page_has_the_box_and_the_test_print_sends_it():
         'style="font-weight:normal; margin:0;">'
         "Leave the dollar sign off the amount</label>"
     ) in js
-    assert "'check_field_layout', 'check_amount_no_dollar_sign']" in js
+    assert "'check_field_layout', 'check_amount_no_dollar_sign'" in js
 
 
 # ----- the amount in figures ---------------------------------------------
