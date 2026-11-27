@@ -562,6 +562,79 @@ def test_a_ticket_line_no_markup_can_reach_says_so(con, seed_customer):
     assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [600.0, 0.0]
     [warning] = made["warnings"]
     assert "sells for 600.00 but the tickets bill 695.00" in warning
+    assert "Trip charge has no cost to mark up" in warning
+    assert "give a line with no cost a unit cost" in warning.lower()
+    assert "Edit its lines' Markup %" not in warning
+
+
+def test_a_no_charge_line_on_a_large_cost_is_not_billed_at_the_job_markup(
+    con, seed_customer
+):
+    """A no-charge line with a large cost sells as near 0.00 as a markup
+    reaches (0.01), not cost plus the job's markup, and the tab says the
+    cent apart."""
+    job = _job(con, seed_customer.id)
+    con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 15})
+    t = _signed(
+        con,
+        job["id"],
+        [
+            {**LABOR},  # 8 h: 400 cost, 600 billed
+            {
+                "line_type": "labor",
+                "description": "Warranty crew",
+                "quantity": 100,
+                "cost_rate": 60,
+                "bill_rate": 0,
+            },
+        ],
+    )
+    made = _make_co(con, [t["id"]])
+    pco = made["change_order"]
+    assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [600.0, 0.01]
+    assert pco["cost_total"] == 6400.0 and pco["sell_total"] == 600.01
+    [warning] = made["warnings"]
+    assert "sells for 600.01 but the tickets bill 600.00" in warning
+    assert "Warranty crew differs by 0.01" in warning
+    assert "Settle the difference with the owner." in warning
+
+
+def test_a_line_with_no_bill_rate_does_not_hide_another_lines_gap(
+    con, seed_customer, db_session
+):
+    """A line with no bill rate (legacy) is left out of the check; a billed
+    line with no cost on the same PCO is still reported."""
+    from app.models.field_tickets import FieldTicket
+
+    job = _job(con, seed_customer.id)
+    con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 10})
+    old = _signed(con, job["id"], [{**LABOR}])
+    new = _signed(
+        con,
+        job["id"],
+        [
+            {
+                "line_type": "other",
+                "description": "Trip charge",
+                "quantity": 1,
+                "cost_rate": 0,
+                "bill_rate": 95,
+            },
+        ],
+    )
+    # the older ticket was saved before T&M tickets had bill rates
+    for ln in db_session.get(FieldTicket, old["id"]).lines:
+        ln.bill_rate = None
+    db_session.commit()
+    made = _make_co(con, [old["id"], new["id"]])
+    pco = made["change_order"]
+    # the legacy line takes the job's 10%; the trip charge has no cost
+    assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [440.0, 0.0]
+    [warning] = made["warnings"]
+    assert "The billed lines on" in warning
+    assert "sell for 0.00 but the tickets bill 95.00" in warning
+    assert "Trip charge has no cost to mark up" in warning
+    assert "Foreman" not in warning
 
 
 def test_markup_for_bill_lands_on_the_cent():
@@ -581,9 +654,19 @@ def test_markup_for_bill_lands_on_the_cent():
         assert pct is not None and Decimal("-100") < pct <= Decimal("999.9999")
         assert pct == pct.quantize(Decimal("0.0001"))
         assert line_sell(Decimal(cost), pct, "pco") == Decimal(bill), (cost, bill)
-    # nothing to mark up, or past what a markup holds
+    # the plain ratio, not the smallest markup that rounds to the bill
+    assert markup_for_bill(Decimal("420.00"), Decimal("483.00")) == Decimal("15.0000")
+    assert markup_for_bill(Decimal("400.00"), Decimal("600.00")) == Decimal("50.0000")
+    assert markup_for_bill(Decimal("100.00"), Decimal("120.00")) == Decimal("20.0000")
+    assert markup_for_bill(Decimal("1000.00"), Decimal("1150.00")) == Decimal("15.0000")
+    # nothing to mark up
     assert markup_for_bill(Decimal("0"), Decimal("95")) is None
-    assert markup_for_bill(Decimal("10.00"), Decimal("200.00")) is None
+    # out of reach: the markup a line holds that comes nearest, never None
+    # (None would fall back to the job's markup)
+    assert markup_for_bill(Decimal("6000.00"), Decimal("0.00")) == Decimal("-99.9999")
+    assert line_sell(Decimal("6000.00"), Decimal("-99.9999"), "pco") == Decimal("0.01")
+    assert markup_for_bill(Decimal("10.00"), Decimal("200.00")) == Decimal("999.9999")
+    assert line_sell(Decimal("10.00"), Decimal("999.9999"), "pco") == Decimal("110.00")
     # a large cost gets the nearest markup when the cent is out of reach
     pct = markup_for_bill(Decimal("7654321.00"), Decimal("9876543.21"))
     sell = line_sell(Decimal("7654321.00"), pct, "pco")

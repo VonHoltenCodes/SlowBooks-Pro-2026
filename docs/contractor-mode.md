@@ -1566,14 +1566,18 @@ Two ways out, from the tab (tick the signed tickets first):
   **Markup on change orders** of the day it was saved, so that line carries
   that figure too, even if the job's markup has changed since. The markup is
   the line's own, so the PCO's **Markup %** does not move these lines; edit a
-  line's Markup % to change one. When a line cannot get there (a bill amount
-  on a line with no cost, or one more than 11 times its cost, past the
-  999.9999% a markup holds, or a cost so large that four decimal places of
-  markup miss the cent), the response's `warnings` names both totals and
-  the tab shows it: "…-PCO-001 sells for 1,000.00 but the tickets bill
-  1,200.00. Edit its lines' Markup % on the Change orders tab to match what
-  was signed." A ticket with no bill rates at all (saved before T&M tickets
-  had them) is priced at the PCO's or the job's markup. A sub's ticket is
+  line's Markup % to change one. When a line cannot get there it gets the
+  markup that comes nearest, and the response's `warnings` names both totals
+  and each line that misses, and the tab shows it: a bill amount on a line
+  with no cost ("…-PCO-001 sells for 600.00 but the tickets bill 695.00.
+  …-TM-001: Trip charge has no cost to mark up. Give a line with no cost a
+  unit cost on the Change orders tab, or settle the difference with the
+  owner."), a bill more than 11 times its cost (past the 999.9999% a markup
+  holds), or a cent a markup cannot land on (a no-charge line on a large
+  cost sells for 0.01; a cost so large that four decimal places of markup
+  miss the cent). A line with no bill rate (a ticket saved before T&M
+  tickets had them) is priced at the PCO's or the job's markup and is left
+  out of that check. A sub's ticket is
   subcontract cost on the PCO, and also goes, at cost with no markup, on a
   draft **sub change order** on its commitment (one per commitment), so the
   sub's contract rises with the owner's; link it to the owner CO once the PCO
