@@ -1542,8 +1542,8 @@ def job_cost_tree(
     Revenue sits on the cost code and type its line or budget names (an
     invoice line's own, #1055, else the code's type; a pay application's
     line, which names none, is spread over its code's budgeted revenue by
-    type), so every figure in the totals is on a row (#1066); revenue with no code and no type is
-    `unassigned_revenue`, a row of its own. A contractor's revenue is also
+    type), so every figure in the totals is on a row (#1066); revenue with
+    no code and no type is `unassigned_revenue`, a row of its own. A contractor's revenue is also
     compared by section: `revenue_sections` puts each section's budgeted and
     actual revenue beside its budgeted and actual cost, the billed markups
     spread over the sections."""

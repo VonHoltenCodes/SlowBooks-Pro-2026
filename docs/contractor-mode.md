@@ -1446,9 +1446,13 @@ carries the cost code.
 
 Because each pay-application line credits its own revenue account with its
 section, revenue by section appears beside cost by section in the job cost
-tree and P&L by Job. A pay application's revenue has no cost type, so the
-cost tree compares revenue **per section, across cost types**: its type
-branches carry cost only, and its *Revenue by section* table (and
+tree and P&L by Job. A pay application's revenue line names its section but
+no cost type, so the cost tree spreads it over the section's budgeted cost
+types in proportion to their budgeted revenue (a section with no budgeted
+revenue keeps it on its own type). The split follows the budget as of the
+tree's end date, so a change order that adds a cost type re-splits revenue
+billed before it when the tree is run again; the totals do not change. Its
+*Revenue by section* table (and
 `revenue_sections` in the JSON, a grid of its own in the PDF and CSV) gives
 each section's budgeted cost, actual cost, budgeted revenue and actual
 revenue together, a sub-code rolling up to its section. A line or budget
