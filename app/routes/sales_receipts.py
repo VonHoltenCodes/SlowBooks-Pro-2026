@@ -107,13 +107,16 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     # Discounts past the other lines: said as such, not "must be positive".
     # Only the subtotal is judged here, since the lines' tax flags are not
     # settled until the invoice step (resolve_line_taxable), which refuses
-    # a taxable discount past the taxed lines in its own sentence.
+    # a taxable discount past the taxed lines in its own sentence. So a
+    # subtotal above zero that a negative tax takes to zero or below goes
+    # on to that step: with the flags settled, either the tax is below zero
+    # (refused there with that sentence) or the total is above zero.
     if subtotal < 0:
         raise HTTPException(
             status_code=422,
             detail=negative_sale_sentence(data.lines, 0, subtotal, "sales receipt"),
         )
-    if total <= 0:
+    if total <= 0 and subtotal <= 0:
         raise HTTPException(
             status_code=400,
             detail="Sales receipt total must be positive; add at least one "

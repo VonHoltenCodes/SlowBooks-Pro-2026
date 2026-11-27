@@ -696,8 +696,9 @@ def duplicate_invoice(
     copied = taxed_copy_lines(original.lines, original.customer, exempt)
     subtotal, tax_amount, total = compute_line_totals(copied, original.tax_rate)
     noun = document_label(original, words).lower()
-    # the copy's tax is the customer's today, so a copy can be past its
-    # taxable lines where the original was not
+    # an invoice stored before this check, or brought by an import, can
+    # already be past its lines; refused in a sentence, not a 500 at the
+    # posting
     refuse_negative_sale(copied, original.tax_rate, total, noun)
     confirm_zero_total(
         total,

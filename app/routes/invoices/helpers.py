@@ -29,7 +29,7 @@ MONEY_APPLIED_CODE = "money_applied"
 NEGATIVE_LINE_REFUSAL = (
     "Value error, a negative price is a discount, and a discount goes on an "
     'item marked "Discount or concession"; a refund belongs on a credit memo '
-    "(API: the item's allows_negative_price is true)"
+    "(API: an item whose allows_negative_price is true)"
 )
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,9 @@ def refuse_zero_total(total, noun: str = "invoice", action: str = "saving it") -
         raise HTTPException(status_code=400, detail=_zero_total_sentence(noun, action))
 
 
-def negative_sale_sentence(lines, tax_rate, total, noun: str = "invoice"):
+def negative_sale_sentence(
+    lines, tax_rate, total, noun: str = "invoice", deducts: bool = False
+):
     """Why a sales document's lines cannot be priced, as a sentence, or None
     when they can. Two ways a discount line breaks a sale:
 
@@ -72,36 +74,54 @@ def negative_sale_sentence(lines, tax_rate, total, noun: str = "invoice"):
     500), or, on a negative total, in the "$0.00" question first. ``lines``
     must carry their settled tax flags (after resolve_line_taxable or
     taxed_copy_lines). When the discounts do not come to more than the
-    other lines, the taxable base is what is wrong, so that is said."""
-    from app.services.accounting import taxable_subtotal
+    other lines, the taxable base is what is wrong, so that is said.
 
+    The base is judged by the tax it comes to, rounded to the cent: a
+    negative base whose tax rounds to $0.00 needs no tax line, so the
+    posting balances and the sale is saved as it always was.
+
+    ``deducts`` words it for an estimate's conversion, whose negative lines
+    are accepted deduct alternates, not discounts (and no refund)."""
     total = Decimal(str(total or 0))
-    taxed = Decimal(str(tax_rate or 0)) > 0
     lines = list(lines)
-    subtotal = compute_line_totals(lines, 0)[0]
-    over = (
-        f"The discounts on this {noun} come to more than its other lines. "
-        "A refund belongs on a credit memo."
-    )
-    base = (
-        "A taxable discount is more than the taxable lines above it. Untick "
-        "Tax on the discount line, or discount the taxable lines."
-    )
+    subtotal, tax_amount, _ = compute_line_totals(lines, tax_rate)
+    if deducts:
+        over = (
+            f"The accepted deduct alternates on this {noun} come to more "
+            "than its other lines, so the invoice would be below zero."
+        )
+        base = (
+            "A taxable deduct alternate is more than the taxable lines above "
+            "it. Untick Tax on the deduct alternate line, or deduct from the "
+            "taxable lines."
+        )
+    else:
+        over = (
+            f"The discounts on this {noun} come to more than its other lines. "
+            "A refund belongs on a credit memo."
+        )
+        base = (
+            "A taxable discount is more than the taxable lines above it. Untick "
+            "Tax on the discount line, or discount the taxable lines."
+        )
     if total < 0 and subtotal < 0:
         return over
-    if taxed and taxable_subtotal(lines) < 0:
+    # _q gives -0.00 for a base that rounds away, and -0.00 is not < 0
+    if tax_amount < 0:
         return base
     if total < 0:
         return over
     return None
 
 
-def refuse_negative_sale(lines, tax_rate, total, noun: str = "invoice") -> None:
+def refuse_negative_sale(
+    lines, tax_rate, total, noun: str = "invoice", deducts: bool = False
+) -> None:
     """Refuse, with a 422 and negative_sale_sentence, a sale whose lines
     cannot be priced. Called right after the totals, at every place an
     invoice is priced (create, edit, duplicate, estimate conversion, sales
     receipt), before the zero-total question and anything is written."""
-    sentence = negative_sale_sentence(lines, tax_rate, total, noun)
+    sentence = negative_sale_sentence(lines, tax_rate, total, noun, deducts)
     if sentence:
         raise HTTPException(status_code=422, detail=sentence)
 

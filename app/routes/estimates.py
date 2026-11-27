@@ -1145,7 +1145,11 @@ def convert_to_invoice(
     # taxable one past the taxed lines, it is said in a sentence (it was a
     # 500 at the invoice's posting)
     refuse_negative_sale(
-        list(copied) + markup_lines, estimate.tax_rate, total, "estimate"
+        list(copied) + markup_lines,
+        estimate.tax_rate,
+        total,
+        "estimate",
+        deducts=True,
     )
     confirm_zero_total(
         total,

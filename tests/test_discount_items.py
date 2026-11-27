@@ -31,7 +31,7 @@ BEFORE = "b1a26772cc4e"  # the credit memo line classes migration (#640), which 
 REFUSAL = (
     "Value error, a negative price is a discount, and a discount goes on an "
     'item marked "Discount or concession"; a refund belongs on a credit memo '
-    "(API: the item's allows_negative_price is true)"
+    "(API: an item whose allows_negative_price is true)"
 )
 
 

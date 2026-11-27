@@ -7,6 +7,7 @@ import calendar
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from dateutil.relativedelta import relativedelta
 
 from fastapi import HTTPException
@@ -451,7 +452,12 @@ def generate_due_invoices(
         # sentence, as a $0.00 one is: posting it raised mid-run.
         from app.routes.invoices.helpers import negative_sale_sentence
 
-        problem = negative_sale_sentence(copied, tax_rate, total)
+        problem = negative_sale_sentence(
+            copied,
+            tax_rate,
+            total,
+            document_label(SimpleNamespace(is_pledge=nonprofit), words).lower(),
+        )
         if problem:
             skipped.append(
                 {

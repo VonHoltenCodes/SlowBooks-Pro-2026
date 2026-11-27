@@ -38,6 +38,15 @@ BASE = (
     "A taxable discount is more than the taxable lines above it. Untick "
     "Tax on the discount line, or discount the taxable lines."
 )
+# an estimate's conversion speaks of its deduct alternates, not discounts
+DEDUCT_OVER = (
+    "The accepted deduct alternates on this estimate come to more than its "
+    "other lines, so the invoice would be below zero."
+)
+DEDUCT_BASE = (
+    "A taxable deduct alternate is more than the taxable lines above it. "
+    "Untick Tax on the deduct alternate line, or deduct from the taxable lines."
+)
 DAY = "2026-10-01"
 
 
@@ -149,6 +158,45 @@ def test_a_positive_total_with_a_negative_taxable_base_is_refused(
             _line("Discount", -40, True, discount["id"], 2),
         ],
         tax_rate=0.1,
+    )
+    _refused(r, BASE)
+    _no_invoices(client)
+
+
+def test_a_negative_base_whose_tax_rounds_to_zero_still_posts(
+    client, seed_customer, discount
+):
+    # labor 500 untaxed, materials 40 taxed, a 40.05 taxable discount at
+    # 6.25%: the base is -0.05, the tax rounds to $0.00, so no tax line is
+    # needed and the posting balances, as it always did
+    r = _invoice(
+        client,
+        seed_customer.id,
+        [
+            _line("Labor", 500, False),
+            _line("Materials", 40, True, order=1),
+            _line("Discount", -40.05, True, discount["id"], 2),
+        ],
+        tax_rate=0.0625,
+    )
+    assert r.status_code == 201, r.text
+    assert Decimal(str(r.json()["tax_amount"])) == Decimal("0")
+    assert Decimal(str(r.json()["total"])) == Decimal("499.95")
+
+
+def test_a_negative_base_whose_tax_rounds_below_zero_is_refused(
+    client, seed_customer, discount
+):
+    # the same lines a cent further: a base of -0.13 is -0.01 of tax
+    r = _invoice(
+        client,
+        seed_customer.id,
+        [
+            _line("Labor", 500, False),
+            _line("Materials", 40, True, order=1),
+            _line("Discount", -40.13, True, discount["id"], 2),
+        ],
+        tax_rate=0.0625,
     )
     _refused(r, BASE)
     _no_invoices(client)
@@ -322,7 +370,7 @@ def test_convert_with_a_taxable_deduct_over_untaxed_labor_is_refused(
     r = client.post(
         f"/api/estimates/{est['id']}/convert", json={"allow_zero_total": allow}
     )
-    _refused(r, BASE)
+    _refused(r, DEDUCT_BASE)
     _no_invoices(client)
 
 
@@ -339,7 +387,7 @@ def test_convert_with_a_deduct_past_the_scope_is_refused(
     r = client.post(
         f"/api/estimates/{est['id']}/convert", json={"allow_zero_total": allow}
     )
-    _refused(r, OVER.format(noun="estimate"))
+    _refused(r, DEDUCT_OVER)
     _no_invoices(client)
 
 
@@ -383,6 +431,21 @@ def test_sales_receipt_taxable_discount_past_the_taxed_lines_is_refused(
             "rate": -10,
             "line_order": 1,
         },
+    ]
+    r = _receipt(client, seed_customer.id, lines, 0.1)
+    _refused(r, BASE)
+    _no_invoices(client)
+
+
+def test_sales_receipt_whose_negative_tax_takes_the_total_below_zero(
+    client, seed_customer, discount
+):
+    # labor 105 untaxed, a 100 taxable discount at 10%: the subtotal is 5,
+    # the tax -10, the total -5. The base is what is wrong, so that is
+    # said, not "Sales receipt total must be positive".
+    lines = [
+        _line("Labor", 105, False),
+        _line("Discount", -100, True, discount["id"], 1),
     ]
     r = _receipt(client, seed_customer.id, lines, 0.1)
     _refused(r, BASE)
