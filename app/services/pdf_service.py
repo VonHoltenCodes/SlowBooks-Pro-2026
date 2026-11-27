@@ -9,7 +9,9 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import NamedTuple
 
-from jinja2 import Environment, FileSystemLoader, Template, pass_context
+from jinja2 import Environment, Template, pass_context
+
+from app.services import local_templates
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 
@@ -171,12 +173,63 @@ class _PrintedTemplate(Template):
     long words set to break (see LONG_WORD)."""
 
     def render(self, *args, **kwargs):
-        html = super().render(*args, **kwargs)
-        return break_long_words(html) if _PRINT_RULE in html else html
+        token = _local_drawn.set([])
+        try:
+            html = super().render(*args, **kwargs)
+            drawn = bool(_local_drawn.get())
+        except Exception as exc:
+            refusal = local_templates.render_failure(exc)
+            if refusal is None:
+                raise
+            raise refusal from exc
+        finally:
+            _local_drawn.reset(token)
+        html = break_long_words(html) if _PRINT_RULE in html else html
+        return _guard_local_page(html) if drawn else html
 
 
-_jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
+# Local templates (#1235, app/services/local_templates.py). A page drawn by
+# one (any part of it: the page, an include, a layout it extends) is also
+# the Print page a signed-in browser opens, on the app's own address. Its
+# scripts must not run there with the person's session: the page carries a
+# policy that lets only the print script (print_html adds it) run, and no
+# fetch, form or plugin. A policy in the page can only narrow the server's.
+# Built-in pages are untouched.
+_local_drawn: ContextVar[list | None] = ContextVar("local_drawn", default=None)
+_DOCTYPE = re.compile(r"\s*<!doctype[^>]*>", re.I)
+
+
+def _mark_local_drawn() -> str:
+    drawn = _local_drawn.get()
+    if drawn is not None:
+        drawn.append(True)
+    return ""
+
+
+def _guard_local_page(html: str) -> str:
+    import base64
+    import hashlib
+
+    from app.routes._print import PRINT_SCRIPT
+
+    script = PRINT_SCRIPT.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    meta = (
+        '<meta http-equiv="Content-Security-Policy" content="'
+        f"script-src 'sha256-{digest}' 'unsafe-eval'; connect-src 'none'; "
+        "form-action 'none'; object-src 'none'; base-uri 'none'\">"
+    )
+    # after the doctype, so the page keeps its standards mode
+    head = _DOCTYPE.match(html)
+    at = head.end() if head else 0
+    return html[:at] + meta + html[at:]
+
+
+_jinja_env = Environment(
+    autoescape=True, loader=local_templates.DocumentLoader(str(TEMPLATE_DIR))
+)
 _jinja_env.template_class = _PrintedTemplate
+_jinja_env.globals["_sb_local_template"] = _mark_local_drawn
 
 
 def _company_logo_data_uri(company_settings: dict) -> str:
