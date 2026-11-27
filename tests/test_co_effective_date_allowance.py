@@ -497,7 +497,7 @@ def test_a_credit_after_the_final_release_says_what_to_do(
     )
     assert r.status_code == 422
     msg = r.json()["detail"]
-    assert "Retainage to date would be -350.00" in msg
+    assert "Retainage to date would be -$350.00" in msg
     assert "Bill the credit before the final retainage release" in msg
 
 
