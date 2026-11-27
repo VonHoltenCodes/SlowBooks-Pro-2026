@@ -1662,13 +1662,17 @@ def check_amount_figures(value, no_dollar_sign=False, asterisk_fill=False) -> st
     stock that prints its own "$" beside the amount box. With the amount
     filled with asterisks (#1239) two asterisks lead the figures, after the
     sign when it prints ("$**1,234.56", "**1,234.56"), so nothing can be
-    written in front of them. Only the face's amount box reads it; the
+    written in front of them. A negative amount keeps its minus sign first
+    ("-$**25.00", "-**25.00"). Only the face's amount box reads it; the
     amount in words, the stubs and the vouchers print as they always have."""
     text = _format_currency(value)
     if no_dollar_sign:
         text = text.replace("$", "", 1)
     if asterisk_fill:
-        at = text.find("$") + 1  # 0 when the sign is left off
+        # after the minus sign and the dollar sign, whichever print
+        at = 1 if text.startswith("-") else 0
+        if text.startswith("$", at):
+            at += 1
         text = text[:at] + "**" + text[at:]
     return text
 
@@ -1684,9 +1688,9 @@ def check_amount_no_dollar_sign(company_settings: dict) -> bool:
 
 
 def check_amount_asterisk_fill(company_settings: dict) -> bool:
-    """Whether the amount box leads the figures with asterisks (#1239), as
-    QuickBooks Desktop prints them. Read apart from check_print_options()
-    so its shape holds; off unless the setting is "true"."""
+    """Whether the amount box leads the figures with asterisks (#1239).
+    Read apart from check_print_options() so its shape holds; off unless
+    the setting is "true"."""
     return company_settings.get("check_amount_asterisk_fill") == "true"
 
 

@@ -2,11 +2,11 @@
 
 Settings -> Check Printing -> Fill the amount with asterisks (off by
 default) prints the amount box as "$**1,234.56", or "**1,234.56" with
-Leave the dollar sign off the amount (#799) on, as QuickBooks Desktop does,
-so nothing can be written in front of the figures. The amount in words, the
-stubs, the vouchers and the MICR line are unchanged, on plain, pre-printed
-and blank stock, in both positions and on the test check. Off, every check
-prints exactly as it did before the setting existed.
+Leave the dollar sign off the amount (#799) on, so nothing can be written
+in front of the figures. The amount in words, the stubs, the vouchers and
+the MICR line are unchanged, on plain, pre-printed and blank stock, in both
+positions and on the test check. Off, every check prints exactly as it did
+before the setting existed.
 
 The HTML tests run everywhere; the PDF tests read the real WeasyPrint output
 with pypdf (they skip without it), as tests/test_check_field_layout.py does.
@@ -137,6 +137,20 @@ def test_the_figures_for_each_pair_of_choices():
     assert check_amount_figures(Decimal("1000000"), False, True) == "$**1,000,000.00"
     # the defaults are today's figures
     assert check_amount_figures(Decimal("1234.56")) == "$1,234.56"
+
+
+def test_a_negative_amount_keeps_its_minus_sign_first():
+    negatives = {
+        (False, False): "-$25.00",
+        (True, False): "-25.00",
+        (False, True): "-$**25.00",
+        (True, True): "-**25.00",
+    }
+    for (no_sign, fill), text in negatives.items():
+        got = check_amount_figures(Decimal("-25"), no_sign, fill)
+        assert got == text, (no_sign, fill, got)
+    on = _html(True, True, checks=[_check(amount=Decimal("-25"), details=[])])
+    assert _box("-**25.00") in on
 
 
 def _feature_off_template():
@@ -324,35 +338,52 @@ def _amount(words, text):
     return found[0]
 
 
-def _right(word):
-    return word[1] + len(word[0]) * 0.6 * word[3]
+# The PDF cases are two tests that loop inside, not one test a case: Windows
+# CI has no WeasyPrint, and every test that renders a PDF counts once against
+# its exact skip budget (MAX_SKIPS in .github/workflows/ci.yml).
 
 
-@pytest.mark.parametrize("position", _POSITIONS)
-def test_the_off_face_reads_as_it_did(position):
-    # the saved "false" prints the very words the absent setting does
-    assert _face_words(_settings(None, None, check_position=position)) == _face_words(
-        _settings(False, False, check_position=position)
-    )
-
-
-@pytest.mark.parametrize("position", _POSITIONS)
-@pytest.mark.parametrize("stock", list(_STOCKS))
-def test_the_figures_keep_their_right_edge_and_baseline(stock, position):
-    words = {
-        pair: _face_words(_settings(*pair, check_position=position, **_STOCKS[stock]))
-        for pair in _BOXES
-    }
-    today = _amount(words[(False, False)], "$1,234.56")
-    for pair, text in _BOXES.items():
-        word = _amount(words[pair], text)
-        # right-aligned: the last figure ends where it ends today, on the
-        # same baseline at the same size; the asterisks grow it leftward
-        assert abs(_right(word) - _right(today)) < 0.05, (pair, word, today)
-        assert word[2:] == today[2:], (pair, word, today)
-        # and nothing else on the face moves
-        others = [w for w in words[pair] if w is not word]
-        assert others == [w for w in words[(False, False)] if w is not today]
+def test_the_figures_keep_their_right_edge_and_nothing_else_moves():
+    for position in _POSITIONS:
+        # the saved "false" prints the very words the absent setting does
+        absent = _face_words(_settings(None, None, check_position=position))
+        saved = _face_words(_settings(False, False, check_position=position))
+        assert absent == saved, f"off, check {position}: the face changed"
+    for position in _POSITIONS:
+        for stock, stock_settings in _STOCKS.items():
+            case = f"{stock} stock, check {position}"
+            words = {
+                pair: _face_words(
+                    _settings(*pair, check_position=position, **stock_settings)
+                )
+                for pair in _BOXES
+            }
+            today = _amount(words[(False, False)], "$1,234.56")
+            # one letter's advance in the face's own font, measured on this
+            # page: the box is right-aligned today, so leaving the "$" off
+            # moves the figures one letter to the right (#799). Nothing here
+            # assumes the font's advance width.
+            advance = _amount(words[(True, False)], "1,234.56")[1] - today[1]
+            assert 0.4 * today[3] < advance < 0.8 * today[3], (case, advance)
+            for pair, text in _BOXES.items():
+                word = _amount(words[pair], text)
+                # right-aligned: the last figure ends where it ends today, on
+                # the same baseline at the same size; the asterisks grow it
+                # leftward by exactly their own two letters
+                letters = len(text) - len(today[0])
+                left_of_today = today[1] - word[1]
+                assert abs(left_of_today - letters * advance) < 0.1, (
+                    f"{case}, {pair}: the right edge moved",
+                    word,
+                    today,
+                    advance,
+                )
+                assert word[2:] == today[2:], (f"{case}, {pair}", word, today)
+                # and nothing else on the face moves
+                others = [w for w in words[pair] if w is not word]
+                assert others == [
+                    w for w in words[(False, False)] if w is not today
+                ], f"{case}, {pair}: something else on the face moved"
 
 
 # where the payee's line ends, in points from the sheet's left edge: the
@@ -369,25 +400,23 @@ _TOP_PAYEE_LONGEST_END = (_FACE_LEFT + 0.75 + 5.0) * 72
 _BOX_LEFT_PAD = 14  # the amount box's 12 px padding and 2 px border, in px
 
 
-@pytest.mark.parametrize("position", _POSITIONS)
-@pytest.mark.parametrize(
-    "amount", ["0.01", "957.68", "1234.56", "99999.99", "999999.99", "9999999.99"]
-)
-def test_the_filled_amount_clears_the_payee_line(position, amount):
-    checks = [_check(amount=Decimal(amount))]
-    words = _face_words(_settings(False, True, check_position=position), checks)
-    word = _amount(words, check_amount_figures(Decimal(amount), False, True))
-    box_left = word[1] - _BOX_LEFT_PAD * 0.75
-    assert box_left > _PAYEE_LINE_END[position], (word, box_left)
-
-
-def test_on_top_a_long_payee_is_cut_short_of_the_filled_amount():
-    # the payee's line on top is cut at its longest; with the asterisks it
+def test_the_filled_amount_clears_the_payee_line():
+    amounts = ["0.01", "957.68", "1234.56", "99999.99", "999999.99", "9999999.99"]
+    for position in _POSITIONS:
+        for amount in amounts:
+            case = f"{amount}, check {position}"
+            checks = [_check(amount=Decimal(amount))]
+            words = _face_words(_settings(False, True, check_position=position), checks)
+            word = _amount(words, check_amount_figures(Decimal(amount), False, True))
+            box_left = word[1] - _BOX_LEFT_PAD * 0.75
+            assert box_left > _PAYEE_LINE_END[position], (case, word, box_left)
+    # on top, the payee's line is cut at its longest; with the asterisks it
     # is cut 0.2 in sooner, so it still ends short of "$**1,234.56"
     payee = "Northern Lakes Regional Mechanical Contracting Services Cooperative"
     checks = [_check(payee=payee)]
     words = _face_words(_settings(False, True, check_position="top"), checks)
     word = _amount(words, "$**1,234.56")
-    assert word[1] - _BOX_LEFT_PAD * 0.75 > _TOP_PAYEE_LONGEST_END
+    box_left = word[1] - _BOX_LEFT_PAD * 0.75
+    assert box_left > _TOP_PAYEE_LONGEST_END, ("long payee, check top", word)
     html = render_checks_html(checks, _settings(False, True, check_position="top"))
-    assert ".check-top .pay-to-line { max-width: 5in; }" in html
+    assert ".check-top .pay-to-line { max-width: 5in; }" in html, "long payee"

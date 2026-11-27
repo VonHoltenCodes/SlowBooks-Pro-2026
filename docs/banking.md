@@ -331,7 +331,7 @@ names the field, and nothing is saved.
 own "$" beside the amount box; **Leave the dollar sign off the amount**
 (v2.32.0) prints the figures as "1,234.56" so the check does not show two.
 **Fill the amount with asterisks** prints two asterisks in front of the
-figures, as QuickBooks Desktop does, so nothing can be written ahead of them:
+figures so nothing can be written ahead of them:
 `$**1,234.56`, or `**1,234.56` with the dollar sign left off. Both are
 off by default, so a check that prints right today prints the same after an
 upgrade, whichever stock is chosen; turn them on to suit your stock. The

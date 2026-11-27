@@ -181,8 +181,8 @@ DEFAULT_SETTINGS = {
     # theirs; plain, pre-printed and blank stock and the test check alike.
     "check_amount_no_dollar_sign": "false",
     # Asterisks before the amount in figures (#1239): "true" prints the
-    # amount box as "$**1,234.56" ("**1,234.56" with the sign left off), as
-    # QuickBooks Desktop does, so nothing can be written in front of it.
+    # amount box as "$**1,234.56" ("**1,234.56" with the sign left off), so
+    # nothing can be written in front of it.
     "check_amount_asterisk_fill": "false",
     # Per-field check layout (#749): each value on the check face (payee,
     # payee address, date, amount in figures, amount in words, memo) moved,
