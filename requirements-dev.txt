@@ -7,4 +7,4 @@ pytest-cov>=5.0.0
 pytest-xdist>=3.6.0
 black>=24.8.0
 ruff>=0.6.0
-pypdf>=5.0.0  # reads rendered PDFs back in tests (the invoice header layout)
+pypdf>=5.0.0,<7.2  # reads rendered PDFs back in tests (the invoice header layout). 7.2.0 reports word positions differently, which fails tests/test_check_field_layout.py; the reader is a test tool only, the printed pages are unchanged
