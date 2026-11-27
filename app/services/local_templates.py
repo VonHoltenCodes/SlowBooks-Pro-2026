@@ -30,7 +30,13 @@ import logging
 import os
 from pathlib import Path
 
-from jinja2 import BaseLoader, FileSystemLoader, TemplateNotFound, TemplateSyntaxError
+from jinja2 import (
+    BaseLoader,
+    FileSystemLoader,
+    TemplateError,
+    TemplateNotFound,
+    TemplateSyntaxError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +48,16 @@ _NOT_DOCUMENTS = ("portal/", "public_pay.html", "invoice_email.html")
 
 
 class LocalTemplateError(RuntimeError):
-    """A local template could not be loaded, parsed or rendered. The message
-    names the file and says it is a local template; it is answered as the
-    refusal, never with a fall back to the built-in template."""
+    """A local template could not be loaded, parsed or rendered. It is
+    answered as the refusal, never with a fall back to the built-in
+    template. ``user_text`` is what the person printing is shown: the
+    template's name in the folder, that it is a local template, the line,
+    and no server path or raw exception text (safe_errors passes it on).
+    ``str()`` adds the path and the error, for the server log."""
+
+    def __init__(self, user_text: str, detail: str = ""):
+        super().__init__(f"{user_text} [{detail}]" if detail else user_text)
+        self.user_text = user_text
 
 
 def _configured() -> tuple[Path | None, str]:
@@ -61,19 +74,25 @@ def _configured() -> tuple[Path | None, str]:
     return None, ""
 
 
-def _problem(folder: Path) -> str:
-    """Why a named folder cannot be used, or '' when it can."""
+def _problem(folder: Path, source: str) -> str:
+    """Why a named folder cannot be used, or '' when it can. Worded for
+    where it was named (the setting, or the desktop data folder)."""
+    named = (
+        f"{ENV_VAR} names a folder"
+        if source == "environment"
+        else f"the data folder's {DATA_SUBFOLDER} sub-folder is a folder"
+    )
     if not folder.is_dir():
-        return f"{ENV_VAR} names a folder that does not exist or is not a folder"
+        return f"{named} that does not exist or is not a folder"
     if not os.access(folder, os.R_OK | os.X_OK):
-        return f"{ENV_VAR} names a folder this server cannot read"
+        return f"{named} this server cannot read"
     return ""
 
 
 def active_folder() -> Path | None:
     """The local templates folder in use, or None (off)."""
-    folder, _ = _configured()
-    if folder is None or _problem(folder):
+    folder, source = _configured()
+    if folder is None or _problem(folder, source):
         return None
     return folder.resolve()
 
@@ -93,15 +112,23 @@ def _local_file(folder: Path, name: str) -> Path | None:
     ):
         raise TemplateNotFound(name)
     path = folder.joinpath(*parts)
-    if not path.exists():
+    # a broken link counts as there: refused below, never the built-in
+    if not (path.is_symlink() or path.exists()):
         return None
     real = path.resolve()
     if not real.is_relative_to(folder):
         raise LocalTemplateError(
-            f'The local template "{name}" ({path}) is a link to a file outside'
-            " the local templates folder, and was refused."
+            f'The local template "{name}" is a link to a file outside the'
+            " local templates folder, and was refused.",
+            str(path),
         )
-    return real if real.is_file() else None
+    if not real.is_file():
+        raise LocalTemplateError(
+            f'The local template "{name}" is not a readable file (a folder, or'
+            " a link to nothing), and was refused.",
+            str(path),
+        )
+    return real
 
 
 class DocumentLoader(BaseLoader):
@@ -122,7 +149,9 @@ class DocumentLoader(BaseLoader):
                 mtime = path.stat().st_mtime
             except (OSError, UnicodeDecodeError) as exc:
                 raise LocalTemplateError(
-                    f'The local template "{name}" ({path}) could not be read: {exc}'
+                    f'The local template "{name}" could not be read'
+                    f" ({type(exc).__name__}).",
+                    f"{path}: {exc}",
                 ) from exc
 
             def uptodate():
@@ -154,8 +183,9 @@ class DocumentLoader(BaseLoader):
         except TemplateSyntaxError as exc:
             if is_local_file(exc.filename):
                 raise LocalTemplateError(
-                    f'The local template "{name}" ({exc.filename}) has an error'
-                    f" on line {exc.lineno}: {exc.message}"
+                    f'The local template "{name}" has an error on line'
+                    f" {exc.lineno}: {exc.message}",
+                    str(exc.filename),
                 ) from exc
             raise
 
@@ -191,9 +221,14 @@ def render_failure(exc: BaseException) -> LocalTemplateError | None:
     if where is None:
         return None
     name = Path(where[0]).relative_to(folder).as_posix()
+    # Jinja's own errors ("'gone' is undefined") are about the template and
+    # are shown; any other exception's text may carry data or SQL, so only
+    # its kind is shown and the text goes to the log.
+    said = f": {exc}" if isinstance(exc, TemplateError) else ""
     return LocalTemplateError(
-        f'The local template "{name}" ({where[0]}) failed on line {where[1]}:'
-        f" {type(exc).__name__}: {exc}"
+        f'The local template "{name}" failed on line {where[1]}:'
+        f" {type(exc).__name__}{said}",
+        f"{where[0]}: {exc}",
     )
 
 
@@ -211,23 +246,50 @@ def status(builtin_dir: str) -> dict:
     }
     if folder is None:
         return out
-    out["problem"] = _problem(folder)
+    out["problem"] = _problem(folder, source)
     if out["problem"]:
         return out
     out["enabled"] = True
-    builtin = {
+    folder = folder.resolve()
+    builtin = sorted(
         n
         for n in FileSystemLoader(builtin_dir).list_templates()
         if not n.startswith(_NOT_DOCUMENTS)
-    }
+    )
     try:
         local = sorted(FileSystemLoader(str(folder)).list_templates())
     except OSError as exc:
-        out["problem"] = f"the local templates folder could not be listed: {exc}"
+        out["problem"] = (
+            f"the local templates folder could not be listed ({type(exc).__name__})"
+        )
         return out
-    out["replaced"] = [n for n in local if n in builtin]
-    out["added"] = [n for n in local if n not in builtin]
+    # Replaced = what the loader itself would draw locally, so a case-
+    # insensitive file system (Windows, macOS) and a broken link (refused
+    # at print) are reported as they print. Listed by the built-in name.
+    taken = set()
+    for n in builtin:
+        try:
+            path = _local_file(folder, n)
+        except (LocalTemplateError, TemplateNotFound):
+            out["replaced"].append(n)
+            taken.add(n)
+            continue
+        if path is not None:
+            out["replaced"].append(n)
+            taken.add(_same_file_key(path))
+    for n in local:
+        key = _same_file_key(folder / n)
+        if n not in taken and (key is None or key not in taken):
+            out["added"].append(n)
     return out
+
+
+def _same_file_key(path: Path):
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
 
 
 def diagnostics_line(builtin_dir: str) -> str:

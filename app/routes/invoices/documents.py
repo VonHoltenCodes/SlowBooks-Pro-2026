@@ -157,6 +157,9 @@ def email_invoice(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     company = get_settings(db)
+    # read by the failure log below even when the PDF fails first (a local
+    # template refused, #1235), before the subject is worked out
+    subject = None
     try:
         from app.services.email_service import send_email, render_invoice_email_parts
         from app.models.email_log import EmailLog

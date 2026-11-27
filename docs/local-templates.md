@@ -17,9 +17,14 @@ interface, a company file, an import or an API call can name it or change it.
 
 **Docker.** Mount a folder into the container and name it in the
 `SLOWBOOKS_LOCAL_TEMPLATES_DIR` environment setting, under the `slowbooks`
-service in `docker-compose.yml`:
+service. Put it in a `docker-compose.override.yml` beside the shipped
+`docker-compose.yml` (Compose reads both), so an upgrade that replaces the
+shipped file does not drop it. With `docker-compose.prod.yml`, add the same
+lines to a file you pass after it (`-f docker-compose.prod.yml -f local.yml`).
 
 ```yaml
+services:
+  slowbooks:
     environment:
       SLOWBOOKS_LOCAL_TEMPLATES_DIR: /app/local-templates
     volumes:
@@ -29,7 +34,8 @@ service in `docker-compose.yml`:
 Then `docker compose up -d`. A read-only mount (`:ro`) is enough.
 
 **A source or systemd install.** Put `SLOWBOOKS_LOCAL_TEMPLATES_DIR=/path/to/folder`
-in `.env` (or the service's environment) and restart the server.
+in `.env` (or the service's environment) and restart the server. Give an
+absolute path: a relative one is read from wherever the server was started.
 
 **The desktop app.** Make a folder named `local-templates` in the app's data
 folder and restart SlowBooks Pro:
@@ -53,9 +59,9 @@ and the startup log and the support line say why.
 
 **When changes take effect.** Once the folder is in use, a file you add, edit
 or remove takes effect at the next print, with no restart (the built-in
-templates are checked the same way). Turning the setting on or off, or
-creating the desktop app's `local-templates` folder, takes effect at the next
-start.
+templates are checked the same way). After turning the setting on or off, or
+creating or removing the desktop app's `local-templates` folder, restart:
+until then some documents may print from the old choice.
 
 ## How names resolve
 
@@ -70,7 +76,12 @@ start.
 - A name with `..`, a leading `/`, a drive letter or a backslash is refused, so
   nothing outside the folder is read. A symbolic link inside the folder is
   followed only when its target is inside the folder too; one that points
-  outside is refused.
+  outside is refused, and so is a link that points at nothing or a folder
+  with a template's name. A hard link is an ordinary file and is not
+  detected; only the person who runs the server can make one.
+- A local template cannot `{% extends %}` the built-in template of the same
+  name (the name is the local file itself; it is refused). Copy the whole
+  built-in file and change what you need.
 - Start each page with `<!DOCTYPE html>`, as the built-in ones do.
 
 ## What a broken local template does
@@ -79,7 +90,17 @@ If a local template, or a partial it includes, does not parse or fails while
 it prints, the document is refused with a message that names the local file,
 says it is a local template, and gives the line. The built-in template is never
 printed in its place, so a layout that broke on upgrade cannot go out looking
-like the default one. The full error is in the server log.
+like the default one. The message shows the file's name in the folder, not
+the server's path; the full error and the path are in the server log. An
+emailed document, a Collections statement run or reminder, and a bulk
+statement send name the local template in the row that failed.
+
+**A name that is no longer passed prints as nothing, without an error.** If
+a release renames or removes a value and your template still uses the old
+name (`{{ inv.old_field }}`, `{{ gone_value }}`), that spot prints blank and
+the document goes out. Only an error, or reading a field of such a missing
+name (`{{ gone_value.amount }}`), is refused. This is why you print a test
+document after every upgrade.
 
 ## The templates
 
@@ -112,7 +133,8 @@ email body is customized under Settings → Email templates):
 ## What each template receives
 
 Every document drawn through the shared renderer (all of the above except
-checks, labels, the analytics snapshot and the tax and payroll forms) gets:
+checks, the pre-printed deposit slip `deposit_slip_stock.html`, labels, the
+analytics snapshot and the tax and payroll forms) gets:
 
 | Name | What it is |
 |---|---|
@@ -133,13 +155,13 @@ Filters: `currency`, `rate`, `qty`, `tax_percent`, `fdate`, `desc`, `own_width`,
 
 | Name | What it is |
 |---|---|
-| `inv` | The invoice record. Used by the built-in template: `invoice_number`, `date`, `due_date`, `terms`, `po_number`, `status`, `is_sales_receipt`, `bill_address`, `bill_city`, `bill_state`, `bill_zip`, `ship_address`, `ship_city`, `ship_state`, `ship_zip`, `customer` (with `name`, `bill_country`, `ship_country`), `customer_name`, `subtotal`, `tax_rate`, `tax_amount`, `total`, `amount_paid`, `balance_due`, `retainage_held`, `retainage_released`, `fair_value_amount`, `fair_value_description`, `notes`, and `lines` (each with `description`, `quantity`, `rate`, `amount`, `is_taxable`) |
-| `doc_kind` | What the document is called (an invoice, a sales receipt, a donation receipt, a pledge) |
+| `inv` | The invoice record. Used by the built-in template: `invoice_number`, `date`, `due_date`, `terms`, `po_number`, `status`, `is_sales_receipt`, `bill_address1`, `bill_address2`, `bill_city`, `bill_state`, `bill_zip`, `ship_address1`, `ship_address2`, `ship_city`, `ship_state`, `ship_zip`, `customer` (with `name`, `bill_country`, `ship_country`), `customer_name`, `subtotal`, `tax_rate`, `tax_amount`, `total`, `amount_paid`, `balance_due`, `retainage_held`, `retainage_released`, `fair_value_amount`, `fair_value_description`, `notes`, and `lines` (each with `description`, `quantity`, `rate`, `amount`, `is_taxable`) |
+| `doc_kind` | Which document it is, as a code: `Invoice`, `SalesReceipt`, `DonationReceipt` or `Pledge` (print `terms(...)` for the company's word) |
 | `bill_to_name`, `bill_to_for`, `bill_to_country`, `ship_to_country` | The Bill To name, the "For:" sub-customer line (or none), and the countries frozen with the addresses |
 | `irs` | On a donation receipt, the acknowledgment block (`text`, `date`, `amount_received`, `deductible_amount`); otherwise none |
 | `release_only` | True on a retainage-release invoice |
 | `pay_application_number` | The pay application this invoice bills, or none |
-| `retainage_lines` | What a line-less pay-application invoice bills, in place of its lines |
+| `retainage_lines` | What a line-less pay-application invoice bills, in place of its lines (each with `description` and `amount`) |
 | `discount_line` | The early-payment discount offer, or none |
 | `discount_taken` | The discount already taken (`amount`, `number`), or none |
 
@@ -177,17 +199,26 @@ authority: when this table and the code differ, the code is right.
 
 ## Before you turn it on: a local template is your own code
 
-- **It runs inside SlowBooks Pro.** A Jinja template is code. A local template
-  can read everything its document's data holds (the invoice, the customer and
-  their other fields, every company setting), and anything those objects lead
-  to. The printed-document templates are not sandboxed, built-in or local, and
-  this feature does not add a sandbox. Use only templates you wrote or have
-  read.
-- **Its scripts do not run with your session.** A page drawn by a local
+- **It runs inside SlowBooks Pro, as the server.** A Jinja template is code.
+  The printed-document templates are not sandboxed, built-in or local, and
+  this feature does not add a sandbox, so a local template can run any code
+  on the server with the server's permissions: every company's data, the
+  encryption keys in its environment, and any file the server can read.
+  Use only templates you wrote or have read line by line.
+- **`company` holds secrets.** On invoices, statements, estimates, bills,
+  purchase orders and the other documents of the shared renderer, `company`
+  is every company setting, decrypted: the email server's password, the
+  payment providers' keys, the ACH bank account, the closing-date password.
+  A template that prints `{{ company.smtp_password }}` puts it on a document
+  that goes to a customer. Check any template you did not write for this.
+- **Its scripts are held back on the Print page.** A page drawn by a local
   template also opens as its Print page in the browser, on SlowBooks Pro's own
-  address. Such a page carries a policy that lets only SlowBooks Pro's print
-  script run, and allows no fetch, form or plugin. A `<script>` in your
-  template is ignored there, and PDFs never run scripts.
+  address. Such a page (and a Print all run that holds one) carries a policy
+  that lets only SlowBooks Pro's print script run, and allows no fetch, form
+  or plugin, so a `<script>` in your template does not run there; PDFs never
+  run scripts. The page is not isolated: it can still load images from
+  anywhere and can send the window elsewhere, so this is a guard against a
+  careless template, not a reason to trust a hostile one.
 - **It is not checked on upgrade.** SlowBooks Pro does not compare your
   template with the built-in one it replaces. After an upgrade, compare your
   copy against the new built-in template, and print a test document before

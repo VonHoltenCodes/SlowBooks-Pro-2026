@@ -23,7 +23,7 @@ from app.database import get_db
 from app.models.invoices import Invoice
 from app.routes._print import print_html
 from app.routes.invoices._router import router
-from app.services.pdf_service import render_invoice_html, render_pdf
+from app.services.pdf_service import _DOCTYPE, _GUARD, render_invoice_html, render_pdf
 from app.services.request_utils import content_disposition
 from app.services.settings_service import get_all_settings as get_settings
 
@@ -73,6 +73,13 @@ def _parse_ids(ids: str) -> list[int]:
 def combine_documents(pages: list[str]) -> str:
     """Several full HTML documents drawn from one template as one page: the
     first one's head, then each one's body in a section of its own."""
+    # A page drawn by a local template carries a script policy (#1235,
+    # pdf_service._guard_local_page). It holds only in the head, so it is
+    # taken out of every page and put once at the top of the combined one:
+    # any local page in the run guards the whole run.
+    guard = _GUARD.search("".join(pages))
+    if guard:
+        pages = [_GUARD.sub("", page) for page in pages]
     first = pages[0]
     head_end = first.lower().find("<body")
     head = first[:head_end] if head_end >= 0 else ""
@@ -85,6 +92,10 @@ def combine_documents(pages: list[str]) -> str:
         m = _BODY_RE.search(page)
         inner = m.group(1) if m else page
         sections.append(f'<section class="sb-print-doc">{inner}</section>')
+    if guard:
+        at = _DOCTYPE.match(head)
+        at = at.end() if at else 0
+        head = head[:at] + guard.group(0) + head[at:]
     return head + "<body>" + "".join(sections) + "</body></html>"
 
 

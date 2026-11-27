@@ -208,7 +208,9 @@ def test_a_local_template_that_does_not_parse_is_refused_by_name(
     assert r.status_code == 500
     detail = r.json()["detail"]
     assert 'local template "invoice_pdf.html"' in detail
-    assert str(local_dir) in detail and "line 1" in detail
+    assert "line 1" in detail
+    # the server's path stays in the log, never in what the user sees
+    assert str(local_dir) not in detail and str(local_dir.parent) not in detail
     assert "Traceback" not in r.text
 
 
@@ -233,6 +235,8 @@ def test_a_local_template_that_fails_while_rendering_is_refused_by_name(
     detail = r.json()["detail"]
     assert 'local template "invoice_pdf.html"' in detail
     assert "line 2" in detail and "ZeroDivisionError" in detail
+    # the exception's own text (which may carry data or SQL) is not shown
+    assert "division" not in detail and str(local_dir) not in detail
     # and the PDF route refuses the same way (it never falls back)
     pdf = client.get(f"/api/invoices/{inv['id']}/pdf")
     assert pdf.status_code == 500
@@ -345,3 +349,201 @@ def test_a_missing_folder_is_reported_not_a_crash(
     assert "local templates are off" in caplog.text
     inv = _invoice(client, seed_customer.id)
     assert _print(client, inv["id"]).status_code == 200  # built-in, as before
+
+
+# ---- review fixes (#1235) ----
+
+
+def test_off_prints_what_the_plain_builtin_loader_prints(
+    client, seed_accounts, seed_customer, off
+):
+    """Byte-for-byte against the loader before this change: the plain
+    FileSystemLoader(app/templates) swapped in, for the invoice and the
+    statement Print pages."""
+    inv = _invoice(client, seed_customer.id)
+    page_new = _print(client, inv["id"]).text
+    statement_new = _statement(client, seed_customer.id)
+    loader = _jinja_env.loader
+    try:
+        _jinja_env.loader = FileSystemLoader(str(TEMPLATE_DIR))
+        _jinja_env.cache.clear()
+        assert _print(client, inv["id"]).text == page_new
+        assert _statement(client, seed_customer.id) == statement_new
+    finally:
+        _jinja_env.loader = loader
+        _jinja_env.cache.clear()
+
+
+def test_print_all_keeps_the_script_guard_in_the_head(
+    client, seed_accounts, seed_customer, local_dir
+):
+    # a local invoice with no <head> or <body> of its own
+    _write(local_dir, "invoice_pdf.html", "<p>X {{ inv.invoice_number }}</p>")
+    a = _invoice(client, seed_customer.id)
+    b = _invoice(client, seed_customer.id)
+    r = client.get(f"/api/invoices/print-preview?ids={a['id']},{b['id']}")
+    assert r.status_code == 200, r.text[:300]
+    page = r.text
+    guard = '<meta http-equiv="Content-Security-Policy"'
+    assert page.count(guard) == 1
+    assert page.index(guard) < page.lower().index("<body")
+
+
+def test_print_all_lifts_a_guard_from_a_later_page():
+    from app.routes.invoices.print_all import combine_documents
+
+    meta = '<meta http-equiv="Content-Security-Policy" content="script-src x">'
+    plain = "<!DOCTYPE html><html><head></head><body><p>one</p></body></html>"
+    local = f"<!DOCTYPE html>{meta}<html><head></head><body><p>two</p></body></html>"
+    page = combine_documents([plain, local])
+    assert page.startswith("<!DOCTYPE html>" + meta)
+    assert page.count(meta) == 1
+    # and a run of built-in pages is unchanged by the guard code
+    assert "Content-Security-Policy" not in combine_documents([plain, plain])
+
+
+def test_a_comment_before_the_doctype_keeps_the_guard_after_it(
+    client, seed_accounts, seed_customer, local_dir
+):
+    _write(
+        local_dir,
+        "invoice_pdf.html",
+        "<!-- firm layout -->\n<!DOCTYPE html><html><body>ok</body></html>",
+    )
+    inv = _invoice(client, seed_customer.id)
+    page = _print(client, inv["id"]).text
+    assert page.startswith(
+        '<!-- firm layout -->\n<!DOCTYPE html><meta http-equiv="Content-Security'
+    )
+
+
+def test_a_missing_name_in_a_local_template_shows_jinjas_own_words(
+    client, seed_accounts, seed_customer, local_dir
+):
+    _write(local_dir, "invoice_pdf.html", "<p>{{ gone_value.amount }}</p>")
+    inv = _invoice(client, seed_customer.id)
+    r = _print(client, inv["id"])
+    assert r.status_code == 500
+    detail = r.json()["detail"]
+    assert 'local template "invoice_pdf.html"' in detail
+    assert "UndefinedError: 'gone_value' is undefined" in detail
+
+
+def test_a_broken_link_or_a_folder_is_refused_not_the_builtin(local_dir):
+    try:
+        (local_dir / "labels_5160_pdf.html").symlink_to(local_dir / "nothing.html")
+    except OSError:
+        pytest.skip("no symbolic links here")
+    (local_dir / "check_pdf.html").mkdir()
+    for name in ("labels_5160_pdf.html", "check_pdf.html"):
+        with pytest.raises(LocalTemplateError, match="not a readable file"):
+            _jinja_env.get_template(name)
+    replaced = local_templates.status(str(TEMPLATE_DIR))["replaced"]
+    assert "labels_5160_pdf.html" in replaced and "check_pdf.html" in replaced
+
+
+def test_diagnostics_list_what_the_loader_draws_on_a_case_insensitive_disk(
+    local_dir, monkeypatch
+):
+    """On Windows or macOS a local Invoice_PDF.html replaces
+    invoice_pdf.html at print; diagnostics must say so, by the built-in
+    name, and not count it as an added file."""
+    _write(local_dir, "Invoice_PDF.html", "<p>firm</p>")
+    real = local_templates._local_file
+
+    def folded(folder, name):
+        for p in folder.iterdir():
+            if p.name.casefold() == name.casefold():
+                return real(folder, p.name)
+        return real(folder, name)
+
+    monkeypatch.setattr(local_templates, "_local_file", folded)
+    s = local_templates.status(str(TEMPLATE_DIR))
+    assert s["replaced"] == ["invoice_pdf.html"]
+    assert s["added"] == []
+
+
+def test_an_unreadable_data_folder_names_the_data_folder_not_the_setting(
+    off, tmp_path, monkeypatch
+):
+    if os.geteuid() == 0:
+        pytest.skip("root reads any folder")
+    folder = tmp_path / "local-templates"
+    folder.mkdir()
+    monkeypatch.setenv("SLOWBOOKS_DATA_DIR", str(tmp_path))
+    folder.chmod(0)
+    try:
+        problem = local_templates.status(str(TEMPLATE_DIR))["problem"]
+    finally:
+        folder.chmod(0o755)
+    assert problem == (
+        "the data folder's local-templates sub-folder is a folder this server"
+        " cannot read"
+    )
+    assert ENV_VAR not in problem
+
+
+def test_emailing_an_invoice_with_a_broken_local_template_names_it(
+    client, seed_accounts, seed_customer, local_dir
+):
+    _write(local_dir, "invoice_pdf.html", "<p>{{ 1 // 0 }}</p>")
+    inv = _invoice(client, seed_customer.id)
+    r = client.post(
+        f"/api/invoices/{inv['id']}/email", json={"recipient": "a@example.test"}
+    )
+    assert r.status_code == 500
+    detail = r.json()["detail"]
+    assert detail.startswith("Email failed: ")
+    assert 'local template "invoice_pdf.html"' in detail
+    assert "UnboundLocalError" not in r.text
+
+
+def test_batch_sends_name_a_broken_local_template(
+    client, db_session, seed_accounts, local_dir
+):
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    from app.models.contacts import Customer
+    from app.models.invoices import Invoice, InvoiceStatus
+    from app.services import collections as svc
+    from app.services.settings_service import set_setting
+
+    # a mail server is named, but nothing reaches it: the PDF fails first
+    set_setting(db_session, "smtp_host", "mail.invalid")
+    db_session.commit()
+    c = Customer(
+        name="Probe Customer",
+        email="probe@example.test",
+        is_active=True,
+        monthly_statement=True,
+    )
+    db_session.add(c)
+    db_session.commit()
+    db_session.add(
+        Invoice(
+            invoice_number=f"LT-{c.id}",
+            customer_id=c.id,
+            status=InvoiceStatus.SENT,
+            date=date.today() - timedelta(days=90),
+            due_date=date.today() - timedelta(days=45),
+            total=Decimal(100),
+            balance_due=Decimal(100),
+        )
+    )
+    db_session.commit()
+    _write(local_dir, "statement_pdf.html", "<p>{{ 1 // 0 }}</p>")
+    _write(local_dir, "invoice_pdf.html", "<p>{{ 1 // 0 }}</p>")
+    answers = []
+    r = client.post("/api/collections/statements/run", json={})
+    answers += r.json()["errors"]
+    r = client.post("/api/reports/batch-email-statements")
+    answers += r.json()["errors"]
+    svc.seed_default_rules(db_session)
+    r = client.post("/api/collections/reminders/run", json={})
+    answers += r.json()["errors"]
+    assert len(answers) == 3, answers
+    assert 'local template "statement_pdf.html"' in answers[0]
+    assert 'local template "statement_pdf.html"' in answers[1]
+    assert 'local template "invoice_pdf.html"' in answers[2]
+    assert all(str(local_dir) not in a for a in answers)

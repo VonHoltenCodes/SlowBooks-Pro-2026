@@ -196,7 +196,9 @@ class _PrintedTemplate(Template):
 # fetch, form or plugin. A policy in the page can only narrow the server's.
 # Built-in pages are untouched.
 _local_drawn: ContextVar[list | None] = ContextVar("local_drawn", default=None)
-_DOCTYPE = re.compile(r"\s*<!doctype[^>]*>", re.I)
+# a comment or two may come before the doctype (still standards mode)
+_DOCTYPE = re.compile(r"(?:\s|<!--.*?-->)*<!doctype[^>]*>", re.I | re.S)
+_GUARD = re.compile(r'<meta http-equiv="Content-Security-Policy"[^>]*>')
 
 
 def _mark_local_drawn() -> str:

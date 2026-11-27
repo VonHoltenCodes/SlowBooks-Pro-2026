@@ -975,9 +975,11 @@ app.add_exception_handler(PdfEngineMissing, _pdf_engine_missing_handler)
 # ---- A local template that fails (#1235) ----
 # The sentence names the local file and says it is a local template; the
 # built-in template is never used in its place, and no traceback is shown.
+# The person sees the name in the folder and the line; the server path and
+# the exception's own text go to the log only.
 async def _local_template_handler(request: Request, exc: Exception):
     logging.getLogger(__name__).warning("%s", exc, exc_info=exc.__cause__)
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    return JSONResponse(status_code=500, content={"detail": exc.user_text})
 
 
 app.add_exception_handler(LocalTemplateError, _local_template_handler)
