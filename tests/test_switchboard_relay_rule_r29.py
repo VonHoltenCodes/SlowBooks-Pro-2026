@@ -949,14 +949,35 @@ def test_a_connect_while_the_record_is_being_changed_waits_then_says_so(
     assert _tokens(db_session) == [("AI assistant (relay)", True)]
 
 
-def test_a_connect_made_by_another_process_meanwhile_wins(raw, client, db_session):
-    """Two server processes share the data folder and not the lock: the
-    file is made only if it is not there, and the one that finds it there
-    undoes what it made (its token, its relay record)."""
+class _PressClock(link._Deadline):
+    """A press deadline that runs out only when the test says so: no
+    wall-clock timer, so how long the token, the fsynced writes and the
+    relay calls take on a slow runner cannot change which step the press
+    reaches before its time is up. ``made`` holds every one made."""
+
+    made: list = []
+
+    def __init__(self, seconds: float):
+        super().__init__(seconds)
+        self._timer.cancel()
+        _PressClock.made.append(self)
+
+    def left(self) -> float:
+        return 0.0 if self._fired else PRESS
+
+    def over(self) -> bool:
+        return self._fired
+
+    def run_out(self) -> None:
+        self._end()
+
+
+def _another_process_connects_meanwhile(raw) -> dict:
+    """Have the relay's /v1/link answer land only after another server
+    process (same data folder, not the same lock) has kept its own link."""
     other = {}
 
     def link_while_another_finishes(conn):
-        # the other process's Connect lands while this one is with the relay
         other.update(
             {
                 "v": 1,
@@ -978,14 +999,69 @@ def test_a_connect_made_by_another_process_meanwhile_wins(raw, client, db_sessio
         conn.sendall(raw.good_link())
 
     raw.behave["/v1/link"] = link_while_another_finishes
-    r = _plain(client.post("/api/switchboard/connect"))
+    return other
+
+
+def _the_other_is_the_connection(raw, db_session, r, other) -> None:
     assert r.status_code == 409 and r.json()["detail"] == link.ALREADY
-    # the other's file is untouched; this press's token and record are gone
+    # the other's file is untouched; this press's token is gone
     assert json.loads(link.link_path().read_text()) == other
     assert _tokens(db_session) == []
-    assert raw.calls[-1] == ("/v1/forget", raw.credentials[0])
     if os.name != "nt":
         assert os.stat(link.link_path()).st_mode & 0o777 == 0o600
+
+
+def test_a_connect_made_by_another_process_meanwhile_wins(
+    raw, client, db_session, monkeypatch
+):
+    """Two server processes share the data folder and not the lock: the
+    file is made only if it is not there, and the one that finds it there
+    undoes what it made (its token, its relay record) within the press.
+
+    The press's time is held still (a 1 s wall-clock deadline shared by the
+    link, the token, two fsynced writes and the forget ran out on a slow
+    Windows runner before the forget was asked, which is the other test
+    below, not this one)."""
+    _PressClock.made = []
+    monkeypatch.setattr(link, "_Deadline", _PressClock)
+    other = _another_process_connects_meanwhile(raw)
+    r = _plain(client.post("/api/switchboard/connect"))
+    _the_other_is_the_connection(raw, db_session, r, other)
+    # in order: the link, then the forget with the credential it gave
+    assert raw.calls == [("/v1/link", None), ("/v1/forget", raw.credentials[0])]
+    assert _pending() == []
+
+
+def test_a_lost_connect_whose_press_runs_out_before_the_forget_notes_it(
+    raw, client, db_session, monkeypatch
+):
+    """The same race, with the press's time running out after the token is
+    taken back and before the relay is told: the relay record is not left
+    behind unnoted. It is kept as a pending deletion, and the retry has the
+    relay delete it with the credential the link gave."""
+    _PressClock.made = []
+    monkeypatch.setattr(link, "_Deadline", _PressClock)
+    undo_token = link._undo_token
+
+    def undo_then_time_is_up(db, token_id):
+        undo_token(db, token_id)
+        _PressClock.made[-1].run_out()
+
+    monkeypatch.setattr(link, "_undo_token", undo_then_time_is_up)
+    other = _another_process_connects_meanwhile(raw)
+    r = _plain(client.post("/api/switchboard/connect"))
+    _the_other_is_the_connection(raw, db_session, r, other)
+    # no time was left to ask: the forget was not sent, it was noted
+    assert raw.calls == [("/v1/link", None)]
+    kept = _pending()
+    assert [(i["credential"], i["slug"], i["connect"]) for i in kept] == [
+        (raw.credentials[0], raw.slugs[0], True)
+    ]
+    # the retry tells the relay, and nothing is left to try
+    assert link.retry_pending_once() == 0 and _pending() == []
+    assert raw.calls == [("/v1/link", None), ("/v1/forget", raw.credentials[0])]
+    # and the other process's connection was never touched
+    assert json.loads(link.link_path().read_text()) == other
 
 
 def test_a_new_connection_file_is_this_users_only_from_the_first_byte(raw, client):
