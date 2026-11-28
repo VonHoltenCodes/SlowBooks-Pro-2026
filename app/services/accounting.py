@@ -709,6 +709,24 @@ CONSTRUCTION_ACCOUNTS = (
 )
 
 
+# The construction account a job's deposits post to (#555) and a pay
+# application's deposit applied is taken from: 2210 Customer Deposits.
+JOB_DEPOSITS_NUMBER = "2210"
+
+
+def construction_number_of(acct) -> str | None:
+    """The suggested number of the construction account `acct` is to the
+    posting code, or None for any other account. The posting code finds a
+    construction account by its name (ensure_account), so this matches the
+    name exactly, whatever number the account carries. A read: nothing is
+    created."""
+    name = getattr(acct, "name", None)
+    for number, cname, _atype, _detail in CONSTRUCTION_ACCOUNTS:
+        if name == cname:
+            return number
+    return None
+
+
 def ensure_construction_accounts(db: Session) -> dict[str, Account]:
     """Create every construction account that is missing; returns them keyed
     by their suggested number. Idempotent."""

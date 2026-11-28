@@ -1740,8 +1740,9 @@ const DepositAccounts = {
     },
     // Customer deposits and retainers (#1237): the liability accounts
     // Settings → Deposits lists for Record Payment's Deposit To, in the
-    // chart's order. Only active liability accounts that are no bank or
-    // credit card account (the server refuses the rest on save), plus
+    // chart's order. Only active liability accounts canHoldCustomerDeposits
+    // takes (the server refuses the rest on save, and treats one ticked
+    // before it stopped qualifying as not ticked), plus
     // `keepId` when it is one of them, so an edit keeps it even if
     // deactivated since. [] when none is listed: the form as before.
     customerDepositIds(s) {
@@ -1773,11 +1774,28 @@ const DepositAccounts = {
         }
         return out;
     },
-    // a liability that is no bank or credit card account, no control account
-    // and no payroll account (#1237): the rule the server's save applies,
-    // less being active, which the caller decides
+    // The construction liabilities the app posts to on its own, by the name
+    // the posting code finds them by (accounting.CONSTRUCTION_ACCOUNTS):
+    // retainage held from subs, the WIP entry's two, use tax, and Customer
+    // Deposits, whose job deposits the pay application applies (a Record
+    // Payment from it would apply that money twice). Never a customer
+    // deposit account (tests/test_retainer_account_guards.py pins the list).
+    // These are the accounts' names as stored, matched and never shown, so
+    // a nonprofit's chart is matched by the same names.
+    CONSTRUCTION_POSTED_NAMES: [
+        'Retainage Payable',
+        'Billings in Excess of Costs and Estimated Earnings',
+        'Provision for Loss on Uncompleted Contracts',
+        'Customer Deposits', // literal face: an account name matched, not shown
+        'Use Tax Payable',
+    ],
+    // a liability that is no bank or credit card account, no control
+    // account, no construction account the app posts to and no payroll
+    // account (#1237): the rule the server's save applies, less being
+    // active, which the caller decides
     canHoldCustomerDeposits(a, s, accounts) {
         return !!a && a.account_type === 'liability' && !a.bank_kind && !a.is_control
+            && !DepositAccounts.CONSTRUCTION_POSTED_NAMES.includes(a.name)
             && !DepositAccounts.payrollIds(accounts, s).has(String(a.id));
     },
     // `banks` with the default first, the rest in their own order
