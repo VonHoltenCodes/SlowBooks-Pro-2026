@@ -2,8 +2,8 @@
 day the release is made — the retainage is owed now, so the ledger posts the
 release in the open period, not back into the purchase order's period.  An
 explicit ``date`` still wins; the due date derives from the release date,
-never from the PO's date.  A release dated before the latest bill that holds
-the retainage (or before the PO) is refused.
+never from the PO's date.  A release of more than the retainage held by its
+date (less what was already released by then) is refused.
 """
 
 from datetime import date, timedelta
@@ -111,59 +111,131 @@ def _held(client, po, bill_date=None):
     return r.json()
 
 
-def test_release_dated_before_the_latest_holding_bill_is_refused(
+def _release(client, po, amount, on=None):
+    body = {"amount": amount}
+    if on is not None:
+        body["date"] = on.isoformat()
+    return client.post(f"/api/purchase-orders/{po['id']}/release-retainage", json=body)
+
+
+def test_partial_release_between_two_holding_bills_is_allowed(
     client, db_session, seed_accounts
 ):
-    """Retainage held on May 1 and Jun 15 can't be released on Jun 1: the
-    latest bill holding it is the floor, and nothing posts."""
+    """$500 held May 1 and $500 more Jun 15: a $300 release dated Jun 1 draws
+    on what was already held by then, so the later bill doesn't block it."""
+    v = _vendor(client, db_session)
+    po = _sent_po(client, v["id"], date(2026, 5, 1))
+    _held(client, po, date(2026, 5, 1))
+    _held(client, po, date(2026, 6, 15))
+
+    rel = _release(client, po, 300, date(2026, 6, 1))
+    assert rel.status_code == 200, rel.text
+    bill = db_session.query(Bill).filter_by(id=rel.json()["bill_id"]).first()
+    assert bill.date == date(2026, 6, 1)
+    assert bill.total == Decimal("300.00")
+
+
+def test_a_release_over_what_was_held_by_its_date_is_refused(
+    client, db_session, seed_accounts
+):
+    """Only $500 was held on Jun 1, so $600 can't be released that day: the
+    refusal says what was held by then and when enough is, and nothing
+    posts. Earlier releases count against the date's holding."""
     v = _vendor(client, db_session)
     po = _sent_po(client, v["id"], date(2026, 5, 1))
     _held(client, po, date(2026, 5, 1))
     _held(client, po, date(2026, 6, 15))
     bills_before = db_session.query(Bill).count()
 
-    rel = client.post(
-        f"/api/purchase-orders/{po['id']}/release-retainage",
-        json={"amount": 500, "date": "2026-06-01"},
-    )
+    rel = _release(client, po, 600, date(2026, 6, 1))
     assert rel.status_code == 422, rel.text
     assert rel.json()["detail"] == (
-        f"A retainage release can't be dated Jun 1, 2026: that is before "
-        f"Jun 15, 2026, the date of the latest bill on {po['po_number']} that "
-        "holds retainage."
+        "A retainage release of $600.00 can't be dated Jun 1, 2026: by then "
+        f"{po['po_number']} held $500.00 of retainage not yet released. "
+        "Enough is held from Jun 15, 2026."
     )
     assert db_session.query(Bill).count() == bills_before
 
-    # the day of the latest holding bill itself is fine
-    ok = client.post(
-        f"/api/purchase-orders/{po['id']}/release-retainage",
-        json={"amount": 500, "date": "2026-06-15"},
-    )
+    # $300 released on May 20 leaves $200 for a second release dated Jun 1
+    assert _release(client, po, 300, date(2026, 5, 20)).status_code == 200
+    again = _release(client, po, 300, date(2026, 6, 1))
+    assert again.status_code == 422, again.text
+    assert "held $200.00 of retainage not yet released" in again.json()["detail"]
+    assert _release(client, po, 200, date(2026, 6, 1)).status_code == 200
+
+
+def test_the_holding_bill_day_itself_is_enough(client, db_session, seed_accounts):
+    """Same-day boundary: retainage held on Jun 15 can be released on Jun 15,
+    but not on Jun 14."""
+    v = _vendor(client, db_session)
+    po = _sent_po(client, v["id"], date(2026, 5, 1))
+    _held(client, po, date(2026, 5, 1))
+    _held(client, po, date(2026, 6, 15))
+
+    early = _release(client, po, 1000, date(2026, 6, 14))
+    assert early.status_code == 422, early.text
+    assert early.json()["detail"].endswith("Enough is held from Jun 15, 2026.")
+    ok = _release(client, po, 1000, date(2026, 6, 15))
     assert ok.status_code == 200, ok.text
 
 
+def test_void_and_release_again_after_a_later_holding_bill(
+    client, db_session, seed_accounts
+):
+    """A May 20 release is voided after a June bill holds more retainage;
+    releasing again on May 20 is still allowed (the voided release no longer
+    counts, and the June bill doesn't matter to a May date)."""
+    v = _vendor(client, db_session)
+    po = _sent_po(client, v["id"], date(2026, 5, 1))
+    _held(client, po, date(2026, 5, 1))
+    first = _release(client, po, 500, date(2026, 5, 20))
+    assert first.status_code == 200, first.text
+    _held(client, po, date(2026, 6, 15))
+    voided = client.post(f"/api/bills/{first.json()['bill_id']}/void")
+    assert voided.status_code == 200, voided.text
+
+    again = _release(client, po, 500, date(2026, 5, 20))
+    assert again.status_code == 200, again.text
+
+
+def test_release_today_with_a_future_dated_holding_bill(
+    client, db_session, seed_accounts
+):
+    """One holding bill is dated today and one in the future: a release
+    taking the default date (today) of what today's bill holds goes
+    through."""
+    v = _vendor(client, db_session)
+    today = date.today()
+    po = _sent_po(client, v["id"], today)
+    _held(client, po, today)
+    _held(client, po, today + timedelta(days=30))
+
+    rel = _release(client, po, 500)
+    assert rel.status_code == 200, rel.text
+    bill = db_session.query(Bill).filter_by(id=rel.json()["bill_id"]).first()
+    assert bill.date in {today, date.today()}
+
+
 def test_release_dated_before_the_po_is_refused(client, db_session, seed_accounts):
-    """The PO's own date is a floor too: a release dated before the
-    commitment existed is refused with a plain sentence."""
+    """Before the commitment existed nothing was held: a release dated before
+    the PO is refused by the same rule, naming $0.00 and the first day
+    enough is held."""
     v = _vendor(client, db_session)
     po = _sent_po(client, v["id"], date(2026, 5, 1))
     _held(client, po)  # dated the PO's date
 
-    rel = client.post(
-        f"/api/purchase-orders/{po['id']}/release-retainage",
-        json={"amount": 500, "date": "2026-01-01"},
-    )
+    rel = _release(client, po, 500, date(2026, 1, 1))
     assert rel.status_code == 422, rel.text
-    detail = rel.json()["detail"]
-    assert detail.startswith("A retainage release can't be dated Jan 1, 2026:")
-    assert "May 1, 2026" in detail
+    assert rel.json()["detail"] == (
+        "A retainage release of $500.00 can't be dated Jan 1, 2026: by then "
+        f"{po['po_number']} held $0.00 of retainage not yet released. "
+        "Enough is held from May 1, 2026."
+    )
 
 
-def test_a_voided_holding_bill_no_longer_sets_the_floor(
-    client, db_session, seed_accounts
-):
-    """Only a standing bill that holds retainage counts: voiding the June
-    bill lets a release dated in May through."""
+def test_a_voided_holding_bill_no_longer_counts(client, db_session, seed_accounts):
+    """Only standing bills count: voiding the June bill leaves May's $500, so
+    a May 20 release of $500 goes through and $600 would not."""
     v = _vendor(client, db_session)
     po = _sent_po(client, v["id"], date(2026, 5, 1))
     _held(client, po, date(2026, 5, 1))
@@ -172,8 +244,6 @@ def test_a_voided_holding_bill_no_longer_sets_the_floor(
     voided = client.post(f"/api/bills/{june_id}/void")
     assert voided.status_code == 200, voided.text
 
-    rel = client.post(
-        f"/api/purchase-orders/{po['id']}/release-retainage",
-        json={"amount": 500, "date": "2026-05-20"},
-    )
+    assert _release(client, po, 600, date(2026, 5, 20)).status_code == 422
+    rel = _release(client, po, 500, date(2026, 5, 20))
     assert rel.status_code == 200, rel.text
