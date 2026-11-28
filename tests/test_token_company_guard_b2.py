@@ -65,9 +65,20 @@ def _set_user(company, username, **values):
             db.commit()
 
 
-def _bot(secret, client=LOOPBACK, company=None):
+def _link_itself() -> dict:
+    """The header the connection's own requests carry."""
+    return {
+        api_token_service.LINK_ORIGIN_HEADER: api_token_service.link_origin_secret()
+    }
+
+
+def _bot(secret, client=LOOPBACK, company=None, as_the_link=True):
+    """A program with the token; by default it is the connection itself,
+    sending the connection's own header."""
     bot = TestClient(app, client=client)
     bot.headers["Authorization"] = f"Bearer {secret}"
+    if as_the_link:
+        bot.headers.update(_link_itself())
     if company:
         bot.headers[HEADER] = company
     return bot
@@ -275,6 +286,152 @@ def test_the_address_the_app_listens_on_counts_as_its_own(served, monkeypatch):
     assert _bot(link, client=LAN).get("/api/customers").status_code == 200
     r = _bot(link, client=("192.168.1.77", 50000)).get("/api/customers")
     assert r.status_code == 401
+
+
+def test_a_connection_token_through_a_forward_on_this_computer_is_refused(served):
+    """A tunnel or a plain TCP forward on this computer that adds no
+    X-Forwarded-For delivers an outside request from loopback. Only the
+    connection's own header lets a connection token in; a program without
+    it is refused with the same sentence, from every address."""
+    link = _token("alpha.db", LINK, created_by="pat")
+    for client in (LOOPBACK, ("::1", 50000), ("::ffff:127.0.0.1", 50000), LAN):
+        r = _bot(link, client=client, as_the_link=False).get("/api/customers")
+        assert (r.status_code, r.json()) == (401, {"detail": LAN_ONLY}), client
+        assert SERVED not in r.headers
+    r = _bot(link, as_the_link=False).post(
+        "/api/customers", json={"name": "Quillfeather Bakery"}
+    )
+    assert (r.status_code, r.json()) == (401, {"detail": LAN_ONLY})
+    # a wrong, empty or repeated value is no better than none
+    key = api_token_service.LINK_ORIGIN_HEADER
+    right = api_token_service.link_origin_secret()
+    for headers in (
+        [(key, "0" * len(right))],
+        [(key, right[:-1])],
+        [(key, "")],
+        [(key, right), (key, right)],
+    ):
+        bot = _bot(link, as_the_link=False)
+        r = bot.get("/api/customers", headers=headers)
+        assert (r.status_code, r.json()) == (401, {"detail": LAN_ONLY}), headers
+    # the connection itself, from this app's own address, is let in
+    assert _bot(link).get("/api/customers").status_code == 200
+    assert _bot(link, client=("::1", 50000)).get("/api/customers").status_code == 200
+
+
+def test_the_connections_header_does_not_open_the_network(served):
+    """The header adds to the address rule, it does not replace it: with
+    the right value from another computer a connection token is still
+    refused (the value never leaves this computer; if it ever did, the
+    address rule still holds where no forward is in between)."""
+    link = _token("alpha.db", LINK, created_by="pat")
+    r = _bot(link, client=LAN).get("/api/customers")
+    assert (r.status_code, r.json()) == (401, {"detail": LAN_ONLY})
+
+
+def test_a_hand_made_token_ignores_the_connections_header(served):
+    other = _token("alpha.db", "office script", created_by="pat")
+    switchboard = _token("alpha.db", "AI assistant (Switchboard)", created_by="pat")
+    for secret in (other, switchboard):
+        for client in (LOOPBACK, LAN):
+            for as_the_link in (True, False):
+                r = _bot(secret, client=client, as_the_link=as_the_link).get(
+                    "/api/customers"
+                )
+                assert r.status_code == 200, (secret is other, client, as_the_link)
+
+
+def test_the_header_value_is_the_same_in_every_process_of_a_server():
+    """Docker runs two uvicorn workers and the line runs in one of them:
+    the value comes from the session key all of a server's processes
+    share, not from one process's start."""
+    import hashlib
+    import hmac
+
+    from app.services.auth import get_session_secret
+
+    expected = hmac.new(
+        get_session_secret().encode("utf-8"),
+        api_token_service._LINK_ORIGIN_CONTEXT,
+        hashlib.sha256,
+    ).hexdigest()
+    assert api_token_service.link_origin_secret() == expected
+    assert expected != get_session_secret() and len(expected) == 64
+
+
+def test_the_header_value_is_never_answered_logged_or_audited(served, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    right = api_token_service.link_origin_secret()
+    link = _token("alpha.db", LINK, created_by="pat")
+    bot = _bot(link)
+    answers = [
+        bot.get("/api/whoami"),
+        bot.get("/api/customers"),
+        bot.post("/api/customers", json={"name": "Quillfeather Bakery"}),
+        bot.get("/api/auth/status"),
+        _bot(link, as_the_link=False).get("/api/customers"),
+        _bot(link, client=LAN).get("/api/customers"),
+    ]
+    assert answers[2].status_code in (200, 201), answers[2].text
+    for r in answers:
+        assert right not in r.text
+        assert all(right not in v for v in r.headers.values())
+    assert right not in caplog.text
+    with db_module.use_company("alpha.db"):
+        with db_module.SessionLocal() as db:
+            from app.models.audit import AuditLog
+
+            rows = db.query(AuditLog).all()
+            assert rows, "the customer's creation is audited"
+            assert all(right not in repr(vars(row)) for row in rows)
+
+
+def test_the_connections_own_transport_sends_the_header(monkeypatch):
+    """switchboard_link._books_transport, the real one (the other tests
+    stand an in-process one in for it), sends the header with this
+    server's value to this app's own address, and a header of that name
+    handed to it from elsewhere is replaced, never passed on."""
+    import http.server
+    import threading
+
+    seen = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get_all(api_token_service.LINK_ORIGIN_HEADER))
+            body = b"[]"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("APP_HOST", "0.0.0.0")
+        monkeypatch.setenv("APP_PORT", str(server.server_address[1]))
+        send = switchboard_link._books_transport(
+            {"token": "sbp_" + secrets.token_urlsafe(24), "file": "alpha.db"}
+        )
+        status, _payload, _headers = send(
+            "GET",
+            "/api/customers",
+            None,
+            None,
+            {api_token_service.LINK_ORIGIN_HEADER.lower(): "planted"},
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert status == 200
+    assert seen == [[api_token_service.link_origin_secret()]]
 
 
 # -- the connection's tokens: only while their maker is an administrator -------------

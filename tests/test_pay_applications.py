@@ -1748,7 +1748,7 @@ def test_release_with_percent_dropped_to_zero_refused(
         release_retainage=3000,
     )
     assert r.status_code == 422, r.text
-    assert "-3000.00" in r.json()["detail"]
+    assert "-$3,000.00" in r.json()["detail"]
     assert _gl(db_session, "1150") == Decimal("3000.00")
 
 

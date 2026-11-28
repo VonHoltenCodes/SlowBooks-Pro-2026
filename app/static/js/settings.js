@@ -203,6 +203,46 @@ const SettingsPage = {
         return h;
     },
 
+    // Customer deposits and retainers (#1237): a labelled box per active
+    // liability account canHoldCustomerDeposits takes (no bank or credit
+    // card account, no control account, no construction account the app
+    // posts to and no payroll account), none ticked by default. Ticked ones
+    // appear in Record Payment's Deposit To, in their own group. A saved id
+    // that no longer qualifies stays ticked and named "(unavailable)": it is
+    // not offered in Deposit To, the server keeps it as it is on a save of
+    // other settings, and unticking it takes it off.
+    _customerDepositAccountsHtml(s, accounts) {
+        const all = Array.isArray(accounts) ? accounts : [];
+        // utils.js loads first in the app; a probe that loads this file alone
+        // gets none, as it got no Deposits section
+        const can = typeof DepositAccounts !== 'undefined' ? a => DepositAccounts.canHoldCustomerDeposits(a, s, all) : () => false;
+        const usable = all.filter(a => a.is_active !== false && can(a));
+        let chosen = [];
+        try { chosen = JSON.parse(s.customer_deposit_account_ids || '[]'); } catch (err) { chosen = []; }
+        chosen = (Array.isArray(chosen) ? chosen : []).map(String);
+        const ticked = new Set(chosen);
+        let h = '<fieldset class="form-group full-width" aria-describedby="settings-customer-deposit-accounts-help" style="border:0; padding:0; margin:8px 0 0;">';
+        h += '<legend style="font-weight:700; font-size:11px; padding:0;">' + escapeHtml(T('Customer')) + ' deposits and retainers</legend>';
+        const box = (id, words) => '<label style="display:block; font-weight:normal; text-transform:none; letter-spacing:0;">'
+            + '<input type="checkbox" name="customer-deposit-account:' + escapeHtml(id) + '" data-customer-deposit-account="' + escapeHtml(id) + '"'
+            + (ticked.has(id) ? ' checked' : '') + ' style="width:auto; vertical-align:middle; margin-right:6px;">'
+            + escapeHtml(words) + '</label>';
+        for (const a of usable) h += box(String(Number(a.id)), accountWords(a));
+        for (const id of chosen) {
+            if (usable.some(a => String(a.id) === id)) continue;
+            const gone = all.find(a => String(a.id) === id);
+            h += box(id, '(unavailable) ' + (gone ? accountWords(gone) : '#' + id));
+        }
+        if (!usable.length && !chosen.length) h += '<div style="font-size:11px; color:var(--text-muted);">' + escapeHtml(Terms.text('The chart has no liability account that can hold customer deposits.')) + '</div>';
+        h += '</fieldset>';
+        return h;
+    },
+
+    // the ticked Customer deposits and retainers boxes (#1237), as the list to save
+    _customerDepositAccountsToSave(boxes) {
+        return boxes.filter(b => b.checked).map(b => parseInt(b.getAttribute('data-customer-deposit-account'), 10)).filter(n => n > 0);
+    },
+
     // the ticked Deposit into these accounts boxes (#735), as the list to save
     _depositAccountsToSave(boxes) {
         return boxes.filter(b => b.checked).map(b => parseInt(b.getAttribute('data-deposit-account'), 10)).filter(n => n > 0);
@@ -597,6 +637,7 @@ const SettingsPage = {
                         SettingsPage._isAdmin() ? { name: 'Logo image', id: 'logo-upload-help', admin: true, text: 'PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.' } : null,
                         s.company_logo_path ? { name: 'Show company logo on invoices', id: 'invoice-show-logo-help', text: 'Applies to PDF, Print, and emailed invoice attachments.' } : null,
                         s.company_logo_path ? { name: 'Logo only', id: 'invoice-logo-only-help', text: 'Print the logo without the company name heading on invoices, estimates, statements and receipts. Only applies when a logo is set.' } : null,
+                        s.company_logo_path && SettingsPage._isAdmin() ? { name: 'Show the company logo in SlowBooks Pro', id: 'company-logo-in-app-help', admin: true, text: 'Shows this logo in the top bar, on the sign-in screen and beside the company in the list of companies. Off by default.' } : null,
                     ])}</div>
                     <div class="form-grid">
                         <div class="form-group">
@@ -614,6 +655,10 @@ const SettingsPage = {
                                     <input type="checkbox" id="invoice-logo-only" name="invoice_logo_only" value="true" data-bool data-write aria-describedby="invoice-logo-only-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_logo_only === 'true' ? 'checked' : ''}>
                                     Logo only
                                 </label>
+                                ${SettingsPage._isAdmin() ? `<label for="company-logo-in-app" style="font-weight:normal; display:block; margin-top:8px;">
+                                    <input type="checkbox" id="company-logo-in-app" name="company_logo_in_app" value="true" data-bool data-admin data-write aria-describedby="company-logo-in-app-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.company_logo_in_app === 'true' ? 'checked' : ''}>
+                                    Show the company logo in SlowBooks Pro
+                                </label>` : ''}
                             </div>` : ''}
                         </div>
                     </div>
@@ -850,8 +895,10 @@ const SettingsPage = {
                         { id: 'settings-deposits-help', text: 'Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.' },
                         { name: 'Default deposit account', id: 'settings-default-deposit-account-help', text: 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.' },
                         { name: 'Deposit into these accounts', id: 'settings-deposit-accounts-help', text: 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.' },
+                        { name: `${T('Customer')} deposits and retainers`, id: 'settings-customer-deposit-accounts-help', text: Terms.text('Liability accounts that hold money a customer paid ahead, such as Retainer Payable. Ticked ones appear in Deposit To on Record Payment only, in a group of their own, to apply that money to invoices: the payment takes it out of the account and no money moves. Such a payment must be applied to invoices in full, and the form asks before applying more than the account holds. Bank, credit card, control and payroll accounts cannot be ticked, nor the construction accounts the app posts to itself, such as Retainage Payable and ') + 'Customer Deposits' + Terms.text(' (job deposits are applied on the pay application). An account marked (unavailable) no longer qualifies and is not offered; untick it. None ticked leaves Deposit To as it is.') },
                     ])}</div>
                     ${SettingsPage._depositAccountsHtml(s, accounts)}
+                    ${SettingsPage._customerDepositAccountsHtml(s, accounts)}
                 </div>
 
                 <div class="settings-section" data-group="connections" role="group" aria-labelledby="settings-h-online-payments">
@@ -1237,10 +1284,11 @@ const SettingsPage = {
                         { name: 'Check memo', id: 'settings-check-memo-help', text: 'What Pay Bills puts on the memo line of the check: the number the bill was entered under (the vendor\'s own numbering), the bill\'s whole memo, or nothing. A check paying several bills lists their numbers (196132, 196140). A bill numbered by SlowBooks because its number was left blank has no reference, so its memo is used instead. The memo can still be changed on the payment before the check prints, and a memo typed there is kept.' },
                         { name: 'Field layout', id: 'settings-check-fields-help', text: 'Move, size or bold one field of the check without moving the others, for stock whose boxes do not all sit where the check prints them. Left/right and up/down are inches from where the field prints today (-1 to 1; a positive offset moves it right and down), on top of the nudges. Size is in points (6 to 18); empty prints today\'s size. A field keeps its baseline as its size changes. It applies to the check at the bottom and on top and to every stock.' },
                         { name: 'Leave the dollar sign off the amount', id: 'settings-check-amount-no-dollar-sign-help', text: 'For check stock that prints its own dollar sign beside the amount box: the amount prints as 1,234.56 instead of $1,234.56. The amount in words and the stubs are unchanged.' },
+                        { name: 'Fill the amount with asterisks', id: 'settings-check-amount-asterisk-fill-help', text: 'Prints two asterisks in front of the amount so nothing can be written in front of it: $**1,234.56, or **1,234.56 with the dollar sign left off. The amount in words and the stubs are unchanged.' },
                         { name: 'Print on blank check stock', id: 'settings-check-blank-stock-help', text: 'Prints everything a pre-printed check carries: the company logo, name and address, the bank\'s name and city, the check number and the MICR line with the routing, account and check numbers, taken from the bank account\'s details below. The labels, lines and borders print as on plain stock, and every field stays where it prints today. A bank reads the MICR line only when it is printed with MICR toner.' },
                         { name: 'Encode the amount in the MICR line', id: 'settings-check-micr-amount-help', text: 'The amount field at the right end of the MICR line is normally encoded by the bank where the check is deposited. Turn this on to print it yourself, so the amount cannot be changed without it showing.' },
                         { name: 'Bank account details for blank stock', id: 'settings-check-bank-details-help', text: 'Each bank account you write checks on keeps its own details. They are saved with their own button, apart from the settings above.' },
-                        { name: 'Print a test check', id: 'settings-check-test-help', text: 'Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges, field layout and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account\'s.' },
+                        { name: 'Print a test check', id: 'settings-check-test-help', text: 'Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges, field layout, the amount\'s dollar sign and asterisks and the blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account\'s.' },
                         { name: 'Deposit slip stock', id: 'settings-deposit-slip-stock-help', text: 'Pre-printed slips already carry the bank\'s labels, boxes and MICR line. Choose them to have Print on a deposit lay only the figures (the date, the account, the cash, each check\'s number and amount, the checks subtotal and the total) where the layout below puts them, with no labels, no MICR line and no routing or account numbers. Checks past the slip\'s lines continue on another page at the same lines, for the back of the slip or a second one. Plain paper prints the deposit slip as it always has.' },
                         { name: 'Deposit slip layout', id: 'settings-deposit-slip-fields-help', text: 'Where each figure prints on your bank\'s slip, in inches from the slip\'s top-left corner as it feeds into the printer (0 to 11). Left is where a date, the account or a check number starts and where an amount ends, so the cents line up; top is the top of the figure. Amounts print without a dollar sign. Measure your slip with a ruler, then print a test slip and hold it against one. The check number and amount rows place the first check line; the rest follow at the spacing below. Clear Print to leave a figure off.' },
                         { name: 'Print a test slip', id: 'settings-deposit-slip-test-help', text: 'Prints a sample deposit (two checks and some cash, made-up figures) laid out for pre-printed slips, using the layout and nudges as set here, saved or not. Print it on plain paper and hold it against a slip, or print it on a spare slip.' },
@@ -1278,6 +1326,10 @@ const SettingsPage = {
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
                                 <input type="checkbox" id="settings-check-amount-no-dollar-sign" name="check_amount_no_dollar_sign" value="true" data-bool aria-describedby="settings-check-amount-no-dollar-sign-help" style="width:auto; margin:0;" ${s.check_amount_no_dollar_sign === 'true' ? 'checked' : ''}>
                                 <label for="settings-check-amount-no-dollar-sign" style="font-weight:normal; margin:0;">Leave the dollar sign off the amount</label>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;">
+                                <input type="checkbox" id="settings-check-amount-asterisk-fill" name="check_amount_asterisk_fill" value="true" data-bool aria-describedby="settings-check-amount-asterisk-fill-help" style="width:auto; margin:0;" ${s.check_amount_asterisk_fill === 'true' ? 'checked' : ''}>
+                                <label for="settings-check-amount-asterisk-fill" style="font-weight:normal; margin:0;">Fill the amount with asterisks</label>
                             </div>
                         </div>
                         <div class="form-group full-width">
@@ -2348,6 +2400,12 @@ const SettingsPage = {
         if (depositBoxes.length || 'default_deposit_account_id' in data) {
             data.deposit_account_ids = JSON.stringify(SettingsPage._depositAccountsToSave(depositBoxes));
         }
+        // Customer deposits and retainers (#1237), as a list; the boxes are not form fields
+        const customerDepositBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-customer-deposit-account]')] : [];
+        for (const key of Object.keys(data)) if (key.startsWith('customer-deposit-account:')) delete data[key];
+        if (customerDepositBoxes.length) {
+            data.customer_deposit_account_ids = JSON.stringify(SettingsPage._customerDepositAccountsToSave(customerDepositBoxes));
+        }
         const btn = document.getElementById('settings-save-btn');
         if (btn) btn.disabled = true;
         try {
@@ -2487,6 +2545,9 @@ const SettingsPage = {
             if (!SettingsPage.isDirty()) { App.navigate('#/settings'); return; }
             document.getElementById('company-logo-preview')?.remove();
             document.getElementById('company-logo-note')?.remove();
+            // The server turned "Show the company logo in SlowBooks Pro" off
+            // with the logo; drop its box so Save Settings never sends it on.
+            document.querySelector('label[for="company-logo-in-app"]')?.remove();
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -2742,7 +2803,7 @@ const SettingsPage = {
     // of them (st.companies) only to someone who is an administrator of
     // every company on it; anyone else hears about this company alone. Each
     // button's name says which company it is for, so no two are alike.
-    switchboardHtml(st, code, error, fallback, busy) {
+    switchboardHtml(st, code, error, fallback, busy, tone) {
         st = st || {};
         const admin = !!st.can_manage;
         // a press is being worked on: no second one until it answers
@@ -2759,8 +2820,11 @@ const SettingsPage = {
             + '</div>';
         if (st.sentence) html += `<div id="claude-relay-sentence" style="margin-top:4px;">${escapeHtml(st.sentence)}</div>`;
         if (error) {
-            html += '<div id="claude-relay-error" role="alert" style="margin-top:4px;">'
-                + `<div style="color:var(--text-danger);">${escapeHtml(error)}</div>`
+            // the message's tone: a refusal (red), a Disconnect that is done
+            // ('ok', green) or one the relay has not finished ('warn', amber)
+            const color = tone === 'ok' ? 'var(--text-success)' : (tone === 'warn' ? 'var(--text-warning)' : 'var(--text-danger)');
+            html += `<div id="claude-relay-error" role="${tone === 'ok' ? 'status' : 'alert'}" style="margin-top:4px;">`
+                + `<div style="color:${color};">${escapeHtml(error)}</div>`
                 + '<div style="margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" id="claude-relay-error-dismiss" aria-label="Dismiss the relay message" onclick="SettingsPage.dismissClaudeError()">Dismiss</button></div>'
                 + '</div>';
         }
@@ -3069,7 +3133,10 @@ const SettingsPage = {
             && (c.goes === 'linked') === !!c.status.linked
             && !(c.goes === 'linked' && c.status.can_add)) { c.error = ''; }
         if (!c.error) { c.goes = ''; c.looks = 0; }
-        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback, c.busy);
+        // a tone belongs to the message it was set with: any other message
+        // (a refusal set after it) is drawn as an error
+        const tone = c.error && c.tone && c.tone.text === c.error ? c.tone.tone : '';
+        const html = SettingsPage.switchboardHtml(c.status, c.code, c.error || c.readError, c.fallback, c.busy, tone);
         // A refresh that changes nothing draws nothing: the keyboard focus, a
         // selection (the relay name being copied) and the screen reader's
         // place stay where they are, and an alert is not announced again.
@@ -3329,25 +3396,42 @@ const SettingsPage = {
         const done = 'The AI assistant is disconnected' + (r && r.revoked ? ' and the token revoked. ' : '. ');
         // companies not open now: their tokens are turned off when they open
         const later = ((r && r.results) || []).filter(x => x && x.result === 'later').map(x => x.name || x.file);
-        if (later.length && r && (r.unlinked || r.pending)) {
-            // the relay was told (or its name is in the notice below): what
-            // is left to say is which companies are not open now
-            SettingsPage._claude.error = 'Disconnected.' + later.map(name => ` ${name} is not open now; its token will be turned off the next time it is opened.`).join('');
+        // why the relay still holds its record, as it answered
+        const held = r && r.why === 'refused'
+            ? 'The relay did not accept the request to delete its record: see the relay name below.'
+            : (r && r.why === 'unconfirmed'
+                ? 'The relay did not confirm that it deleted its record: see the relay name below.'
+                : 'The relay was out of reach: see the relay name below.');
+        if (later.length && r && r.unlinked) {
+            // the relay was told: its own sentence says what became of its
+            // record, and which companies are not open now. Done, so it is
+            // drawn as a success, not an error.
+            const text = done + (r.sentence || later.map(name => `${name} is not open now; its token will be turned off the next time it is opened.`).join(' '));
+            SettingsPage._claude.error = text;
+            SettingsPage._claude.tone = { text, tone: 'ok' };
+            toast('The AI assistant is disconnected. See the message on the panel.');
+        } else if (later.length && r && r.pending) {
+            // not finished: the relay still holds its record (its name is in
+            // the notice below, and SlowBooks Pro keeps asking), and the
+            // companies not open now are still to be turned off
+            const text = done + held + later.map(name => ` ${name} is not open now; its token will be turned off the next time it is opened.`).join('');
+            SettingsPage._claude.error = text;
+            SettingsPage._claude.tone = { text, tone: 'warn' };
             toast('The AI assistant is disconnected. See the message on the panel.');
         } else if (r && r.say && r.sentence) {
             // something the relay could not do, with no notice kept for
-            // it: the server's sentence stays on the panel until dismissed
+            // it: the server's sentence stays on the panel until dismissed,
+            // drawn as the other Disconnect messages are: a success when
+            // the relay was told, unfinished when it was not; never as an
+            // error, since the Disconnect itself was done
             SettingsPage._claude.error = r.sentence;
+            SettingsPage._claude.tone = { text: r.sentence, tone: r.unlinked ? 'ok' : 'warn' };
             toast('The AI assistant is disconnected. See the message on the panel.');
         } else if (r && r.unlinked === false && r.slug) {
             // the relay still holds its record: the relay name is on the
             // panel, from the server's status (NEW-269), and the toast
             // says why, as the relay answered
-            toast(done + (r.why === 'refused'
-                ? 'The relay did not accept the request to delete its record: see the relay name below.'
-                : (r.why === 'unconfirmed'
-                    ? 'The relay did not confirm that it deleted its record: see the relay name below.'
-                    : 'The relay was out of reach: see the relay name below.')));
+            toast(done + held);
         } else {
             toast(r && r.deleted
                 ? 'The AI assistant is disconnected, and the relay deleted its record of these books.'
@@ -4111,12 +4195,12 @@ const SettingsPage = {
     },
 
     // Opens a sample check PDF in a new tab (#440) with the stock, check
-    // position (#727), nudge, field layout (#749) and dollar sign (#799) as they stand in the form — saved or not — so a nudge can be tried
+    // position (#727), nudge, field layout (#749), dollar sign (#799) and asterisks (#1239) as they stand in the form — saved or not — so a nudge can be tried
     // before it is saved.
     testPrintCheck() {
         const form = document.getElementById('settings-form');
         const params = new URLSearchParams();
-        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout', 'check_amount_no_dollar_sign']) {
+        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout', 'check_amount_no_dollar_sign', 'check_amount_asterisk_fill']) {
             const el = form && form.querySelector(`[name="${name}"]`);
             if (el) params.set(name, el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value);
         }

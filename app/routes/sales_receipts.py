@@ -19,7 +19,7 @@ from app.models.accounts import Account
 from app.models.contacts import Customer
 from app.models.invoices import Invoice
 from app.routes.invoices.crud import create_invoice, get_invoice, list_invoices
-from app.routes.invoices.helpers import _compute_totals
+from app.routes.invoices.helpers import _compute_totals, negative_sale_sentence
 from app.routes.invoices.lifecycle import void_invoice
 from app.routes.payments import create_payment
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse
@@ -103,8 +103,20 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     # (#1129); a rate sent, 0 included, is kept.
     if data.tax_rate is None:
         data.tax_rate = default_sales_tax_rate(db)
-    _, _, total = _compute_totals(data.lines, data.tax_rate)
-    if total <= 0:
+    subtotal, _, total = _compute_totals(data.lines, data.tax_rate)
+    # Discounts past the other lines: said as such, not "must be positive".
+    # Only the subtotal is judged here, since the lines' tax flags are not
+    # settled until the invoice step (resolve_line_taxable), which refuses
+    # a taxable discount past the taxed lines in its own sentence. So a
+    # subtotal above zero that a negative tax takes to zero or below goes
+    # on to that step: with the flags settled, either the tax is below zero
+    # (refused there with that sentence) or the total is above zero.
+    if subtotal < 0:
+        raise HTTPException(
+            status_code=422,
+            detail=negative_sale_sentence(data.lines, 0, subtotal, "sales receipt"),
+        )
+    if total <= 0 and subtotal <= 0:
         raise HTTPException(
             status_code=400,
             detail="Sales receipt total must be positive; add at least one "
@@ -161,26 +173,31 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     invoice.is_sales_receipt = True
     db.commit()
 
+    # a sales receipt posts its payment as it always has: the customer
+    # deposit and retainer checks (#1237) are Receive Payment's alone
+    from app.services.customer_deposit_accounts import not_checked
+
     try:
-        pay_resp = create_payment(
-            PaymentCreate(
-                customer_id=customer_id,
-                date=data.date,
-                amount=inv_resp.total,
-                method=data.method,
-                check_number=data.check_number,
-                reference=data.reference,
-                deposit_to_account_id=data.deposit_to_account_id,
-                currency=data.currency,
-                exchange_rate=data.exchange_rate,
-                allocations=[
-                    PaymentAllocationCreate(
-                        invoice_id=inv_resp.id, amount=inv_resp.total
-                    )
-                ],
-            ),
-            db,
-        )
+        with not_checked():
+            pay_resp = create_payment(
+                PaymentCreate(
+                    customer_id=customer_id,
+                    date=data.date,
+                    amount=inv_resp.total,
+                    method=data.method,
+                    check_number=data.check_number,
+                    reference=data.reference,
+                    deposit_to_account_id=data.deposit_to_account_id,
+                    currency=data.currency,
+                    exchange_rate=data.exchange_rate,
+                    allocations=[
+                        PaymentAllocationCreate(
+                            invoice_id=inv_resp.id, amount=inv_resp.total
+                        )
+                    ],
+                ),
+                db,
+            )
     except Exception:
         # The invoice committed but its payment didn't: void the invoice so
         # a failed receipt never leaves a stray open balance, then surface

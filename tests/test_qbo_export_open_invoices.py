@@ -51,13 +51,15 @@ BUNDLE = [
 ]
 
 
-def _files(aging_text=None, replace=None):
+def _files(aging_text=None, replace=None, journal_extra=""):
     """The bundle as CSVs, with the aging report (as given, or the
     fixture's); `replace` rewrites names in every file (a renamed
-    account)."""
+    account); `journal_extra` adds entries to the Journal."""
     out = []
     for name in BUNDLE:
         text = (FIXTURES / name).read_text()
+        if name == "Journal.csv" and journal_extra:
+            text = text.rstrip("\n") + "\n" + journal_extra
         for old, new in (replace or {}).items():
             text = text.replace(old, new)
         out.append(("files", (name, io.BytesIO(text.encode()), "text/csv")))
@@ -422,9 +424,16 @@ def test_an_ap_aging_report_is_not_read_as_invoices(client, db_session, seed_acc
         .replace("A/R Aging Detail Report", "A/P Aging Detail Report")
     )
     data = client.post("/api/migration/qbo_export/import", files=_files(text)).json()
-    assert data["ok"] is True, data["errors"]
-    assert data["imported_open_invoices"] == 0
-    assert any("is not read" in w for w in data["warnings"]), data["warnings"]
+    # Since #713 an A/P Aging Detail report is read as one, whatever its file
+    # is called: placed by its title on the payables side, never as invoices.
+    # This one names customers, not vendors, so it is refused for that.
+    assert data["ok"] is False
+    assert "imported_open_invoices" not in data
+    assert data["imported_open_bills"] == 0
+    assert any(
+        e.startswith("The A/P Aging Detail report lacks its Transaction type or Vendor")
+        for e in data["errors"]
+    ), data["errors"]
     assert db_session.query(Invoice).count() == 0
 
 
@@ -506,7 +515,13 @@ def test_a_receivable_named_like_1100_is_refused_before_anything_is_written(
         files=_files(_short_report(), replace=rename),
     ).json()
     assert data["ok"] is False
-    assert any("would count twice" in e for e in data["errors"]), data["errors"]
+    assert any(
+        "open balances come to 625.00, and the Journal leaves 525.00" in e
+        and "-100.00 would sit in 1100 with no document behind it" in e
+        and "Rename 1100 in the Chart of Accounts here" in e
+        for e in data["errors"]
+    ), data["errors"]
+    assert not any("count twice" in e for e in data["errors"])
     assert data["imported_journals"] == 0
     assert (
         db_session.query(Transaction)
@@ -514,6 +529,95 @@ def test_a_receivable_named_like_1100_is_refused_before_anything_is_written(
         .count()
         == 0
     )
+
+
+# Two credit memos and a journal entry credit the receivable in the Journal
+# and sit on the report as negative rows, which are not carried over.
+CREDITS_JOURNAL = """\
+,10/05/2026,Credit Memo,CM-1,Dana Reyes - CUST,Fee refund,Accounts Receivable (A/R),,=40.00
+,,,,,Fee refund,Commission Income,=40.00,
+,,,,,,,=40.00,=40.00
+,,,,,,,,
+,10/06/2026,Credit Memo,CM-2,Sam Ortiz - CUST,Fee refund,Accounts Receivable (A/R),,=35.00
+,,,,,Fee refund,Commission Income,=35.00,
+,,,,,,,=35.00,=35.00
+,,,,,,,,
+,10/07/2026,Journal Entry,JE-9,Sam Ortiz - CUST,Small balance,Accounts Receivable (A/R),,=25.00
+,,,,,Small balance,Commission Income,=25.00,
+,,,,,,,=25.00,=25.00
+,,,,,,,,
+"""
+
+
+def _credits_report():
+    anchor = ",10/01/2026,Payment,,Dana Reyes - CUST,10/01/2026,-100,-100\n"
+    text = (FIXTURES / AGING).read_text()
+    assert anchor in text
+    return text.replace(
+        anchor,
+        anchor + ",10/05/2026,Credit Memo,CM-1,Dana Reyes - CUST,10/05/2026,-40,-40\n"
+        ",10/06/2026,Credit Memo,CM-2,Sam Ortiz - CUST,10/06/2026,-35,-35\n"
+        ",10/07/2026,Journal Entry,JE-9,Sam Ortiz - CUST,10/07/2026,-25,-25\n",
+    )
+
+
+def test_rows_not_carried_are_named_when_named_like_1100_is_refused(
+    client, db_session, seed_accounts
+):
+    control = db_session.query(Account).filter(Account.account_number == "1100").one()
+    rename = {"Accounts Receivable (A/R)": control.name}
+    data = client.post(
+        "/api/migration/qbo_export/dry-run",
+        files=_files(_credits_report(), rename, CREDITS_JOURNAL),
+    ).json()
+    assert data["ok"] is False
+    refusal = [e for e in data["errors"] if "not carried over" in e]
+    assert len(refusal) == 1, data["errors"]
+    said = refusal[0]
+    assert "has 3 rows that are not carried over" in said
+    assert "Credit Memo CM-1 for Dana Reyes - CUST (-40.00)" in said
+    assert "Credit Memo CM-2 for Sam Ortiz - CUST (-35.00)" in said
+    assert "Journal Entry JE-9 for Sam Ortiz - CUST (-25.00)" in said
+    assert "together -100.00" in said
+    assert "-100.00 would sit in 1100 with no document behind it" in said
+    assert "Rename 1100 in the Chart of Accounts here" in said
+    assert "rename the account in QuickBooks Online" in said
+    assert "import without the A/R Aging Detail report" in said
+    assert not any("count twice" in e for e in data["errors"])
+    # the per-row notes no longer send anyone to enter the credit again
+    assert not any("Enter it after" in w for w in data["warnings"])
+    assert any(
+        "Credit Memo CM-1" in w
+        and "the customer's aging here will read higher by 40.00" in w
+        for w in data["warnings"]
+    ), data["warnings"]
+
+
+def test_the_difference_note_names_the_rows_not_carried(
+    client, db_session, seed_accounts
+):
+    data = client.post(
+        "/api/migration/qbo_export/dry-run",
+        files=_files(_credits_report(), journal_extra=CREDITS_JOURNAL),
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    assert any(
+        "the difference, -100.00, stays on Accounts Receivable (A/R). The rows not "
+        "carried over come to -100.00: Credit Memo CM-1 for Dana Reyes - CUST "
+        "(-40.00), Credit Memo CM-2" in w
+        and "Journal Entry JE-9 for Sam Ortiz - CUST (-25.00)." in w
+        and "another day" not in w
+        for w in data["warnings"]
+    ), data["warnings"]
+
+
+def test_more_than_five_rows_not_carried_are_counted():
+    rows = [
+        {"type": "Credit Memo", "num": f"CM-{n}", "customer": "Dana", "open": -n}
+        for n in range(1, 8)
+    ]
+    said = qbo._rows_not_carried(rows)
+    assert said.count("Credit Memo") == 5 and said.endswith(", and 2 more")
 
 
 # ── as QuickBooks Online hands it over ─────────────────────────────────────

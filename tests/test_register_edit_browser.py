@@ -231,6 +231,8 @@ def test_a_locked_sign_in_sees_no_edit_on_a_register_entry(
         row = page.locator(
             f"#page-content tbody tr:has(button[onclick*='editEntry({txn},'])"
         )
+        # the register's row for that entry, once drawn
+        row.wait_for(state="attached", timeout=5000)
         assert row.count() == 1
         assert not row.locator("button:has-text('Edit')").is_visible()
     finally:
@@ -240,6 +242,7 @@ def test_a_locked_sign_in_sees_no_edit_on_a_register_entry(
     try:
         _visit(page, handled, f"#/banking/{checking}")
         edit = page.locator(f"button[onclick*='editEntry({txn},']")
+        edit.wait_for(state="attached", timeout=5000)
         assert edit.count() == 1 and edit.is_visible()
     finally:
         page.close()

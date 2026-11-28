@@ -57,6 +57,14 @@ RUN useradd -m -u 1000 slowbooks \
     && chown -R slowbooks:slowbooks /app
 USER slowbooks
 
+# The commit this image was built from, shown on About as <version>+<commit>
+# (#816). The build context has no .git, so the compose files pass it in:
+#   SLOWBOOKS_COMMIT=$(git rev-parse HEAD) docker compose up -d --build
+# Left empty, About shows the bare version. Declared last so a new commit
+# rebuilds only this layer.
+ARG SLOWBOOKS_COMMIT=
+ENV SLOWBOOKS_COMMIT=${SLOWBOOKS_COMMIT}
+
 EXPOSE 3001
 
 # Liveness probe — hits the unauthenticated /health endpoint via a stdlib

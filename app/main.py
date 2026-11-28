@@ -175,9 +175,11 @@ from app.services.closing_date import (
     password_from_header as _closing_password_from_header,
 )
 from app.services.api_token_service import ADMIN_TOKEN_REFUSAL
+from app.services.api_token_service import from_the_link_itself as _from_the_link
 from app.services.api_token_service import is_link_label as _is_link_label
 from app.services.api_token_service import resolve as _resolve_api_token
 from app.services.served_companies import CompanyUnavailable, sentence_of
+from app.services.local_templates import LocalTemplateError
 from app.services.pdf_service import PdfEngineMissing
 
 # An API token's request names the company it works in with this header
@@ -195,8 +197,9 @@ UNSERVED_COMPANY_REFUSAL = (
     "This server does not serve that company for this request. Nothing was done."
 )
 # The AI assistant connection's tokens are used by this app's own line to
-# itself, never from another computer: a copied connection file is no use
-# elsewhere on the network.
+# itself, never by another program or from another computer: a copied
+# connection file is no use anywhere else, and neither is a tunnel or a
+# forward into this computer.
 LINK_TOKEN_ADDRESS_REFUSAL = (
     "This token works only for the AI assistant connection on this computer. "
     "Nothing was done."
@@ -612,6 +615,11 @@ async def lifespan(app: FastAPI):
         warn_if_manifest_missing()
     except Exception:
         pass  # a diagnostic, never a reason not to boot
+    # Local templates (#1235): on, off, or a setting naming a folder that
+    # cannot be used, said once. Never raises.
+    from app.services import local_templates, pdf_service
+
+    local_templates.report_at_startup(str(pdf_service.TEMPLATE_DIR))
     # Issue #119: say once, at boot, if this company's chart is missing an
     # account the posting code resolves by number. Before 2.10.1 the first
     # symptom was a document that looked saved and never reached the ledger;
@@ -962,6 +970,19 @@ async def _pdf_engine_missing_handler(request: Request, exc: Exception):
 
 
 app.add_exception_handler(PdfEngineMissing, _pdf_engine_missing_handler)
+
+
+# ---- A local template that fails (#1235) ----
+# The sentence names the local file and says it is a local template; the
+# built-in template is never used in its place, and no traceback is shown.
+# The person sees the name in the folder and the line; the server path and
+# the exception's own text go to the log only.
+async def _local_template_handler(request: Request, exc: Exception):
+    logging.getLogger(__name__).warning("%s", exc, exc_info=exc.__cause__)
+    return JSONResponse(status_code=500, content={"detail": exc.user_text})
+
+
+app.add_exception_handler(LocalTemplateError, _local_template_handler)
 
 
 # ---- A value the database refuses (422, not 500) ----
@@ -1508,7 +1529,14 @@ def api_token_refusal(request: Request):
         )
     if (
         token_principal.get("link") or _is_link_label(token_principal.get("label"))
-    ) and not _from_this_apps_own_address(request):
+    ) and not (
+        _from_the_link(request.headers) and _from_this_apps_own_address(request)
+    ):
+        # Honored only from the connection itself: its own header (see
+        # api_token_service.LINK_ORIGIN_HEADER), and from this app's own
+        # address as well. The address alone is not proof: a tunnel or a
+        # plain forward on this computer that adds no X-Forwarded-For makes
+        # an outside request look like loopback.
         return token_principal, JSONResponse(
             status_code=401,
             content={"detail": LINK_TOKEN_ADDRESS_REFUSAL},

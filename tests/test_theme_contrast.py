@@ -438,7 +438,14 @@ def _open(browser, client, served=None):
 def _visit(page, handled, route):
     """The page at `route`, rendered, with whatever it fills in afterwards.
     App.navigate is what the address change runs; awaiting it directly means
-    the page is in, rather than guessing how long that takes."""
+    the page is in, rather than guessing how long that takes.
+
+    The app draws its own first page once its settings are read (App.init),
+    which can be after the page has loaded. Started after this one, that
+    move draws last and closes a dialog the test has opened since; so this
+    waits until it has started (App._navSeq counts the moves), and awaiting
+    this move then waits out the first page too (the last move wins)."""
+    page.wait_for_function("() => window.App && App._navSeq > 0")
     page.evaluate("async (h) => { await App.navigate(h); }", route)
     settle(page, handled)
 

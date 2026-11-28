@@ -1846,6 +1846,12 @@ _AS_OF_REPORTS = {
     "commitments": lambda db, **kw: job_reports.commitment_status(
         db, as_of=kw.pop("as_of"), **kw
     ),
+    "cost_to_complete": lambda db, **kw: job_reports.cost_to_complete(
+        db, as_of=kw.pop("as_of"), **kw
+    ),
+    "ctc_forecast": lambda db, **kw: job_reports.ctc_forecast_report(
+        db, as_of=kw.pop("as_of"), **kw
+    ),
     "vendor": lambda db, **kw: job_reports.job_cost_by_vendor(
         db, end_date=kw.pop("as_of"), **kw
     ),
@@ -1867,6 +1873,26 @@ def test_as_of_reports_keep_a_job_closed_after_the_date(
     assert run(db_session, as_of=date(2026, 10, 1))["jobs"] == []
     wip = job_reports.wip_schedule(db_session, as_of=date(2026, 7, 1))
     assert job.id in [r["job_id"] for r in wip["rows"]]
+
+
+@pytest.mark.parametrize("name", sorted(_AS_OF_REPORTS))
+def test_as_of_reports_read_a_job_closed_on_the_date_as_closed(
+    db_session, seed_accounts, name
+):
+    """A job closed on a day is closed as of that day: the report dated the
+    day before keeps it as open, the reports dated the close day and the day
+    after leave it out, the same as the WIP schedule."""
+    job = _closed_later_job(db_session)  # closed 2026-09-01
+    run = _AS_OF_REPORTS[name]
+    assert [j["job_id"] for j in run(db_session, as_of=date(2026, 8, 31))["jobs"]] == [
+        job.id
+    ]
+    assert run(db_session, as_of=date(2026, 9, 1))["jobs"] == []
+    assert run(db_session, as_of=date(2026, 9, 2))["jobs"] == []
+    on_day = job_reports.wip_schedule(db_session, as_of=date(2026, 9, 1))
+    assert job.id not in [r["job_id"] for r in on_day["rows"]]
+    day_before = job_reports.wip_schedule(db_session, as_of=date(2026, 8, 31))
+    assert job.id in [r["job_id"] for r in day_before["rows"]]
 
 
 @pytest.mark.parametrize("name", sorted(_AS_OF_REPORTS))

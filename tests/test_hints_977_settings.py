@@ -514,6 +514,7 @@ FIELDS = {
     "settings-check-position": "settings-check-position-help",
     "settings-check-memo": "settings-check-memo-help",
     "settings-check-amount-no-dollar-sign": "settings-check-amount-no-dollar-sign-help",
+    "settings-check-amount-asterisk-fill": "settings-check-amount-asterisk-fill-help",
     "settings-check-blank-stock": "settings-check-blank-stock-help",
     "settings-check-micr-amount": "settings-check-micr-amount-help",
     "settings-check-bank-details": "settings-check-bank-details-help",

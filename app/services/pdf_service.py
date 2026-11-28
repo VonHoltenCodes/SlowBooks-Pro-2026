@@ -9,7 +9,9 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import NamedTuple
 
-from jinja2 import Environment, FileSystemLoader, Template, pass_context
+from jinja2 import Environment, Template, pass_context
+
+from app.services import local_templates
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 
@@ -171,12 +173,193 @@ class _PrintedTemplate(Template):
     long words set to break (see LONG_WORD)."""
 
     def render(self, *args, **kwargs):
-        html = super().render(*args, **kwargs)
-        return break_long_words(html) if _PRINT_RULE in html else html
+        token = _local_drawn.set([])
+        try:
+            html = super().render(*args, **kwargs)
+            drawn = bool(_local_drawn.get())
+        except Exception as exc:
+            refusal = local_templates.render_failure(exc)
+            if refusal is None:
+                raise
+            raise refusal from exc
+        finally:
+            _local_drawn.reset(token)
+        html = break_long_words(html) if _PRINT_RULE in html else html
+        return _guard_local_page(html) if drawn else html
 
 
-_jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
+# Local templates (#1235, app/services/local_templates.py). A page drawn by
+# one (any part of it: the page, an include, a layout it extends) is also
+# the Print page a signed-in browser opens, on the app's own address. Its
+# scripts must not run there with the person's session: the page carries a
+# policy that lets only the print script (print_html adds it) run, and no
+# fetch, form or plugin. A policy in the page can only narrow the server's.
+# Built-in pages are untouched.
+_local_drawn: ContextVar[list | None] = ContextVar("local_drawn", default=None)
+
+
+class GuardedPage(str):
+    """A page a local template drew, as _PrintedTemplate.render returns it:
+    the renderer's own record that the page carries our script guard and
+    needs it wherever it goes (Print all, print_all.combine_documents).
+    Nothing in a page's text can make a page one, or stop it being one."""
+
+
+def is_guarded(page: str) -> bool:
+    """Whether a local template drew ``page`` (see GuardedPage)."""
+    return isinstance(page, GuardedPage)
+
+
+# The page is the template author's text, so these scan it with str.find and
+# patterns that cannot backtrack: each is linear in its length.
+_COMMENT_CLOSE = re.compile(r"--!?>")
+_TAG_STOP = re.compile(r"[>\"']")
+_ATTR = re.compile(r"""([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?""")
+
+
+def _comment_end(html: str, i: int) -> int:
+    """Where the comment opened by the <!-- at ``i`` ends, or -1 when it is
+    never closed. As HTML reads it: <!--> and <!---> are whole comments,
+    and a comment ends at its first --> (or --!>)."""
+    j = i + 4
+    if html.startswith(">", j):
+        return j + 1
+    if html.startswith("->", j):
+        return j + 2
+    close = _COMMENT_CLOSE.search(html, j)
+    return close.end() if close else -1
+
+
+def _tag_end(html: str, i: int) -> int:
+    """Where the tag whose attributes start at ``i`` ends (just past its
+    >), or -1 when it never does. A > inside a quoted value does not end
+    it."""
+    while True:
+        stop = _TAG_STOP.search(html, i)
+        if stop is None:
+            return -1
+        if stop.group() == ">":
+            return stop.end()
+        close = html.find(stop.group(), stop.end())
+        if close < 0:
+            return -1
+        i = close + 1
+
+
+def doctype_end(html: str) -> int:
+    """Where the page's doctype ends, or 0 when it has none. Whitespace and
+    whole comments may come before it (still standards mode); a comment
+    ends where HTML ends it (_comment_end), and one never closed ends the
+    search. A doctype inside a comment is not one."""
+    i, n = 0, len(html)
+    while i < n:
+        if html[i].isspace():
+            i += 1
+        elif html.startswith("<!--", i):
+            i = _comment_end(html, i)
+            if i < 0:
+                return 0
+        else:
+            break
+    if html[i : i + 9].lower() != "<!doctype":
+        return 0
+    close = html.find(">", i + 9)
+    return close + 1 if close >= 0 else 0
+
+
+def _is_guard_tag(tag: str) -> bool:
+    for m in _ATTR.finditer(tag, 5):
+        if m.group(1).lower() == "http-equiv":
+            value = m.group(2) or m.group(3) or m.group(4) or ""
+            if value.strip().lower() == "content-security-policy":
+                return True
+    return False
+
+
+def _guard_spans(html: str):
+    """Where each script-policy meta tag in the page starts and ends, in
+    any case or quoting. Text inside a comment is not a tag."""
+    k, n = 0, len(html)
+    while True:
+        k = html.find("<", k)
+        if k < 0:
+            return
+        if html.startswith("<!--", k):
+            k = _comment_end(html, k)
+            if k < 0:
+                # the rest of the page is the comment
+                return
+            continue
+        if html[k + 1 : k + 5].lower() == "meta" and (
+            k + 5 == n or html[k + 5] in " \t\n\r\f/>"
+        ):
+            end = _tag_end(html, k + 5)
+            if end < 0:
+                # the rest of the page is this tag; nothing after it closes
+                return
+            if _is_guard_tag(html[k:end]):
+                yield k, end
+            k = end
+            continue
+        k += 1
+
+
+def guard_tags(html: str) -> list[str]:
+    """Every script-policy meta tag in the page, as a browser reads them."""
+    return [html[start:end] for start, end in _guard_spans(html)]
+
+
+def drop_guards(html: str) -> str:
+    """The page with every script-policy meta tag taken out."""
+    out, pos = [], 0
+    for start, end in _guard_spans(html):
+        out.append(html[pos:start])
+        pos = end
+    out.append(html[pos:])
+    return "".join(out)
+
+
+def _mark_local_drawn() -> str:
+    drawn = _local_drawn.get()
+    if drawn is not None:
+        drawn.append(True)
+    return ""
+
+
+def guard_meta() -> str:
+    """Our script guard for a page a local template drew: a policy that
+    lets only the print script (print_html adds it) run, and no fetch, form,
+    plugin or base change. Always this tag, never one found in a page."""
+    import base64
+    import hashlib
+
+    from app.routes._print import PRINT_SCRIPT
+
+    script = PRINT_SCRIPT.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    return (
+        '<meta http-equiv="Content-Security-Policy" content="'
+        f"script-src 'sha256-{digest}' 'unsafe-eval'; connect-src 'none'; "
+        "form-action 'none'; object-src 'none'; base-uri 'none'\">"
+    )
+
+
+def insert_guard(html: str) -> str:
+    """``html`` with our guard right after its doctype, so the page keeps
+    its standards mode (or first, when it has none)."""
+    at = doctype_end(html)
+    return html[:at] + guard_meta() + html[at:]
+
+
+def _guard_local_page(html: str) -> "GuardedPage":
+    return GuardedPage(insert_guard(html))
+
+
+_jinja_env = Environment(
+    autoescape=True, loader=local_templates.DocumentLoader(str(TEMPLATE_DIR))
+)
 _jinja_env.template_class = _PrintedTemplate
+_jinja_env.globals["_sb_local_template"] = _mark_local_drawn
 
 
 def _company_logo_data_uri(company_settings: dict) -> str:
@@ -1656,14 +1839,25 @@ def blank_stock(company_settings: dict) -> dict:
     }
 
 
-def check_amount_figures(value, no_dollar_sign=False) -> str:
+def check_amount_figures(value, no_dollar_sign=False, asterisk_fill=False) -> str:
     """The amount in figures on the check face: "$1,234.56", or "1,234.56"
     when Settings -> Check Printing leaves the dollar sign off (#799), for
-    stock that prints its own "$" beside the amount box. Only the face's
-    amount box reads it; the amount in words, the stubs and the vouchers
-    print as they always have."""
+    stock that prints its own "$" beside the amount box. With the amount
+    filled with asterisks (#1239) two asterisks lead the figures, after the
+    sign when it prints ("$**1,234.56", "**1,234.56"), so nothing can be
+    written in front of them. A negative amount keeps its minus sign first
+    ("-$**25.00", "-**25.00"). Only the face's amount box reads it; the
+    amount in words, the stubs and the vouchers print as they always have."""
     text = _format_currency(value)
-    return text.replace("$", "", 1) if no_dollar_sign else text
+    if no_dollar_sign:
+        text = text.replace("$", "", 1)
+    if asterisk_fill:
+        # after the minus sign and the dollar sign, whichever print
+        at = 1 if text.startswith("-") else 0
+        if text.startswith("$", at):
+            at += 1
+        text = text[:at] + "**" + text[at:]
+    return text
 
 
 _jinja_env.filters["check_amount"] = check_amount_figures
@@ -1674,6 +1868,13 @@ def check_amount_no_dollar_sign(company_settings: dict) -> bool:
     apart from check_print_options() so its shape holds; off unless the
     setting is "true"."""
     return company_settings.get("check_amount_no_dollar_sign") == "true"
+
+
+def check_amount_asterisk_fill(company_settings: dict) -> bool:
+    """Whether the amount box leads the figures with asterisks (#1239).
+    Read apart from check_print_options() so its shape holds; off unless
+    the setting is "true"."""
+    return company_settings.get("check_amount_asterisk_fill") == "true"
 
 
 # Where each field of the check layout (#749) sits on the face: the element
@@ -1792,6 +1993,7 @@ def render_checks_html(checks: list, company_settings: dict, options=None) -> st
         field_css=field_css,
         field_wrap=field_wrap,
         no_dollar_sign=check_amount_no_dollar_sign(company_settings),
+        asterisk_fill=check_amount_asterisk_fill(company_settings),
         **opts,
         **extra,
     )

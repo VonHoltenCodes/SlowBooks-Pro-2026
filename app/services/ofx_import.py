@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 UNREADABLE_TEXT = (
     "That file isn't a bank statement this can read: "
-    "an OFX, QFX or CSV export from the bank."
+    "an OFX, QFX, QBO or CSV export from the bank."
 )
 EMPTY_TEXT = "The file is empty — there is nothing to import."
 

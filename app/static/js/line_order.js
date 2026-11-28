@@ -6,7 +6,8 @@
  * A grid opts in with one call once its <tbody> is on the page:
  *
  *   LineOrder.attach('#inv-lines', {
- *       add: () => InvoicesPage.addLine(),   // appends one blank row
+ *       add: () => InvoicesPage.addLine(),   // appends one blank row; given
+ *                                            // the line it will go under
  *       changed: () => InvoicesPage.recalc(), // totals after a move/insert
  *       remove: true,  // a grid with no Remove line button of its own
  *   });
@@ -137,11 +138,13 @@ const LineOrder = {
         return true;
     },
 
-    // Add a blank row with the grid's own add function, then slot it under `row`.
+    // Add a blank row with the grid's own add function, then slot it under
+    // `row`. The add function is handed `row`, for a grid whose new line
+    // starts from the line above it (Bill Quick Entry's class).
     insertBelow(tbody, row) {
         const opts = LineOrder._opts.get(tbody) || {};
         if (!opts.add) return null;
-        opts.add();
+        opts.add(row);
         const fresh = tbody.lastElementChild;
         if (!fresh || fresh === row) return null;
         // under the line and the rows that belong to it

@@ -214,6 +214,16 @@ def company_engine(filename: str | None):
         return found
 
 
+def company_engine_is_open(filename: str | None) -> bool:
+    """Whether a session in this company would bind to an engine already
+    open (the started company's always is). Asking never opens a file: the
+    sign-in screen's logo (app/routes/auth.py) is never a reason to open,
+    unlock or upgrade a company file."""
+    if filename is None or filename == started_company_file():
+        return True
+    return filename in _company_engines
+
+
 def current_engine():
     """The engine of the company this request works in."""
     return company_engine(_served_company.get())

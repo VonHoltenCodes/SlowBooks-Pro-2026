@@ -89,6 +89,7 @@ ENUM_SETTINGS = {
     "ask_password_on_start": frozenset({"true", "false"}),
     "invoice_show_logo": frozenset({"true", "false"}),
     "invoice_logo_only": frozenset({"true", "false"}),
+    "company_logo_in_app": frozenset({"true", "false"}),
     "class_warn_blank": frozenset({"true", "false"}),
     "new_lines_taxable": frozenset({"true", "false"}),
     "use_account_numbers": frozenset({"true", "false"}),
@@ -106,6 +107,7 @@ ENUM_SETTINGS = {
     # deposit_slip_layout.
     "deposit_slip_stock": frozenset({"plain", "preprinted"}),
     "check_amount_no_dollar_sign": frozenset({"true", "false"}),
+    "check_amount_asterisk_fill": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),
@@ -385,9 +387,50 @@ def _guard_payroll_accounts(db: Session, cleaned: dict) -> None:
                 status_code=400,
                 detail=f"The {piece.label} account id must be a number.",
             )
-        problem = payroll_accounts.account_problem(db.get(Account, acct_id), piece, db)
+        acct = db.get(Account, acct_id)
+        problem = payroll_accounts.account_problem(acct, piece, db)
         if problem:
             raise HTTPException(status_code=400, detail=problem)
+        _refuse_a_ticked_customer_deposit_account(db, cleaned, piece, acct)
+
+
+def _customer_deposit_ids_after(db: Session, cleaned: dict) -> set[int]:
+    """Customer deposits and retainers (#1237) as it will be after this
+    save: the request's list when it sends one (cleaned to JSON), else the
+    saved one."""
+    from app.services.customer_deposit_accounts import configured_ids
+
+    if "customer_deposit_account_ids" not in cleaned:
+        return configured_ids(db)
+    return {int(i) for i in json.loads(cleaned["customer_deposit_account_ids"])}
+
+
+def _refuse_a_ticked_customer_deposit_account(
+    db: Session, cleaned: dict, piece, acct
+) -> None:
+    """A payroll posting account (#620) may not be one ticked under
+    Customer deposits and retainers (#1237) once this save is made, whether
+    the request sends the list or not: a 400 saying so, rather than a save
+    that leaves the two settings in conflict. An overlap already saved
+    before this save is left for the person to put right (the form sends
+    both settings on every save, so refusing it would refuse every save)."""
+    from app.services.customer_deposit_accounts import configured_ids, payroll_ids
+
+    if acct.id not in _customer_deposit_ids_after(db, cleaned):
+        return
+    if acct.id in configured_ids(db) and acct.id in payroll_ids(db):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=said(
+            "The "
+            + piece.label
+            + " account cannot be {}: it is ticked under Settings → "
+            "Connections → Deposits → Customer deposits and retainers. Untick "
+            "it there, or choose another account. Nothing was saved.",
+            acct.name,
+        ),
+    )
 
 
 def _deposit_bank_account(db: Session, value, label: str):
@@ -419,6 +462,72 @@ def _deposit_bank_account(db: Session, value, label: str):
             detail=f"{label}: {acct.name} is inactive. Nothing was saved.",
         )
     return acct
+
+
+def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
+    """Customer deposits and retainers (#1237): every account the request
+    ticks (cleaned to a JSON list of ids) is in the chart, a liability, not a
+    bank or credit card account, not a control account (Accounts Payable,
+    Sales Tax Payable and the rest, which their own documents keep), not a
+    construction account the app posts to on its own (Retainage Payable, the
+    WIP accounts, Use Tax Payable, and Customer Deposits, whose job deposits
+    the pay application applies), not a payroll account (the 23xx payroll
+    liabilities and any account Settings → Payroll Accounts names, counting
+    the ones this same request chooses) and active.
+    Anything else is refused with a 422 saying why, before any setting is
+    written.
+
+    An account already on the saved list is judged only on what this save
+    changes: one that has stopped qualifying since it was ticked (made
+    inactive, deleted, renamed onto a construction account) stays on the
+    list the form sends back, is treated as not ticked, and does not lock
+    every other setting; one this save would make a payroll account is
+    refused."""
+    from app.models.accounts import Account
+    from app.services.customer_deposit_accounts import (
+        configured_ids,
+        not_usable_because,
+    )
+
+    if "customer_deposit_account_ids" not in cleaned:
+        return
+    saved = configured_ids(db)
+    label = "Customer deposits and retainers"
+    for acct_id in sorted(_customer_deposit_ids_after(db, cleaned)):
+        acct = db.get(Account, acct_id)
+        if acct_id in saved:
+            if acct is None:
+                continue
+            if not_usable_because(db, acct) is not None or acct.is_active is False:
+                continue
+        if acct is None:
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": no account {} in the chart. Nothing was saved.",
+                    str(acct_id),
+                ),
+            )
+        why = not_usable_because(db, acct, pending=cleaned)
+        if why is None and acct.is_active is False:
+            # it qualifies but for being inactive: say how to fix that
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": {} is inactive. Make it active in the Chart of "
+                    "Accounts, or untick it here. Nothing was saved.",
+                    acct.name,
+                ),
+            )
+        if why:
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": {} " + why + ". Choose a liability account that "
+                    "holds money customers paid ahead. Nothing was saved.",
+                    acct.name,
+                ),
+            )
 
 
 def _guard_deposit_accounts(db: Session, cleaned: dict) -> None:
@@ -484,6 +593,30 @@ def _clearing_off_warnings(db: Session, cleaned: dict) -> list[str]:
                     "payouts until it is paid out."
                 )
     return warnings
+
+
+def _logo_option_needs_its_logo(db: Session, cleaned: dict) -> None:
+    """Show the company logo in SlowBooks Pro never stands on with no logo
+    (2.32.0): a save that would leave it on with none (a form drawn before
+    the logo was removed, a second window, a script, or one that clears the
+    logo's path) stores it off, so a logo uploaded later shows in the app
+    only once an administrator turns it on again. Stored off rather than
+    refused, so a page drawn before the removal still saves its other edits."""
+    from app.services import company_logo, file_store
+
+    path_key = "company_logo_path"
+    if company_logo.SETTING not in cleaned and path_key not in cleaned:
+        return
+    on = cleaned.get(company_logo.SETTING)
+    if on is None:
+        on = get_setting_raw(db, company_logo.SETTING) or ""
+    if on.strip() != "true":
+        return
+    path = cleaned.get(path_key)
+    if path is None:
+        path = get_setting_raw(db, path_key)
+    if file_store.logo_row(db, file_store.logo_id(path)) is None:
+        cleaned[company_logo.SETTING] = "false"
 
 
 @router.put("")
@@ -556,6 +689,7 @@ def update_settings(
     _guard_clearing_accounts(db, cleaned)
     _guard_payroll_accounts(db, cleaned)
     _guard_deposit_accounts(db, cleaned)
+    _guard_customer_deposit_accounts(db, cleaned)
     # The "Taxed as" select is hidden for a non-LLC but the form still submits
     # its last value; drop a stale election so it never lingers (#488).
     if "llc_tax_election" in cleaned:
@@ -564,6 +698,7 @@ def update_settings(
             effective_type = get_setting_raw(db, "entity_type") or ""
         if effective_type != "llc":
             cleaned["llc_tax_election"] = ""
+    _logo_option_needs_its_logo(db, cleaned)
     clearing_warnings = _clearing_off_warnings(db, cleaned)
     # The open window's words and sidebar follow the company type at the
     # next start (the window that changes it reloads itself): a save from

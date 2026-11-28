@@ -417,7 +417,7 @@ def _approve(client, co_id):
     return r.json()
 
 
-def test_make_change_order_from_several_tickets_at_cost_with_job_markup(
+def test_make_change_order_from_several_tickets_at_cost_and_bill_amounts(
     con, seed_customer
 ):
     job = _job(con, seed_customer.id, job_number="2601")
@@ -439,17 +439,238 @@ def test_make_change_order_from_several_tickets_at_cost_with_job_markup(
     pco = made["change_order"]
     assert pco["kind"] == "pco" and pco["status"] == "draft"
     assert pco["number"] == "2601-PCO-001"
-    # a line per ticket line, at cost; the job's markup prices it
+    # a line per ticket line, at cost; each sells at the ticket's bill amount
+    # (8 h × 75 typed in, 10 × 12 with the job's 15% filled in on save)
     assert [float(ln["unit_cost"]) for ln in pco["lines"]] == [50.0, 12.0]
     assert [ln["cost_type"] for ln in pco["lines"]] == ["labor", "material"]
     assert pco["lines"][0]["description"].startswith("2601-TM-001")
     assert pco["cost_total"] == 520.0
-    assert pco["sell_total"] == 598.0
+    assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [600.0, 138.0]
+    assert pco["sell_total"] == 738.0 == a["bill_total"] + b["bill_total"]
+    assert made["warnings"] == []
     # each ticket links to it and stays signed until the owner approves
     for t in made["tickets"]:
         assert (t["change_order_number"], t["status"]) == ("2601-PCO-001", "signed")
     # already priced: not twice
     _make_co(con, [a["id"]], status=409)
+
+
+def test_a_change_order_from_a_signed_ticket_carries_its_bill_rates(con, seed_customer):
+    """#1226: the PCO sells for what the owner's rep signed, line for line,
+    not cost times the job's markup; cost stays cost, the markup is not
+    applied twice, a later change to the job's markup does not move it, and
+    the SOV line and contract take the signed figure."""
+    job = _job(con, seed_customer.id, job_number="2602")
+    con.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={
+            "contract_type": "lump_sum",
+            "contract_amount": 50000,
+            "co_markup_pct": 15,
+        },
+    )
+    r = con.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={
+            "lines": [{"description": "Base", "kind": "work", "scheduled_value": 50000}]
+        },
+    )
+    assert r.status_code == 200, r.text
+    t = _signed(
+        con,
+        job["id"],
+        [
+            {
+                "line_type": "labor",
+                "description": "Crew",
+                "quantity": 12,
+                "cost_rate": 48,
+                "bill_rate": 85,
+            },
+            {
+                "line_type": "material",
+                "description": "Anchors",
+                "quantity": 1,
+                "cost_rate": 420,
+            },
+        ],
+    )
+    assert t["cost_total"] == 996.0
+    assert t["bill_total"] == 1503.0  # 1,020.00 + 483.00
+    made = _make_co(con, [t["id"]])
+    pco = made["change_order"]
+    assert made["warnings"] == []
+    assert [float(ln["amount"]) for ln in pco["lines"]] == [576.0, 420.0]  # cost
+    assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [1020.0, 483.0]
+    assert (pco["cost_total"], pco["markup_total"], pco["sell_total"]) == (
+        996.0,
+        507.0,
+        1503.0,
+    )
+    # the job's markup moves; the signed figures do not
+    con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 30})
+    again = con.get(f"/api/change-orders/{pco['id']}").json()
+    assert again["sell_total"] == 1503.0
+    # the ticket is priced once: it is not billed by itself as well
+    r = con.post("/api/field-tickets/bill", json={"ticket_ids": [t["id"]]})
+    assert r.status_code == 409, r.text
+    owner = con.post(f"/api/change-orders/{pco['id']}/promote").json()
+    assert owner["sell_total"] == 1503.0 and owner["cost_total"] == 996.0
+    _approve(con, owner["id"])
+    contract = con.get(f"/api/jobs/{job['id']}/contract").json()
+    assert contract["contract"]["contract_amount"] == 51503.0
+    [co_line] = [ln for ln in contract["sov"] if ln["kind"] == "change_order"]
+    assert float(co_line["scheduled_value"]) == 1503.0
+    assert contract["contract"]["sov_balance"] == 0.0
+    # a change order typed in by hand still takes the job's markup
+    r = con.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "kind": "pco",
+            "funding": "contract",
+            "lines": [
+                {"cost_type": "labor", "quantity": 10, "unit_cost": 40},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["sell_total"] == 520.0  # 400 × 1.30
+
+
+def test_a_ticket_line_no_markup_can_reach_says_so(con, seed_customer):
+    """A bill amount on a line with no cost cannot be reached by a markup:
+    the PCO is still made, and the response says the totals differ."""
+    job = _job(con, seed_customer.id)
+    con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 10})
+    t = _signed(
+        con,
+        job["id"],
+        [
+            {**LABOR},  # 8 h: 400 cost, 600 billed
+            {
+                "line_type": "other",
+                "description": "Trip charge",
+                "quantity": 1,
+                "cost_rate": 0,
+                "bill_rate": 95,
+            },
+        ],
+    )
+    made = _make_co(con, [t["id"]])
+    pco = made["change_order"]
+    assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [600.0, 0.0]
+    [warning] = made["warnings"]
+    assert "sells for 600.00 but the tickets bill 695.00" in warning
+    assert "Trip charge has no cost to mark up" in warning
+    assert "give a line with no cost a unit cost" in warning.lower()
+    assert "Edit its lines' Markup %" not in warning
+
+
+def test_a_no_charge_line_on_a_large_cost_is_not_billed_at_the_job_markup(
+    con, seed_customer
+):
+    """A no-charge line with a large cost sells as near 0.00 as a markup
+    reaches (0.01), not cost plus the job's markup, and the tab says the
+    cent apart."""
+    job = _job(con, seed_customer.id)
+    con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 15})
+    t = _signed(
+        con,
+        job["id"],
+        [
+            {**LABOR},  # 8 h: 400 cost, 600 billed
+            {
+                "line_type": "labor",
+                "description": "Warranty crew",
+                "quantity": 100,
+                "cost_rate": 60,
+                "bill_rate": 0,
+            },
+        ],
+    )
+    made = _make_co(con, [t["id"]])
+    pco = made["change_order"]
+    assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [600.0, 0.01]
+    assert pco["cost_total"] == 6400.0 and pco["sell_total"] == 600.01
+    [warning] = made["warnings"]
+    assert "sells for 600.01 but the tickets bill 600.00" in warning
+    assert "Warranty crew differs by 0.01" in warning
+    assert "Settle the difference with the owner." in warning
+
+
+def test_a_line_with_no_bill_rate_does_not_hide_another_lines_gap(
+    con, seed_customer, db_session
+):
+    """A line with no bill rate (legacy) is left out of the check; a billed
+    line with no cost on the same PCO is still reported."""
+    from app.models.field_tickets import FieldTicket
+
+    job = _job(con, seed_customer.id)
+    con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 10})
+    old = _signed(con, job["id"], [{**LABOR}])
+    new = _signed(
+        con,
+        job["id"],
+        [
+            {
+                "line_type": "other",
+                "description": "Trip charge",
+                "quantity": 1,
+                "cost_rate": 0,
+                "bill_rate": 95,
+            },
+        ],
+    )
+    # the older ticket was saved before T&M tickets had bill rates
+    for ln in db_session.get(FieldTicket, old["id"]).lines:
+        ln.bill_rate = None
+    db_session.commit()
+    made = _make_co(con, [old["id"], new["id"]])
+    pco = made["change_order"]
+    # the legacy line takes the job's 10%; the trip charge has no cost
+    assert [float(ln["sell_amount"]) for ln in pco["lines"]] == [440.0, 0.0]
+    [warning] = made["warnings"]
+    assert "The billed lines on" in warning
+    assert "sell for 0.00 but the tickets bill 95.00" in warning
+    assert "Trip charge has no cost to mark up" in warning
+    assert "Foreman" not in warning
+
+
+def test_markup_for_bill_lands_on_the_cent():
+    from app.services.change_orders import line_sell
+    from app.services.field_tickets import markup_for_bill
+
+    for cost, bill in (
+        ("576.00", "1020.00"),
+        ("420.00", "483.00"),
+        ("333.33", "500.00"),
+        ("1234.56", "1234.56"),
+        ("9999.99", "12345.67"),
+        ("850.00", "0.00"),  # no charge: just above -100%
+        ("700.00", "650.00"),  # billed under cost
+    ):
+        pct = markup_for_bill(Decimal(cost), Decimal(bill))
+        assert pct is not None and Decimal("-100") < pct <= Decimal("999.9999")
+        assert pct == pct.quantize(Decimal("0.0001"))
+        assert line_sell(Decimal(cost), pct, "pco") == Decimal(bill), (cost, bill)
+    # the plain ratio, not the smallest markup that rounds to the bill
+    assert markup_for_bill(Decimal("420.00"), Decimal("483.00")) == Decimal("15.0000")
+    assert markup_for_bill(Decimal("400.00"), Decimal("600.00")) == Decimal("50.0000")
+    assert markup_for_bill(Decimal("100.00"), Decimal("120.00")) == Decimal("20.0000")
+    assert markup_for_bill(Decimal("1000.00"), Decimal("1150.00")) == Decimal("15.0000")
+    # nothing to mark up
+    assert markup_for_bill(Decimal("0"), Decimal("95")) is None
+    # out of reach: the markup a line holds that comes nearest, never None
+    # (None would fall back to the job's markup)
+    assert markup_for_bill(Decimal("6000.00"), Decimal("0.00")) == Decimal("-99.9999")
+    assert line_sell(Decimal("6000.00"), Decimal("-99.9999"), "pco") == Decimal("0.01")
+    assert markup_for_bill(Decimal("10.00"), Decimal("200.00")) == Decimal("999.9999")
+    assert line_sell(Decimal("10.00"), Decimal("999.9999"), "pco") == Decimal("110.00")
+    # a large cost gets the nearest markup when the cent is out of reach
+    pct = markup_for_bill(Decimal("7654321.00"), Decimal("9876543.21"))
+    sell = line_sell(Decimal("7654321.00"), pct, "pco")
+    assert abs(sell - Decimal("9876543.21")) <= Decimal("4.00")
 
 
 def test_tickets_close_when_the_owner_co_is_approved_and_reopen_on_void(

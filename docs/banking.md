@@ -165,6 +165,40 @@ already in it keeps it: the deposit still opens, prints and edits, and the
 payment's edit still offers its own account. A blank Deposit To still
 posts to Undeposited Funds.
 
+**Customer deposits and retainers** (#1237), in the same section, is for
+money a customer paid ahead and you hold in a liability account, such as
+Retainer Payable. It is empty, and changes nothing, until an administrator
+ticks an account; only active liability accounts that are no bank or credit
+card account, no control account (Accounts Payable, Sales Tax Payable and
+the like), no construction account the app posts to on its own (Retainage
+Payable, the two WIP liabilities and Use Tax Payable) and no payroll account
+(the 2300 to 2390 payroll liabilities, and any account Settings → Payroll and
+checks → Payroll Accounts posts to) can be ticked. Customer Deposits cannot be
+ticked either: a job's deposits post there and are applied on the pay
+application, so a payment from it here would apply the same money twice. A
+payroll account cannot be chosen for an account ticked here, and an account
+cannot be ticked here and chosen for payroll in the same save. A ticked account appears in Deposit To on Receive
+Payment only, below the bank accounts, in a group of its own, "Apply a
+customer deposit or retainer (no money moves)". A payment into it applies the money
+held to the customer's invoices: it debits the liability and credits A/R, no
+money moves, and it never waits in Undeposited Funds. Such a payment must be
+applied to invoices in full, and the form asks before applying more than the
+account holds; the API refuses both the same way on `POST /api/payments` and
+on an edit (`POST /api/payments/{id}/replace`), and `allow_overdraw` applies
+more than the account holds. Batch Payments, the importers and the bank feed
+are not checked, and a sales receipt deposited to a ticked account posts as
+it always has. An account ticked
+here and later changed so it no longer qualifies (made a bank or credit card
+account, made inactive, or renamed onto a construction account) is shown as
+"(unavailable)", is not offered in Deposit To and takes deposits as any such
+account does; it does not stop the rest of Settings saving, and unticking it
+takes it off the list.
+Editing any payment keeps its own Deposit To and Method, whether or not the
+account is ticked here or is a bank account at all. An edit that keeps a
+ticked account may not leave more unapplied than the payment had, and asks
+before taking more than the account holds once it takes more than the payment
+did, so a payment saved before the account was ticked can still be corrected.
+
 Above the register, **From**, **To** and **Class** narrow what it shows. A
 From date adds a *Balance brought forward* row, and the running balance
 counts the lines shown. The dates apply when you press Enter or leave the
@@ -294,7 +328,7 @@ check** opens a sample check (Sample Payee, $1,234.56, today, "Alignment
 test") in a new tab; print it on plain paper and hold it against your stock
 to see how far to nudge. The test check uses the stock and nudges as they
 stand in the form, saved or not, so a change can be tried before saving it
-(`GET /api/checks/test-print?check_stock=&check_position=&check_nudge_x_in=&check_nudge_y_in=&check_field_layout=`,
+(`GET /api/checks/test-print?check_stock=&check_position=&check_nudge_x_in=&check_nudge_y_in=&check_field_layout=&check_amount_no_dollar_sign=&check_amount_asterisk_fill=`,
 each optional). This applies to every check print path — a bill
 payment, Pay Bills, the batch print of waiting checks, a register check
 and an expense paid from a bank account.
@@ -326,6 +360,24 @@ what differs from today — `x` and `y` (inches), `size` (points) and `bold`
 (true or false), such as `{"date": {"x": -0.2, "size": 12, "bold": true}}`;
 `""` is today's layout. A value out of bounds is refused with a sentence that
 names the field, and nothing is saved.
+
+**The amount in figures** has two boxes of its own. Some stock prints its
+own "$" beside the amount box; **Leave the dollar sign off the amount**
+(v2.32.0) prints the figures as "1,234.56" so the check does not show two.
+**Fill the amount with asterisks** prints two asterisks in front of the
+figures so nothing can be written ahead of them:
+`$**1,234.56`, or `**1,234.56` with the dollar sign left off. Both are
+off by default, so a check that prints right today prints the same after an
+upgrade, whichever stock is chosen; turn them on to suit your stock. The
+figures stay right-aligned, so the last figure ends where it always has and
+the asterisks take room to its left; with the check on top, a payee's name
+long enough to be cut before the amount is cut 0.2 in sooner to leave them
+that room. Either box applies to the check at the bottom and on top, to
+plain, pre-printed and blank stock, to every print path and to the test
+check, saved or not. The amount in words, the stubs, the vouchers and the
+MICR line print as they always have. The API keeps them as
+`check_amount_no_dollar_sign` and `check_amount_asterisk_fill`, `"true"` or
+`"false"` on `PUT /api/settings`.
 
 **Check position** (v2.31.9) says where the check sits on the sheet.
 **Check at the bottom** (the default) prints two stubs and then the check,
@@ -504,7 +556,7 @@ or card account posts as a transfer and keeps its class and job.
 ## Bank feeds and file imports: the review queue
 
 A statement line arriving by a bank feed (SimpleFIN, [setup-bank-feeds.md](setup-bank-feeds.md),
-or Mercury, [setup-mercury.md](setup-mercury.md)), or an OFX/QFX or CSV
+or Mercury, [setup-mercury.md](setup-mercury.md)), or an OFX/QFX/QBO or CSV
 import. A feed's **Imports into** list offers every bank and card account in
 the chart, and picking one makes the feed for it (2.31.1). CSV
 files: the Bank of America, Chase and PayPal layouts, or any file whose

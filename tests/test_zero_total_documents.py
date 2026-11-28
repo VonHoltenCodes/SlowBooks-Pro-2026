@@ -218,7 +218,12 @@ def test_the_credit_memo_and_recurring_forms_price_the_item_and_show_a_total():
         assert 'class="line-qty" type="number"' in row, page
         assert row.count(f'oninput="{obj}.recalc()"') == 2, page
         assert 'class="col-amount line-amount"' in row, page
-        assert f"SalesLines.fillFromItem(row, {obj}._items)" in src, page
+        # these forms keep the price floor on a Discount item: their server
+        # takes no discount line
+        assert (
+            f"SalesLines.fillFromItem(row, {obj}._items, {{ allowNegative: false }})"
+            in src
+        ), page
         assert f"SalesLines.totals($('#{prefix}-lines')" in src, page
         for cell in ("subtotal", "tax", "total"):
             assert f'id="{prefix}-{cell}"' in src, (page, cell)

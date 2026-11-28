@@ -54,7 +54,8 @@ def _local_date(ts: datetime) -> date:
 
 def job_closed_by(job: Job, as_of: Optional[date] = None) -> bool:
     """Whether the job was closed on `as_of`: its status is Closed and it
-    went to Closed by then (a job closed with no date on file counts as
+    went to Closed by then, the close day included: a job closed on a day is
+    closed as of that day (a job closed with no date on file counts as
     closed on every date). None: closed today."""
     if job.status not in _CLOSED:
         return False
@@ -525,8 +526,9 @@ def _wip_row_warnings(
         out.append(
             f"{job.name}: billed in full, retainage collected and every "
             f"commitment closed, yet {_money_text(ctc)} of cost to complete "
-            "remains. If the job is finished, close it (a closed job reads "
-            "100% complete) or enter 0 in the Cost-to-Complete Forecast."
+            "remains. If the job is finished, enter 0 in the Cost-to-Complete "
+            "Forecast, or close the job: a job closed on or before the "
+            "schedule's date is left off the schedule."
         )
     return out
 

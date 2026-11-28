@@ -64,7 +64,7 @@ const App = {
         // Phase 2: Accounts Payable
         '/purchase-orders': { page: 'purchase-orders', label: 'Purchase Orders',  render: () => PurchaseOrdersPage.render() },
         '/bills':         { page: 'bills',           label: 'Bills',              render: () => BillsPage.render() },
-        '/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',   render: () => BillQuickEntry.render(), mount: () => () => PendingFiles.discard() },
+        '/bill-entry':    { page: 'bill-entry',      label: 'Bill Quick Entry',   render: () => BillQuickEntry.render(), mount: () => BillQuickEntry.mount() },
         '/bills/:id':         { page: 'bills',      label: 'Bill',          document: true, render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.view(id)) },
         '/bill-payments/:id': { page: 'bills',      label: 'Bill Payment',  document: true, render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.viewPayment(id)) },
         '/credit-memos':  { page: 'credit-memos',    label: 'Credit Memos',       render: () => CreditMemosPage.render() },
@@ -124,8 +124,12 @@ const App = {
         // opened over the page in view (App.openOver): its list isn't drawn
         const over = App._openOver;
         App._openOver = null;
+        // the move this document belongs to (App.navigate): one overtaken
+        // while its list loaded opens nothing over the page moved to since
+        const seq = App._navSeq;
         const html = over ? '' : await list();
         setTimeout(() => {
+            if (App._overtaken(seq)) return;
             // the dialog about to open is the address's own, over the list
             // (App.dialogClosed) — or over the page it was opened from
             App._dialogUnder = over ? (location.hash || '#/') : App.pageUnder(location.hash);
@@ -750,10 +754,36 @@ const App = {
         return { path, query };
     },
 
+    // The last move wins. Two can be under way at once: the app's first
+    // page (App.init) still loading when a sidebar link, a shortcut or a
+    // save moves on, and whichever finished last was drawn, so a slow
+    // Dashboard landed over the Expenses list just chosen, with the address
+    // and the sidebar saying Expenses. Each move has a number; one
+    // overtaken by a later one draws nothing, and waiting on any of them
+    // waits until the page the address names is drawn.
+    _navSeq: 0,
+    _navRun: null,
+
     async navigate(hash) {
         // the way back to the entry a declined move left (App.stayPut):
         // the page is still that entry's, nothing to render
         if (App._stay) { App._stay = false; App.addressShown(); return; }
+        const seq = ++App._navSeq;
+        let run = App._navigateTo(hash, seq);
+        // a move started while this one's first steps ran (before its
+        // first wait) is the later one: its run stays the one awaited
+        if (!App._overtaken(seq)) App._navRun = run;
+        await run;
+        while (App._navRun !== run) {
+            run = App._navRun;
+            try { await run; } catch (e) { /* that move's own caller hears of it */ }
+        }
+    },
+
+    // a move overtaken by a later one (App.navigate)
+    _overtaken(seq) { return seq !== App._navSeq; },
+
+    async _navigateTo(hash, seq) {
         // an invited sign-in with its one-time password sets its own
         // before any page (#345); the server refuses everything else
         if (App.mustChangePassword) {
@@ -849,9 +879,11 @@ const App = {
         if (typeof API !== 'undefined' && API && typeof API.revalidate === 'function') {
             await App.refreshSettings('page');
         }
+        if (App._overtaken(seq)) return;
 
         try {
             const html = await route.render(param, query);
+            if (App._overtaken(seq)) return;
             if (adminOnly()) return showAdminOnly();
             $('#page-content').innerHTML = html;
             // Another page opens at its top. A register opens at its foot
@@ -874,6 +906,7 @@ const App = {
             // goes back on the row, as a report's rows have it (W-7)
             if (history.state && history.state.focus) ReportsPage._refocusRow($('#page-content'));
         } catch (err) {
+            if (App._overtaken(seq)) return;
             if (adminOnly()) return showAdminOnly();
             // a sign-in that must set its password first: the form, not
             // the refusal its page met (NEW-149)
@@ -1145,7 +1178,7 @@ const App = {
         'JobsPage.coMakeSub', 'JobsPage.coSubmitSubOrder',
         'JobsPage.paNew', 'JobsPage.paEdit', 'JobsPage.paSave', 'JobsPage.paSubmit', 'JobsPage.paApprove',
         'JobsPage.paVoid', 'JobsPage.paDelete', 'JobsPage.paMakeWaiver', 'JobsPage.paAddDeposit', 'JobsPage.paSaveDeposit', 'JobsPage.paVoidDeposit',
-        'PurchaseOrdersPage.subPayApp', 'PurchaseOrdersPage.releaseRetainage',
+        'PurchaseOrdersPage.subPayApp', 'PurchaseOrdersPage.releaseRetainage', 'PurchaseOrdersPage.doReleaseRetainage',
         'InKindPage.voidEntry', 'ReleasesPage.voidEntry',
         'AllocationsPage.voidEntry', 'AllocationsPage.deleteRule', 'AllocationsPage.showRun', 'RecurringPage.generateNow',
         'RecurringPage.del', 'MemorizedPage.enter', 'MemorizedPage.doEnter', 'MemorizedPage.pause', 'MemorizedPage.resume',
@@ -2848,6 +2881,7 @@ const App = {
     showCompany(s) {
         App.settings = s || {};
         App.applyHiddenMenu(App.settings);
+        App.showCompanyLogo(App.settings);
         const name = App.settings.company_name;
         if (!name || name === 'My Company') return;
         const companyEl = $('#status-company');
@@ -2857,6 +2891,48 @@ const App = {
         App.setWindowTitle(name);
         const brand = $('#topbar-company');
         if (brand) brand.textContent = name;
+    },
+
+    // The company's own logo in the top bar (2.32.0), where the product's
+    // mark sat before #978 moved it to the sidebar: only when the company
+    // turned "Show the company logo in SlowBooks Pro" on and has a logo.
+    // An <img> of the logo's own address (an SVG shown this way runs
+    // nothing), never its markup; named by the company; put away if it
+    // fails to load. Off, the bar is exactly as index.html draws it: the
+    // image is added here and taken out again, never left hidden in it.
+    // topbar_fit.js folds it away, as it did the mark, when the bar is
+    // short of room. Settings re-read on focus (refreshSettings) and a
+    // save both come here, so turning it on or off shows at once.
+    companyLogoSrc(s) {
+        s = s || {};
+        if (s.company_logo_in_app !== 'true') return '';
+        const path = String(s.company_logo_path || '');
+        return /^\/api\/uploads\/logo\/\d{1,12}$/.test(path) ? path : '';
+    },
+
+    showCompanyLogo(s) {
+        const src = App.companyLogoSrc(s);
+        let img = document.getElementById('topbar-logo');
+        if (!src) {
+            if (img) img.remove();
+            return;
+        }
+        const back = document.getElementById('back-btn');
+        if (!img) {
+            if (!back || !back.parentNode) return;
+            img = document.createElement('img');
+            img.id = 'topbar-logo';
+            img.className = 'topbar-logo';
+            img.decoding = 'async';
+            img.addEventListener('error', () => { img.hidden = true; });
+            back.parentNode.insertBefore(img, back);
+        }
+        const name = String((s && s.company_name) || '').trim();
+        img.alt = name || 'Company logo';
+        if (img.getAttribute('src') !== src) {
+            img.hidden = false;
+            img.setAttribute('src', src);
+        }
     },
 
     // Rewrites the static shell into the company's words. index.html is

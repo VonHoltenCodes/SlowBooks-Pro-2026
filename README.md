@@ -115,7 +115,12 @@ and a California employer's 2026 Form 940 carries the credit reduction
 fee and the payout (#583, #584); a file from before 2.29.0 is sent to
 2.31.14 first (#769), and the Server Edition runs with debug off (#812). The
 desktop window's title names the open company and its text can be selected
-and copied (#1145, #1146). Outgoing email now verifies the mail server's
+and copied (#1145, #1146). A local templates folder holds your own layouts
+for printed documents (#1235); Record Payment can apply a customer deposit
+or retainer held in a liability account to the customer's invoices (#1237);
+a check's amount can be filled with asterisks (#1239); and the company's own
+logo can show in the app, in the top bar, on the sign-in screen and in the
+company picker. Outgoing email now verifies the mail server's
 security certificate before it sends the password or any mail: a mail server
 with a self-signed or mismatched certificate will stop accepting mail from
 SlowBooks Pro until its certificate is fixed (#1150).
@@ -135,7 +140,7 @@ against any of eight providers (Anthropic Claude and xAI Grok first, then
 Groq, Cloudflare Workers AI, OpenAI, Google Gemini, a Cloudflare Worker you
 host yourself, or any OpenAI-compatible endpoint you name) — keys encrypted at rest with versioned, rotatable ciphertext.
 And the whole app is agent-operable: every install serves a
-self-documenting local REST API (835 operations) — built for Claude
+self-documenting local REST API (887 operations) — built for Claude
 Code and Grok first, and any agentic CLI works; the
 [AI setup guide](https://www.slowbookspro.com/ai/) has the paste-prompt.
 Settings → Connections → **Connect to AI assistant** connects Claude or
@@ -174,7 +179,7 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
 - **Double-entry core** — auto + manual journals, closing-date
   enforcement, automatic audit log, 50-account contractor chart
 - **Banking** — the register is the ledger (entries post, feeds are a review queue, reconciliation over ledger lines), transfers, deposits (onto the bank's pre-printed slips too), check printing,
-  OFX/QFX + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN and Mercury bank feeds,
+  OFX/QFX/QBO + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN and Mercury bank feeds,
   shared auto-categorization rules
 - **Reports & tax** — P&L (plain & by Class), Balance Sheet, Trial
   Balance, agings, GL, Cash Flow, Sales Tax with pay-to-government flow
@@ -243,6 +248,8 @@ and double-click. Fully self-contained (64-bit Windows 10/11); a portable
 — it needs the Microsoft Edge WebView2 runtime, 101 or later, which Windows 11
 has and the installer sets up or updates; without it, or with an older one,
 the app says so and offers to open in your browser instead.
+Unblock the .zip before extracting it (right-click → Properties → tick
+**Unblock** → OK), and extract each version into its own folder.
 Each company is one SQLite file under `%LOCALAPPDATA%\SlowBooksPro` —
 upgrades and even uninstalls never touch your books.
 
@@ -293,6 +300,7 @@ Production checklist: **[docs/release-checklist.md](docs/release-checklist.md)**
 | [docs/development.md](docs/development.md) | Tech stack, project structure, contributor flow |
 | [docs/data-model.md](docs/data-model.md) | Database schema |
 | [docs/operations.md](docs/operations.md) | Backups, restore, key rotation, monitoring |
+| [docs/local-templates.md](docs/local-templates.md) | Your own invoice, statement and other printed layouts: the local templates folder and what each template receives |
 | [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Payroll / HR module reference |
 | [docs/release-checklist.md](docs/release-checklist.md) | Production deployment checklist |
 | [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md) | Real certs in front of SlowBooks (Caddy, nginx, Traefik) |

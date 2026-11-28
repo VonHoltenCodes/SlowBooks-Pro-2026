@@ -1489,6 +1489,40 @@ def voided_invoice_line_dims(db: Session, lines) -> dict:
     return out
 
 
+def _pay_app_invoice_types(db: Session, lines) -> tuple[set, set]:
+    """For the income lines of invoices (and their voids) in `lines`: the ids
+    of those invoices that came from a pay application, and the (invoice id,
+    cost code id) pairs among them whose invoice line names a cost type of
+    its own, which keeps it."""
+    from app.models.invoices import Invoice, InvoiceLine
+
+    ids = {
+        txn.source_id
+        for _ln, txn, acct in lines
+        if txn.source_type in ("invoice", "invoice_void")
+        and acct.account_type == AccountType.INCOME
+    }
+    if not ids:
+        return set(), set()
+    pay = {
+        i
+        for (i,) in db.query(Invoice.id).filter(
+            Invoice.id.in_(ids), Invoice.pay_application_id.isnot(None)
+        )
+    }
+    if not pay:
+        return set(), set()
+    typed = {
+        (i, c)
+        for i, c in db.query(InvoiceLine.invoice_id, InvoiceLine.cost_code_id).filter(
+            InvoiceLine.invoice_id.in_(pay),
+            InvoiceLine.cost_type.isnot(None),
+            InvoiceLine.cost_type != "",
+        )
+    }
+    return pay, typed
+
+
 def job_cost_tree(
     db: Session,
     job_id: int,
@@ -1506,12 +1540,13 @@ def job_cost_tree(
     Status reads them that day.
 
     Revenue sits on the cost code and type its line or budget names (an
-    invoice line's own, #1055, else the code's type), so every figure in
-    the totals is on a row (#1066); revenue with no code and no type is
-    `unassigned_revenue`, a row of its own. A contractor's revenue is also
-    compared by section: `revenue_sections` puts each section's budgeted and
-    actual revenue beside its budgeted and actual cost, the billed markups
-    spread over the sections."""
+    invoice line's own, #1055, else the code's type; a pay application's
+    line, which names none, is spread over its code's budgeted revenue by
+    type), so every figure in the totals is on a row (#1066); revenue with
+    no code and no type is `unassigned_revenue`, a row of its own. A
+    contractor's revenue is also compared by section: `revenue_sections`
+    puts each section's budgeted and actual revenue beside its budgeted and
+    actual cost, the billed markups spread over the sections."""
     construction = _is_construction(db)
     # a contractor's commitments read as of the end date, as Commitment
     # Status does; other companies keep today's open commitments
@@ -1599,6 +1634,42 @@ def job_cost_tree(
             return ("code", code_id, t or "other")
         return ("uncoded", t or "other")
 
+    # A pay application's invoice line names a cost code and no cost type
+    # (an SOV line merges every type the estimate bid it under), so the
+    # ledger stamps the code's own type on its revenue. Here that revenue is
+    # spread over the types the code's budgets carry revenue on, in
+    # proportion to it, as its estimated revenue is; a code with no budgeted
+    # revenue keeps it on its own type. The totals, the section table and the
+    # ledger are unchanged.
+    type_order = {t.code: i for i, t in enumerate(ordered_types)}
+    rev_weights: dict = {}
+    for b in budgets:
+        if b.cost_code_id in code_by_id:
+            t = eff_type(b.cost_code_id, b.cost_type) or "other"
+            w = rev_weights.setdefault(b.cost_code_id, {})
+            w[t] = w.get(t, Decimal("0")) + Decimal(str(b.revenue_amount or 0))
+    pay_invoices, typed_pairs = _pay_app_invoice_types(db, lines)
+
+    def parts_for(txn, code_id, k, amt):
+        if (
+            txn.source_type not in ("invoice", "invoice_void")
+            or txn.source_id not in pay_invoices
+            or k[0] != "code"
+            or (txn.source_id, code_id) in typed_pairs
+        ):
+            return [(k, amt)]
+        weights = sorted(
+            ((t, w) for t, w in rev_weights.get(code_id, {}).items() if w > 0),
+            key=lambda tw: (type_order.get(tw[0], len(type_order)), tw[0]),
+        )
+        if not weights:
+            return [(k, amt)]
+        denom = sum((w for _t, w in weights), Decimal("0"))
+        out = [(("code", code_id, t), _q(amt * w / denom)) for t, w in weights[:-1]]
+        rest = _q(amt - sum((p for _k, p in out), Decimal("0")))
+        out.append((("code", code_id, weights[-1][0]), rest))
+        return out
+
     for ln, txn, acct in lines:
         code_id, line_ct = void_dims.get(ln.id, (ln.cost_code_id, ln.cost_type))
         k = key_for(code_id, line_ct)
@@ -1607,36 +1678,39 @@ def job_cost_tree(
             # revenue with no cost code and no cost type has a row of its
             # own (#1066), not Other's "No cost code"
             k = ("revenue_uncoded",)
-        f = fig.setdefault(k, _blank())
         if is_income:
             amt = Decimal(str(ln.credit)) - Decimal(str(ln.debit))
             # on the code and type the line names (#1055), so every figure
             # in the Total row is on a row above it (#1066); a contractor's
             # revenue is compared by section as well
-            f["act_revenue"] += amt
             if construction:
                 section_cell(code_id)["act_revenue"] += amt
             kind = "income"
+            parts = parts_for(txn, code_id, k, amt)
         else:
             amt = Decimal(str(ln.debit)) - Decimal(str(ln.credit))
-            f["actual"] += amt
             if construction:
                 section_cell(code_id)["actual"] += amt
             kind = "cost"
-        line_rows.setdefault(k, []).append(
-            {
-                "transaction_id": txn.id,
-                "date": txn.date.isoformat(),
-                "source_type": txn.source_type,
-                "source_id": txn.source_id,
-                "reference": txn.reference or "",
-                "description": ln.description or txn.description or "",
-                "account_name": acct.name,
-                "kind": kind,
-                "amount": float(amt),
-                "is_billable": bool(ln.is_billable),
-            }
-        )
+            parts = [(k, amt)]
+        for pk, part in parts:
+            fig.setdefault(pk, _blank())[
+                "act_revenue" if is_income else "actual"
+            ] += part
+            line_rows.setdefault(pk, []).append(
+                {
+                    "transaction_id": txn.id,
+                    "date": txn.date.isoformat(),
+                    "source_type": txn.source_type,
+                    "source_id": txn.source_id,
+                    "reference": txn.reference or "",
+                    "description": ln.description or txn.description or "",
+                    "account_name": acct.name,
+                    "kind": kind,
+                    "amount": float(part),
+                    "is_billable": bool(ln.is_billable),
+                }
+            )
     for code_id, line_ct, amt in committed_rows:
         k = key_for(code_id, line_ct)
         fig.setdefault(k, _blank())["committed"] += Decimal(str(amt))

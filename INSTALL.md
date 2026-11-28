@@ -91,6 +91,16 @@ other desktop app. If something goes wrong before the app window can open, a
 small popup explains it, and full details are written to
 `%LOCALAPPDATA%\SlowBooksPro\data\launcher.log`.
 
+### The portable .zip
+
+The release also has a portable `SlowBooksPro-windows-x64.zip`. Before you
+extract it, right-click the downloaded .zip, choose **Properties**, tick
+**Unblock** at the bottom and press **OK**; then extract each version into
+its own folder (for example `SlowBooks Pro 2.32.0`). If it was extracted
+without that, SlowBooks Pro removes the download mark from its own .NET
+DLLs when it starts, and says so in `launcher.log`. It keeps its books in
+the same `%LOCALAPPDATA%\SlowBooksPro` as the installed app.
+
 ### Microsoft Edge WebView2 (the app window)
 
 The app's window is drawn by Microsoft's Edge WebView2 runtime, which
@@ -223,6 +233,13 @@ Open **http://localhost:3001** in your browser.
 > `docker-compose.prod.yml` behind a TLS proxy: [docs/cloud-hosting.md](docs/cloud-hosting.md)
 > is the whole recipe, and [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md)
 > covers the proxy, `FORWARDED_ALLOW_IPS` and `RATE_LIMIT_STORAGE_URI`.
+
+> The **About** box of a Docker build shows the version alone, such as
+> `2.32.0`. To show the commit after it (`2.32.0+<commit>`), so two builds of
+> one version can be told apart, build with
+> `SLOWBOOKS_COMMIT=$(git rev-parse HEAD) docker compose up --build` (Linux
+> and macOS shells; in PowerShell run `$env:SLOWBOOKS_COMMIT = git rev-parse HEAD`
+> first, then `docker compose up --build`). It is optional.
 
 > On Windows, **Option 0** avoids all of this (no Docker at all, secret
 > generated for you, opens a desktop window, and serves the office as Server

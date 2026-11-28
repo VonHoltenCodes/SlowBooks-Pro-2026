@@ -12,7 +12,7 @@ def test_the_review_category_list_groups_transfers():
     fill = js.split("_fillReviewCats() {")[1].split("async addLine(")[0]
     assert '<optgroup label="Categories">' in fill
     assert '<optgroup label="Transfer to another account">' in fill
-    assert "usable.filter(a => a.bank_kind)" in fill
+    assert "named.filter(({ a }) => a.bank_kind)" in fill
 
 
 def test_the_guide_says_how_a_transfer_is_posted_from_the_feed():

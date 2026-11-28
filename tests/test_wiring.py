@@ -282,6 +282,10 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     # the Settings page and the invoice view put in an <img src> as a value,
     # not a literal the JS scan can see.
     ("GET", "/api/uploads/logo/{file_id}"),
+    # The logo before a sign-in (2.32.0): its address comes as a value
+    # (company_logo_url, logo_url in /api/companies) that the sign-in
+    # screen and Company Files put in an <img src>, not a literal.
+    ("GET", "/api/auth/company-logo"),
     ("POST", "/api/payroll/gross-up"),
     ("POST", "/api/time-entries/classify"),
     # Legacy: superseded by /api/payroll/forms/* — kept until next major release.

@@ -128,7 +128,7 @@ const IIFPage = {
                         { text: `or, for timesheets, <strong>Time by Job Detail</strong> (Reports > Jobs, Time &amp; Mileage; a Time by Name report grouped by job reads too), saved as CSV or Excel: every entry becomes an approved time entry under its employee, marked as QuickBooks' so no pay run picks it up.` },
                         { text: `Keep each report's default columns, except the sales Transaction Detail and Transaction Detail by Account, which need <strong>Debit</strong> and <strong>Credit</strong> ticked (Customize Report &gt; Display; Amount may stay). From Excel, upload the .xlsx itself or File &gt; Save As &gt; CSV (Comma delimited). Safe to re-upload — what is already here is skipped.` },
                         { text: `<strong>A categorized bank sheet</strong> (the Transaction Pro / SaasAnt layout: Bank Account, Transaction Date, Memo, Payee, Account, Amount) posts each row as the register entry it is, rows sharing the date, payee and memo as one split entry; payees not on the lists are added.` },
-                        { text: `A bank or credit card <strong>statement</strong> (CSV, OFX, QFX) is not imported here: it goes in from the account itself, under <a href="#/banking">Banking</a> → the account → <strong>Import file</strong>.` },
+                        { text: `A bank or credit card <strong>statement</strong> (CSV, OFX, QFX, QBO) is not imported here: it goes in from the account itself, under <a href="#/banking">Banking</a> → the account → <strong>Import file</strong>.` },
                     ])}</div>
                     <label style="display:flex; align-items:center; gap:6px; font-size:11px; margin-bottom:8px;">
                         <input type="checkbox" id="qbcsv-outflow-positive">

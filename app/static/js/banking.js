@@ -1395,15 +1395,19 @@ const BankingPage = {
             }
         }
         const filterQs = Object.entries(f).filter(([, v]) => v).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
-        const [reg, overview, classes, chart, vendors, customers, jobs] = await Promise.all([
+        const [reg, overview, classes, chartAll, vendors, customers, jobs] = await Promise.all([
             API.get(`/banking/check-register?account_id=${id}${filterQs}`),
             API.get('/banking/overview'),
             API.get('/classes?include_archived=true').catch(() => []),
-            API.get('/accounts?active_only=true').catch(() => []),
+            API.get('/accounts').catch(() => []),
             API.get('/vendors?active_only=true').catch(() => null),
             API.get('/customers?active_only=true&tree=1').catch(() => null),
             API.get('/jobs').catch(() => []),
         ]);
+        // the whole chart names a sub-account by its path; the active
+        // accounts are the ones offered
+        BankingPage._chartAll = chartAll;
+        const chart = chartAll.filter(a => a.is_active !== false);
         BankingPage._accounts = chart;
         BankingPage._setVendors(vendors);
         BankingPage._customerNames = customers ? new Set(customers.map(c => c.name.toLowerCase())) : null;
@@ -1768,7 +1772,8 @@ const BankingPage = {
     },
 
     async _fillCategorySelects(kind) {
-        const accounts = await API.get('/accounts?active_only=true');
+        BankingPage._chartAll = await API.get('/accounts');
+        const accounts = BankingPage._chartAll.filter(a => a.is_active !== false);
         BankingPage._reviewAccounts = accounts.filter(a => BankingPage.CATEGORY_TYPES.includes(a.account_type));
         BankingPage._fillReviewCats();
     },
@@ -1777,6 +1782,25 @@ const BankingPage = {
     // now; a line keeps its own choice (one picked a moment ago, not yet
     // reloaded, included).
     _reviewAccounts: null,
+    // The whole chart as last read, inactive accounts too: what a category
+    // picker's sub-account path is read from.
+    _chartAll: [],
+    // The register's category pickers name a sub-account by its path,
+    // "Telephone Expense: 8127", as the chart nests it (a QuickBooks import
+    // names it by its leaf alone), and list it under its parent, in the
+    // chart's order. The path comes from the whole chart, so a parent of
+    // another type, or an inactive one, still names itself. Each account
+    // shown, with the name to label it by.
+    _categoryNames(shown) {
+        const all = BankingPage._chartAll || [];
+        const known = new Set(all.map(a => a.id));
+        const chart = all.concat(shown.filter(a => !known.has(a.id)));
+        const path = App._accountTree(chart).path;
+        const wanted = new Set(shown.map(a => a.id));
+        return App._accountTreeOrder(chart, false)
+            .filter(({ a }) => wanted.has(a.id))
+            .map(({ a }) => ({ a, name: path(a) }));
+    },
     // The bank and card accounts under their own heading (#948): a line
     // whose category is another bank or card account posts as a transfer,
     // and the heading says so where the hand goes; the kind label stays.
@@ -1784,9 +1808,10 @@ const BankingPage = {
         const usable = BankingPage._reviewAccounts || [];
         document.querySelectorAll('select.review-cat, select.review-bulk-cat').forEach(sel => {
             const current = sel.value || sel.dataset.current;
-            const opt = (a) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
-            const transfers = usable.filter(a => a.bank_kind);
-            const categories = usable.filter(a => !a.bank_kind);
+            const opt = ({ a, name }) => `<option value="${a.id}" ${String(a.id) === current ? 'selected' : ''}>${accountLabel(a, name)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`;
+            const named = BankingPage._categoryNames(usable);
+            const transfers = named.filter(({ a }) => a.bank_kind);
+            const categories = named.filter(({ a }) => !a.bank_kind);
             sel.innerHTML = '<option value="">Pick a category…</option>'
                 + `<optgroup label="Categories">${categories.map(opt).join('')}</optgroup>`
                 + (transfers.length ? `<optgroup label="Transfer to another account">${transfers.map(opt).join('')}</optgroup>` : '');
@@ -2390,9 +2415,18 @@ const BankingPage = {
             const bar = `<div style="margin-bottom:8px; font-size:12px;"><label for="match-range">Look for postings</label>
                 <select id="match-range" data-readonly-ok onchange="BankingPage.matchRangeChanged(this, ${lineId}, ${accountId})" style="margin-left:6px;">${opts}</select>
                 <span style="color:var(--gray-500); margin-left:6px;">either side of the line's date</span></div>`;
-            openModal('Match to a posting', bar + BankingPage._feedPayOffer(lineId, accountId) + (rows
+            // with nothing to match, the line most often pays open bills
+            // (or is a customer's payment): name that way, and open it
+            const offer = BankingPage._feedPayOffer(lineId, accountId);
+            const t = (BankingPage._reviewLines || {})[lineId];
+            const moneyIn = t && parseFloat(t.amount) > 0;
+            const payWay = !offer ? ''
+                : moneyIn ? ` If it is a ${T('customer').toLowerCase()}'s payment, pick or check the ${T('customer').toLowerCase()} under <strong>Receive payment</strong> above.`
+                : ' If it pays open bills, pick or check the vendor under <strong>Pay bills</strong> above.';
+            openModal('Match to a posting', bar + offer + (rows
                 ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Payee / description</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col"></th></tr></thead><tbody>${rows}</tbody></table></div>`
-                : `<p>Nothing in the books has this amount ${within}. Look further back, or use <strong>Add</strong> to post it.</p>`));
+                : `<p>Nothing in the books has this amount ${within}.${payWay} Otherwise look further back, or use <strong>Add</strong> to post it.</p>`));
+            if (!rows && offer) await BankingPage.openFeedPay(lineId, accountId, { focus: !refocus });
             if (refocus) { const sel = document.getElementById('match-range'); if (sel) sel.focus(); }
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -2418,27 +2452,37 @@ const BankingPage = {
 
     _feedPayCtx: null,
 
-    async openFeedPay(lineId, accountId) {
+    async openFeedPay(lineId, accountId, { focus = true } = {}) {
         const t = (BankingPage._reviewLines || {})[lineId];
         const panel = document.getElementById('feed-pay-panel');
         const opener = document.getElementById('feed-pay-open');
         if (!t || !panel) return;
+        const open = BankingPage._feedPayCtx;
+        if (!panel.hidden && open && open.lineId === lineId) {
+            // already open (by itself, when nothing matched): keep the picks
+            const party = document.getElementById('feed-pay-party');
+            if (party && focus) party.focus();
+            return;
+        }
         const moneyIn = parseFloat(t.amount) > 0;
-        BankingPage._feedPayCtx = { lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
+        const ctx = { lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
+        BankingPage._feedPayCtx = ctx;
         let picked = '';
         let options = '';
+        let payee = t.payee || t.description || '';
+        const parties = moneyIn ? (BankingPage._customers || [])
+            : [...(BankingPage._vendorsByName || new Map()).values()].sort((a, b) => a.name.localeCompare(b.name));
         if (moneyIn) {
             const sel = document.getElementById(`rv-customer-${lineId}`);
             picked = String((sel && sel.value) || t.pick_customer_id || '');
-            options = (BankingPage._customers || [])
-                .map(c => `<option value="${c.id}"${String(c.id) === picked ? ' selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
         } else {
             const box = document.getElementById(`rv-vendor-${lineId}`);
+            if (box && box.value.trim()) payee = box.value;
             picked = String(BankingPage._payeeVendorId(box ? box.value : '') || t.pick_vendor_id || t.rule_vendor_id || '');
-            options = [...(BankingPage._vendorsByName || new Map()).values()]
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(v => `<option value="${v.id}"${String(v.id) === picked ? ' selected' : ''}>${escapeHtml(v.name)}</option>`).join('');
         }
+        if (!picked) picked = await BankingPage._feedPayGuess(moneyIn, ctx.amount, payee, parties);
+        if (BankingPage._feedPayCtx !== ctx || document.getElementById('feed-pay-panel') !== panel) return;  // closed or reopened meanwhile
+        options = parties.map(p => `<option value="${p.id}"${String(p.id) === picked ? ' selected' : ''}>${escapeHtml(moneyIn ? customerLabel(p) : p.name)}</option>`).join('');
         const who = moneyIn ? T('Customer') : 'Vendor';
         panel.innerHTML = `<form id="feed-pay-form" onsubmit="BankingPage.submitFeedPay(event)">
                 <div class="form-group" style="margin-bottom:6px;"><label for="feed-pay-party">${who}</label>
@@ -2452,21 +2496,55 @@ const BankingPage = {
         panel.hidden = false;
         if (opener) opener.setAttribute('aria-expanded', 'true');
         if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms(panel);
-        if (picked) await BankingPage.loadFeedPayDocs();
-        else BankingPage._feedPaySum();
+        await BankingPage.loadFeedPayDocs();
         const party = document.getElementById('feed-pay-party');
-        if (party) party.focus();
+        if (party && focus) party.focus();
+    },
+
+    // The one to pay or receive from when the line does not say: the one
+    // whose name begins the bank's payee text ("PARTS DEPOT #4411" is Parts
+    // Depot), the longest such name, since the bank naming someone beats an
+    // amount that happens to agree; else the only one with an open bill (or
+    // invoice) of exactly the line's amount; else none ('').
+    async _feedPayGuess(moneyIn, amount, payee, parties) {
+        const text = String(payee || '').trim().toLowerCase();
+        let best = null;
+        for (const p of parties) {
+            const name = String(p.name || '').trim().toLowerCase();
+            if (!name || !text.startsWith(name) || /[a-z0-9]/.test(text.charAt(name.length))) continue;
+            if (!best || name.length > best.name.length) best = { id: String(p.id), name };
+        }
+        if (best) return best.id;
+        const known = new Set(parties.map(p => String(p.id)));
+        const cents = Math.round((amount || 0) * 100);
+        try {
+            const docs = await fetchAllPages(moneyIn ? '/invoices?open_only=true' : '/bills?open_only=true');
+            const who = new Set(docs
+                .filter(d => d.status !== 'void' && Math.round((parseFloat(d.balance_due) || 0) * 100) === cents)
+                .map(d => String(moneyIn ? (d.bill_to_customer_id || d.customer_id) : d.vendor_id)));
+            if (who.size === 1) {
+                const [id] = who;
+                if (known.has(id)) return id;
+            }
+        } catch (err) { /* no guess: the panel says to pick one */ }
+        return '';
     },
 
     // the open invoices or bills of the one picked, oldest first, each
     // filled with what the line covers, oldest first, as Receive Payments
-    // fills them
+    // fills them; but when just one of them is still due exactly the line's
+    // amount, the line plainly pays that one, so only it is filled
     async loadFeedPayDocs() {
         const ctx = BankingPage._feedPayCtx;
         const party = document.getElementById('feed-pay-party');
         const box = document.getElementById('feed-pay-docs');
         if (!ctx || !party || !box) return;
-        if (!party.value) { ctx.docs = []; box.innerHTML = ''; BankingPage._feedPaySum(); return; }
+        if (!party.value) {
+            ctx.docs = [];
+            box.innerHTML = `<p style="font-size:12px;">Pick the ${ctx.moneyIn ? `${T('customer').toLowerCase()} to see their open ${T('invoices').toLowerCase()}` : 'vendor to see their open bills'}.</p>`;
+            BankingPage._feedPaySum();
+            return;
+        }
         const id = parseInt(party.value, 10);
         let docs;
         try {
@@ -2485,9 +2563,11 @@ const BankingPage = {
             return;
         }
         let left = Math.round(ctx.amount * 100);
+        const dueOf = d => Math.round((parseFloat(d.balance_due) || 0) * 100);
+        const exact = docs.filter(d => dueOf(d) === left);
         const rows = docs.map(d => {
-            const due = Math.round((parseFloat(d.balance_due) || 0) * 100);
-            const put = Math.max(0, Math.min(due, left));
+            const due = dueOf(d);
+            const put = exact.length === 1 ? (d === exact[0] ? due : 0) : Math.max(0, Math.min(due, left));
             left -= put;
             const num = ctx.moneyIn ? d.invoice_number : (d.bill_number || d.id);
             return `<tr>
@@ -2577,10 +2657,17 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // The row's category box is narrow: a sub-account's path is cut short
+    // when the list is closed, so the whole name is its tooltip.
+    _titleCategory(sel) {
+        const o = sel.options[sel.selectedIndex];
+        sel.title = o && o.value ? o.text : '';
+    },
+
     _quickEntryRow(accountId, kind, chart, outLabel, inLabel) {
-        const cats = (chart || [])
-            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type))
-            .map(a => `<option value="${a.id}">${accountLabel(a, a.account_path || a.name)}${a.bank_kind ? ' (transfer)' : ''}</option>`).join('');
+        const cats = BankingPage._categoryNames((chart || [])
+            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type)))
+            .map(({ a, name }) => `<option value="${a.id}">${accountLabel(a, name)}${a.bank_kind ? ' (transfer)' : ''}</option>`).join('');
         const key = `onkeydown="BankingPage._quickKey(event, ${accountId})"`;
         const now = new Date();
         const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -2595,7 +2682,7 @@ const BankingPage = {
                     <td><input type="text" id="qe-memo" aria-label="New entry memo" placeholder="Memo" style="width:100%; font-size:11px; padding:2px 4px;" ${key}></td>
                     <td><input type="text" id="qe-ref" aria-label="New entry check or reference number" placeholder="Ref" style="width:60px; font-size:11px; padding:2px 4px;" ${key}></td>
                     <td></td>
-                    <td>${AccountQuickAdd.picker('<select id="qe-category" aria-label="New entry category" data-no-search ' + key + ' style="font-size:11px; padding:2px 4px; max-width:150px;"><option value="">Category…</option>' + cats + '</select>', 'register', { ctx: accountId, id: 'qe-category-add', style: 'font-size:11px; padding:2px 6px;' })}${BankingPage._quickClassHtml(key)}</td>
+                    <td>${AccountQuickAdd.picker('<select id="qe-category" aria-label="New entry category" data-no-search ' + key + ' onchange="BankingPage._titleCategory(this)" style="font-size:11px; padding:2px 4px; max-width:150px;"><option value="">Category…</option>' + cats + '</select>', 'register', { ctx: accountId, id: 'qe-category-add', style: 'font-size:11px; padding:2px 6px;' })}${BankingPage._quickClassHtml(key)}</td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-out" class="money" aria-label="New entry ${escapeHtml(outLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-in" class="money" aria-label="New entry ${escapeHtml(inLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td></td><td></td>
@@ -2749,12 +2836,13 @@ const BankingPage = {
     // + Entry (posts) and Transfer
     // ------------------------------------------------------------------
     async showEntryForm(accountId, entry = null) {
-        const accounts = await API.get('/accounts?active_only=true');
+        BankingPage._chartAll = await API.get('/accounts');
+        const accounts = BankingPage._chartAll.filter(a => a.is_active !== false);
         const me = accounts.find(a => a.id === accountId) || {};
         const isCard = me.bank_kind === 'credit_card';
-        const catOpts = accounts
-            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type))
-            .map(a => `<option value="${a.id}">${accountLabel(a)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`).join('');
+        const catOpts = BankingPage._categoryNames(accounts
+            .filter(a => a.id !== accountId && BankingPage.CATEGORY_TYPES.includes(a.account_type)))
+            .map(({ a, name }) => `<option value="${a.id}">${accountLabel(a, name)}${a.bank_kind ? ' (' + BankingPage._kindLabel(a.bank_kind).toLowerCase() + ')' : ''}</option>`).join('');
         BankingPage._accounts = accounts;
         if (!BankingPage._vendorNames) {
             const vendors = await API.get('/vendors?active_only=true').catch(() => null);
@@ -2799,7 +2887,7 @@ const BankingPage = {
                         <input name="description"></div>
                     ${classGroup}
                     ${jobGroup}
-                    <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from)</span></label>
+                    <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from or went to)</span></label>
                         ${BankingPage.nameSelectHtml('entry-name', 'customer_id', null, `${T('Customer')}`)}</div>
                     <div class="form-group full-width" id="entry-splits" style="display:none;">
                         <label>Split across accounts ${hint("(each line's share of the amount; a loan payment's principal and interest, a check that pays several things, a card processor's deposit as the gross with the fee taken out)", 'Split across accounts')}</label>
@@ -2896,8 +2984,9 @@ const BankingPage = {
     // The form as "Edit entry": the entry's fields in the boxes, its split
     // lines when it has them, and the entry id on the form for saveEntry.
     // What the form has no box for rides along on it and goes back with
-    // the save (#388 review): the entry's job, and each split line's own
-    // class and job. A class archived since keeps its place in the list.
+    // the save (#388 review): the entry's job when there is no Job box,
+    // and each split line's own class and job. A class archived since
+    // keeps its place in the list.
     _fillEntryForm(entry) {
         const form = document.querySelector('#modal-body form');
         if (!form) return;
@@ -2924,6 +3013,14 @@ const BankingPage = {
                 sel.appendChild(opt);
             }
             sel.value = want;
+        }
+        // a job made inactive since keeps its place, or saving would clear it
+        if (form.job_id && entry.job_id && ![...form.job_id.options].some(o => o.value === String(entry.job_id))) {
+            const opt = document.createElement('option');
+            opt.value = String(entry.job_id);
+            opt.textContent = `${entry.job_name || T('Job') + ' ' + entry.job_id} (inactive)`;
+            form.job_id.appendChild(opt);
+            form.job_id.value = String(entry.job_id);
         }
         // a gift on a named donor's line gets the thank-you letter (#606)
         if (Terms.isNonprofit() && entry.gift_letters && entry.gift_letters.length) {
@@ -3217,11 +3314,13 @@ const BankingPage = {
             job_id: jobIdFromForm(form),
             ...(splits ? { splits } : {}),
         };
-        // the plain entry's name (#606): on money in only, null clears it
-        if (!splits && parseFloat(form.amount.value || '0') > 0) data.customer_id = form.customer_id.value ? parseInt(form.customer_id.value, 10) : null;
-        // an edit sends the entry's job back: the form has no box for it,
-        // and leaving it out of the body would be read as "keep" anyway
-        if (form.dataset.entryId) data.job_id = form.dataset.jobId ? parseInt(form.dataset.jobId, 10) : null;
+        // the plain entry's name (#606), money in or out: null clears it;
+        // a box left on "+ New" is not sent, so an edit keeps the name
+        const name = form.customer_id.value;
+        if (!splits && name !== '__new__') data.customer_id = name ? parseInt(name, 10) : null;
+        // an edit with no Job box (the company has no active job) sends the
+        // entry's own job back; with a box, what the box holds is sent
+        if (form.dataset.entryId && !form.job_id) data.job_id = form.dataset.jobId ? parseInt(form.dataset.jobId, 10) : null;
         return data;
     },
 
@@ -3444,8 +3543,14 @@ const BankingPage = {
             chart: () => (BankingPage._accounts = BankingPage._accounts || []),
             excludeId: (accountId) => accountId,
             host: (select) => (select.id === 'qe-category' ? document.getElementById('qe-category-host') : null),
-            added: (made) => {
-                const opt = `<option value="${made.id}">${accountLabel(made)}</option>`;
+            added: (made, select) => {
+                // into the chart the paths are read from, so an account
+                // added under this one is named by its path too
+                const all = (BankingPage._chartAll = BankingPage._chartAll || []);
+                if (!all.some(a => a.id === made.id)) all.push(made);
+                const name = BankingPage._categoryNames([made])[0].name;
+                const opt = `<option value="${made.id}">${accountLabel(made, name)}</option>`;
+                if (select && select.id === 'qe-category') select.title = accountWords(made, name);
                 for (const id of ['qe-category', 'entry-category']) {
                     const s = document.getElementById(id);
                     if (s && !s.querySelector(`option[value="${made.id}"]`)) s.insertAdjacentHTML('beforeend', opt);
@@ -3971,7 +4076,7 @@ const BankingPage = {
     },
 
     // ------------------------------------------------------------------
-    // File import (OFX/QFX; CSV: Bank of America, Chase checking/credit,
+    // File import (OFX/QFX/QBO; CSV: Bank of America, Chase checking/credit,
     // PayPal, or any file whose header names a date, a description and an
     // amount — and, for one that doesn't, a step that asks which column is
     // which) — needs a feed on the account; offers to create one.
@@ -3992,8 +4097,8 @@ const BankingPage = {
         openModal('Import Bank File', `
             <form id="ofx-form" onsubmit="BankingPage.previewOFX(event, ${feedId}, ${accountId})">
                 <div class="form-group">
-                    <label>Select an OFX/QFX file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal, or any file with date, description and amount columns)</label>
-                    <input type="file" name="file" accept=".ofx,.qfx,.csv" required id="ofx-file" onchange="BankingPage._csvMapping = null">
+                    <label>Select an OFX/QFX/QBO file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal, or any file with date, description and amount columns)</label>
+                    <input type="file" name="file" accept=".ofx,.qfx,.qbo,.csv" required id="ofx-file" onchange="BankingPage._csvMapping = null">
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>

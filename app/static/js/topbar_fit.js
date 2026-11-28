@@ -20,11 +20,14 @@
  *      buttons, none when it has none;
  *   3. the sign-in name, About and Contact support move into More
  *      (tb-fold-who);
- *   4. the theme switch moves into More (tb-fold-theme).
+ *   4. the company's own logo goes, when the company shows one (2.32.0,
+ *      app.js App.showCompanyLogo), as the wordmark did in its place
+ *      before #978 (tb-fold-logo); no step when there is none;
+ *   5. the theme switch moves into More (tb-fold-theme).
  * (The bar has no wordmark to fold since #978: the brand is in the sidebar.)
  * The bar's data-fold is the number of steps taken (1, then 1 + each rack
- * button folded, then the two after). More is in the bar from the first
- * thing it holds; it lists, when opened, every control the bar has folded
+ * button folded, then the two after, three with a logo). More is in the
+ * bar from the first thing it holds; it lists, when opened, every control the bar has folded
  * away, the rack's by their names in the rack's order, and the name signed
  * in, so nothing the bar offers is ever out of reach, and last
  * Customize Fast Rack…, which opens Settings at the rack's block. Sign Out,
@@ -64,8 +67,15 @@
         });
     }
 
-    // 1 tightens, one step per rack button, then the two after it
-    function steps() { return 1 + rackButtons().length + 2; }
+    // The company's logo in the bar, when it shows one: a step of its own
+    function logoSteps() {
+        var logo = document.getElementById('topbar-logo');
+        return logo && bar.contains(logo) && !logo.hidden ? 1 : 0;
+    }
+
+    // 1 tightens, one step per rack button, then the two after it (and the
+    // logo's, before the theme's, when there is one)
+    function steps() { return 1 + rackButtons().length + 2 + logoSteps(); }
 
     function setLevel(n) {
         var buttons = rackButtons();
@@ -74,8 +84,10 @@
         bar.classList.toggle('tb-fold-1', n >= 1);
         buttons.forEach(function (b, i) { b.classList.toggle('fr-folded', i >= r - gone); });
         if (rack) rack.classList.toggle('fr-all-folded', r > 0 && gone === r);
+        var l = logoSteps();
         bar.classList.toggle('tb-fold-who', n >= r + 2);
-        bar.classList.toggle('tb-fold-theme', n >= r + 3);
+        bar.classList.toggle('tb-fold-logo', l > 0 && n >= r + 3);
+        bar.classList.toggle('tb-fold-theme', n >= r + 3 + l);
         more.hidden = n < 2;
     }
 

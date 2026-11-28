@@ -47,8 +47,9 @@ The zip is the export. Reports downloaded one at a time from the Reports
 page, such as the General Ledger or a chart of accounts report, are not
 it: the import reads the **Journal** inside the zip and leaves the General
 Ledger alone (it repeats the Journal by account), and the dry run says so
-when they come without the zip. The two reports it does read beside the
-zip are the Account List and the A/R Aging Detail, below.
+when they come without the zip. The three reports it does read beside the
+zip are the Account List, the A/R Aging Detail and the A/P Aging Detail,
+below.
 
 What comes across:
 
@@ -110,9 +111,57 @@ customer's balance are right; their postings move the open balance to 1100
 Accounts Receivable and touch no income, and "Accounts Receivable (A/R)"
 ends at zero. The dry run checks the report against the Journal and names
 any difference. Already imported the zip without it? Upload both again: the
-journals are skipped and only the open invoices come across. Unpaid bills
-are entered after the import, against the imported "Accounts Payable"
-account.
+journals are skipped and only the open invoices come across.
+
+The payables side works the same way with QuickBooks Online's **A/P Aging
+Detail** report (Reports → Standard reports → What you owe → Accounts
+payable aging detail → Export → Export to Excel; the file is named
+`<Company>_A_P Aging Detail Report.xlsx`), uploaded with the zip as it
+downloads. The
+Journal's bills, bill payments and vendor credits land on 2000 Accounts
+Payable, so 2000 holds what is owed; the report brings the documents behind
+it. Each open **Bill** comes across as a bill with its vendor, number, date,
+due date and open balance (a bill partly paid there comes at its full
+amount with a bill payment for the part paid, so its open balance is the
+same); each **Vendor Credit** not yet applied as a vendor
+credit, dated as the report dates it (its Due date is empty there; one the
+report gives no number is numbered QBO-VC- and its date, QBO-VC-20261122
+say); each **Bill Payment (Check)** or **Bill Payment (Credit Card)** not
+yet applied as a bill payment applied to no bill. They post nothing of their
+own (the history already put their balance on 2000), so A/P Aging equals
+2000, every vendor's balance is their aging row, and Pay Bills offers the
+bills. A bill the report gives no number gets the number SlowBooks Pro
+would give it, from the vendor and the date. The report's aging headings,
+its "Total for" rows and its TOTAL row are not carried. The totals are
+formulas in the download; the import works TOTAL out from the sheet's own
+cells and refuses the report when the rows it read do not add up to it. The
+dates are read month first (MM/DD/YYYY), as QuickBooks Online writes them
+for a US company. A row is refused by its number when it has an amount but
+no date or type, no open balance, no vendor, or an open balance larger
+than its amount. A due date before the bill's own date, or a bill dated
+after the day the report was run, is carried as QuickBooks has it. A vendor name with a colon (a sub-vendor) that the Vendor
+list lacks is refused too. The vendor
+column is read under QuickBooks' Vendor display name,
+Vendor or Vendor full name, or the Supplier spellings some regions use; a
+vendor the report names that the Vendor list lacks is created. The dry run
+counts the bills, credits and payments, the vendors matched and created,
+and the total open balance, checks the total against what the Journal
+leaves on 2000 and says how far apart they are, and lists by its row number every row it does not carry (a
+transaction type other than those three, or an open balance the wrong way
+round for its type) and refuses an unreadable row by its number. A report
+with nothing open (its header and no rows) carries nothing and is no error.
+A report beside an export whose Balance Sheet has no Accounts Payable
+account is refused, with nothing imported: check that the report and the
+zip come from the same company.
+A void of a carried bill, vendor credit or bill payment moves its amount
+between 2000 and QuickBooks' own payable account ("Accounts Payable (A/P)",
+made then), so A/P Aging still equals 2000; a carried bill's lines and
+amount are not edited (its dates, terms and notes are). Without the report
+the payables come across as a balance on 2000 with no bills behind it, and
+the dry run says so. Importing again with the report afterward carries the
+bills, and clears the vendor names the first import put on the Journal's
+entries on 2000, so the balance is not counted twice; a document carried
+once is not carried again, even after its notes are edited or it is voided.
 
 ## Path 2 — QuickBooks Desktop (IIF files)
 
@@ -445,7 +494,7 @@ Desktop does not export transactions to IIF natively. Two other options:
   IIF) so account and item names resolve — deposit and check blocks
   whose accounts are missing are reported with a pointer to do exactly
   that. All four are safe to re-upload; duplicates are skipped.
-- **A bank or credit card statement (CSV, OFX, QFX) is not an
+- **A bank or credit card statement (CSV, OFX, QFX, QBO) is not an
   Interoperability import.** It goes in from the account itself, under
   **Banking → Bank Accounts → the account → Import file**. The vendors and accounts on the
   statement do not need to exist first: each line comes in as a statement

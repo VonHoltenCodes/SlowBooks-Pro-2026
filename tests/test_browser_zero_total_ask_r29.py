@@ -39,8 +39,9 @@ REMOVE_ONE = """(sel) => {
     b.click();
     return true;
 }"""
-# A grid with no Remove line of its own (the bill's): its amounts are cleared,
-# which is the other way a document comes to $0.00.
+# A grid with no Remove line (invoice Quick Entry's; the bill's and Bill Quick
+# Entry's have one since #1189, the memorized bill's since #1189's follow-up):
+# its amounts are cleared, which is the other way a document comes to $0.00.
 HAS_REMOVE = """(sel) => !!document.querySelector(sel).querySelector(
     '[aria-label^="Remove line"], [data-line-order="remove"],'
     + ' button[onclick*="emoveLine"]')"""
@@ -352,6 +353,7 @@ def _forms(client):
             "#bqe-number",
             "Enter what the vendor charged: an amount on at least one line.",
             ready="() => !!document.querySelector('#bqe-lines tr')",
+            still="() => !!document.querySelector('#bqe-form')",
         ),
         _Form(
             "field ticket",

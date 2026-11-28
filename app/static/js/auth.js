@@ -198,6 +198,9 @@
     let usernames = [];
     // Several companies on one server (#358): the sign-in screen asks which.
     let companies = [];
+    // The company's own logo (2.32.0), from /api/auth/status: there only
+    // when the company turned "Show the company logo in SlowBooks Pro" on.
+    let companyLogo = "";
 
     function rememberedUsername() {
         try { return sessionStorage.getItem(SWITCH_USERNAME_KEY) || ""; } catch (e) { return ""; }
@@ -312,6 +315,20 @@
         );
     }
 
+    // The logo of the company this screen signs in to, above its name: an
+    // <img> of the address the status gave (the server's own route, which
+    // serves nothing but that image), never the image's markup. None when
+    // the status gave none: not opted in, no logo, or a company that
+    // cannot be opened now. Put away if it fails to load (wireLogin).
+    function companyLogoHTML() {
+        if (!/^\/api\/auth\/company-logo\?[A-Za-z0-9=&._%-]+$/.test(companyLogo)) return "";
+        return (
+            '<img id="auth-company-logo" src="' + escapeText(companyLogo) + '" alt="' +
+            escapeText(existingCompany.name || "Company logo") + '" ' +
+            'style="display:block;width:200px;max-width:100%;height:64px;object-fit:contain;object-position:left center;margin:0 0 12px;">'
+        );
+    }
+
     function loginViewHTML() {
         // Name the books: with several companies on one machine, "Unlock
         // SlowBooks" did not say whose password it wanted (explore 2.17.3,
@@ -322,6 +339,7 @@
             'style="background:#fff;color:#111;padding:calc(32px / var(--ui-scale, 1)) 28px;border-radius:8px;' +
             'min-width:340px;max-width:400px;width:100%;' +
             'box-shadow:0 20px 60px rgba(0,0,0,0.4);">' +
+            companyLogoHTML() +
             '<h2 id="auth-title" style="margin:0 0 6px;font-size:20px;">' +
             (name ? "Unlock " + escapeText(name) : "Unlock SlowBooks") +
             "</h2>" +
@@ -675,6 +693,8 @@
         const btn = overlay.querySelector("#auth-submit");
         wireCompanySelect(overlay, onSuccess);
         wireForgot(overlay, onSuccess);
+        const logo = overlay.querySelector("#auth-company-logo");
+        if (logo) logo.addEventListener("error", function () { logo.remove(); });
         (rememberedUsername() && userInput ? input : (userInput || input)).focus();
 
         form.addEventListener("submit", async function (e) {
@@ -1055,6 +1075,7 @@
                 // start looking for the window's bridge now, so "Forgot your
                 // password?" has its answer by the time it is pressed
                 if (forgotOffersReset()) windowCanReset();
+                companyLogo = typeof status.company_logo_url === "string" ? status.company_logo_url : "";
                 existingCompany = {
                     name: status.company_name || "",
                     hasData: status.has_data === true,

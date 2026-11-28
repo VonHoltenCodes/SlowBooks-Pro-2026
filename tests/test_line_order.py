@@ -252,15 +252,15 @@ def test_the_module_moves_drags_and_inserts():
 
 
 # NEW-278: the purchase order's form could move and insert a line but not
-# remove one. Each grid but the bill's removes a line: with its own button,
-# or with the shared module's (remove: true), never both.
+# remove one. Each grid removes a line: with its own button, or with the
+# shared module's (remove: true), never both.
 OWN_REMOVE = {"invoices.js", "estimates.js", "sales_receipts.js", "credit_memos.js"}
 OWN_REMOVE |= {"recurring.js"}
 
 
-# the bill's grid is not yet (its columns are set to fit the agents'
-# window with no room for a fifth control); left open on the issue
-CAN_REMOVE = {p: g for p, g in GRIDS.items() if p != "bills.js"}
+# #1189: the bill's grid joined them once the wide dialog's cap grew by a
+# control's width to carry the fifth control at the construction bill.
+CAN_REMOVE = dict(GRIDS)
 
 
 @pytest.mark.parametrize("page,grid", CAN_REMOVE.items())
@@ -276,3 +276,33 @@ def test_the_module_removes_a_line():
     src = (JS / "line_order.js").read_text(encoding="utf-8")
     assert 'data-line-order="remove" aria-label="Remove line"' in src
     assert "removeRow(" in src
+
+
+# #1189: bill quick entry is a page, not a modal, so it opts in on mount
+# rather than beside its render; remove: true since its grid, like the bill
+# form's, has no Remove line button of its own.
+def test_bill_quick_entry_can_remove_a_line():
+    src = (JS / "bill_quick_entry.js").read_text(encoding="utf-8")
+    assert re.search(r"LineOrder\.attach\('#bqe-lines', \{[^}]*remove: true", src)
+    assert 'aria-label="Remove line"' not in src  # the shared module's button
+
+
+# The memorized bill's form draws the bill's grid (#bill-lines) and, like
+# the bill form, has no Remove line of its own, so it too takes the shared
+# module's; it was the one attach left without it. Every attach in the app
+# gives a way to remove a line: remove: true, or the page's own button.
+def test_every_attach_removes_a_line():
+    seen = 0
+    for path in sorted(JS.glob("*.js")):
+        src = path.read_text(encoding="utf-8")
+        for call in re.findall(r"LineOrder\.attach\('[^']+', \{[^}]*\}", src):
+            seen += 1
+            shared = "remove: true" in call
+            assert shared != (path.name in OWN_REMOVE), (path.name, call)
+    assert seen >= 10
+
+
+def test_the_memorized_bill_form_can_remove_a_line():
+    src = (JS / "memorized.js").read_text(encoding="utf-8")
+    assert re.search(r"LineOrder\.attach\('#bill-lines', \{[^}]*remove: true", src)
+    assert 'aria-label="Remove line"' not in src

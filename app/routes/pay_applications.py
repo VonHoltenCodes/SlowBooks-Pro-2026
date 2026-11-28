@@ -38,6 +38,7 @@ from app.services.accounting import (
     get_contract_revenue_account_id,
     get_sales_tax_account_id,
 )
+from app.services.bank_register import money_text
 from app.services.closing_date import check_closing_date
 from app.services.contracts import (
     application_contract_sums,
@@ -274,36 +275,32 @@ def _validate_cached(db: Session, app: PayApplication) -> None:
                     f"scheduled value {scheduled:.2f}."
                 ),
             )
-    outstanding = retainage_outstanding(db, app.job_id)
-    if _q(app.release_retainage) > outstanding:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Release {_q(app.release_retainage):.2f} is more than the "
-                f"{outstanding:.2f} of retainage held to date."
-            ),
-        )
-    # Retainage to date (gross at this application's percent, less the prior
-    # and this release) cannot go below zero: dropping the percent and
-    # releasing on the same application would otherwise over-bill the owner.
-    held = application_figures(db, app)["retainage_to_date"]
+    # The money this application may release is the retainage held through the
+    # prior applications PLUS what this application holds on the work it bills
+    # (#1228): a final application can bill the period and release everything
+    # at once, closing the job in one application. Held-to-date is net of this
+    # release (what the preview shows), so a release past the ceiling is
+    # exactly held-to-date below zero — the one line both refuse on (#576).
+    figures = application_figures(db, app)
+    held = figures["retainage_to_date"]
     if held < _ZERO:
         if _q(app.release_retainage) == _ZERO:
             # A credit billed after the retainage was released: its share of
             # retainage would come back out of nothing.
             message = (
-                f"Retainage to date would be {held:.2f}: this application bills "
-                "a credit after the retainage was released, and the credit's "
+                f"Retainage to date would be {money_text(held)}: this application "
+                "bills a credit after the retainage was released, and the credit's "
                 f"{app.retainage_pct}% retainage has none left to come out of. "
                 "Bill the credit before the final retainage release, or release "
                 "less retainage now and the rest after the credit."
             )
         else:
             message = (
-                f"Retainage to date would be {held:.2f}: the release of "
-                f"{_q(app.release_retainage):.2f} is more than the retainage "
-                f"held at {app.retainage_pct}% on the work completed. Release "
-                "less, or keep the retainage percent until the release is billed."
+                f"Retainage to date would be {money_text(held)}: the release of "
+                f"{money_text(_q(app.release_retainage))} is more than the "
+                f"retainage held at {app.retainage_pct}% on the work completed. "
+                "Release less, or keep the retainage percent until the release "
+                "is billed."
             )
             if any(_q(ln.this_period) < _ZERO for ln in app.lines):
                 message += (
@@ -321,7 +318,7 @@ def _validate_cached(db: Session, app: PayApplication) -> None:
                 f"{unapplied:.2f} of unapplied deposits."
             ),
         )
-    current_due = application_figures(db, app)["current_due"]
+    current_due = figures["current_due"]
     if deposit > 0 and deposit > current_due:
         raise HTTPException(
             status_code=422,
@@ -1010,6 +1007,10 @@ def _apply_deposit(db, app, invoice, customer, amount, when):
         deposit_to_account_id=deposits_acct,
         notes=f"Deposit applied — {app.number}",
         allocations=[PaymentAllocationCreate(invoice_id=invoice.id, amount=amount)],
+        # the application applies its own job's deposit, figured with the
+        # job; listing 2210 under Customer deposits and retainers (#1237)
+        # must not refuse an approval over the account's company-wide total
+        allow_overdraw=True,
     )
     resp = create_payment(data, db)  # commits
     app.deposit_payment_id = resp.id
