@@ -39,7 +39,12 @@ services:
       - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
 
   slowbooks:
-    build: .
+    build:
+      context: .
+      args:
+        # The commit for About's version line (Dockerfile). Optional:
+        # SLOWBOOKS_COMMIT=$(git rev-parse HEAD) docker compose ... up -d --build
+        SLOWBOOKS_COMMIT: "${SLOWBOOKS_COMMIT:-}"
     restart: unless-stopped
     depends_on:
       postgres:
