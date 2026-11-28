@@ -171,7 +171,7 @@ Retainer Payable. It is empty, and changes nothing, until an administrator
 ticks an account; only active liability accounts that are no bank or credit
 card account, no control account (Accounts Payable, Sales Tax Payable and
 the like) and no payroll account (the 2300 to 2390 payroll liabilities, and
-any account Settings → Payroll Accounts posts to) can be ticked. A ticked account appears in Deposit To on Receive
+any account Settings → Payroll and checks → Payroll Accounts posts to) can be ticked. A ticked account appears in Deposit To on Receive
 Payment only, below the bank accounts, in a group of its own, "Apply a
 customer deposit or retainer (no money moves)". A payment into it applies the money
 held to the customer's invoices: it debits the liability and credits A/R, no

@@ -219,7 +219,7 @@ const SettingsPage = {
         chosen = (Array.isArray(chosen) ? chosen : []).map(String);
         const ticked = new Set(chosen);
         let h = '<fieldset class="form-group full-width" aria-describedby="settings-customer-deposit-accounts-help" style="border:0; padding:0; margin:8px 0 0;">';
-        h += '<legend style="font-weight:700; font-size:11px; padding:0;">Customer deposits and retainers</legend>';
+        h += '<legend style="font-weight:700; font-size:11px; padding:0;">' + escapeHtml(T('Customer')) + ' deposits and retainers</legend>';
         const box = (id, words) => '<label style="display:block; font-weight:normal; text-transform:none; letter-spacing:0;">'
             + '<input type="checkbox" name="customer-deposit-account:' + escapeHtml(id) + '" data-customer-deposit-account="' + escapeHtml(id) + '"'
             + (ticked.has(id) ? ' checked' : '') + ' style="width:auto; vertical-align:middle; margin-right:6px;">'
@@ -230,7 +230,7 @@ const SettingsPage = {
             const gone = all.find(a => String(a.id) === id);
             h += box(id, '(unavailable) ' + (gone ? accountWords(gone) : '#' + id));
         }
-        if (!usable.length && !chosen.length) h += '<div style="font-size:11px; color:var(--text-muted);">The chart has no liability account that can hold customer deposits.</div>';
+        if (!usable.length && !chosen.length) h += '<div style="font-size:11px; color:var(--text-muted);">' + escapeHtml(Terms.text('The chart has no liability account that can hold customer deposits.')) + '</div>';
         h += '</fieldset>';
         return h;
     },
@@ -887,7 +887,7 @@ const SettingsPage = {
                         { id: 'settings-deposits-help', text: 'Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.' },
                         { name: 'Default deposit account', id: 'settings-default-deposit-account-help', text: 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.' },
                         { name: 'Deposit into these accounts', id: 'settings-deposit-accounts-help', text: 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.' },
-                        { name: 'Customer deposits and retainers', id: 'settings-customer-deposit-accounts-help', text: 'Liability accounts that hold money a customer paid ahead, such as Retainer Payable. Ticked ones appear in Deposit To on Receive Payment only, in a group of their own, to apply that money to invoices: the payment takes it out of the account and no money moves. Such a payment must be applied to invoices in full, and the form asks before applying more than the account holds. None ticked leaves Deposit To as it is.' },
+                        { name: `${T('Customer')} deposits and retainers`, id: 'settings-customer-deposit-accounts-help', text: Terms.text('Liability accounts that hold money a customer paid ahead, such as Retainer Payable. Ticked ones appear in Deposit To on Receive Payment only, in a group of their own, to apply that money to invoices: the payment takes it out of the account and no money moves. Such a payment must be applied to invoices in full, and the form asks before applying more than the account holds. None ticked leaves Deposit To as it is.') },
                     ])}</div>
                     ${SettingsPage._depositAccountsHtml(s, accounts)}
                     ${SettingsPage._customerDepositAccountsHtml(s, accounts)}

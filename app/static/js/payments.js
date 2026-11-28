@@ -313,7 +313,7 @@ const PaymentsPage = {
         PaymentsPage._retainerIds = new Set(retainers.map(a => String(a.id)));
         bankOpts += PaymentsPage._keptAccountOption(accounts, depositBanks.concat(retainers), keepDepositId);
         if (retainers.length) {
-            bankOpts += '<optgroup label="Apply a customer deposit or retainer (no money moves)">'
+            bankOpts += '<optgroup label="' + escapeHtml(Terms.text('Apply a customer deposit or retainer (no money moves)')) + '">'
                 + retainers.map(a => `<option value="${Number(a.id)}" data-retainer>${escapeHtml(a.name)}</option>`).join('')
                 + '</optgroup>';
         }
@@ -892,7 +892,7 @@ const PaymentsPage = {
         const kept = PaymentsPage._giveBackDeposit;
         const keptHere = retainer && kept && kept.id === String(retainer.id) ? kept : null;
         if (retainer && remaining > (keptHere ? keptHere.unapplied || 0 : 0)) {
-            toast(Terms.text(`Deposit To is ${retainer.name}, a customer deposit or retainer account, so the whole payment must be applied to invoices; ${PaymentsPage._fmt(remaining / 100)} is not applied. Apply it, or lower the amount.`), 'error');
+            toast(`Deposit To is ${retainer.name}, ${Terms.text('a customer deposit or retainer account, so the whole payment must be applied to invoices;')} ${PaymentsPage._fmt(remaining / 100)} is not applied. Apply it, or lower the amount.`, 'error');
             return;
         }
         // Leaving money unapplied is a choice the user makes, not a default.

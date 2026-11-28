@@ -32,6 +32,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.services.accounting import _q
+from app.services.terminology import said
 
 
 def configured_ids(db: Session) -> set[int]:
@@ -192,11 +193,14 @@ def refuse_misuse(
     if left > (kept.unapplied if kept else 0):
         raise HTTPException(
             status_code=422,
-            detail=(
-                f"Deposit To is {acct.name}, a customer deposit or retainer "
-                f"account, so the whole payment must be applied to invoices; "
-                f"{_money(left)} is not applied. Apply it, or lower the amount. "
-                "Nothing was recorded."
+            # the account's name and the amount are data (said): a
+            # nonprofit's "Customer Deposits" keeps its own name
+            detail=said(
+                "Deposit To is {}, a customer deposit or retainer account, so "
+                "the whole payment must be applied to invoices; {} is not "
+                "applied. Apply it, or lower the amount. Nothing was recorded.",
+                acct.name,
+                _money(left),
             ),
         )
     held = _q(Decimal(str(acct.balance or 0)))
@@ -206,9 +210,12 @@ def refuse_misuse(
     if wanted > held and not allow_overdraw:
         raise HTTPException(
             status_code=422,
-            detail=(
-                f"{acct.name} holds {_money(held)}, less than the "
-                f"{_money(wanted)} applied from it. Lower the amount, or "
-                "confirm applying more than it holds. Nothing was recorded."
+            detail=said(
+                "{} holds {}, less than the {} applied from it. Lower the "
+                "amount, or confirm applying more than it holds. Nothing was "
+                "recorded.",
+                acct.name,
+                _money(held),
+                _money(wanted),
             ),
         )
