@@ -6,7 +6,7 @@ adjusting entry with its next-day reversal on construction setup's accounts.
 """
 
 import threading
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -287,6 +287,10 @@ def test_finished_job_still_showing_cost_to_complete_is_flagged(
     _r, data = _row(db_session, job.id)
     said = [w for w in data["warnings"] if finished in w]
     assert len(said) == 1 and "$61,500.00" in said[0]
+    # it says what closing really does on the screen, and promises no
+    # 100% row the WIP never shows
+    assert "100% complete" not in said[0]
+    assert "schedules dated after the day you close it leave it out" in said[0]
 
 
 # ── 4. a change order's budget alone is no estimate ─────────────────────
@@ -932,10 +936,52 @@ def test_a_job_closed_in_november_is_in_septembers_wip(
     row, data = _wip_row(db_session, job.id, SEP30_2)
     assert row is not None and row["percent_complete"] == 50.0  # open on 9/30
     assert [j["job_id"] for j in data["adjusting_entry"]["jobs"]] == [job.id]
-    # from the day it closed it is off the board (and 100% with include_closed)
+    # after the day it closed it is off the board (and 100% with include_closed)
     assert _wip_row(db_session, job.id, date(2026, 11, 30))[0] is None
     closed, _ = _wip_row(db_session, job.id, date(2026, 11, 30), include_closed=True)
     assert closed["percent_complete"] == 100.0
+
+
+def test_a_wip_dated_the_close_day_reads_the_same_that_evening(
+    client, db_session, seed_accounts
+):
+    """A schedule run the morning a job is closed can be run again that
+    evening with the same rows: the job was on the books for the day it
+    closed and leaves the WIP from the next day's schedule."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    today = date.today()
+    morning, _ = _wip_row(db_session, job.id, today)
+    assert morning is not None and morning["status"] == "in_progress"
+
+    r = client.put(f"/api/jobs/{job.id}", json={"status": "closed"})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    assert db_session.get(Job, job.id).closed_on == today
+
+    evening, _ = _wip_row(db_session, job.id, today)
+    assert evening == morning
+    shown = client.get(f"/api/reports/wip-schedule?as_of={today.isoformat()}")
+    assert shown.status_code == 200, shown.text
+    assert job.id in [r["job_id"] for r in shown.json()["rows"]]
+
+    tomorrow = today + timedelta(days=1)
+    assert _wip_row(db_session, job.id, tomorrow)[0] is None
+    closed, _ = _wip_row(db_session, job.id, tomorrow, include_closed=True)
+    assert closed["status"] == "closed" and closed["percent_complete"] == 100.0
+
+
+def test_a_job_closed_with_no_date_stays_off_the_wip_of_today(
+    db_session, seed_accounts
+):
+    """A job closed before 2.31.11 has no close day on file: it still reads
+    closed on every date, today's schedule too."""
+    job = _job(db_session, status="closed")
+    _budget(db_session, job, None, "material", "80000", source="manual")
+    _cost(db_session, job, None, "material", "40000")
+    db_session.commit()
+    assert job.closed_on is None
+    assert _wip_row(db_session, job.id, date.today())[0] is None
 
 
 def test_closing_a_job_stamps_the_day_and_reopening_clears_it(

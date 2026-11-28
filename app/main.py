@@ -179,6 +179,7 @@ from app.services.api_token_service import from_the_link_itself as _from_the_lin
 from app.services.api_token_service import is_link_label as _is_link_label
 from app.services.api_token_service import resolve as _resolve_api_token
 from app.services.served_companies import CompanyUnavailable, sentence_of
+from app.services.local_templates import LocalTemplateError
 from app.services.pdf_service import PdfEngineMissing
 
 # An API token's request names the company it works in with this header
@@ -614,6 +615,11 @@ async def lifespan(app: FastAPI):
         warn_if_manifest_missing()
     except Exception:
         pass  # a diagnostic, never a reason not to boot
+    # Local templates (#1235): on, off, or a setting naming a folder that
+    # cannot be used, said once. Never raises.
+    from app.services import local_templates, pdf_service
+
+    local_templates.report_at_startup(str(pdf_service.TEMPLATE_DIR))
     # Issue #119: say once, at boot, if this company's chart is missing an
     # account the posting code resolves by number. Before 2.10.1 the first
     # symptom was a document that looked saved and never reached the ledger;
@@ -964,6 +970,19 @@ async def _pdf_engine_missing_handler(request: Request, exc: Exception):
 
 
 app.add_exception_handler(PdfEngineMissing, _pdf_engine_missing_handler)
+
+
+# ---- A local template that fails (#1235) ----
+# The sentence names the local file and says it is a local template; the
+# built-in template is never used in its place, and no traceback is shown.
+# The person sees the name in the folder and the line; the server path and
+# the exception's own text go to the log only.
+async def _local_template_handler(request: Request, exc: Exception):
+    logging.getLogger(__name__).warning("%s", exc, exc_info=exc.__cause__)
+    return JSONResponse(status_code=500, content={"detail": exc.user_text})
+
+
+app.add_exception_handler(LocalTemplateError, _local_template_handler)
 
 
 # ---- A value the database refuses (422, not 500) ----

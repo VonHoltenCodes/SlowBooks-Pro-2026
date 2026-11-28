@@ -429,6 +429,44 @@ body {
 
 /* The top bar names nothing at its left end (#978): the brand is once in
    the app, in the sidebar, and the room goes to the Fast Rack. */
+/* The company's own logo (2.32.0), where the product's mark sat before
+   #978, when the company turned "Show the company logo in SlowBooks Pro"
+   on (app.js App.showCompanyLogo adds it; with the setting off it is not
+   in the bar at all). A fixed box, so a logo of any shape fits it whole
+   and the bar measures the same before and after the image loads; on a
+   white plate with the bar's own line round it, because the bar is dark
+   in the dark theme and a dark-ink logo would vanish there. In px, as the
+   rest of the bar, so the Text size scales it with the bar. It folds away
+   before the theme switch when the bar is short of room (topbar_fit.js,
+   tb-fold-logo). */
+#topbar .topbar-logo {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 120px;
+    height: 32px;
+    padding: 2px 6px;
+    margin: 0 8px 0 0;
+    object-fit: contain;
+    background: #ffffff;
+    border: 1px solid #b0b8c4;
+    border-radius: 3px;
+}
+#topbar .topbar-logo[hidden],
+#topbar.tb-fold-logo .topbar-logo { display: none; }
+/* and on its card in Company Files (companies.js), on the same white plate */
+.company-card-logo {
+    display: block;
+    box-sizing: border-box;
+    width: 160px;
+    height: 48px;
+    padding: 3px 6px;
+    margin-bottom: 6px;
+    object-fit: contain;
+    object-position: left center;
+    background: #ffffff;
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+}
 
 .tb-sep {
     width: 1px;

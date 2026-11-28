@@ -414,7 +414,7 @@ const MemorizedPage = {
                     <button type="submit" class="btn btn-primary">${id ? 'Save Changes' : 'Memorize'}</button>
                 </div>
             </form>`, { wide: true });
-        typeof LineOrder !== 'undefined' && LineOrder.attach('#bill-lines', { add: () => BillsPage.addLine(), changed: () => BillsPage.recalc() });
+        typeof LineOrder !== 'undefined' && LineOrder.attach('#bill-lines', { add: () => BillsPage.addLine(), changed: () => BillsPage.recalc(), remove: true });
         const vendorSel = document.getElementById('mem-vendor');
         if (vendorSel && m.vendor_id) {
             vendorSel.value = m.vendor_id;

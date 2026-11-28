@@ -319,7 +319,7 @@ check** opens a sample check (Sample Payee, $1,234.56, today, "Alignment
 test") in a new tab; print it on plain paper and hold it against your stock
 to see how far to nudge. The test check uses the stock and nudges as they
 stand in the form, saved or not, so a change can be tried before saving it
-(`GET /api/checks/test-print?check_stock=&check_position=&check_nudge_x_in=&check_nudge_y_in=&check_field_layout=`,
+(`GET /api/checks/test-print?check_stock=&check_position=&check_nudge_x_in=&check_nudge_y_in=&check_field_layout=&check_amount_no_dollar_sign=&check_amount_asterisk_fill=`,
 each optional). This applies to every check print path — a bill
 payment, Pay Bills, the batch print of waiting checks, a register check
 and an expense paid from a bank account.
@@ -351,6 +351,24 @@ what differs from today — `x` and `y` (inches), `size` (points) and `bold`
 (true or false), such as `{"date": {"x": -0.2, "size": 12, "bold": true}}`;
 `""` is today's layout. A value out of bounds is refused with a sentence that
 names the field, and nothing is saved.
+
+**The amount in figures** has two boxes of its own. Some stock prints its
+own "$" beside the amount box; **Leave the dollar sign off the amount**
+(v2.32.0) prints the figures as "1,234.56" so the check does not show two.
+**Fill the amount with asterisks** prints two asterisks in front of the
+figures so nothing can be written ahead of them:
+`$**1,234.56`, or `**1,234.56` with the dollar sign left off. Both are
+off by default, so a check that prints right today prints the same after an
+upgrade, whichever stock is chosen; turn them on to suit your stock. The
+figures stay right-aligned, so the last figure ends where it always has and
+the asterisks take room to its left; with the check on top, a payee's name
+long enough to be cut before the amount is cut 0.2 in sooner to leave them
+that room. Either box applies to the check at the bottom and on top, to
+plain, pre-printed and blank stock, to every print path and to the test
+check, saved or not. The amount in words, the stubs, the vouchers and the
+MICR line print as they always have. The API keeps them as
+`check_amount_no_dollar_sign` and `check_amount_asterisk_fill`, `"true"` or
+`"false"` on `PUT /api/settings`.
 
 **Check position** (v2.31.9) says where the check sits on the sheet.
 **Check at the bottom** (the default) prints two stubs and then the check,

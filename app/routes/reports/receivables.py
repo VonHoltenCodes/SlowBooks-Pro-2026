@@ -22,6 +22,7 @@ from app.services.pdf_service import (
 )
 from app.services.settings_service import get_all_settings as get_settings
 from app.services.request_utils import content_disposition
+from app.services.local_templates import LocalTemplateError
 from app.routes.reports._router import router
 from app.routes._roles import reads_mail_server_words
 from app.services.email_errors import (
@@ -1045,6 +1046,7 @@ def batch_email_statements(request: Request, db: Session = Depends(get_db)):
 
         ok = False
         ran = False
+        refused = None
         try:
             pdf_bytes = generate_statement_pdf(
                 customer,
@@ -1068,8 +1070,10 @@ def batch_email_statements(request: Request, db: Session = Depends(get_db)):
                 entity_type="statement",
                 entity_id=cid,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to send statement to customer %s", customer.id)
+            if isinstance(exc, LocalTemplateError):
+                refused = exc.user_text  # names the local template (#1235)
         if ok:
             sent += 1
             note = note_for_last_send(db, "statement", cid)
@@ -1077,6 +1081,9 @@ def batch_email_statements(request: Request, db: Session = Depends(get_db)):
                 notes.append(f"{customer.name}: {note}")
         else:
             failed += 1
+            if refused:
+                errors.append(f"{customer.name}: {refused}")
+                continue
             # the reply's sentence when the send ran and the server said
             # why (#811); the raw text stays in the email log
             errors.append(

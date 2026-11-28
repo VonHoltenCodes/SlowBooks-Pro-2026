@@ -6,6 +6,7 @@
 #   POST /api/auth/login   → password (+ username once 2+ users exist)
 #   POST /api/auth/logout  → clear session
 #   POST /api/auth/company → work in another company this server serves (#358)
+#   GET  /api/auth/company-logo → a company's own logo, when it opted in
 #
 # These routes are deliberately NOT protected by require_auth — they're
 # how you become authenticated in the first place.
@@ -208,6 +209,81 @@ def auth_status(request: Request):
         db.close()
 
 
+def _sign_in_logo_url(db: Session) -> str:
+    """The address the sign-in screen shows this company's logo from, or ""
+    (not opted in, no logo). On a server serving several companies it names
+    the company, as its sign-in screen does, so two companies' logos are
+    never one address."""
+    from app.services import company_logo
+
+    row = company_logo.shown_logo(db)
+    if row is None:
+        return ""
+    filename = served_companies.current_file() if served_companies.enabled() else None
+    return company_logo.public_url(row, filename)
+
+
+# The company's own logo before a sign-in (2.32.0): the image and nothing
+# else, for a company that turned "Show the company logo in SlowBooks Pro"
+# on, the way the employee portal serves its logo (routes/portal.py): the
+# stored, checked type, the sandbox policy (file_store.SERVED_FILE_CSP),
+# nosniff from the app's own headers, no referrer and no cache. Every other
+# case (not opted in, no logo, a company not served, one whose file is not
+# open now, locked or missing) is the same 404, word for word.
+_COMPANY_LOGO_HEADERS = {
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store, max-age=0",
+}
+NO_COMPANY_LOGO = "No logo is set."
+
+
+def _no_company_logo():
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        status_code=404,
+        content={"detail": NO_COMPANY_LOGO},
+        headers=_COMPANY_LOGO_HEADERS,
+    )
+
+
+@router.get("/company-logo")
+@limiter.limit("60/minute")
+def company_logo_image(request: Request, file: Optional[str] = None):
+    """The logo of the company this sign-in screen is for, or of ``file``:
+    a company this server serves, by the name its sign-in screen lists. No
+    other company detail, no id or path from the request: the image is the
+    one the company's own settings name. A company file the server has not
+    opened is never opened for it, so a locked one shows none."""
+    import app.database as db_module
+    from app.services import company_logo, file_store
+
+    if file is not None:
+        if not served_companies.enabled() or not served_companies.is_served(file):
+            return _no_company_logo()
+        target = file
+    else:
+        target = db_module.served_company()
+    if not db_module.company_engine_is_open(target):
+        return _no_company_logo()
+    response = None
+    try:
+        with use_company(target):
+            db = db_module.SessionLocal()
+            try:
+                row = company_logo.shown_logo(db)
+                if row is not None:
+                    response = file_store.logo_response(db, row)
+            finally:
+                db.close()
+    except Exception:  # locked, gone, its bytes unreadable: no logo
+        response = None
+    if response is None:
+        return _no_company_logo()
+    response.headers.update(_COMPANY_LOGO_HEADERS)
+    return response
+
+
 def _status_while_company_unavailable(request: Request, sentence: str) -> dict:
     return {
         "authenticated": False,
@@ -277,6 +353,13 @@ def _auth_status(request: Request, db: Session) -> dict:
     # New Company dialog (F3) nor silently renames a file that already holds
     # a company's books (2.9.0 gate).
     out["company_name"] = _company_name(db)
+    # Its own logo (2.32.0), when it turned "Show the company logo in
+    # SlowBooks Pro" on: the address only, and only then, so a company that
+    # has not opted in reads as one with no logo.
+    if not program:
+        logo_url = _sign_in_logo_url(db)
+        if logo_url:
+            out["company_logo_url"] = logo_url
     # an accountant's copy says so on every page (#346)
     from app.services.accountants_copy import mode_of
 

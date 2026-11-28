@@ -89,6 +89,7 @@ ENUM_SETTINGS = {
     "ask_password_on_start": frozenset({"true", "false"}),
     "invoice_show_logo": frozenset({"true", "false"}),
     "invoice_logo_only": frozenset({"true", "false"}),
+    "company_logo_in_app": frozenset({"true", "false"}),
     "class_warn_blank": frozenset({"true", "false"}),
     "new_lines_taxable": frozenset({"true", "false"}),
     "use_account_numbers": frozenset({"true", "false"}),
@@ -106,6 +107,7 @@ ENUM_SETTINGS = {
     # deposit_slip_layout.
     "deposit_slip_stock": frozenset({"plain", "preprinted"}),
     "check_amount_no_dollar_sign": frozenset({"true", "false"}),
+    "check_amount_asterisk_fill": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),
@@ -535,6 +537,30 @@ def _clearing_off_warnings(db: Session, cleaned: dict) -> list[str]:
     return warnings
 
 
+def _logo_option_needs_its_logo(db: Session, cleaned: dict) -> None:
+    """Show the company logo in SlowBooks Pro never stands on with no logo
+    (2.32.0): a save that would leave it on with none (a form drawn before
+    the logo was removed, a second window, a script, or one that clears the
+    logo's path) stores it off, so a logo uploaded later shows in the app
+    only once an administrator turns it on again. Stored off rather than
+    refused, so a page drawn before the removal still saves its other edits."""
+    from app.services import company_logo, file_store
+
+    path_key = "company_logo_path"
+    if company_logo.SETTING not in cleaned and path_key not in cleaned:
+        return
+    on = cleaned.get(company_logo.SETTING)
+    if on is None:
+        on = get_setting_raw(db, company_logo.SETTING) or ""
+    if on.strip() != "true":
+        return
+    path = cleaned.get(path_key)
+    if path is None:
+        path = get_setting_raw(db, path_key)
+    if file_store.logo_row(db, file_store.logo_id(path)) is None:
+        cleaned[company_logo.SETTING] = "false"
+
+
 @router.put("")
 def update_settings(
     data: SettingsUpdate, request: Request, db: Session = Depends(get_db)
@@ -614,6 +640,7 @@ def update_settings(
             effective_type = get_setting_raw(db, "entity_type") or ""
         if effective_type != "llc":
             cleaned["llc_tax_election"] = ""
+    _logo_option_needs_its_logo(db, cleaned)
     clearing_warnings = _clearing_off_warnings(db, cleaned)
     # The open window's words and sidebar follow the company type at the
     # next start (the window that changes it reloads itself): a save from

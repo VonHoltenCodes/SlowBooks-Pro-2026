@@ -2415,9 +2415,18 @@ const BankingPage = {
             const bar = `<div style="margin-bottom:8px; font-size:12px;"><label for="match-range">Look for postings</label>
                 <select id="match-range" data-readonly-ok onchange="BankingPage.matchRangeChanged(this, ${lineId}, ${accountId})" style="margin-left:6px;">${opts}</select>
                 <span style="color:var(--gray-500); margin-left:6px;">either side of the line's date</span></div>`;
-            openModal('Match to a posting', bar + BankingPage._feedPayOffer(lineId, accountId) + (rows
+            // with nothing to match, the line most often pays open bills
+            // (or is a customer's payment): name that way, and open it
+            const offer = BankingPage._feedPayOffer(lineId, accountId);
+            const t = (BankingPage._reviewLines || {})[lineId];
+            const moneyIn = t && parseFloat(t.amount) > 0;
+            const payWay = !offer ? ''
+                : moneyIn ? ` If it is a ${T('customer').toLowerCase()}'s payment, pick or check the ${T('customer').toLowerCase()} under <strong>Receive payment</strong> above.`
+                : ' If it pays open bills, pick or check the vendor under <strong>Pay bills</strong> above.';
+            openModal('Match to a posting', bar + offer + (rows
                 ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Payee / description</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col"></th></tr></thead><tbody>${rows}</tbody></table></div>`
-                : `<p>Nothing in the books has this amount ${within}. Look further back, or use <strong>Add</strong> to post it.</p>`));
+                : `<p>Nothing in the books has this amount ${within}.${payWay} Otherwise look further back, or use <strong>Add</strong> to post it.</p>`));
+            if (!rows && offer) await BankingPage.openFeedPay(lineId, accountId, { focus: !refocus });
             if (refocus) { const sel = document.getElementById('match-range'); if (sel) sel.focus(); }
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -2443,27 +2452,37 @@ const BankingPage = {
 
     _feedPayCtx: null,
 
-    async openFeedPay(lineId, accountId) {
+    async openFeedPay(lineId, accountId, { focus = true } = {}) {
         const t = (BankingPage._reviewLines || {})[lineId];
         const panel = document.getElementById('feed-pay-panel');
         const opener = document.getElementById('feed-pay-open');
         if (!t || !panel) return;
+        const open = BankingPage._feedPayCtx;
+        if (!panel.hidden && open && open.lineId === lineId) {
+            // already open (by itself, when nothing matched): keep the picks
+            const party = document.getElementById('feed-pay-party');
+            if (party && focus) party.focus();
+            return;
+        }
         const moneyIn = parseFloat(t.amount) > 0;
-        BankingPage._feedPayCtx = { lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
+        const ctx = { lineId, accountId, moneyIn, amount: Math.abs(parseFloat(t.amount) || 0), docs: [] };
+        BankingPage._feedPayCtx = ctx;
         let picked = '';
         let options = '';
+        let payee = t.payee || t.description || '';
+        const parties = moneyIn ? (BankingPage._customers || [])
+            : [...(BankingPage._vendorsByName || new Map()).values()].sort((a, b) => a.name.localeCompare(b.name));
         if (moneyIn) {
             const sel = document.getElementById(`rv-customer-${lineId}`);
             picked = String((sel && sel.value) || t.pick_customer_id || '');
-            options = (BankingPage._customers || [])
-                .map(c => `<option value="${c.id}"${String(c.id) === picked ? ' selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
         } else {
             const box = document.getElementById(`rv-vendor-${lineId}`);
+            if (box && box.value.trim()) payee = box.value;
             picked = String(BankingPage._payeeVendorId(box ? box.value : '') || t.pick_vendor_id || t.rule_vendor_id || '');
-            options = [...(BankingPage._vendorsByName || new Map()).values()]
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(v => `<option value="${v.id}"${String(v.id) === picked ? ' selected' : ''}>${escapeHtml(v.name)}</option>`).join('');
         }
+        if (!picked) picked = await BankingPage._feedPayGuess(moneyIn, ctx.amount, payee, parties);
+        if (BankingPage._feedPayCtx !== ctx || document.getElementById('feed-pay-panel') !== panel) return;  // closed or reopened meanwhile
+        options = parties.map(p => `<option value="${p.id}"${String(p.id) === picked ? ' selected' : ''}>${escapeHtml(moneyIn ? customerLabel(p) : p.name)}</option>`).join('');
         const who = moneyIn ? T('Customer') : 'Vendor';
         panel.innerHTML = `<form id="feed-pay-form" onsubmit="BankingPage.submitFeedPay(event)">
                 <div class="form-group" style="margin-bottom:6px;"><label for="feed-pay-party">${who}</label>
@@ -2477,21 +2496,55 @@ const BankingPage = {
         panel.hidden = false;
         if (opener) opener.setAttribute('aria-expanded', 'true');
         if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms(panel);
-        if (picked) await BankingPage.loadFeedPayDocs();
-        else BankingPage._feedPaySum();
+        await BankingPage.loadFeedPayDocs();
         const party = document.getElementById('feed-pay-party');
-        if (party) party.focus();
+        if (party && focus) party.focus();
+    },
+
+    // The one to pay or receive from when the line does not say: the one
+    // whose name begins the bank's payee text ("PARTS DEPOT #4411" is Parts
+    // Depot), the longest such name, since the bank naming someone beats an
+    // amount that happens to agree; else the only one with an open bill (or
+    // invoice) of exactly the line's amount; else none ('').
+    async _feedPayGuess(moneyIn, amount, payee, parties) {
+        const text = String(payee || '').trim().toLowerCase();
+        let best = null;
+        for (const p of parties) {
+            const name = String(p.name || '').trim().toLowerCase();
+            if (!name || !text.startsWith(name) || /[a-z0-9]/.test(text.charAt(name.length))) continue;
+            if (!best || name.length > best.name.length) best = { id: String(p.id), name };
+        }
+        if (best) return best.id;
+        const known = new Set(parties.map(p => String(p.id)));
+        const cents = Math.round((amount || 0) * 100);
+        try {
+            const docs = await fetchAllPages(moneyIn ? '/invoices?open_only=true' : '/bills?open_only=true');
+            const who = new Set(docs
+                .filter(d => d.status !== 'void' && Math.round((parseFloat(d.balance_due) || 0) * 100) === cents)
+                .map(d => String(moneyIn ? (d.bill_to_customer_id || d.customer_id) : d.vendor_id)));
+            if (who.size === 1) {
+                const [id] = who;
+                if (known.has(id)) return id;
+            }
+        } catch (err) { /* no guess: the panel says to pick one */ }
+        return '';
     },
 
     // the open invoices or bills of the one picked, oldest first, each
     // filled with what the line covers, oldest first, as Receive Payments
-    // fills them
+    // fills them; but when just one of them is still due exactly the line's
+    // amount, the line plainly pays that one, so only it is filled
     async loadFeedPayDocs() {
         const ctx = BankingPage._feedPayCtx;
         const party = document.getElementById('feed-pay-party');
         const box = document.getElementById('feed-pay-docs');
         if (!ctx || !party || !box) return;
-        if (!party.value) { ctx.docs = []; box.innerHTML = ''; BankingPage._feedPaySum(); return; }
+        if (!party.value) {
+            ctx.docs = [];
+            box.innerHTML = `<p style="font-size:12px;">Pick the ${ctx.moneyIn ? `${T('customer').toLowerCase()} to see their open ${T('invoices').toLowerCase()}` : 'vendor to see their open bills'}.</p>`;
+            BankingPage._feedPaySum();
+            return;
+        }
         const id = parseInt(party.value, 10);
         let docs;
         try {
@@ -2510,9 +2563,11 @@ const BankingPage = {
             return;
         }
         let left = Math.round(ctx.amount * 100);
+        const dueOf = d => Math.round((parseFloat(d.balance_due) || 0) * 100);
+        const exact = docs.filter(d => dueOf(d) === left);
         const rows = docs.map(d => {
-            const due = Math.round((parseFloat(d.balance_due) || 0) * 100);
-            const put = Math.max(0, Math.min(due, left));
+            const due = dueOf(d);
+            const put = exact.length === 1 ? (d === exact[0] ? due : 0) : Math.max(0, Math.min(due, left));
             left -= put;
             const num = ctx.moneyIn ? d.invoice_number : (d.bill_number || d.id);
             return `<tr>

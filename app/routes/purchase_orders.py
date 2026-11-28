@@ -4,6 +4,7 @@
 # ============================================================================
 
 from app.routes._print import print_html
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -558,6 +559,7 @@ def release_retainage(
         ensure_construction_accounts,
         get_ap_account_id,
     )
+    from app.services.bank_register import date_text, money_text
     from app.services.closing_date import check_closing_date
 
     if data is None:
@@ -580,7 +582,47 @@ def release_retainage(
                 "retainage held on this commitment."
             ),
         )
-    when = data.date or po.date
+    # The release is dated the day it is made, not the PO's date (#1227):
+    # the retainage is owed now, so a bill back-dated to a commitment opened
+    # in May posts the release into an already-reported period and shows up
+    # in A/P Aging past due the day it was released. An explicit date (the
+    # caller's, e.g. a back-office import) still wins.
+    when = data.date or date.today()
+    # Never more than was held by the release date: what the commitment's
+    # standing bills dated on or before it hold, less what its standing
+    # release (RET-) bills dated on or before it already released. A release
+    # past that would post Retainage Payable a debit balance in a period that
+    # held less. Same definitions as _commitment_retainage (non-void bills'
+    # retainage_held) and a release bill's retainage_released.
+    dated = [
+        (b.date, _q(b.retainage_held or 0), _q(b.retainage_released or 0))
+        for b in db.query(Bill).filter(
+            Bill.po_id == po.id, Bill.status != BillStatus.VOID
+        )
+        if b.date is not None
+    ]
+
+    def _available_on(day: date) -> Decimal:
+        return _q(sum((h - r for d, h, r in dated if d <= day), Decimal("0")))
+
+    held_by_then = _available_on(when)
+    if held_by_then < amount:
+        enough_on = next(
+            (
+                d
+                for d in sorted({d for d, _h, _r in dated if d > when})
+                if _available_on(d) >= amount
+            ),
+            None,
+        )
+        detail = (
+            f"A retainage release of {money_text(amount)} can't be dated "
+            f"{date_text(when)}: by then {po.po_number} held "
+            f"{money_text(held_by_then)} of retainage not yet released."
+        )
+        if enough_on is not None:
+            detail += f" Enough is held from {date_text(enough_on)}."
+        raise HTTPException(status_code=422, detail=detail)
     check_closing_date(db, when)
     vendor = po.vendor
     terms = (vendor.terms if vendor else None) or "Net 30"

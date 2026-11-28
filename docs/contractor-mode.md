@@ -995,7 +995,7 @@ approve click.
   budget cell (a schedule typed by hand) just gets the change order's cost.
   The draw counts against the allowance line (refused 409
   `allowance_exceeded` when it would pass the allowance). The Contract tab
-  shows each allowance's used and remaining.
+  shows each allowance's used, cost posted and remaining.
 - *Sub CO* — appends the lines to its commitment, which must be on the **same
   job** and **open** (refused 409 `commitment_job_mismatch` or
   `commitment_not_open` otherwise), and recomputes the commitment's total; the
@@ -1008,11 +1008,12 @@ not the owner's choices used it all. The Contract tab's allowance row shows
 **Return unspent** (when something is left; or
 `POST /api/change-orders/allowance-return` with the allowance line, an
 optional `amount` (default everything unspent) and an optional `date`
-(default today; the dialog asks for it). The date is the change order's date,
+(default today). The dialog asks for both: the amount starts at everything
+left on the allowance and cannot be more than that. The date is the change order's date,
 and approving it cannot take effect earlier, so a month-end return is dated in
 that month; it cannot be before the contract date (422) or in a closed period
 (403). It makes a **draft owner
-change order for minus the unspent amount**, no markup (whatever the job's
+change order for minus the amount returned**, no markup (whatever the job's
 default says), funded against that allowance: it is contract-funded, because
 it takes the money off the contract, and it names the allowance line. Submit
 and approve it like any other (it takes effect on its date, in the open
@@ -1029,7 +1030,16 @@ period). Approving it:
 
 "Unspent" is what the Contract tab shows as **remaining**: the allowance line's
 scheduled value less the allowance-funded change orders that drew it (and any
-earlier return's credit). A return of an allowance with nothing unspent is
+earlier return's credit). Billing the allowance line and posting cost on its
+cost code do not count as used: only an allowance-funded change order does. So
+the Contract tab also shows the **cost posted** on the allowance line's cost
+code (job cost on that code, from bills, checks and journals), and when more
+cost has posted there than the change orders record, the Return dialog warns
+before the return is made, naming both figures. The return is not refused:
+enter only what is really unspent (with 11,650 of fixture cost posted on a
+12,000 allowance and no change order recording it, return 350, not 12,000), or
+record the owner's selections as allowance-funded change orders first. A return
+of an allowance with nothing unspent is
 refused (409 `allowance_nothing_unspent`, "… has nothing unspent to return");
 so is a second return while one is still draft or pending (409
 `allowance_return_open`) and one for more than is unspent (422). Its funding,
@@ -1114,7 +1124,9 @@ no lines and a zero total is voided like any other (#723).
 **Submit, Approve and the printed application.** **Submit** marks the
 application as sent to the owner; nothing posts. **Approve** is the
 contractor's own button, not the owner's approval: it posts the invoice (from
-a draft or a submitted application). So when the owner's architect or rep
+a draft or a submitted application). That invoice starts as **Sent**, which
+means it was issued with the application, not that it was emailed: email it
+to the owner from the invoice. So when the owner's architect or rep
 certifies less than you asked for, open the submitted application, change its
 amounts to the certified figures, then Approve. The PDF (titled *Application
 for Payment*) prints the application's **Status** (Draft, Submitted,
@@ -1370,7 +1382,12 @@ previous / this period / remaining). Its held retainage is released with
 **Release retainage** (`POST /api/purchase-orders/{id}/release-retainage`),
 which writes a bill for the vendor carrying no expense account: DR **Retainage
 Payable** (2050) / CR Accounts Payable for the amount, payable through Pay Bills
-like any bill. A release over what is held is refused (422), and voiding the
+like any bill. The release bill is dated the day of the release unless a date
+is given, and is due by the vendor's terms from that date. A release of more
+than the commitment held by its date (the retainage on its standing bills dated
+on or before it, less what standing release bills dated on or before it already
+released) is refused (422), naming what was held by then and the first date
+enough is held. A release over what is held is refused (422), and voiding the
 release bill gives the retainage back to the commitment. A release bill's lines,
 tax, job, class or number can't be edited (409, "A retainage release bill can't
 be re-lined; void it and release again."), since a re-post would put its line on an
@@ -1446,9 +1463,13 @@ carries the cost code.
 
 Because each pay-application line credits its own revenue account with its
 section, revenue by section appears beside cost by section in the job cost
-tree and P&L by Job. A pay application's revenue has no cost type, so the
-cost tree compares revenue **per section, across cost types**: its type
-branches carry cost only, and its *Revenue by section* table (and
+tree and P&L by Job. A pay application's revenue line names its section but
+no cost type, so the cost tree spreads it over the section's budgeted cost
+types in proportion to their budgeted revenue (a section with no budgeted
+revenue keeps it on its own type). The split follows the budget as of the
+tree's end date, so a change order that adds a cost type re-splits revenue
+billed before it when the tree is run again; the totals do not change. Its
+*Revenue by section* table (and
 `revenue_sections` in the JSON, a grid of its own in the PDF and CSV) gives
 each section's budgeted cost, actual cost, budgeted revenue and actual
 revenue together, a sub-code rolling up to its section. A line or budget
@@ -1559,16 +1580,25 @@ Two ways out, from the tab (tick the signed tickets first):
 - **Make change order** (`POST /api/field-tickets/make-change-order`): one or
   several signed tickets on one job become one **potential change order** to
   the owner, a line per ticket line **at cost** (quantity × cost rate, the
-  line's cost type and code), marked up by the job's change-order markup. The
-  ticket's bill rates are not used on this path, **so the PCO can differ from
-  what the owner's rep signed**: a ticket whose bill rates were left blank
-  (cost rate plus the job's markup) comes to the same figures, give or take a
-  cent of rounding a line, as long as the job's **Markup on change orders**
-  has not changed since the ticket was saved (the ticket's bill rate was
-  figured at the markup of that day; a draft or pending PCO with no markup of
-  its own reads the job's markup as it is now). One with bill rates typed in
-  does not. To make it match, edit the PCO while it is a draft or pending:
-  its **Markup %**, or a line's own Markup %. A sub's ticket is
+  line's cost type and code), each with its own **Markup %** set so the line
+  sells for the ticket line's **bill amount** (quantity × bill rate): the PCO
+  comes to what the owner's rep signed, and its cost stays the cost. A bill
+  rate left blank on the ticket was filled in as the cost rate plus the job's
+  **Markup on change orders** of the day it was saved, so that line carries
+  that figure too, even if the job's markup has changed since. The markup is
+  the line's own, so the PCO's **Markup %** does not move these lines; edit a
+  line's Markup % to change one. When a line cannot get there it gets the
+  markup that comes nearest, and the response's `warnings` names both totals
+  and each line that misses, and the tab shows it: a bill amount on a line
+  with no cost ("…-PCO-001 sells for 600.00 but the tickets bill 695.00.
+  …-TM-001: Trip charge has no cost to mark up. Give a line with no cost a
+  unit cost on the Change orders tab, or settle the difference with the
+  owner."), a bill more than 11 times its cost (past the 999.9999% a markup
+  holds), or a cent a markup cannot land on (a no-charge line on a large
+  cost sells for 0.01; a cost so large that four decimal places of markup
+  miss the cent). A line with no bill rate (a ticket saved before T&M
+  tickets had them) is priced at the PCO's or the job's markup and is left
+  out of that check. A sub's ticket is
   subcontract cost on the PCO, and also goes, at cost with no markup, on a
   draft **sub change order** on its commitment (one per commitment), so the
   sub's contract rises with the owner's; link it to the owner CO once the PCO
@@ -1751,7 +1781,10 @@ and any difference from billing is over or under billing. Closed jobs are left
 out unless *include closed* (or the status filter) asks for them. Closing is
 read **as of the date**: the job keeps the day it went to Closed (cleared if it
 reopens), so a job closed in November is an open job, measured as any other,
-in September's schedule and its adjusting entry. A job already closed when
+in September's schedule and its adjusting entry. A job closed during a day was
+still on the books for it: a schedule dated the close day reads the same that
+evening as it did that morning, and the job leaves the schedule from the next
+day. A job already closed when
 this was added takes the day its record was last changed (the latest it can
 have closed); one with no date on file counts as closed on every date.
 
@@ -1767,8 +1800,8 @@ the table, in the PDF note and the CSV):
   spend).
 - *A finished job still showing cost to come.* A job billed in full (billed to
   date at or over the revised contract), its retainage collected and every
-  commitment closed, that still has cost to complete. Close the job (it then
-  reads 100% complete) or enter 0 in the forecast.
+  commitment closed, that still has cost to complete. Enter 0 in the forecast,
+  or close the job: schedules dated after the day you close it leave it out.
 
 **Projected loss.** When actual + cost to complete is over the revised contract,
 the whole loss is recognised now, the usual treatment of a loss contract. Earned

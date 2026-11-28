@@ -145,6 +145,11 @@ DEFAULT_SETTINGS = {
     # when a logo prints: without one the heading stays, so a document never
     # goes out nameless. The address block prints either way.
     "invoice_logo_only": "false",
+    # The company's own logo in SlowBooks Pro (2.32.0): "true" shows the logo
+    # above in the top bar while signed in, on the sign-in screen and beside
+    # the company in the lists of companies (app/services/company_logo.py).
+    # Off by default; an administrator's, offered only once a logo is set.
+    "company_logo_in_app": "false",
     # Report PDF paper size: letter | a4
     "pdf_paper_size": "letter",
     # Pre-printed check stock (#440, from discussion #354). "plain" prints
@@ -180,6 +185,10 @@ DEFAULT_SETTINGS = {
     # beside the box. The amount in words, the stubs and the vouchers keep
     # theirs; plain, pre-printed and blank stock and the test check alike.
     "check_amount_no_dollar_sign": "false",
+    # Asterisks before the amount in figures (#1239): "true" prints the
+    # amount box as "$**1,234.56" ("**1,234.56" with the sign left off), so
+    # nothing can be written in front of it.
+    "check_amount_asterisk_fill": "false",
     # Per-field check layout (#749): each value on the check face (payee,
     # payee address, date, amount in figures, amount in words, memo) moved,
     # sized and bolded on its own, on top of the nudges, as JSON of what

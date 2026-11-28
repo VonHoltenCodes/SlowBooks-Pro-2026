@@ -126,6 +126,16 @@
     .voucher-foot { position: absolute; bottom: 0.45in; left: 0.25in; right: 0.25in; display: flex; justify-content: space-between; font-weight: bold; }
 </style>
 {%- endif %}
+{%- if asterisk_fill and position == 'top' %}
+<style>
+    /* The amount's asterisks (#1239) widen the right-aligned amount box to
+       the left by two figures (0.2 in at 12 pt), so a payee long enough to
+       be cut is cut that much sooner and still ends 0.09 in short of
+       "$**1,234.56". Shorter payees and the check at the bottom, which has
+       the room, are unchanged. */
+    .check-top .pay-to-line { max-width: 5in; }
+</style>
+{%- endif %}
 {%- if blank %}
 <style>
     /* Blank check stock (#739): what pre-printed stock carries, printed by
@@ -190,7 +200,7 @@
                 <span class="pay-to-label">PAY TO THE ORDER OF</span>
                 <span class="pay-to-line">{{ field('payee', check.payee) }}</span>
             </div>
-            <div class="amount-box">{{ field('amount', check.amount | check_amount(no_dollar_sign)) }}</div>
+            <div class="amount-box">{{ field('amount', check.amount | check_amount(no_dollar_sign, asterisk_fill)) }}</div>
             <div class="amount-words">{{ field('amount_words', check.amount_words ~ ' ******') }}</div>
 {%- if check.payee_address %}
             {{ payee_address(check) }}
@@ -304,7 +314,7 @@
                 <span class="pay-to-label">PAY TO THE ORDER OF</span><br>
                 <span class="pay-to-line">{{ field('payee', check.payee) }}</span>
             </div>
-            <div class="amount-box">{{ field('amount', check.amount | check_amount(no_dollar_sign)) }}</div>
+            <div class="amount-box">{{ field('amount', check.amount | check_amount(no_dollar_sign, asterisk_fill)) }}</div>
             <div class="amount-words">{{ field('amount_words', check.amount_words ~ ' ******') }}</div>
 {%- if check.payee_address %}
             {{ payee_address(check) }}
