@@ -4,10 +4,14 @@ Explorer's Extract All copies the download's internet mark (the
 Zone.Identifier stream) onto every file, and .NET Framework, which the
 window runs on through pythonnet, will not load a marked DLL. The window
 never opened, and the message blamed WebView2. Now the frozen Windows
-portable copy removes the mark from its own DLLs before the window's
-backend loads (what Properties > Unblock does), and when a DLL is still
-marked the message names the real cause and the steps. The installed copy,
-macOS, Linux and a source run are untouched.
+portable copy removes the mark from its own .NET DLLs (pythonnet's runtime
+folder and pywebview's lib folder, the ones .NET Framework refuses) before
+the window's backend loads (what Properties > Unblock does), and when one is
+still marked the message names the real cause and the steps. Every other
+file keeps its mark; nothing happens unless the files are in the "_internal"
+folder beside the exe; a link out of that folder is never followed; a
+failure of the step never stops the start. The installed copy, macOS, Linux
+and a source run are untouched.
 
 The Windows calls (reading and removing the stream) are replaced here, so
 this runs anywhere; no real window is opened and pywebview is never
@@ -25,21 +29,24 @@ import desktop_launcher as dl
 def bundle(tmp_path, monkeypatch):
     """A portable copy's folder: the exe beside _internal, with DLLs, a
     .pyd, a script and a data file; the marks live in a set."""
-    app = tmp_path / "SlowBooks Pro"
+    app = tmp_path.resolve() / "SlowBooks Pro"
     internal = app / "_internal"
-    (internal / "pythonnet" / "runtime").mkdir(parents=True)
-    (internal / "webview" / "lib").mkdir(parents=True)
-    (internal / "scripts" / "windows").mkdir(parents=True)
+    lib = internal / "webview" / "lib"
     files = [
         app / "SlowBooksPro.exe",
         internal / "pythonnet" / "runtime" / "Python.Runtime.dll",
-        internal / "webview" / "lib" / "Microsoft.Web.WebView2.Core.dll",
+        lib / "Microsoft.Web.WebView2.Core.dll",
+        lib / "WebBrowserInterop.x64.dll",
+        # native DLLs and everything else: they load with the mark
+        lib / "runtimes" / "win-x64" / "native" / "WebView2Loader.dll",
+        internal / "clr_loader" / "ffi" / "dlls" / "amd64" / "ClrLoader.dll",
         internal / "python312.dll",
         internal / "_ssl.pyd",
         internal / "scripts" / "windows" / "serveredition-install.ps1",
         internal / "base_library.zip",
     ]
     for f in files:
+        f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(b"x")
     marks = {str(f) for f in files}
     removed = []
@@ -64,19 +71,82 @@ def bundle(tmp_path, monkeypatch):
 
 
 def _dlls(b):
-    return {str(f) for f in b.files if f.suffix == ".dll"}
+    """The .NET DLLs the fix may unmark: directly in the two named folders."""
+    named = {("pythonnet", "runtime"), ("webview", "lib")}
+    return {
+        str(f)
+        for f in b.files
+        if f.suffix == ".dll" and f.parent.relative_to(b.internal).parts in named
+    }
 
 
-def test_the_marked_dlls_are_unblocked_and_nothing_else(bundle, capsys):
+def test_only_the_named_net_dlls_are_unblocked(bundle, capsys):
     left = dl.unblock_portable_copy(bundle.internal)
     assert left == []
+    assert len(_dlls(bundle)) == 3
     assert set(bundle.removed) == _dlls(bundle)
-    # the exe, the .pyd, the script and the data file keep their mark
-    assert bundle.marks == {str(f) for f in bundle.files if f.suffix != ".dll"}
+    # the exe, the other DLLs (native loader, clr_loader, python312), the
+    # .pyd, the script and the data file all keep their mark
+    assert bundle.marks == {str(f) for f in bundle.files} - _dlls(bundle)
     out = capsys.readouterr().out
-    assert "the mark was removed from 3 of its own DLLs" in out
-    assert str(bundle.internal) in out
-    assert "No other file was changed." in out
+    assert (
+        "the mark was removed from 3 .NET DLLs in pythonnet\\runtime and "
+        f"webview\\lib under {bundle.internal}, as Unblock does" in out
+    )
+    assert " ms). No other file was changed." in out
+    assert out.count("\n") == 1
+
+
+def test_a_dll_elsewhere_in_the_bundle_keeps_its_mark(bundle):
+    # e.g. another app's _internal merged by an "extract here"
+    other = bundle.internal / "otherapp" / "Other.Managed.dll"
+    other.parent.mkdir()
+    other.write_bytes(b"x")
+    bundle.marks.add(str(other))
+    dl.unblock_portable_copy(bundle.internal)
+    assert str(other) in bundle.marks
+    assert str(other) not in bundle.removed
+
+
+def test_nothing_happens_unless_the_folder_is_internal_beside_the_exe(
+    bundle, monkeypatch, tmp_path
+):
+    # files beside the exe (contents_directory=".") : the exe's own folder
+    monkeypatch.setattr(dl.sys, "executable", str(bundle.internal / "x.exe"))
+    assert dl.unblock_portable_copy(bundle.internal.parent) == []
+    # an "_internal" that is not beside the running exe
+    monkeypatch.setattr(dl.sys, "executable", str(tmp_path / "elsewhere" / "x.exe"))
+    assert dl.unblock_portable_copy(bundle.internal) == []
+    # a folder beside the exe that is not named _internal
+    renamed = bundle.app / "lib"
+    bundle.internal.rename(renamed)
+    monkeypatch.setattr(dl.sys, "executable", str(bundle.app / "SlowBooksPro.exe"))
+    assert dl.unblock_portable_copy(renamed) == []
+    assert bundle.removed == []
+
+
+def test_a_link_out_of_the_bundle_is_never_followed(bundle, tmp_path):
+    outside = tmp_path / "Elsewhere"
+    (outside / "runtime").mkdir(parents=True)
+    far_file = outside / "Far.dll"
+    far_in_dir = outside / "runtime" / "Python.Runtime.dll"
+    for f in (far_file, far_in_dir):
+        f.write_bytes(b"x")
+        bundle.marks.add(str(f))
+    # a file link in a named folder, and a named folder that is a link
+    (bundle.internal / "webview" / "lib" / "Far.dll").symlink_to(far_file)
+    runtime = bundle.internal / "pythonnet" / "runtime"
+    (runtime / "Python.Runtime.dll").unlink()
+    runtime.rmdir()
+    runtime.symlink_to(outside / "runtime", target_is_directory=True)
+    dl.unblock_portable_copy(bundle.internal)
+    assert str(far_file) in bundle.marks
+    assert str(far_in_dir) in bundle.marks
+    assert not any(p.startswith(str(outside)) for p in bundle.removed)
+    # the real DLLs in the bundle were still unblocked
+    assert str(bundle.internal / "webview" / "lib" / "WebBrowserInterop.x64.dll") in (
+        bundle.removed
+    )
 
 
 def test_a_second_start_is_quiet(bundle, capsys):
@@ -133,7 +203,7 @@ def test_a_read_only_folder_reports_what_is_still_marked(bundle, monkeypatch, ca
     left = dl.unblock_portable_copy(bundle.internal)
     assert {str(p) for p in left} == _dlls(bundle)
     out = capsys.readouterr().out
-    assert "could not be removed from 3 of its DLLs" in out
+    assert "could not be removed from 3 of its .NET DLLs" in out
     assert "was removed" not in out
 
 
@@ -205,6 +275,8 @@ def test_still_marked_names_the_real_cause_not_webview2(
     (msg,) = shown
     assert "Could not open the native window: Failed to resolve" in msg
     assert "marked this copy's own files as downloaded" in msg
+    assert "could not remove the mark itself" in msg
+    assert "WebView2 is probably not the problem" in msg
     assert "Right-click the downloaded .zip and choose Properties" in msg
     assert "tick Unblock, then press OK" in msg
     assert "Extract the .zip again, into a new folder" in msg
@@ -220,3 +292,21 @@ def test_an_unmarked_failure_still_names_webview2(bundle, failing_window):
     assert "WebView2 runtime is missing" in msg
     assert "Unblock" not in msg
     assert bundle.removed == []
+
+
+def test_a_failure_of_the_step_never_stops_the_start(
+    bundle, failing_window, monkeypatch, capsys
+):
+    def broken(root=None):
+        raise ValueError("odd path")
+
+    monkeypatch.setattr(dl, "unblock_portable_copy", broken)
+    rc, shown = failing_window()
+    # the start went on to the window (which fails here), and the fallback
+    # still names the real cause: the DLLs are still marked
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "Could not check the download mark: ValueError('odd path')" in out
+    (msg,) = shown
+    assert "marked this copy's own files as downloaded" in msg
+    assert "WebView2 runtime is missing" not in msg
