@@ -39,7 +39,6 @@ from app.switchboard import line as line_client
 from tests.switchboard_clock import (
     BACKSTOP,
     NoWait,
-    at_once,
     hold_the_clock,
     settle_the_start,
 )
@@ -371,8 +370,9 @@ def _hold_the_start(monkeypatch):
 
 def _watch_the_start(monkeypatch) -> NoWait:
     """link.start_in_background() asks the thread that calls it for no
-    wait at all: no sleep, no wait for an event, a thread or a lock, no
-    socket and no name lookup (NoWait). Checked with ``check()``."""
+    wait at all: no sleep, no wait for an event, a thread, a lock or a
+    select, no socket and no name lookup (NoWait). Checked with
+    ``check()``; how long it took is not looked at."""
     waits = NoWait("link.start_in_background()")
     waits.watch(monkeypatch, link, "start_in_background")
     return waits
@@ -554,8 +554,7 @@ def test_the_relay_down_at_start_holds_nothing_and_the_panel_says_so(
     link._save(record)
     start = _hold_the_start(monkeypatch)
     waits = _watch_the_start(monkeypatch)
-    with at_once("link.start_in_background()"):
-        link.start_in_background()
+    link.start_in_background()
     # it asked its caller to wait for nothing (a start that sleeps, joins,
     # calls the relay or does its work in the caller's thread asks to)
     waits.check()
@@ -609,8 +608,7 @@ def test_the_app_starts_with_the_relay_down(
     waits = _watch_the_start(monkeypatch)
     try:
         with ExitStack() as running:
-            with at_once("the app's start"):
-                again = running.enter_context(TestClient(app))
+            again = running.enter_context(TestClient(app))
             # the lifespan's start of the line asked the app's start to wait
             # for nothing, and the app started while the line's start was
             # still held: the app's start waits for nothing of the relay's

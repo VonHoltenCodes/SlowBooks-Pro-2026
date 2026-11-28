@@ -25,13 +25,21 @@ What a test proves with it does not depend on the machine:
 - a press against a relay that answers at once never has its time run out,
   so its outcome is the relay's answer, however slow the machine;
 - a call that must return at once asks its own thread to wait for nothing
-  (NoWait): a sleep, a wait for an event, a thread, a lock or a socket is
-  caught as it is asked for, not by a stopwatch noticing it afterwards.
-  AT_ONCE is only the last line of defence behind that.
+  (NoWait): each wait it can see (its docstring says which) is caught as
+  it is asked for, not by a stopwatch noticing it afterwards.
+
+No test here bounds the wall-clock time of anything: a slow or loaded
+machine makes every test slower, never a different result. BACKSTOP is
+only how long a test waits for something that should already have
+happened (a hold, the start's thread) before failing instead of hanging.
 """
 
 import functools
+import os
+import select
+import selectors
 import socket
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -51,12 +59,6 @@ BACKSTOP = 60.0
 # file every 0.05 s when another window holds it), never a wait for the
 # relay, a thread, a timer or another holder.
 LIMIT = 0.1
-# A wall-clock bound on a call that returns at once, behind NoWait, for a
-# wait no recorder sees. 20 s: the bounds that flaked on slow runners were
-# half a second to a second for a whole Connect, and the 5 s and 10 s ones
-# never did, so a slow runner is far inside it; and it is a third of
-# BACKSTOP, so a call that waited for a hold to give up fails here too.
-AT_ONCE = 20.0
 
 
 class PressClock(link._Deadline):
@@ -212,30 +214,84 @@ def settle_the_start() -> None:
 
 _LockType = type(threading.Lock())
 _RLockType = type(threading.RLock())
+_LOCKS = (_LockType, _RLockType)
+# the app's own code: a lock it takes itself is checked where it is taken
+_APP = os.path.dirname(os.path.dirname(os.path.abspath(link.__file__))) + os.sep
+# a wait whose length the recorder cannot see (a C call's arguments are not
+# shown to a profile function): always a wait
+UNSEEN = "unseen"
+# how far from the link module's globals its locks are looked for
+_REACH = 3
+
+
+def _would_block(lock) -> bool:
+    """Whether taking ``lock`` now would wait: a Lock that is held (by any
+    thread, this one too), or an RLock held by another thread."""
+    if isinstance(lock, _RLockType):
+        return repr(lock).startswith("<locked") and not lock._is_owned()
+    return lock.locked()
+
+
+def _ours(obj) -> bool:
+    """An object of the app's own (or a SimpleNamespace) whose attributes
+    may hold a lock: not a module, a class or a function."""
+    kind = type(obj)
+    return not isinstance(obj, type) and (
+        kind is SimpleNamespace or kind.__module__.startswith("app.")
+    )
 
 
 class _WatchedLock:
-    """A lock whose waits are seen by a NoWait: one free at once is taken
-    with no wait; one that is held is a wait, asked for as long as the
-    caller says (no timeout: with no end)."""
+    """A lock whose waits are seen by a NoWait. It is the same lock (``inner``)
+    in every thread; only the bookkeeping is added. ``name`` says which lock
+    it is, for the failure's message.
 
-    def __init__(self, inner, waits: "NoWait"):
+    Taking it when it is free is no wait. When it is held and a watched
+    thread asks for it, that thread waits for it (for its own timeout,
+    BACKSTOP at most), and the wait counts when the timeout ran out first,
+    or when a hold it waited behind had its holder wait (see
+    NoWait._holder_waits) while holding it. A holder that only computes,
+    for as long as a slow machine makes that take, is not a wait."""
+
+    def __init__(self, inner, waits: "NoWait", name: str = "a lock"):
         self._inner = inner
         self._waits = waits
+        self._name = name
 
     def acquire(self, blocking=True, timeout=-1):
-        if self._inner.acquire(False):
+        waits = self._waits
+        watched = waits._watched()
+        with waits._inside():
+            got = self._inner.acquire(False)
+            if not got and blocking and not watched:
+                got = self._inner.acquire(True, timeout)
+        if got:
+            waits._took(self._inner)
             return True
-        if not blocking:
+        if not blocking or not watched:
             return False
-        if self._waits._watched():
-            asked = None if timeout is None or timeout < 0 else timeout
-            # the lock is still waited for (to BACKSTOP at most): going on
-            # without it would break the product's own bookkeeping
-            timeout = self._waits._asked("a wait for a lock", asked, cut=BACKSTOP)
-        return self._inner.acquire(True, timeout)
+        asked = None if timeout is None or timeout < 0 else timeout
+        behind = waits._waited_holds(self._inner)
+        with waits._inside():
+            # still waited for: going on without it would break the
+            # product's own bookkeeping
+            got = self._inner.acquire(
+                True, BACKSTOP if asked is None else min(asked, BACKSTOP)
+            )
+        if not got or waits._waited_holds(self._inner) != behind:
+            why = (
+                " (its holder waited while holding it)"
+                if got
+                else " (it stayed held to the end of the wait)"
+            )
+            waits._asked(f"a wait for {self._name}{why}", asked, cut=0.0)
+        if got:
+            waits._took(self._inner)
+        return got
 
     def release(self):
+        # counted before it is let go, so the next holder sees the count
+        self._waits._gave(self._inner)
         self._inner.release()
 
     def __enter__(self):
@@ -251,19 +307,48 @@ class _WatchedLock:
 class NoWait:
     """Proves a call returns at once by what it asks for, not by a clock.
 
-    While a call made watched (``watch``) runs, the ways its own thread
-    could be made to wait are replaced with recorders: time.sleep,
-    Event.wait, Condition.wait (so a queue's wait too), Thread.join, a wait
-    for a lock (every lock of the link module, and every lock made during
-    the call), and, unless ``sockets`` is true, a socket's timeout, a
-    blocking socket call and a name lookup. A wait longer than LIMIT, a
-    wait with no end, or waits adding up to more than LIMIT, are noted in
-    ``asked`` and fail ``check()``; the wait itself is then cut to LIMIT
-    (a lock's to BACKSTOP), so a call that waits fails at once instead of
-    hanging. A wait that would end at once (an event already set, a thread
-    already finished, a free lock) is not a wait. Other threads, and the
-    thread's own Thread.start handshake, are left as they are. The
-    originals are put back when the last watched call returns.
+    While a call made watched (``watch``) runs, its own thread is watched in
+    two ways, and neither looks at how long anything took.
+
+    Recorders, which see how long each wait is asked to be: time.sleep,
+    Event.wait, Condition.wait (so a queue's wait too), Thread.join,
+    select.select and a selector's select (the selectors module); unless
+    ``sockets`` is true, a socket's timeout, a blocking socket call and a
+    name lookup too. A wait longer than LIMIT, a wait with no end, or waits
+    adding up to more than LIMIT, are noted in ``asked``; the wait itself
+    is then cut to LIMIT, so a call that waits fails at once instead of
+    hanging. A wait that ends at once (an event already set, a thread
+    already finished, a timeout of 0) is not a wait.
+
+    Locks: every lock in the link module's globals, every lock the link
+    module reaches from its globals through the app's own objects,
+    SimpleNamespaces and dicts (_REACH steps at most: the open line's own
+    lock and its connection's, for some), and every lock made while a
+    watched call runs, become _WatchedLocks of the same lock. A watched
+    thread that asks for one of them while it is held waits for it (to its
+    own timeout, BACKSTOP at most: this wait is not cut), and the wait
+    counts when its own timeout ran out first or when the holder waited (in
+    one of the recorders above, in any thread) while holding it.
+    A lock held only while its holder computes is no wait, so the result
+    does not depend on how fast the holder runs.
+
+    A profile function (sys.setprofile) on the watched thread, for what the
+    recorders cannot reach: a call into C that would wait, made outside a
+    recorder. That is an ``acquire`` by the app's own code of a lock not
+    wrapped above (one kept only in a closure, say) while that lock is held
+    (a Lock held by anyone, an RLock held by another thread); a call of the
+    original time.sleep or select.select (as when the app took it under
+    another name before the watch began); and a poll or epoll object's
+    poll. A C call does not show its arguments, so each of these counts as
+    a wait of a length it does not show (UNSEEN), even a try that asks for
+    no wait at all, and is not cut.
+
+    Not seen: a ``with`` on a held lock that is not wrapped (Python takes it
+    without a call a profile function sees); a holder's wait that no
+    recorder sees (with ``sockets=True``, a blocking socket read); and any
+    other wait in another thread. Other threads, and the thread's own
+    Thread.start handshake, are left as they are. The originals are put
+    back when the last watched call returns.
 
     ``sockets=True`` is for a press: it talks to the relay, and its wait
     for the relay's answer is what the press's deadline ends (see
@@ -278,6 +363,12 @@ class NoWait:
         self._guard = threading.local()
         self._mutex = threading.Lock()
         self._saved = []
+        self._c_waits = {}
+        self._pollers = ()
+        # each thread's holds of a _WatchedLock: [id of the lock, waited]
+        self._holding = threading.local()
+        # how many holds of each lock had their holder wait
+        self._counts = {}
 
     # -- what is watched
 
@@ -298,10 +389,16 @@ class NoWait:
         with self._mutex:
             if not self._threads:
                 self._install()
+            first = me not in self._threads
             self._threads[me] = self._threads.get(me, 0) + 1
+        if first:
+            before = sys.getprofile()
+            sys.setprofile(self._profile)
         try:
             yield self
         finally:
+            if first:
+                sys.setprofile(before)
             with self._mutex:
                 self._threads[me] -= 1
                 if not self._threads[me]:
@@ -310,11 +407,15 @@ class NoWait:
                     self._restore()
 
     def check(self) -> None:
+        def length(seconds):
+            if seconds is None:
+                return "no end"
+            if seconds == UNSEEN:
+                return "a time it does not show"
+            return f"{seconds:g} s"
+
         assert not self.asked, f"{self.what} asked its own thread to wait: " + (
-            "; ".join(
-                f"{what} for {'no end' if s is None else f'{s:g} s'}"
-                for what, s in self.asked
-            )
+            "; ".join(f"{what} for {length(s)}" for what, s in self.asked)
         )
 
     # -- the recorders
@@ -333,6 +434,61 @@ class NoWait:
         self.asked.append((what, seconds))
         return cut if seconds is None else min(seconds, cut)
 
+    def _held(self) -> list:
+        held = getattr(self._holding, "held", None)
+        if held is None:
+            held = self._holding.held = []
+        return held
+
+    def _took(self, inner) -> None:
+        self._held().append([id(inner), False])
+
+    def _gave(self, inner) -> None:
+        held = self._held()
+        for at in range(len(held) - 1, -1, -1):
+            if held[at][0] == id(inner):
+                if held.pop(at)[1]:
+                    self._counts[id(inner)] = self._counts.get(id(inner), 0) + 1
+                return
+
+    def _waited_holds(self, inner) -> int:
+        return self._counts.get(id(inner), 0)
+
+    def _holder_waits(self, skip=None) -> None:
+        """The calling thread (any thread) waits: each _WatchedLock it holds
+        (but ``skip``, the lock a Condition.wait lets go of) is held across
+        a wait. Not counted inside a recorder (an Event's own Condition, a
+        Thread.start handshake)."""
+        if getattr(self._guard, "inside", False):
+            return
+        for hold in self._held():
+            if hold[0] != skip:
+                hold[1] = True
+
+    def _profile(self, frame, event, arg) -> None:
+        """The watched thread's profile function: a call into C that would
+        wait, made outside the recorders (see the class's docstring)."""
+        if event != "c_call" or getattr(self._guard, "inside", False):
+            return
+        owner = getattr(arg, "__self__", None)
+        name = getattr(arg, "__name__", "")
+        if isinstance(owner, _LOCKS):
+            if (
+                name in ("acquire", "acquire_lock")
+                and frame.f_code.co_filename.startswith(_APP)
+                and _would_block(owner)
+            ):
+                self._unseen("a wait for a held lock", frame)
+        elif id(arg) in self._c_waits:
+            self._unseen(self._c_waits[id(arg)], frame)
+        elif name == "poll" and isinstance(owner, self._pollers):
+            self._unseen(f"{type(owner).__name__}.poll", frame)
+
+    def _unseen(self, what: str, frame) -> None:
+        code = frame.f_code
+        where = f"{code.co_name}, {os.path.basename(code.co_filename)} line {frame.f_lineno}"
+        self.asked.append((f"{what} (in {where})", UNSEEN))
+
     @contextmanager
     def _inside(self):
         was = getattr(self._guard, "inside", False)
@@ -349,35 +505,60 @@ class NoWait:
     def _restore(self) -> None:
         while self._saved:
             owner, name, value = self._saved.pop()
-            setattr(owner, name, value)
+            if callable(owner) and name is None:
+                owner()  # an undo of its own (a lock reached from the globals)
+            else:
+                setattr(owner, name, value)
 
     def _install(self) -> None:
         waits = self
         sleep = time.sleep
+        select_select = select.select
         event_wait = threading.Event.wait
         condition_wait = threading.Condition.wait
         join = threading.Thread.join
         start = threading.Thread.start
         make_lock, make_rlock = threading.Lock, threading.RLock
 
+        def waiting(timeout) -> bool:
+            return timeout is None or timeout > 0
+
         def watched_sleep(seconds):
+            if seconds > 0:
+                waits._holder_waits()
             if waits._watched():
                 seconds = waits._asked("time.sleep", seconds)
-            return sleep(seconds)
+            with waits._inside():
+                return sleep(seconds)
+
+        def watched_select(rlist, wlist, xlist, timeout=None):
+            if waiting(timeout):
+                waits._holder_waits()
+            if waits._watched():
+                timeout = waits._asked("select.select", timeout)
+            with waits._inside():
+                return select_select(rlist, wlist, xlist, timeout)
 
         def watched_event_wait(event, timeout=None):
+            if not event.is_set() and waiting(timeout):
+                waits._holder_waits()
             if waits._watched() and not event.is_set():
                 timeout = waits._asked("Event.wait", timeout)
             with waits._inside():
                 return event_wait(event, timeout)
 
         def watched_condition_wait(condition, timeout=None):
+            if waiting(timeout):
+                own = getattr(condition, "_lock", None)
+                waits._holder_waits(skip=id(getattr(own, "_inner", own)))
             if waits._watched():
                 timeout = waits._asked("Condition.wait", timeout)
             with waits._inside():
                 return condition_wait(condition, timeout)
 
         def watched_join(thread, timeout=None):
+            if thread.is_alive() and waiting(timeout):
+                waits._holder_waits()
             if waits._watched() and thread.is_alive():
                 timeout = waits._asked("Thread.join", timeout)
             with waits._inside():
@@ -388,18 +569,93 @@ class NoWait:
             with waits._inside():
                 return start(thread)
 
+        self._c_waits = {
+            id(sleep): "time.sleep, not through its recorder",
+            id(select_select): "select.select, not through its recorder",
+        }
+        pollers = []
+        if hasattr(select, "poll"):
+            pollers.append(type(select.poll()))
+        if hasattr(select, "epoll"):
+            pollers.append(select.epoll)
+        self._pollers = tuple(pollers)
         self._set(time, "sleep", watched_sleep)
+        self._set(select, "select", watched_select)
         self._set(threading.Event, "wait", watched_event_wait)
         self._set(threading.Condition, "wait", watched_condition_wait)
         self._set(threading.Thread, "join", watched_join)
         self._set(threading.Thread, "start", watched_start)
-        self._set(threading, "Lock", lambda: _WatchedLock(make_lock(), waits))
-        self._set(threading, "RLock", lambda: _WatchedLock(make_rlock(), waits))
-        for name, value in list(vars(link).items()):
-            if isinstance(value, (_LockType, _RLockType)):
-                self._set(link, name, _WatchedLock(value, waits))
+        self._install_selectors()
+        made = "a lock made during the call"
+        self._set(threading, "Lock", lambda: _WatchedLock(make_lock(), waits, made))
+        self._set(threading, "RLock", lambda: _WatchedLock(make_rlock(), waits, made))
+        self._install_locks(vars(link), "link", 0, set())
         if not self.sockets:
             self._install_sockets()
+
+    def _install_selectors(self) -> None:
+        waits = self
+        for kind in vars(selectors).values():
+            if not (
+                isinstance(kind, type)
+                and issubclass(kind, selectors.BaseSelector)
+                and kind is not selectors.BaseSelector
+                and "select" in vars(kind)
+            ):
+                continue
+            real = vars(kind)["select"]
+
+            def watched_select(selector, timeout=None, _real=real):
+                if timeout is None or timeout > 0:
+                    waits._holder_waits()
+                    if waits._watched():
+                        timeout = waits._asked("a selector's select", timeout)
+                with waits._inside():
+                    return _real(selector, timeout)
+
+            self._set(kind, "select", watched_select)
+
+    def _install_locks(self, where, path: str, depth: int, seen: set) -> None:
+        """Every lock in ``where`` (a dict, or an object of the app's own)
+        becomes a _WatchedLock of that same lock, and the objects and dicts
+        it holds are looked into in turn, _REACH steps at most."""
+        if depth > _REACH or id(where) in seen:
+            return
+        seen.add(id(where))
+        if isinstance(where, dict):
+            items = list(where.items())
+
+            def put(key, value, _where=where):
+                _where[key] = value
+
+            def get(key, _where=where):
+                return _where.get(key)
+
+        elif _ours(where) and hasattr(where, "__dict__"):
+            items = list(vars(where).items())
+
+            def put(key, value, _where=where):
+                setattr(_where, key, value)
+
+            def get(key, _where=where):
+                return getattr(_where, key, None)
+
+        else:
+            return
+        for key, value in items:
+            if isinstance(value, _LOCKS):
+                wrapped = _WatchedLock(value, self, f"the lock {path}.{key}")
+                put(key, wrapped)
+
+                def undo(key=key, value=value, wrapped=wrapped, put=put, get=get):
+                    # put back only what is still the wrapper: the call may
+                    # have given the object a new lock of its own
+                    if get(key) is wrapped:
+                        put(key, value)
+
+                self._saved.append((undo, None, None))
+            elif isinstance(value, dict) or _ours(value):
+                self._install_locks(value, f"{path}.{key}", depth + 1, seen)
 
     def _install_sockets(self) -> None:
         waits = self
@@ -422,20 +678,11 @@ class NoWait:
             real = getattr(socket.socket, name)
 
             def watched_call(sock, *args, _real=real, _name=name, **kw):
-                if waits._watched():
-                    limit = sock.gettimeout()
-                    if limit is None or limit > LIMIT:
-                        waits._asked(f"a blocking socket.{_name}", limit)
+                limit = sock.gettimeout()
+                if limit is None or limit > 0:
+                    waits._holder_waits()
+                if waits._watched() and (limit is None or limit > LIMIT):
+                    waits._asked(f"a blocking socket.{_name}", limit)
                 return _real(sock, *args, **kw)
 
             self._set(socket.socket, name, watched_call)
-
-
-@contextmanager
-def at_once(what: str):
-    """The last line of defence behind NoWait: the block takes under
-    AT_ONCE of wall-clock time, however slow the machine (see AT_ONCE)."""
-    began = time.monotonic()
-    yield
-    took = time.monotonic() - began
-    assert took < AT_ONCE, f"{what} took {took:.1f} s (at most {AT_ONCE:g} s)"

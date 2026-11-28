@@ -29,7 +29,6 @@ from tests.switchboard_clock import (
     Holder,
     NoWait,
     PressClock,
-    at_once,
     ended_by_its_deadline,
     hold_the_clock,
 )
@@ -108,16 +107,15 @@ def _ended_at_its_deadline(silent_relay, presses: int = 1) -> None:
 def _press(client, monkeypatch, path: str, name: str, ended=None):
     """POST the press at ``path`` (link.``name``), proving it asked its own
     thread for no wait but the relay's answer (which its deadline ends):
-    no sleep, no wait for an event, a thread or a lock (NoWait), then
-    ``ended`` (how it ended), and, as a last line of defence only, that it
-    took under AT_ONCE of wall-clock time."""
+    no wait NoWait sees (a sleep, a wait for an event, a thread, a lock or
+    a select), then ``ended`` (how it ended). How long it took is not
+    looked at: a slow machine makes it slower, never a different result."""
     waits = NoWait(f"the {name} press", sockets=True)
     waits.watch(monkeypatch, link, name)
-    with at_once(f"the {name} press"):
-        r = client.post(path)
-        waits.check()
-        if ended is not None:
-            ended()
+    r = client.post(path)
+    waits.check()
+    if ended is not None:
+        ended()
     return r
 
 

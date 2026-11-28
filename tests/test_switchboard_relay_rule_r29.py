@@ -35,7 +35,6 @@ from tests.switchboard_clock import (
     Holder,
     NoWait,
     PressClock,
-    at_once,
     ended_by_its_deadline,
     hold_the_clock,
 )
@@ -450,17 +449,16 @@ def test_a_link_is_a_link_on_200_or_201(raw, client, db_session):
 
 def _quick_press(client, monkeypatch, press: str, ended):
     """POST the press, proving it asked its own thread for no wait but the
-    relay's answer (which its deadline ends): no sleep, no wait for an
-    event, a thread or a lock (NoWait), then ``ended`` (how it ended), and,
-    as a last line of defence only, that it took under AT_ONCE of
-    wall-clock time."""
+    relay's answer (which its deadline ends): no wait NoWait sees (a
+    sleep, a wait for an event, a thread, a lock or a select), then
+    ``ended`` (how it ended). How long it took is not looked at: a slow
+    machine makes it slower, never a different result."""
     name = {"connect": "connect", "code": "new_code", "disconnect": "disconnect"}
     waits = NoWait(f"the {press} press", sockets=True)
     waits.watch(monkeypatch, link, name[press])
-    with at_once(f"the {press} press"):
-        r = client.post(f"/api/switchboard/{press}")
-        waits.check()
-        ended()
+    r = client.post(f"/api/switchboard/{press}")
+    waits.check()
+    ended()
     return _plain(r)
 
 
