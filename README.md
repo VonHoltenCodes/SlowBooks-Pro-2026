@@ -239,6 +239,7 @@ Production checklist: **[docs/release-checklist.md](docs/release-checklist.md)**
 | [docs/development.md](docs/development.md) | Tech stack, project structure, contributor flow |
 | [docs/data-model.md](docs/data-model.md) | Database schema |
 | [docs/operations.md](docs/operations.md) | Backups, restore, key rotation, monitoring |
+| [docs/local-templates.md](docs/local-templates.md) | Your own invoice, statement and other printed layouts: the local templates folder and what each template receives |
 | [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Payroll / HR module reference |
 | [docs/release-checklist.md](docs/release-checklist.md) | Production deployment checklist |
 | [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md) | Real certs in front of SlowBooks (Caddy, nginx, Traefik) |

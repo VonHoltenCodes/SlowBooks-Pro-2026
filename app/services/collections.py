@@ -67,6 +67,7 @@ from app.models.payments import Payment
 from app.models.settings import Settings
 from app.services.donor_documents import document_label, invoice_doc_kind
 from app.services.email_service import send_email
+from app.services.local_templates import LocalTemplateError
 from app.services.pdf_service import generate_invoice_pdf, generate_statement_pdf
 from app.services.settings_service import get_all_settings, set_setting
 from app.services.sub_customers import billed_balances, billed_subs, billed_to
@@ -714,12 +715,14 @@ def _send_one(db, plan, settings, words, home, trigger, admin=False):
         if not ok:
             error = _send_failed("The email", "reminder", inv.id, db)
             shown = _send_failed("The email", "reminder", inv.id, db, admin=admin)
-    except Exception:
+    except Exception as exc:
         # The exception's own text stays in the log and the audit row; the
         # sentence that goes back to the screen names no internals.
         logger.exception("Reminder for invoice %s failed", inv.id)
         db.rollback()
         error = "The reminder could not be prepared (the server log has the reason)."
+        if isinstance(exc, LocalTemplateError):
+            error = exc.user_text  # names the local template (#1235)
     row.status = "sent" if ok else "failed"
     row.email_log_id = log_id
     row.error = error
@@ -1174,6 +1177,7 @@ def run_statements(db: Session, force: bool = False, admin: bool = False) -> dic
             skipped += 1
             continue
         ok = ran = False
+        refused = None
         try:
             pdf = generate_statement_pdf(
                 customer, statement_activity(db, customer, today), settings, today
@@ -1193,15 +1197,18 @@ def run_statements(db: Session, force: bool = False, admin: bool = False) -> dic
                 entity_type="statement",
                 entity_id=customer.id,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to send statement to customer %s", customer.id)
             db.rollback()
+            if isinstance(exc, LocalTemplateError):
+                refused = exc.user_text  # names the local template (#1235)
         row.status = "sent" if ok else "failed"
         row.email_log_id = _latest_log_id(db, "statement", customer.id) if ok else None
         row.error = (
             None
             if ok
-            else _send_failed("The statement", "statement", customer.id, db, ran)
+            else refused
+            or _send_failed("The statement", "statement", customer.id, db, ran)
         )
         row.sent_at = _now()
         db.commit()
@@ -1216,7 +1223,7 @@ def run_statements(db: Session, force: bool = False, admin: bool = False) -> dic
             failed += 1
             # the reason a single send gives (the month's row keeps the
             # same sentence, worded for every reader)
-            shown = _send_failed(
+            shown = refused or _send_failed(
                 "The statement", "statement", customer.id, db, ran, admin
             )
             errors.append(f"{customer.name}: {shown}")

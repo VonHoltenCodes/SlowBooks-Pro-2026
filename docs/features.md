@@ -8,7 +8,7 @@ The guides go deeper: [installing](../INSTALL.md), [Server Edition](server-editi
 and [MYOB](migrate-from-myob.md), [banking](banking.md), [contractor mode](contractor-mode.md),
 [nonprofit mode](nonprofit-module.md), [payroll and HR](payroll-hr-module.md),
 [working with your accountant](working-with-your-accountant.md),
-[encrypting the company file](company-file-encryption.md), [accessibility](accessibility.md),
+[encrypting the company file](company-file-encryption.md), [your own printed layouts](local-templates.md), [accessibility](accessibility.md),
 the integrations ([bank feeds](setup-bank-feeds.md), [Mercury](setup-mercury.md),
 [Stripe](setup-stripe.md), [Square](setup-square.md), [PayPal](setup-paypal.md),
 [the Cloudflare AI gateway](../cloudflare/README.md)), and for a server

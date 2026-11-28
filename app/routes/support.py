@@ -22,8 +22,9 @@ from app import __version__
 from app.database import get_db
 from app.models.contacts import Customer, Vendor
 from app.models.payroll import Employee
-from app.services import settings_service, support_diagnostics
+from app.services import local_templates, settings_service, support_diagnostics
 from app.services.company_service import data_dir
+from app.services.pdf_service import TEMPLATE_DIR
 
 router = APIRouter(prefix="/api/support", tags=["support"])
 
@@ -61,6 +62,11 @@ def diagnostics(db: Session = Depends(get_db)):
     env_block = support_diagnostics.environment_block(
         __version__, commit, platform_name, python, deployment
     )
+    # which built-in document templates a local file replaces (#1235)
+    local = local_templates.status(str(TEMPLATE_DIR))
+    local_line = local_templates.diagnostics_line(str(TEMPLATE_DIR))
+    if local_line:
+        env_block += "\n" + local_line
 
     raw_tail, available = support_diagnostics.read_log_tail(_log_path())
     log_tail = (
@@ -82,6 +88,7 @@ def diagnostics(db: Session = Depends(get_db)):
         "log_tail": log_tail,
         "log_available": available,
         "log_note": "" if available else _no_log_note(deployment),
+        "local_templates": local,
     }
 
 
