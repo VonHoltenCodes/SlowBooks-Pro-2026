@@ -204,10 +204,13 @@ const SettingsPage = {
     },
 
     // Customer deposits and retainers (#1237): a labelled box per active
-    // liability account that is no bank or credit card account, no
-    // control account and no payroll account, none ticked by default. Ticked ones appear in Record
-    // Payment's Deposit To, in their own group. A saved id that no longer
-    // qualifies stays ticked and named, so Save says what is wrong.
+    // liability account canHoldCustomerDeposits takes (no bank or credit
+    // card account, no control account, no construction account the app
+    // posts to and no payroll account), none ticked by default. Ticked ones
+    // appear in Record Payment's Deposit To, in their own group. A saved id
+    // that no longer qualifies stays ticked and named "(unavailable)": it is
+    // not offered in Deposit To, the server keeps it as it is on a save of
+    // other settings, and unticking it takes it off.
     _customerDepositAccountsHtml(s, accounts) {
         const all = Array.isArray(accounts) ? accounts : [];
         // utils.js loads first in the app; a probe that loads this file alone
@@ -892,7 +895,7 @@ const SettingsPage = {
                         { id: 'settings-deposits-help', text: 'Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.' },
                         { name: 'Default deposit account', id: 'settings-default-deposit-account-help', text: 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.' },
                         { name: 'Deposit into these accounts', id: 'settings-deposit-accounts-help', text: 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.' },
-                        { name: `${T('Customer')} deposits and retainers`, id: 'settings-customer-deposit-accounts-help', text: Terms.text('Liability accounts that hold money a customer paid ahead, such as Retainer Payable. Ticked ones appear in Deposit To on Receive Payment only, in a group of their own, to apply that money to invoices: the payment takes it out of the account and no money moves. Such a payment must be applied to invoices in full, and the form asks before applying more than the account holds. None ticked leaves Deposit To as it is.') },
+                        { name: `${T('Customer')} deposits and retainers`, id: 'settings-customer-deposit-accounts-help', text: Terms.text('Liability accounts that hold money a customer paid ahead, such as Retainer Payable. Ticked ones appear in Deposit To on Receive Payment only, in a group of their own, to apply that money to invoices: the payment takes it out of the account and no money moves. Such a payment must be applied to invoices in full, and the form asks before applying more than the account holds. Bank, credit card, control and payroll accounts cannot be ticked, nor the construction accounts the app posts to itself, such as Retainage Payable and ') + 'Customer Deposits' + Terms.text(' (job deposits are applied on the pay application). An account marked (unavailable) no longer qualifies and is not offered; untick it. None ticked leaves Deposit To as it is.') },
                     ])}</div>
                     ${SettingsPage._depositAccountsHtml(s, accounts)}
                     ${SettingsPage._customerDepositAccountsHtml(s, accounts)}
