@@ -626,12 +626,40 @@ const JobsPage = {
             API.get('/cost-types'),
             API.get(`/estimates?customer_id=${job.customer_id}`).catch(() => []),
         ]);
-        const byCode = {}; const byType = {}; let whole = null;
+        // One screen line stands for every row on its key: a code's rows
+        // (estimate rows carry the code's cost type), else the type or the
+        // whole job. Change-order rows are the change order's own and stay
+        // out. Shown is the sum the reports use, as the save compares it.
+        const cents = v => Math.round((parseFloat(v) || 0) * 100);
+        const groups = {};
         for (const r of rows) {
-            if (r.cost_code_id) byCode[r.cost_code_id] = r;
-            else if (r.cost_type) byType[r.cost_type] = r;
-            else whole = r;
+            if (r.source === 'change') continue;
+            const k = r.cost_code_id ? `c${r.cost_code_id}` : (r.cost_type ? `t${r.cost_type}` : 'w');
+            (groups[k] = groups[k] || []).push(r);
         }
+        const line = (k) => {
+            let g = groups[k];
+            if (!g) return {};
+            // a manual untyped copy equal to the code's other rows is the old
+            // Save Budget twin (the save folds it away), so it is not shown
+            const isCopy = r => r.source === 'manual' && !r.cost_type;
+            const others = g.filter(r => !isCopy(r));
+            if (k[0] === 'c' && others.length && others.length < g.length) {
+                const sum = (rs, f) => rs.reduce((t, r) => t + cents(r[f]), 0);
+                const [oa, orv] = [sum(others, 'amount'), sum(others, 'revenue_amount')];
+                g = g.filter(r => !(isCopy(r) && cents(r.amount) === oa && cents(r.revenue_amount) === orv));
+            }
+            const total = f => (g.reduce((t, r) => t + cents(r[f]), 0) / 100).toFixed(2);
+            const sources = [...new Set(g.map(r => r.source))];
+            const source = (sources.length > 1 ? 'mixed' : sources[0]) + (g.some(r => r.locked) ? ' · locked' : '');
+            return { amount: total('amount'), revenue_amount: total('revenue_amount'), source };
+        };
+        const byCode = {}; const byType = {};
+        for (const k of Object.keys(groups)) {
+            if (k[0] === 'c') byCode[k.slice(1)] = line(k);
+            else if (k[0] === 't') byType[k.slice(1)] = line(k);
+        }
+        const whole = groups.w ? line('w') : null;
         const codeRows = codes.map(c => {
             const r = byCode[c.id] || {};
             return `<tr data-budget-code="${c.id}">
