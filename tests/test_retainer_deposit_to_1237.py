@@ -95,6 +95,10 @@ def _lines(db_session, payment):
 def test_an_edit_keeps_a_liability_deposit_to_and_its_method(
     client, db_session, seed_accounts, seed_customer, number, name, method
 ):
+    """The server never changed (it keeps what it is sent), so this passes
+    with or without commit 1: it pins the books for what the corrected form
+    sends. The form itself is pinned by the node test, which is the real
+    guard against a regression."""
     acct = _liability(client, number, name)
     _hold(client, seed_accounts, acct)
     inv = _invoice(client, seed_customer.id)
@@ -185,6 +189,9 @@ def test_a_plain_liability_is_accepted_and_stored_as_a_list(
         ("2100", "is a bank or credit card account"),
         ("2000", "is a control account"),
         ("2200", "is a control account"),
+        ("2300", "is a payroll account"),
+        ("2330", "is a payroll account"),
+        ("2390", "is a payroll account"),
     ],
 )
 def test_anything_but_a_plain_liability_is_refused_with_a_sentence(
@@ -275,9 +282,13 @@ def test_listed_more_than_the_account_holds_needs_the_override(
     acct, inv = _retainer_setup(client, seed_accounts, seed_customer)
     r = _pay(client, seed_customer, acct, inv, "600.00", "600.00")
     assert r.status_code == 422, r.text
-    assert r.json()["detail"].startswith(
+    detail = r.json()["detail"]
+    assert detail.startswith(
         "Retainer Payable holds $500.00, less than the $600.00 applied from it."
     )
+    # in words a form user can act on, never the API's field name
+    assert "allow_overdraw" not in detail
+    assert "confirm applying more than it holds" in detail
     assert db_session.query(Payment).count() == 0
     r = _pay(client, seed_customer, acct, inv, "600.00", "600.00", allow_overdraw=True)
     assert r.status_code == 201, r.text
@@ -324,3 +335,134 @@ def test_listed_other_accounts_are_checked_as_before(
     for deposit_to in (seed_accounts["1000"].id, None, other):
         r = _pay(client, seed_customer, deposit_to, inv, "50.00", "10.00")
         assert r.status_code == 201, (deposit_to, r.text)
+
+
+# --- Review round: what the list must not do --------------------------------
+
+
+def test_an_account_a_payroll_setting_names_is_refused(
+    client, db_session, seed_accounts
+):
+    """Not only the seeded 23xx numbers: any account Settings → Payroll
+    Accounts posts withholding to."""
+    held = _liability(client, "2295", "Withholding Held")
+    _ok(
+        client.put(
+            "/api/settings", json={"payroll_federal_withholding_account_id": held}
+        )
+    )
+    r = _list(client, [held])
+    assert r.status_code == 422, r.text
+    assert "Withholding Held is a payroll account" in r.json()["detail"]
+    # the refusal names no example account
+    assert "such as" not in r.json()["detail"]
+    assert _ok(client.get("/api/settings"))["customer_deposit_account_ids"] == "[]"
+
+
+@pytest.mark.parametrize("change", ["bank", "credit_card", "payroll"])
+def test_a_listed_account_that_no_longer_qualifies_takes_ordinary_deposits(
+    client, db_session, seed_accounts, seed_customer, change
+):
+    """Ticked, then retyped to a bank, made a credit card or named by a
+    payroll setting: the saved list is not trusted on its own, so Receive
+    Payment, Sales Receipts and the bank feed deposit into it as before."""
+    acct, inv = _retainer_setup(client, seed_accounts, seed_customer)
+    if change == "bank":
+        _ok(
+            client.put(
+                f"/api/accounts/{acct}",
+                json={"account_type": "asset", "bank_kind": "bank"},
+            )
+        )
+    elif change == "credit_card":
+        _ok(client.put(f"/api/accounts/{acct}", json={"bank_kind": "credit_card"}))
+    else:
+        _ok(client.put("/api/settings", json={"payroll_suta_account_id": acct}))
+    db_session.expire_all()
+    # money left over, and more than the account holds: both as before
+    r = _pay(client, seed_customer, acct, inv, "900.00", "300.00")
+    assert r.status_code == 201, r.text
+    r = _pay(client, seed_customer, acct, inv, "700.00", "700.00")
+    assert r.status_code == 201, r.text
+
+
+def test_an_edit_of_a_payment_saved_before_the_account_was_listed_saves(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A $400 payment to Retainer Payable with $300 applied, saved while
+    nothing was listed; the account is ticked; an edit changing only the
+    memo keeps its account and saves, as it did before the setting."""
+    acct, inv = _retainer_setup(client, seed_accounts, seed_customer, listed=False)
+    first = _ok(_pay(client, seed_customer, acct, inv, "400.00", "300.00"))
+    _ok(_list(client, [acct]))
+    body = {
+        "customer_id": seed_customer.id,
+        "date": "2026-10-20",
+        "amount": "400.00",
+        "method": "Retainer",
+        "deposit_to_account_id": acct,
+        "notes": "memo fixed",
+        "allocations": [{"invoice_id": inv["id"], "amount": "300.00"}],
+    }
+    new = _ok(client.post(f"/api/payments/{first['id']}/replace", json=body))
+    assert new["deposit_to_account_id"] == acct
+    # a new payment to it is still held to the rule
+    r = _pay(client, seed_customer, acct, inv, "400.00", "300.00")
+    assert r.status_code == 422, r.text
+    # and an edit moving another payment onto it is a new use of it
+    bank = _ok(
+        _pay(client, seed_customer, seed_accounts["1000"].id, inv, "50.00", "10.00")
+    )
+    body.update(
+        amount="50.00", allocations=[{"invoice_id": inv["id"], "amount": "10.00"}]
+    )
+    r = client.post(f"/api/payments/{bank['id']}/replace", json=body)
+    assert r.status_code == 422, r.text
+
+
+def test_a_pay_application_applies_its_deposit_past_a_listed_2210_balance(
+    client, db_session, seed_accounts, seed_customer
+):
+    """_apply_deposit sends the override: the job's own deposit is what
+    the application checks, not 2210's company-wide balance."""
+    from tests.test_pay_applications import (
+        _acct,
+        _approve,
+        _deposit,
+        _edit,
+        _gl,
+        _new_app,
+        _two_line_job,
+    )
+
+    job, sov = _two_line_job(client, seed_customer.id)
+    bank = _acct(db_session, "1000")
+    assert _deposit(client, job["id"], 10000, bank.id).status_code == 201
+    cd = _acct(db_session, "2210")
+    _ok(_list(client, [cd.id]))
+    # 2210 now holds less than the job's deposit: 9,000 moved out by hand
+    _ok(
+        client.post(
+            "/api/journal",
+            json={
+                "date": "2026-05-02",
+                "description": "Deposit refunded",
+                "lines": [
+                    {"account_id": cd.id, "debit": "9000.00", "credit": "0"},
+                    {"account_id": bank.id, "debit": "0", "credit": "9000.00"},
+                ],
+            },
+        )
+    )
+    db_session.expire_all()
+    assert db_session.get(Account, cd.id).balance == Decimal("1000.00")
+    app = _new_app(client, job["id"])
+    _edit(
+        client,
+        app["id"],
+        lines=[{"sov_line_id": sov[0]["id"], "this_period": 30000, "stored": 0}],
+        deposit_applied=10000,
+    )
+    r = _approve(client, app["id"])
+    assert r.status_code == 200, r.text
+    assert _gl(db_session, "2210") == Decimal("9000.00")

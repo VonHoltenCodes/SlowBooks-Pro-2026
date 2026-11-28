@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 
 const JS = path.join(__dirname, '../../app/static/js');
 
@@ -28,7 +29,7 @@ function depositAccounts(App) {
     return ctx.DepositAccounts;
 }
 
-function loadPayments({ accounts = ALL, settings = {} } = {}) {
+function loadPayments({ accounts = ALL, settings = {}, source = null } = {}) {
     let modal = '';
     const App = { settings: JSON.parse(JSON.stringify(settings)), navigate() {} };
     const context = {
@@ -51,7 +52,7 @@ function loadPayments({ accounts = ALL, settings = {} } = {}) {
     };
     context.fetchAllPages = url => context.API.get(url);
     vm.createContext(context);
-    vm.runInContext(fs.readFileSync(path.join(JS, 'payments.js'), 'utf8') + '\nthis.PaymentsPage = PaymentsPage;', context);
+    vm.runInContext((source || fs.readFileSync(path.join(JS, 'payments.js'), 'utf8')) + '\nthis.PaymentsPage = PaymentsPage;', context);
     return { page: context.PaymentsPage, modal: () => modal, context, App };
 }
 
@@ -139,11 +140,57 @@ test('DepositAccounts.customerDeposits: only listed, active liabilities that are
     assert.deepEqual(fromApp.customerDeposits(ALL).map(a => a.id), [7]);
 });
 
+test('DepositAccounts.customerDeposits: never a control or payroll account, even listed', () => {
+    const DA = depositAccounts({ settings: {} });
+    const ap = { id: 9, account_number: '2000', name: 'Accounts Payable', account_type: 'liability', is_control: true, bank_kind: null, is_active: true };
+    const payroll = { id: 12, account_number: '2300', name: 'Payroll Liabilities', account_type: 'liability', is_control: false, bank_kind: null, is_active: true };
+    const held = { id: 13, account_number: '2296', name: 'Withholding Held', account_type: 'liability', is_control: false, bank_kind: null, is_active: true };
+    const accounts = [...ALL, ap, payroll, held];
+    const s = { customer_deposit_account_ids: '[7, 9, 12, 13]' };
+    assert.deepEqual(DA.customerDeposits(accounts, s).map(a => a.id), [7, 13]);
+    // an account a payroll setting names is a payroll account too
+    const named = { ...s, payroll_state_withholding_account_id: '13' };
+    assert.deepEqual(DA.customerDeposits(accounts, named).map(a => a.id), [7]);
+    assert.deepEqual([...DA.payrollIds(accounts, named)].sort(), ['12', '13']);
+});
+
+// payments.js as it was before #1237: the merge base with origin/main.
+// Null when git or the base is not there (a shallow CI checkout), and once
+// this is merged the base is this code itself; it pins the change in review.
+function basePayments() {
+    const root = path.join(__dirname, '../..');
+    try {
+        const base = execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        return execFileSync('git', ['show', `${base}:app/static/js/payments.js`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 });
+    } catch (err) {
+        return null;
+    }
+}
+const squeeze = html => html.replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
+
 test('an empty list leaves Record Payment exactly as it is today', async () => {
-    const html = async settings => { const p = loadPayments({ settings }); await p.page.showForm(); return p.modal(); };
+    const html = async (settings, keep = null, source = null) => {
+        const p = loadPayments({ settings, source });
+        await p.page.showForm(null, null, keep);
+        return p.modal();
+    };
     const today = await html({});
     assert.equal(await html({ customer_deposit_account_ids: '[]' }), today);
     assert.ok(!today.includes('optgroup'));
+});
+
+test('an empty list renders the form the code before #1237 rendered', async (t) => {
+    const before = basePayments();
+    if (!before) { t.skip('no git merge base with origin/main here'); return; }
+    const html = async (keep, source) => {
+        const p = loadPayments({ settings: {}, source });
+        await p.page.showForm(null, null, keep);
+        return squeeze(p.modal());
+    };
+    // a new payment, and Edit of a bank, Undeposited Funds or blank payment
+    for (const keep of [null, SAVINGS.id, UF.id]) {
+        assert.equal(await html(keep, null), await html(keep, before), String(keep));
+    }
 });
 
 test('a listed account is in its own labelled group, worded as no bank', async () => {
@@ -255,10 +302,25 @@ test('Save: more than the account holds asks first; No sends nothing, Yes sends 
     assert.equal(yes.sent[0][1].allow_overdraw, true);
 });
 
-test('Save: an edit counts what its void gives back to the account', async () => {
-    const r = await saving({ depositTo: '7', amount: '600.00', giveBack: { id: '7', cents: 30000 } }).run();
+test('Save: an edit keeping its own retainer account saves as it was', async () => {
+    // saved before the account was ticked: money left over, more than it holds
+    // (money left over then takes the keep-as-credit box, as any payment's)
+    const left = await saving({ depositTo: '7', remaining: 10000, giveBack: { id: '7' } }).run();
+    assert.ok(!left.toasts.some(x => /customer deposit or retainer/.test(x[0])), JSON.stringify(left.toasts));
+    assert.match(left.toasts[0][0], /tick the box to keep it as a credit/);
+    const r = await saving({ depositTo: '7', amount: '600.00', giveBack: { id: '7' } }).run();
     assert.equal(r.asked.length, 0);
+    assert.equal(r.sent.length, 1);
     assert.ok(!('allow_overdraw' in r.sent[0][1]));
+});
+
+test('Save: an edit moving a payment onto a retainer account is checked as new', async () => {
+    const left = await saving({ depositTo: '7', remaining: 5000, giveBack: { id: '1' } }).run();
+    assert.equal(left.sent.length, 0);
+    assert.match(left.toasts[0][0], /must be applied to invoices/);
+    const over = await saving({ depositTo: '7', amount: '600.00', answer: false, giveBack: { id: '1' } }).run();
+    assert.equal(over.sent.length, 0);
+    assert.equal(over.asked.length, 1);
 });
 
 test('Save: a bank account is never asked about, leftover or not', async () => {
@@ -277,6 +339,7 @@ function settingsPage() {
         accountWords: a => `${a.account_number} - ${a.name}`,
         toast() {}, document: { getElementById: () => null },
         PendingFiles: { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} },
+        DepositAccounts: depositAccounts({ settings: {} }),
     };
     vm.createContext(context);
     vm.runInContext(fs.readFileSync(path.join(JS, 'payment_terms.js'), 'utf8'), context);
@@ -303,4 +366,14 @@ test('Settings: a saved account that no longer qualifies stays ticked and named'
     const page = settingsPage();
     const box = (id, checked) => ({ checked, getAttribute: () => id });
     assert.deepEqual([...page._customerDepositAccountsToSave([box('7', true), box('8', false), box('11', true)])], [7, 11]);
+});
+
+test('Settings: no box for a payroll account, seeded or named by a payroll setting', () => {
+    const payroll = { id: 12, account_number: '2300', name: 'Payroll Liabilities', account_type: 'liability', is_control: false, bank_kind: null, is_active: true };
+    const ss = { id: 14, account_number: '2330', name: 'Social Security Payable', account_type: 'liability', is_control: false, bank_kind: null, is_active: true };
+    const held = { id: 13, account_number: '2296', name: 'Withholding Held', account_type: 'liability', is_control: false, bank_kind: null, is_active: true };
+    const accounts = [...ALL, payroll, ss, held];
+    const boxes = s => [...settingsPage()._customerDepositAccountsHtml(s, accounts).matchAll(/data-customer-deposit-account="(\d+)"/g)].map(m => m[1]);
+    assert.deepEqual(boxes({}), ['7', '8', '13']);
+    assert.deepEqual(boxes({ payroll_futa_account_id: '13' }), ['7', '8']);
 });

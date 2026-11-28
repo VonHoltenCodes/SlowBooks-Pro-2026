@@ -232,9 +232,9 @@ const PaymentsPage = {
         for (const a of p.allocations || []) back[a.invoice_id] = (back[a.invoice_id] || 0) + (parseFloat(a.amount) || 0);
         for (const d of p.discounts || []) back[d.invoice_id] = (back[d.invoice_id] || 0) + (parseFloat(d.amount) || 0);
         PaymentsPage._giveBack = back;
-        // what the void gives back to its Deposit To, for the retainer
-        // check on Save (#1237)
-        PaymentsPage._giveBackDeposit = { id: String(p.deposit_to_account_id || ''), cents: PaymentsPage._cents(p.amount) };
+        // the edited payment's own Deposit To: kept, it saves as it was,
+        // with no retainer check on Save (#1237)
+        PaymentsPage._giveBackDeposit = { id: String(p.deposit_to_account_id || '') };
         Replace.set(form, 'customer_id', p.customer_id);
         Replace.set(form, 'date', p.date);
         Replace.set(form, 'amount', Number(p.amount).toFixed(2));
@@ -862,8 +862,14 @@ const PaymentsPage = {
             return;
         }
         // A customer deposit or retainer account (#1237) is applied in full:
-        // money left over would be a customer credit taken out of it
-        const retainer = PaymentsPage._retainerAccount(form);
+        // money left over would be a customer credit taken out of it. An
+        // edit keeping its own account saves as it was (the server lets it
+        // through too): one saved before the account was ticked may have
+        // left money unapplied
+        const kept = PaymentsPage._giveBackDeposit;
+        const retainerChosen = PaymentsPage._retainerAccount(form);
+        const retainer = retainerChosen && !(kept && kept.id === String(retainerChosen.id))
+            ? retainerChosen : null;
         if (retainer && remaining > 0) {
             toast(Terms.text(`Deposit To is ${retainer.name}, a customer deposit or retainer account, so the whole payment must be applied to invoices; ${PaymentsPage._fmt(remaining / 100)} is not applied. Apply it, or lower the amount.`), 'error');
             return;
@@ -932,11 +938,10 @@ const PaymentsPage = {
         };
 
         // more than the retainer account holds: asked, then sent with the
-        // server's override (#1237); an edit counts what its void gives back
+        // server's override (#1237); an edit keeping its own account is not
+        // asked (above)
         if (retainer) {
-            const back = PaymentsPage._giveBackDeposit && PaymentsPage._giveBackDeposit.id === String(retainer.id)
-                ? PaymentsPage._giveBackDeposit.cents : 0;
-            const held = PaymentsPage._cents(retainer.balance) + back;
+            const held = PaymentsPage._cents(retainer.balance);
             const wanted = Math.round(data.amount * (foreign ? rate : 1) * 100);
             if (wanted > held) {
                 if (!confirm(`${retainer.name} holds ${PaymentsPage._fmt(held / 100)}, less than the ${PaymentsPage._fmt(wanted / 100)} applied from it. Apply it anyway?`)) return;

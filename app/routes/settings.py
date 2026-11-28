@@ -425,13 +425,15 @@ def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
     """Customer deposits and retainers (#1237): every account on the list
     (cleaned to a JSON list of ids) is in the chart, a liability, not a bank
     or credit card account, not a control account (Accounts Payable, Sales
-    Tax Payable and the rest, which their own documents keep) and active.
+    Tax Payable and the rest, which their own documents keep), not a payroll
+    account (the 23xx payroll liabilities and any account Settings → Payroll
+    Accounts names) and active.
     Anything else is refused with a 422 saying why, before any setting is
     written."""
     import json
 
     from app.models.accounts import Account
-    from app.services import control_accounts
+    from app.services.customer_deposit_accounts import not_usable_because
 
     if "customer_deposit_account_ids" not in cleaned:
         return
@@ -446,25 +448,15 @@ def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
                     str(acct_id),
                 ),
             )
-        kind = getattr(acct.account_type, "value", acct.account_type)
-        why = None
-        if kind != "liability":
-            why = "is not a liability account"
-        elif acct.bank_kind:
-            why = "is a bank or credit card account"
-        elif control_accounts.is_control(
-            acct.account_number, acct.account_type, acct.name
-        ):
-            why = "is a control account its own documents keep"
-        elif acct.is_active is False:
+        why = not_usable_because(db, acct)
+        if why is None and acct.is_active is False:
             why = "is inactive"
         if why:
             raise HTTPException(
                 status_code=422,
                 detail=said(
                     label + ": {} " + why + ". Choose a liability account that "
-                    "holds money for customers, such as Retainer Payable. "
-                    "Nothing was saved.",
+                    "holds money customers paid ahead. Nothing was saved.",
                     acct.name,
                 ),
             )

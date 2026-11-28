@@ -1753,7 +1753,32 @@ const DepositAccounts = {
         const chosen = new Set(DepositAccounts.customerDepositIds(s));
         if (!chosen.size) return [];
         return DepositAccounts.active(accounts, keepId)
-            .filter(a => chosen.has(String(a.id)) && a.account_type === 'liability' && !a.bank_kind);
+            .filter(a => chosen.has(String(a.id)) && DepositAccounts.canHoldCustomerDeposits(a, s, accounts));
+    },
+    // The payroll liabilities (#1237): the seeded 23xx accounts a pay run,
+    // a benefits posting or a PTO accrual finds by number, and every account
+    // a payroll_*_account_id setting names, as id strings. Never a customer
+    // deposit account (the server refuses them on save, and ignores one
+    // ticked before it became one).
+    PAYROLL_NUMBERS: ['2300', '2310', '2320', '2330', '2340', '2350', '2360', '2370', '2380', '2390'],
+    payrollIds(accounts, s) {
+        const out = new Set((accounts || [])
+            .filter(a => DepositAccounts.PAYROLL_NUMBERS.includes(String(a.account_number || '')))
+            .map(a => String(a.id)));
+        const set = DepositAccounts._settings(s);
+        for (const key of Object.keys(set)) {
+            if (!/^payroll_.+_account_id$/.test(key)) continue;
+            const v = String(set[key] || '').trim();
+            if (/^\d+$/.test(v)) out.add(v);
+        }
+        return out;
+    },
+    // a liability that is no bank or credit card account, no control account
+    // and no payroll account (#1237): the rule the server's save applies,
+    // less being active, which the caller decides
+    canHoldCustomerDeposits(a, s, accounts) {
+        return !!a && a.account_type === 'liability' && !a.bank_kind && !a.is_control
+            && !DepositAccounts.payrollIds(accounts, s).has(String(a.id));
     },
     // `banks` with the default first, the rest in their own order
     defaultFirst(banks, s) {

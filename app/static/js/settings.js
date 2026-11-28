@@ -204,13 +204,16 @@ const SettingsPage = {
     },
 
     // Customer deposits and retainers (#1237): a labelled box per active
-    // liability account that is no bank or credit card account and no
-    // control account, none ticked by default. Ticked ones appear in Record
+    // liability account that is no bank or credit card account, no
+    // control account and no payroll account, none ticked by default. Ticked ones appear in Record
     // Payment's Deposit To, in their own group. A saved id that no longer
     // qualifies stays ticked and named, so Save says what is wrong.
     _customerDepositAccountsHtml(s, accounts) {
         const all = Array.isArray(accounts) ? accounts : [];
-        const usable = all.filter(a => a.account_type === 'liability' && !a.bank_kind && !a.is_control && a.is_active !== false);
+        // utils.js loads first in the app; a probe that loads this file alone
+        // gets none, as it got no Deposits section
+        const can = typeof DepositAccounts !== 'undefined' ? a => DepositAccounts.canHoldCustomerDeposits(a, s, all) : () => false;
+        const usable = all.filter(a => a.is_active !== false && can(a));
         let chosen = [];
         try { chosen = JSON.parse(s.customer_deposit_account_ids || '[]'); } catch (err) { chosen = []; }
         chosen = (Array.isArray(chosen) ? chosen : []).map(String);
