@@ -65,7 +65,7 @@ const FieldTickets = {
                 <button class="btn btn-primary" onclick="FieldTickets.newTicket('tm')">+ T&amp;M ticket</button>
                 <button class="btn btn-secondary" onclick="FieldTickets.newTicket('material')">+ Material slip</button>
                 <button class="btn btn-secondary" onclick="FieldTickets.newTicket('delivery')">+ Delivery ticket</button>
-                <button class="btn btn-secondary" onclick="FieldTickets.makeChangeOrder()" title="Tick signed T&amp;M tickets to price them as one potential change order, at cost with the job's markup">Make change order</button>
+                <button class="btn btn-secondary" onclick="FieldTickets.makeChangeOrder()" title="Tick signed T&amp;M tickets to price them as one potential change order, at cost marked up to their bill rates">Make change order</button>
                 <button class="btn btn-secondary" onclick="FieldTickets.billSelected()" title="Tick signed T&amp;M tickets to bill them on an invoice at their bill rates (a job with no schedule of values)">Bill it</button>
             </div>
             <div class="table-container"><table class="data-table" id="ft-list" style="font-size:12px">
@@ -446,6 +446,7 @@ const FieldTickets = {
             const made = await API.post('/field-tickets/make-change-order', { ticket_ids: ids });
             const subs = made.sub_change_orders.map(s => s.number).join(', ');
             toast(`Made ${made.change_order.number}${subs ? ` and sub change order ${subs}` : ''}. Find it on the Change orders tab.`, 'success');
+            (made.warnings || []).forEach(w => toast(w, 'warning'));
             await FieldTickets.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },
