@@ -54,15 +54,17 @@ def _local_date(ts: datetime) -> date:
 
 def job_closed_by(job: Job, as_of: Optional[date] = None) -> bool:
     """Whether the job was closed on `as_of`: its status is Closed and it
-    went to Closed by then (a job closed with no date on file counts as
-    closed on every date). None: closed today."""
+    went to Closed before that day. A job closed during a day was still on
+    the books for it, so a schedule dated the close day reads the same that
+    evening as it did that morning. A job closed with no date on file counts
+    as closed on every date. None: closed now."""
     if job.status not in _CLOSED:
         return False
-    return as_of is None or job.closed_on is None or job.closed_on <= as_of
+    return as_of is None or job.closed_on is None or job.closed_on < as_of
 
 
 def status_on(job: Job, as_of: Optional[date] = None) -> str:
-    """The job's status as it read on `as_of`: a job closed after the day was
+    """The job's status as it read on `as_of`: a job closed on or after the day was
     still in progress on it."""
     if job.status in _CLOSED and not job_closed_by(job, as_of):
         return "in_progress"
@@ -158,8 +160,8 @@ def select_jobs(
 
     `status` names one job status and wins; otherwise not-awarded jobs are
     always left out and closed ones too unless `include_closed`. With
-    `as_of`, a job closed after that day was still open on it, so it stays
-    in."""
+    `as_of`, a job closed on or after that day was still open on it, so it
+    stays in (see job_closed_by)."""
     q = db.query(Job).options(joinedload(Job.customer))
     if job_id is not None:
         q = q.filter(Job.id == job_id)
@@ -173,7 +175,7 @@ def select_jobs(
         if not include_closed:
             closed = Job.status.in_(_CLOSED)
             if as_of is not None:
-                closed = closed & (Job.closed_on.is_(None) | (Job.closed_on <= as_of))
+                closed = closed & (Job.closed_on.is_(None) | (Job.closed_on < as_of))
             q = q.filter(~closed)
     jobs = q.all()
     if status and as_of is not None:
@@ -525,8 +527,9 @@ def _wip_row_warnings(
         out.append(
             f"{job.name}: billed in full, retainage collected and every "
             f"commitment closed, yet {_money_text(ctc)} of cost to complete "
-            "remains. If the job is finished, close it (a closed job reads "
-            "100% complete) or enter 0 in the Cost-to-Complete Forecast."
+            "remains. If the job is finished, enter 0 in the Cost-to-Complete "
+            "Forecast, or close the job: schedules dated after the day you "
+            "close it leave it out."
         )
     return out
 
@@ -568,7 +571,7 @@ def wip_schedule(
     posted revenue to that date, billing and retainage from the applications
     approved by then, the revised contract with the change orders approved by
     then. The estimated total cost takes the budget with the change orders
-    in effect by then, and a job closed after the date reads as it did: open.
+    in effect by then, and a job closed on or after the date reads as it did: open.
     The WIP adjusting entry itself is in none of these figures."""
     as_of = as_of or date.today()
     jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)

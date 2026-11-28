@@ -114,6 +114,35 @@ def _income_lines(db, invoice_id):
     return [(acct.account_number, tl) for tl, acct in rows]
 
 
+def _code_revenue(tree, code_id):
+    """{cost type: actual revenue} for one code's own rows, nonzero only."""
+    out = {}
+
+    def walk(node, ty):
+        if node["id"] == code_id and node["own"]["act_revenue"]:
+            out[ty] = node["own"]["act_revenue"]
+        for ch in node["children"]:
+            walk(ch, ty)
+
+    for ty in tree["types"]:
+        for node in ty["codes"]:
+            walk(node, ty["cost_type"])
+    return out
+
+
+def _code_lines(tree, code_id, ty_code):
+    for ty in tree["types"]:
+        if ty["cost_type"] != ty_code:
+            continue
+        stack = list(ty["codes"])
+        while stack:
+            node = stack.pop()
+            if node["id"] == code_id:
+                return node["lines"]
+            stack.extend(node["children"])
+    return []
+
+
 # ── Build from accepted estimate ─────────────────────────────────────────
 
 
@@ -300,13 +329,117 @@ def test_each_line_credits_its_revenue_account_with_job_and_code(
     # nothing to 4000 Service Income any more
     assert "4000" not in by_number
 
-    # revenue by section reaches the job cost tree (by section, not under a
-    # cost type: a pay application's revenue has none)
+    # revenue by section reaches the job cost tree; with no budget on the
+    # section, its revenue stays on the section's own cost type
     tree = client.get(f"/api/jobs/{job['id']}/cost-tree").json()
     by_section = {r["cost_code_id"]: r for r in tree["revenue_sections"]}
     assert by_section[conc["id"]]["act_revenue"] == 20000.0
     assert by_section[None]["act_revenue"] == 10000.0  # the line with no section
     assert tree["totals"]["act_revenue"] == 30000.0
+    assert _code_revenue(tree, conc["id"]) == {"subcontract": 20000.0}
+
+
+def test_pay_app_revenue_is_spread_over_the_budgeted_cost_types(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A pay application's invoice line names a code and no cost type, so
+    the ledger stamps the code's own; Job Cost Detail spreads that revenue
+    over the code's budgeted types by their budgeted revenue, as the
+    estimated revenue is, and the totals, the section table, the ledger and
+    the invoice stay as they were."""
+    from app.models.invoices import InvoiceLine
+
+    _construction(client)
+    shell = _section(client, "93 10 00", "Shell", cost_type="other")
+    job, sov, _ = _accepted_build(
+        client,
+        seed_customer.id,
+        [
+            _line(
+                "Shell material", 6000, cost_code_id=shell["id"], cost_type="material"
+            ),
+            _line("Shell sub", 4000, cost_code_id=shell["id"], cost_type="subcontract"),
+        ],
+    )
+    approved = _bill_all(client, job["id"], sov)
+
+    inv_lines = (
+        db_session.query(InvoiceLine).filter_by(invoice_id=approved["invoice_id"]).all()
+    )
+    assert inv_lines and all(ln.cost_type is None for ln in inv_lines)
+    income = [tl for _n, tl in _income_lines(db_session, approved["invoice_id"])]
+    assert income and all(tl.cost_type == "other" for tl in income)
+
+    tree = client.get(f"/api/jobs/{job['id']}/cost-tree").json()
+    assert _code_revenue(tree, shell["id"]) == {
+        "material": 6000.0,
+        "subcontract": 4000.0,
+    }
+    assert sum(r["amount"] for r in _code_lines(tree, shell["id"], "material")) == (
+        6000.0
+    )
+    assert tree["totals"]["act_revenue"] == tree["totals"]["est_revenue"] == 10000.0
+    by_section = {r["cost_code_id"]: r for r in tree["revenue_sections"]}
+    assert by_section[shell["id"]]["act_revenue"] == 10000.0
+
+    # the PDF and CSV read the same tree
+    import csv as csvlib
+    import io
+
+    r = client.get(f"/api/jobs/{job['id']}/cost-tree/csv")
+    assert r.status_code == 200, r.text
+    rows = list(csvlib.reader(io.StringIO(r.text)))
+    head = next(row for row in rows if row[:1] == ["Cost type"])
+    est, act = head.index("Est. Rev"), head.index("Act. Rev")
+    shell_rows = [row for row in rows if len(row) > act and row[1] == "93 10 00"]
+    assert shell_rows and all(row[est] == row[act] for row in shell_rows)
+
+    # voided with the application, every type nets to zero
+    r = client.post(f"/api/pay-applications/{approved['id']}/void")
+    assert r.status_code == 200, r.text
+    tree = client.get(f"/api/jobs/{job['id']}/cost-tree").json()
+    assert _code_revenue(tree, shell["id"]) == {}
+    assert tree["totals"]["act_revenue"] == 0.0
+
+
+def test_pay_app_revenue_spread_rounds_and_foots(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Three equally budgeted types on one code and 100.00 billed on it: 33.33, 33.33 and the
+    remainder, 33.34, on the last type, so the parts add up to the line."""
+    _construction(client)
+    fit = _section(client, "93 20 00", "Fit-out", cost_type="other")
+    job, sov, _ = _accepted_build(
+        client,
+        seed_customer.id,
+        [
+            _line("Fit material", 100, cost_code_id=fit["id"], cost_type="material"),
+            _line("Fit labor", 100, cost_code_id=fit["id"], cost_type="labor"),
+            _line("Fit sub", 100, cost_code_id=fit["id"], cost_type="subcontract"),
+        ],
+    )
+    # bill 100.00 on one of the code's lines: the line names no type
+    r = client.post(
+        "/api/pay-applications", json={"job_id": job["id"], "date": "2026-07-31"}
+    )
+    assert r.status_code == 201, r.text
+    app = r.json()
+    r = client.put(
+        f"/api/pay-applications/{app['id']}",
+        json={
+            "lines": [{"sov_line_id": sov[0]["id"], "this_period": 100, "stored": 0}]
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/pay-applications/{app['id']}/approve")
+    assert r.status_code == 200, r.text
+
+    tree = client.get(f"/api/jobs/{job['id']}/cost-tree").json()
+    got = _code_revenue(tree, fit["id"])
+    assert set(got) == {"material", "labor", "subcontract"}
+    order = [t["cost_type"] for t in tree["types"] if t["cost_type"] in got]
+    assert [got[t] for t in order] == [33.33, 33.33, 33.34]
+    assert tree["totals"]["act_revenue"] == 100.0
 
 
 def test_put_sov_refuses_a_revenue_account_that_is_not_income(

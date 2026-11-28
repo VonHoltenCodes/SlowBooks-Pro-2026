@@ -53,10 +53,24 @@ class DiscountTaken(BaseModel):
 
 
 class InvoiceLineCreate(StrictModel):
-    item_id: Optional[int] = None
+    item_id: Optional[int] = Field(
+        None,
+        description="The item sold. A discount is a line on an item whose "
+        "allows_negative_price is true (is_discount on the item's response, "
+        '"Discount or concession" on its form), with a negative rate.',
+    )
     description: Optional[str] = None
     quantity: Decimal = Decimal("1")
-    rate: Decimal = Decimal("0")
+    rate: Decimal = Field(
+        Decimal("0"),
+        description="The unit price. Negative only for a discount, on an "
+        "item whose allows_negative_price is true (send quantity 1 and "
+        "rate -10.00 for $10.00 off); refused on any other item or on a "
+        "line with no item. The discounts may not come to more than the "
+        "other lines, and with a tax rate a taxable discount may not be "
+        "more than the taxable lines. A refund or a return belongs on a "
+        "credit memo, not a negative line.",
+    )
     amount: Decimal = Decimal("0")
     class_name: Optional[str] = None
     job_id: Optional[int] = None

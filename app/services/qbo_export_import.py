@@ -1420,7 +1420,9 @@ CUSTOMER_LABEL_COLUMN = re.compile(
 )
 
 
-def parse_ar_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
+def parse_ar_aging(
+    csv_text: str, left_out: list[dict] | None = None
+) -> tuple[list[dict], list[str], list[str]]:
     """The A/R Aging Detail report's rows as {kind, type, date, num,
     customer, due_date, amount, open}: kind "invoice" for an invoice with
     an open balance, "payment" for a payment not (fully) applied, whose
@@ -1429,7 +1431,8 @@ def parse_ar_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
     Amount, Open balance), a section per aging bucket with its "Total for"
     row, a TOTAL row and a footer with the time it was run. Returns the
     rows, the errors (nothing can be carried) and the notes (a row left
-    where it is)."""
+    where it is). ``left_out``, when given, collects each row with an open
+    balance that is not carried over as {type, num, customer, open}."""
     rows = _rows(csv_text)
     items: list[dict] = []
     errors: list[str] = []
@@ -1520,9 +1523,17 @@ def parse_ar_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
         kind = {"invoice": "invoice", "payment": "payment"}.get(ttype.lower())
         if kind is None or (kind == "invoice") != (open_ > 0) or open_ == 0:
             left_alone += open_
+            if open_ == 0:
+                notes.append(f"{what} is not carried over: nothing is open on it.")
+                continue
+            if left_out is not None:
+                left_out.append(
+                    {"type": ttype, "num": num, "customer": customer, "open": open_}
+                )
             notes.append(
-                f"{what} ({open_:,.2f} open) is not carried over: it stays on the "
-                "export's receivable account. Enter it after the import."
+                f"{what} ({open_:,.2f} open) is not carried over: the amount stays "
+                "on the export's receivable account, and the customer's aging here "
+                f"will read {'higher' if open_ < 0 else 'lower'} by {abs(open_):,.2f}."
             )
             continue
         if kind == "invoice":
@@ -1556,6 +1567,18 @@ def parse_ar_aging(csv_text: str) -> tuple[list[dict], list[str], list[str]]:
             "the sum of its rows: export it again"
         )
     return items, errors, notes
+
+
+def _rows_not_carried(rows: list[dict]) -> str:
+    """The A/R Aging Detail rows not carried over, for a sentence: type,
+    number, customer and amount of the first five, then "and N more"."""
+    said = [
+        f"{r['type']} {r['num']}".strip() + f" for {r['customer']} ({r['open']:,.2f})"
+        for r in rows[:5]
+    ]
+    if len(rows) > 5:
+        said.append(f"and {len(rows) - 5} more")
+    return ", ".join(said)
 
 
 def _receivable_name(
@@ -1720,7 +1743,9 @@ def _carry_plan(db: Session, bundle: dict) -> dict:
                 "and upload it with the export."
             )
         return plan
-    items, errors, notes = parse_ar_aging(bundle["ar_aging"])
+    left_out: list[dict] = []
+    items, errors, notes = parse_ar_aging(bundle["ar_aging"], left_out)
+    left_out_total = sum((r["open"] for r in left_out), Decimal("0"))
     plan["errors"].extend(errors)
     plan["notes"].extend(notes)
     if not items:
@@ -1752,12 +1777,26 @@ def _carry_plan(db: Session, bundle: dict) -> dict:
         and not plan["onto_control"]
         and control.name.lower() == receivable.lower()
     ):
+        if left_out:
+            why = (
+                f"The A/R Aging Detail report has {len(left_out)} "
+                f"{'row' if len(left_out) == 1 else 'rows'} that "
+                f"{'is' if len(left_out) == 1 else 'are'} not carried over: "
+                f"{_rows_not_carried(left_out)}, together {left_out_total:,.2f}. "
+            )
+        else:
+            why = (
+                f"The A/R Aging Detail report's open balances come to {total:,.2f}, "
+                f"and the Journal leaves {left:,.2f} on {receivable} (the report "
+                "may have been run on another day than the export). "
+            )
         plan["errors"].append(
-            f"The export's receivable account is named {receivable!r}, as 1100 is "
-            "here, so the history already posts to 1100 and the open invoices "
-            "would count twice. Rename it in QuickBooks Online (its default name "
-            "is Accounts Receivable (A/R)) and export again, or import without the "
-            "A/R Aging Detail report."
+            why + f"The export's receivable account is named {receivable!r}, as "
+            "1100 is here, so the history posts to 1100 and "
+            f"{left - total:,.2f} would sit in 1100 with no document behind it. "
+            "Rename 1100 in the Chart of Accounts here, or rename the account in "
+            "QuickBooks Online (its default name is Accounts Receivable (A/R)) and "
+            "export again, or import without the A/R Aging Detail report."
         )
         return plan
     names = _customer_names(db, bundle)
@@ -1859,11 +1898,21 @@ def _carry_plan(db: Session, bundle: dict) -> dict:
             f"{receivable} ends at zero."
         )
     else:
+        if not left_out:
+            why = " (a report run on another day than the export)"
+        else:
+            why = (
+                ". The rows not carried over come to "
+                f"{left_out_total:,.2f}: {_rows_not_carried(left_out)}"
+            )
+            if left_out_total != left - total:
+                why += (
+                    "; the rest is likely a report run on another day than the export"
+                )
         plan["notes"].append(
             f"The A/R Aging Detail report's open balances come to {total:,.2f}, and "
             f"the Journal leaves {left:,.2f} on {receivable}: the difference, "
-            f"{left - total:,.2f}, stays on {receivable} (a report run on another "
-            "day than the export, or a row not carried over)."
+            f"{left - total:,.2f}, stays on {receivable}{why}."
         )
     return plan
 

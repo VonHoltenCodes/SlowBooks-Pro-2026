@@ -234,6 +234,27 @@ test('disconnect: a sentence with no notice kept for it stays on the panel, esca
     assert.ok(buttons(f.panel.innerHTML).includes('Dismiss'));
 });
 
+// The same finished Disconnect is drawn the same way whether or not another
+// company is closed: with every company open, a relay that was told is a
+// success, and one that was not is unfinished; neither is drawn as an error.
+test('disconnect: a sentence kept on the panel is drawn as done or unfinished, not as an error', async () => {
+    const drawn = async (unlinked, sentence) => {
+        const f = fixture({
+            '/switchboard/status': { state: 'not_connected', linked: false, can_manage: true },
+            'POST /switchboard/disconnect': { unlinked, revoked: true, deleted: false, slug: 'ztnqj8djvg', sentence, why: '', pending: false, say: true },
+        });
+        await f.page.disconnectClaude();
+        f.page._drawSwitchboard();
+        assert.equal(f.page._claude.error, sentence);
+        assert.doesNotMatch(f.panel.innerHTML, /text-danger/);
+        return f.panel.innerHTML;
+    };
+    const told = 'This computer is unlinked (relay name ztnqj8djvg). This relay cannot delete its record of these books by itself; to have it removed, send that name to support.';
+    assert.match(await drawn(true, told), /<div id="claude-relay-error" role="status" style="margin-top:4px;"><div style="color:var\(--text-success\);">This computer is unlinked/);
+    const lost = 'The relay\'s own record of these books could not be removed, because the relay name was lost with the file.';
+    assert.match(await drawn(false, lost), /<div id="claude-relay-error" role="alert" style="margin-top:4px;"><div style="color:var\(--text-warning\);">The relay/);
+});
+
 test('a refresh that changes nothing draws nothing', async () => {
     const f = fixture({ '/switchboard/status': CONNECTED });
     await f.page.loadSwitchboard();
@@ -510,7 +531,8 @@ test('Disconnect from several companies asks in the exact words, then says which
     const f = fixture({
         '/switchboard/status': MANAGER,
         'POST /switchboard/disconnect': {
-            unlinked: true, revoked: true, deleted: true, slug: 'ztnqj8djvg', sentence: 'x', say: true,
+            unlinked: true, revoked: true, deleted: true, slug: 'ztnqj8djvg', say: true,
+            sentence: 'This computer is unlinked, and the relay deleted its record of these books (relay name ztnqj8djvg). Lake Dental is not open now; its token will be turned off the next time it is opened.',
             results: [
                 { file: 'harbor.db', name: 'Harbor Books', result: 'ended' },
                 { file: 'smith.db', name: 'Smith Plumbing', result: 'ended' },
@@ -521,9 +543,48 @@ test('Disconnect from several companies asks in the exact words, then says which
     await f.page.loadSwitchboard();
     await f.page.disconnectClaude();
     assert.equal(f.confirms[0], "Disconnect the AI assistant from all 3 companies? The relay forgets this connection and each company's AI assistant token is turned off: Harbor Books, Smith Plumbing, Lake Dental. A company that is not open now has its token turned off the next time it opens; until then it cannot be used, because its secret is deleted from this computer.");
-    assert.equal(f.page._claude.error, 'Disconnected. Lake Dental is not open now; its token will be turned off the next time it is opened.');
+    // done: what became of the relay's record, as the server said it, and
+    // which company is not open now, in the success style
+    assert.equal(f.page._claude.error, 'The AI assistant is disconnected and the token revoked. This computer is unlinked, and the relay deleted its record of these books (relay name ztnqj8djvg). Lake Dental is not open now; its token will be turned off the next time it is opened.');
+    f.page._drawSwitchboard();
+    assert.match(f.panel.innerHTML, /<div id="claude-relay-error" role="status" style="margin-top:4px;"><div style="color:var\(--text-success\);">The AI assistant is disconnected/);
+    assert.doesNotMatch(f.panel.innerHTML, /text-danger/);
     const two = f.page.claudeDisconnectQuestion(MANAGER, THREE.slice(0, 2));
     assert.match(two, /^Disconnect the AI assistant from both companies\? /);
+});
+
+test('Disconnect with a company not open and the relay not finished says so, not as done', async () => {
+    const f = fixture({
+        '/switchboard/status': MANAGER,
+        'POST /switchboard/disconnect': {
+            unlinked: false, revoked: true, deleted: false, slug: 'ztnqj8djvg', why: 'away', pending: true, say: false,
+            sentence: 'This computer is unlinked here, but the relay could not be reached.',
+            results: [
+                { file: 'harbor.db', name: 'Harbor Books', result: 'ended' },
+                { file: 'lake.db', name: 'Lake Dental', result: 'later' },
+            ],
+        },
+    });
+    await f.page.loadSwitchboard();
+    await f.page.disconnectClaude();
+    assert.equal(f.page._claude.error, 'The AI assistant is disconnected and the token revoked. The relay was out of reach: see the relay name below. Lake Dental is not open now; its token will be turned off the next time it is opened.');
+    f.page._drawSwitchboard();
+    assert.match(f.panel.innerHTML, /<div id="claude-relay-error" role="alert" style="margin-top:4px;"><div style="color:var\(--text-warning\);">The AI assistant is disconnected/);
+    // the relay's answer, as it gave it
+    const g = fixture({
+        '/switchboard/status': MANAGER,
+        'POST /switchboard/disconnect': {
+            unlinked: false, revoked: true, slug: 'ztnqj8djvg', why: 'refused', pending: true,
+            results: [{ file: 'lake.db', name: 'Lake Dental', result: 'later' }],
+        },
+    });
+    await g.page.loadSwitchboard();
+    await g.page.disconnectClaude();
+    assert.ok(g.page._claude.error.includes('The relay did not accept the request to delete its record: see the relay name below.'));
+    // a refusal set after it is drawn as an error again
+    g.page._claude.error = 'Something went wrong.';
+    g.page._drawSwitchboard();
+    assert.match(g.panel.innerHTML, /<div id="claude-relay-error" role="alert" style="margin-top:4px;"><div style="color:var\(--text-danger\);">Something went wrong\./);
 });
 
 test('a busy connection says so, and the sentence stays', async () => {

@@ -7,6 +7,7 @@ import calendar
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from dateutil.relativedelta import relativedelta
 
 from fastapi import HTTPException
@@ -446,6 +447,29 @@ def generate_due_invoices(
             default_tax_exempt(db, rec.customer, rec.job_id),
         )
         subtotal, tax_amount, total = compute_line_totals(copied, tax_rate)
+        # A template whose lines can't be priced (discounts past its other
+        # lines, or a taxable one past its taxed lines) is skipped with the
+        # sentence, as a $0.00 one is: posting it raised mid-run.
+        from app.routes.invoices.helpers import negative_sale_sentence
+
+        problem = negative_sale_sentence(
+            copied,
+            tax_rate,
+            total,
+            document_label(SimpleNamespace(is_pledge=nonprofit), words).lower(),
+        )
+        if problem:
+            skipped.append(
+                {
+                    "recurring_id": rec.id,
+                    "customer_name": rec.customer.name if rec.customer else None,
+                    "message": (
+                        f"The schedule for {_who(rec)} was not run: {problem} "
+                        "Open it and correct its lines."
+                    ),
+                }
+            )
+            continue
         if total <= 0:
             skipped.append(
                 {

@@ -408,7 +408,9 @@ const PurchaseOrdersPage = {
     },
 
     // Release retainage (#555): a prompt for the amount (default the whole
-    // outstanding) → a bill DR Retainage Payable / CR A/P, payable in Pay Bills.
+    // outstanding) and the release date (default today — the release is
+    // dated the day it is made, #1227) → a bill DR Retainage Payable / CR
+    // A/P, payable in Pay Bills.
     async releaseRetainage(id) {
         let sched;
         try { sched = await API.get(`/purchase-orders/${id}/pay-app`); }
@@ -419,8 +421,10 @@ const PurchaseOrdersPage = {
         if (raw === null) return;
         const amount = parseFloat(raw);
         if (isNaN(amount) || amount <= 0) { toast('Enter an amount to release.', 'error'); return; }
+        const when = await prompt('Release date:', todayISO());
+        if (when === null) return;
         try {
-            const r = await API.post(`/purchase-orders/${id}/release-retainage`, { amount });
+            const r = await API.post(`/purchase-orders/${id}/release-retainage`, { amount, date: when || undefined });
             toast(r.message);
             if (location.hash === '#/bills') App.navigate('#/bills'); else location.hash = '#/bills';
         } catch (err) { toast(err.message, 'error'); }

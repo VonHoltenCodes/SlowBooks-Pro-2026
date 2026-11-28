@@ -224,6 +224,13 @@ Open **http://localhost:3001** in your browser.
 > is the whole recipe, and [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md)
 > covers the proxy, `FORWARDED_ALLOW_IPS` and `RATE_LIMIT_STORAGE_URI`.
 
+> The **About** box of a Docker build shows the version alone, such as
+> `2.32.0`. To show the commit after it (`2.32.0+<commit>`), so two builds of
+> one version can be told apart, build with
+> `SLOWBOOKS_COMMIT=$(git rev-parse HEAD) docker compose up --build` (Linux
+> and macOS shells; in PowerShell run `$env:SLOWBOOKS_COMMIT = git rev-parse HEAD`
+> first, then `docker compose up --build`). It is optional.
+
 > On Windows, **Option 0** avoids all of this (no Docker at all, secret
 > generated for you, opens a desktop window, and serves the office as Server
 > Edition from the same install).

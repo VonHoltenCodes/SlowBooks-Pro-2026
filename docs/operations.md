@@ -63,33 +63,102 @@ folder and is lost when the container is recreated):
 docker compose exec -e BACKUP_DIR=/app/backups slowbooks ./scripts/backup.sh
 ```
 
-Under `docker-compose.prod.yml` the app container has no `PG*` connection
-settings; dump from the `postgres` container instead, as in
-[cloud-hosting.md](cloud-hosting.md), "Backups that leave the machine".
+That command works with the plain `docker-compose.yml` only. Under
+`docker-compose.prod.yml` the app container has no `PG*` connection
+settings, so `backup.sh` there fails with a `socket "/var/run/postgresql/...`
+error. Dump from the `postgres` container instead, which reaches the
+database over its own socket with no password (cloud-hosting.md,
+"Backups that leave the machine", has the nightly version):
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres \
+    pg_dump --clean --if-exists -U bookkeeper bookkeeper | gzip > "bookkeeper_$(date +%Y%m%d_%H%M%S).sql.gz"
+```
+
+This writes the file on the host, in the current folder.
 
 ### Restore
 
-Stop the app first, and always pass `-v ON_ERROR_STOP=1`: without it psql
-reports every failed statement and still exits 0, and a restore that
-collided with the existing tables looked successful while nothing was
-restored. A dump from `scripts/backup.sh` (or `pg_dump --clean --if-exists`)
-replaces the tables the app's first start made; a plain dump restores only
-into an empty database, so drop and recreate it first.
+Restore into a freshly created database, never over the existing one: stop
+the app, drop the database, create it empty, then load the dump in one
+transaction. Restoring over the existing database fails partway whenever a
+newer version than the one that took the dump has upgraded it, which is
+always the case when you go back to an older version: tables only the newer
+version has still hold foreign keys, and those block the dump's own drops.
 
-Native:
+- Check the file first with `gunzip -t bookkeeper_20260523_020000.sql.gz`
+  and stop if it reports an error. It reads the whole file before anything
+  is dropped; a cut-short or damaged file piped into psql could still load
+  partway and report success.
+- `--single-transaction` makes the restore all or nothing.
+- `-v ON_ERROR_STOP=1` makes psql stop at the first error and exit non-zero;
+  without it psql reports each failed statement and still exits 0.
+- **If psql stops with an error**, nothing from the file was kept and the
+  database is left empty. Do not start the app on it: its first start would
+  set up a new, empty company there. Fix what the error names, then run the
+  drop, create and restore steps again.
+- A restore that failed by the steps in earlier versions of this guide (no
+  drop, no `--single-transaction`) may have left most keys and indexes
+  dropped while the app still starts and serves the books. Restore again by
+  the steps below.
+
+Docker, plain `docker-compose.yml`:
 
 ```bash
-gunzip -c bookkeeper_20260523_020000.sql.gz | PGHOST=localhost psql -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
-```
-
-Docker:
-
-```bash
+gunzip -t bookkeeper_20260523_020000.sql.gz   # stop here if it reports an error
 docker compose stop slowbooks
+docker compose exec -T postgres dropdb -U bookkeeper bookkeeper
+docker compose exec -T postgres createdb -U bookkeeper bookkeeper
 gunzip -c bookkeeper_20260523_020000.sql.gz | \
-    docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
+    docker compose exec -T postgres psql --single-transaction -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
 docker compose start slowbooks
 ```
+
+Docker, `docker-compose.prod.yml` (the same steps; see also
+[cloud-hosting.md](cloud-hosting.md), "Backups that leave the machine"):
+
+```bash
+gunzip -t bookkeeper_20260523_020000.sql.gz   # stop here if it reports an error
+docker compose -f docker-compose.prod.yml stop slowbooks
+docker compose -f docker-compose.prod.yml exec -T postgres dropdb -U bookkeeper bookkeeper
+docker compose -f docker-compose.prod.yml exec -T postgres createdb -U bookkeeper bookkeeper
+gunzip -c bookkeeper_20260523_020000.sql.gz | \
+    docker compose -f docker-compose.prod.yml exec -T postgres \
+    psql --single-transaction -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
+docker compose -f docker-compose.prod.yml start slowbooks
+```
+
+Native PostgreSQL (Linux; on macOS run `dropdb` and `createdb` as yourself,
+without `sudo -u postgres`, as INSTALL.md set the database up):
+
+```bash
+gunzip -t bookkeeper_20260523_020000.sql.gz   # stop here if it reports an error
+sudo systemctl stop slowbooks    # or stop the app however you run it
+sudo -u postgres dropdb bookkeeper
+sudo -u postgres createdb bookkeeper -O bookkeeper
+gunzip -c bookkeeper_20260523_020000.sql.gz | \
+    PGHOST=localhost psql --single-transaction -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
+sudo systemctl start slowbooks
+```
+
+`dropdb` says the database "is being accessed by other users": the app is
+still running. Stop it, then run `dropdb` again.
+
+**Going back to an older version.** Restore the backup you took before the
+upgrade, by the steps above, before the older version starts. An older
+version usually cannot start on a database a newer version upgraded (whenever
+the newer version changed the database): under Docker it
+restarts over and over and the browser only gets "connection refused"; the
+reason (`Can't locate revision`) is only in the log
+(`docker compose logs slowbooks`). The order is: stop the app, check out the
+older version (`git checkout v2.31.14`, the version the backup was taken
+on), check the file, drop, create and restore, then build and start that
+version (`docker compose up -d --build`, or the native start). Under Docker,
+leave out the last line of the restore block (`docker compose start
+slowbooks`): `git checkout` does not change the image already built, so
+`start` would boot the newer version, which upgrades the restored data
+again, and the older version then fails the same way. `up -d --build` builds
+the older version and starts it.
 
 `pg_dump` not found?
 - Docker: included automatically; nothing to do.
