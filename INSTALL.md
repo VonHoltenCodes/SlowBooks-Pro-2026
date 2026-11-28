@@ -91,6 +91,16 @@ other desktop app. If something goes wrong before the app window can open, a
 small popup explains it, and full details are written to
 `%LOCALAPPDATA%\SlowBooksPro\data\launcher.log`.
 
+### The portable .zip
+
+The release also has a portable `SlowBooksPro-windows-x64.zip`. Before you
+extract it, right-click the downloaded .zip, choose **Properties**, tick
+**Unblock** at the bottom and press **OK**; then extract each version into
+its own folder (for example `SlowBooks Pro 2.32.0`). If it was extracted
+without that, SlowBooks Pro removes the download mark from its own program
+DLLs when it starts, and says so in `launcher.log`. It keeps its books in
+the same `%LOCALAPPDATA%\SlowBooksPro` as the installed app.
+
 ### Microsoft Edge WebView2 (the app window)
 
 The app's window is drawn by Microsoft's Edge WebView2 runtime, which

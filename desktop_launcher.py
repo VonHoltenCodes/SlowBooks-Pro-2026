@@ -196,6 +196,91 @@ def _bootstrap_frozen_macos_runtime() -> None:
         pass
 
 
+# A portable copy extracted from a downloaded .zip (Windows). Explorer's
+# Extract All copies the download's internet mark (the Zone.Identifier
+# stream) onto every file it extracts, and .NET Framework, which pywebview's
+# window runs on through pythonnet, will not load a marked DLL: the window
+# never opened, and the message blamed WebView2. Unblocking the .zip before
+# extracting avoids it; these do the same for the program's own DLLs, after
+# the person has chosen to start the signed program.
+_ZONE_STREAM = ":Zone.Identifier"
+
+
+def _has_zone_mark(path: str) -> bool:
+    """Does Windows mark this file as downloaded? (Its Zone.Identifier
+    stream; on any other system the open fails and the answer is no.)"""
+    try:
+        with open(path + _ZONE_STREAM, "rb"):
+            return True
+    except OSError:
+        return False
+
+
+def _remove_zone_mark(path: str) -> None:
+    """What Properties > Unblock does to one file."""
+    os.remove(path + _ZONE_STREAM)
+
+
+def _marked_program_dlls(root: Path) -> list[Path]:
+    """The DLLs in the program's own folder that carry the internet mark."""
+    return sorted(p for p in root.rglob("*.dll") if _has_zone_mark(str(p)))
+
+
+def _is_installed_copy() -> bool:
+    """The installer leaves its uninstaller beside the exe; a portable copy
+    has none."""
+    return (Path(sys.executable).parent / "unins000.exe").exists()
+
+
+def unblock_portable_copy(root: Path | None = None) -> list[Path]:
+    """Remove the internet mark from the portable copy's own DLLs, inside
+    ``root`` only, so the window can open. Nothing happens on the installed
+    copy, outside Windows, from source, or when no DLL is marked. Returns
+    the DLLs still marked (the folder may be read-only), for the message."""
+    if not (FROZEN and sys.platform == "win32") or _is_installed_copy():
+        return []
+    root = ROOT if root is None else root
+    marked = _marked_program_dlls(root)
+    left = []
+    for path in marked:
+        try:
+            _remove_zone_mark(str(path))
+        except OSError:
+            left.append(path)
+    if len(left) < len(marked):
+        print(
+            f"This copy was extracted from a downloaded .zip, so Windows had "
+            f"marked its files as downloaded; the mark was removed "
+            f"from {len(marked) - len(left)} of its own DLLs in {root}, as "
+            f"Unblock does, so the window can open. No other file was changed."
+        )
+    if left:
+        print(
+            f"The mark could not be removed from {len(left)} of its DLLs, "
+            f"for example {left[0]}."
+        )
+    return left
+
+
+def _blocked_download_message() -> str:
+    """The window could not open because this copy's DLLs are still marked
+    as downloaded, so Windows will not load them."""
+    return (
+        "Windows has marked this copy's own files as downloaded from "
+        "the internet, and will not load them. That happens when a downloaded "
+        ".zip is extracted without being unblocked first; WebView2 is not the "
+        "problem.\n"
+        "\n"
+        "To fix it:\n"
+        "  1. Close this message.\n"
+        "  2. Right-click the downloaded .zip and choose Properties.\n"
+        "  3. At the bottom of the General tab, tick Unblock, then press OK.\n"
+        "  4. Extract the .zip again, into a new folder, and start "
+        "SlowBooksPro.exe from there.\n"
+        f"Or install SlowBooks Pro with its installer, {WINDOWS_INSTALLER}."
+    )
+
+
 if FROZEN:
     if sys.platform == "win32":
         _bootstrap_frozen_runtime()
@@ -2899,6 +2984,9 @@ def _track_window_geometry(window, tracker: WindowGeometryTracker, path: Path):
 
 
 def run_window(port: int, log_fh=None) -> int:
+    # Before anything loads pywebview's .NET backend (listing the screens
+    # below does): a portable copy extracted from a downloaded .zip.
+    unblock_portable_copy()
     try:
         import webview
     except ImportError:
@@ -3002,6 +3090,14 @@ def run_window(port: int, log_fh=None) -> int:
                 f"{exc!r}; the window position was saved."
             )
             return 0
+        if FROZEN and sys.platform == "win32" and _marked_program_dlls(ROOT):
+            msg = (
+                f"Could not open the native window: {exc}\n\n"
+                f"{_blocked_download_message()}"
+            )
+            print(msg)
+            _show_error_box(msg)
+            return 1
         if sys.platform == "win32":
             guidance = (
                 "This usually means the Microsoft WebView2 runtime is missing "
