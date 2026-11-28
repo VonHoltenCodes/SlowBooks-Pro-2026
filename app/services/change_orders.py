@@ -17,12 +17,15 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
+from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from app.models.accounts import Account, AccountType
 from app.models.change_orders import ChangeOrder, ChangeOrderLine
 from app.models.job_costing import JobBudget
 from app.models.jobs import Job, SovLine
 from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
+from app.models.transactions import Transaction, TransactionLine
 from app.services.accounting import _q
 from app.services.contracts import change_order_sov_fields, next_item_no
 
@@ -336,14 +339,40 @@ def allowance_unspent(db: Session, job: Job, line: SovLine) -> Decimal:
     )
 
 
+def allowance_cost_posted(db: Session, job: Job, line: SovLine) -> Decimal | None:
+    """The job cost actually posted on the allowance line's cost code (cost
+    and expense lines on this job, the WIP entry left out), or None when the
+    line names no cost code. "Used" counts only allowance-funded change
+    orders, so cost posted beyond it was spent without one recording it."""
+    if not line.cost_code_id:
+        return None
+    from app.services.jobs_service import job_attribution, not_wip_entry
+
+    total = (
+        db.query(sqlfunc.sum(TransactionLine.debit - TransactionLine.credit))
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(
+            job_attribution() == job.id,
+            TransactionLine.cost_code_id == line.cost_code_id,
+            Account.account_type.in_((AccountType.COGS, AccountType.EXPENSE)),
+            not_wip_entry(),
+        )
+        .scalar()
+    )
+    return _q(Decimal(str(total or 0)))
+
+
 def allowances_summary(db: Session, job: Job) -> list[dict]:
-    """Per allowance SOV line: its scheduled value, used and remaining."""
+    """Per allowance SOV line: its scheduled value, used and remaining, and
+    the job cost posted on its cost code (None with no code)."""
     out = []
     for line in job.sov_lines:
         if line.kind != "allowance":
             continue
         value = _q(line.scheduled_value)
         used = allowance_used(db, job, line.id)
+        posted = allowance_cost_posted(db, job, line)
         out.append(
             {
                 "sov_line_id": line.id,
@@ -351,6 +380,7 @@ def allowances_summary(db: Session, job: Job) -> list[dict]:
                 "scheduled_value": float(value),
                 "used": float(used),
                 "remaining": float(allowance_unspent(db, job, line)),
+                "cost_posted": None if posted is None else float(posted),
             }
         )
     return out
