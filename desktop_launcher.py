@@ -196,6 +196,153 @@ def _bootstrap_frozen_macos_runtime() -> None:
         pass
 
 
+# A portable copy extracted from a downloaded .zip (Windows). Explorer's
+# Extract All copies the download's internet mark (the Zone.Identifier
+# stream) onto every file it extracts, and .NET Framework, which pywebview's
+# window runs on through pythonnet, will not load a marked DLL: the window
+# never opened, and the message blamed WebView2. Unblocking the .zip before
+# extracting avoids it; these do the same for the program's own .NET DLLs
+# only, after the person has chosen to start the signed program.
+_ZONE_STREAM = ":Zone.Identifier"
+
+
+def _has_zone_mark(path: str) -> bool:
+    """Does Windows mark this file as downloaded? (Its Zone.Identifier
+    stream; on any other system the open fails and the answer is no.)"""
+    try:
+        with open(path + _ZONE_STREAM, "rb"):
+            return True
+    except OSError:
+        return False
+
+
+def _remove_zone_mark(path: str) -> None:
+    """What Properties > Unblock does to one file."""
+    os.remove(path + _ZONE_STREAM)
+
+
+# The only DLLs whose mark matters: the .NET assemblies that pythonnet and
+# pywebview load through .NET Framework (shown on Windows 11, Nov 2026).
+# The native DLLs, the .pyd files and clr_loader's DLL load with the mark,
+# so they keep it. Each is a folder under _internal, and only the DLLs
+# directly in it (not webview/lib/runtimes/, the native loaders).
+_MANAGED_DLL_FOLDERS = (("pythonnet", "runtime"), ("webview", "lib"))
+_MANAGED_DLL_FOLDER_NAMES = " and ".join(
+    "\\".join(parts) for parts in _MANAGED_DLL_FOLDERS
+)
+
+
+def _is_bundle_folder(root: Path) -> bool:
+    """Is ``root`` the "_internal" folder directly beside the running exe,
+    the layout this copy was built with? Anything else (a future build that
+    puts its files beside the exe, a source run) is never touched."""
+    exe_dir = Path(sys.executable).parent
+    return root.name.lower() == "_internal" and os.path.normcase(
+        os.path.abspath(root.parent)
+    ) == os.path.normcase(os.path.abspath(exe_dir))
+
+
+def _marked_program_dlls(root: Path) -> list[Path]:
+    """The .NET DLLs in the named folders of the program's own folder that
+    carry the internet mark. Each path is resolved and must stay inside the
+    resolved program folder, so a junction or symbolic link that leads out
+    of it is never followed."""
+    try:
+        base = root.resolve(strict=True)
+    except OSError:
+        return []
+    found = []
+    for parts in _MANAGED_DLL_FOLDERS:
+        try:
+            entries = list(root.joinpath(*parts).iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.suffix.lower() != ".dll":
+                continue
+            try:
+                real = entry.resolve(strict=True)
+            except OSError:
+                continue
+            if not real.is_relative_to(base) or not real.is_file():
+                continue
+            if _has_zone_mark(str(real)):
+                found.append(real)
+    return sorted(found)
+
+
+def _is_installed_copy() -> bool:
+    """The installer leaves its uninstaller beside the exe; a portable copy
+    has none."""
+    return (Path(sys.executable).parent / "unins000.exe").exists()
+
+
+def unblock_portable_copy(root: Path | None = None) -> list[Path]:
+    """Remove the internet mark from the portable copy's own .NET DLLs (the
+    named folders in ``root`` only), so the window can open. Nothing happens
+    on the installed copy, outside Windows, from source, when ``root`` is
+    not the "_internal" folder beside the exe, or when no DLL is marked.
+    Returns the DLLs still marked (the folder may be read-only), for the
+    message."""
+    if not (FROZEN and sys.platform == "win32") or _is_installed_copy():
+        return []
+    root = ROOT if root is None else root
+    if not _is_bundle_folder(root):
+        return []
+    started = time.perf_counter()
+    marked = _marked_program_dlls(root)
+    left = []
+    for path in marked:
+        try:
+            _remove_zone_mark(str(path))
+        except OSError:
+            left.append(path)
+    took = round((time.perf_counter() - started) * 1000)
+    if len(left) < len(marked):
+        print(
+            f"This copy was extracted from a downloaded .zip, so Windows had "
+            f"marked its files as downloaded; the mark was removed from "
+            f"{len(marked) - len(left)} .NET DLLs in {_MANAGED_DLL_FOLDER_NAMES} "
+            f"under {root}, as Unblock does, so the window can open "
+            f"({took} ms). No other file was changed."
+        )
+    if left:
+        print(
+            f"The mark could not be removed from {len(left)} of its .NET "
+            f"DLLs, for example {left[0]}."
+        )
+    return left
+
+
+def _still_marked() -> bool:
+    """Are any of this copy's .NET DLLs still marked as downloaded? (For the
+    message when the window fails; an error here is a no.)"""
+    try:
+        return bool(_marked_program_dlls(ROOT))
+    except Exception:
+        return False
+
+
+def _blocked_download_message() -> str:
+    """The window could not open because this copy's DLLs are still marked
+    as downloaded, so Windows will not load them."""
+    return (
+        "Windows has marked this copy's own files as downloaded from "
+        "the internet, and will not load them. That happens when a downloaded "
+        ".zip is extracted without being unblocked first. SlowBooks Pro could "
+        "not remove the mark itself (the folder may be read-only). WebView2 "
+        "is probably not the problem.\n"
+        "\n"
+        "To fix it:\n"
+        "  1. Close this message.\n"
+        "  2. Right-click the downloaded .zip and choose Properties.\n"
+        "  3. At the bottom of the General tab, tick Unblock, then press OK.\n"
+        "  4. Extract the .zip again, into a new folder, and start "
+        "SlowBooksPro.exe from there.\n"
+        f"Or install SlowBooks Pro with its installer, {WINDOWS_INSTALLER}."
+    )
+
+
 if FROZEN:
     if sys.platform == "win32":
         _bootstrap_frozen_runtime()
@@ -2899,6 +3046,13 @@ def _track_window_geometry(window, tracker: WindowGeometryTracker, path: Path):
 
 
 def run_window(port: int, log_fh=None) -> int:
+    # Before anything loads pywebview's .NET backend (listing the screens
+    # below does): a portable copy extracted from a downloaded .zip.
+    # Never stops the start: on any failure the message below still applies.
+    try:
+        unblock_portable_copy()
+    except Exception as exc:
+        print(f"Could not check the download mark: {exc!r}")
     try:
         import webview
     except ImportError:
@@ -3002,6 +3156,14 @@ def run_window(port: int, log_fh=None) -> int:
                 f"{exc!r}; the window position was saved."
             )
             return 0
+        if FROZEN and sys.platform == "win32" and _still_marked():
+            msg = (
+                f"Could not open the native window: {exc}\n\n"
+                f"{_blocked_download_message()}"
+            )
+            print(msg)
+            _show_error_box(msg)
+            return 1
         if sys.platform == "win32":
             guidance = (
                 "This usually means the Microsoft WebView2 runtime is missing "
