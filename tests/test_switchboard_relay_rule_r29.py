@@ -546,7 +546,10 @@ def test_the_products_deadline_is_a_timer_for_the_press_seconds():
         mine, theirs = socket.socketpair()
         try:
             done.hold(mine)
-            assert mine.recv(1) == b""
+            # the other end sees it shut (reading the shut end itself is
+            # an error on Windows and an empty read elsewhere)
+            theirs.settimeout(60)
+            assert theirs.recv(1) == b""
         finally:
             mine.close()
             theirs.close()
