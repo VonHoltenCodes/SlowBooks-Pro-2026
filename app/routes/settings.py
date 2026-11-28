@@ -89,6 +89,7 @@ ENUM_SETTINGS = {
     "ask_password_on_start": frozenset({"true", "false"}),
     "invoice_show_logo": frozenset({"true", "false"}),
     "invoice_logo_only": frozenset({"true", "false"}),
+    "company_logo_in_app": frozenset({"true", "false"}),
     "class_warn_blank": frozenset({"true", "false"}),
     "new_lines_taxable": frozenset({"true", "false"}),
     "use_account_numbers": frozenset({"true", "false"}),

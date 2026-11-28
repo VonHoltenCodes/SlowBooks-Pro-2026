@@ -706,6 +706,8 @@ PICKER_HTML = """<!DOCTYPE html>
              padding: 14px 16px; margin-bottom: 10px; cursor: pointer;
              display: flex; justify-content: space-between; align-items: center; }
   .company:hover { border-color: #2f6fed; box-shadow: 0 1px 4px rgba(47,111,237,.15); }
+  .company .logo { flex: none; width: 96px; height: 40px; object-fit: contain; margin-right: 14px; }
+  .company .logo + div { flex: 1; min-width: 0; }
   .company .name { font-weight: 600; color: #1a2b3c; }
   .company .file { font-size: 11px; color: #99a; }
   .company .note { font-size: 12px; color: #a0522d; margin-top: 4px; line-height: 1.4; }
@@ -883,12 +885,19 @@ async function refresh() {
         '<div class="note">Missing: the company file is no longer in the company folder.</div></div>' +
         '<button type="button" class="remove" data-remove="' + esc(c.file) + '">Remove from list</button></div>';
     }
-    return '<div class="company" data-file="' + esc(c.file) + '">' +
+    // its own logo, when the company turned it on (2.32.0): an image the
+    // launcher read from the file, never markup of the company's own
+    const logo = LOGO_URI.test(c.logo || '')
+      ? '<img class="logo" src="' + c.logo + '" alt="' + esc(c.name) + '">' : '';
+    return '<div class="company" data-file="' + esc(c.file) + '">' + logo +
       '<div><div class="name">' + esc(c.name) + sample + last + '</div>' +
       '<div class="file">' + esc(c.file) + '</div>' +
       (c.note ? '<div class="note">' + esc(c.note) + '</div>' : '') + '</div>' +
       '<div class="open">Open &rsaquo;</div></div>';
   }).join('');
+  list.querySelectorAll('.company .logo').forEach(function (img) {
+    img.addEventListener('error', function () { img.remove(); });
+  });
   list.querySelectorAll('.company:not(.missing)').forEach(function (el) {
     el.onclick = function () { openCompany(el.getAttribute('data-file'), el.querySelector('.name').firstChild.textContent); };
   });
@@ -906,6 +915,8 @@ async function refresh() {
   autoOpenTried = true;
 }
 var autoOpenTried = false;
+// a logo as the launcher reads it: a data: image of a logo's own types
+var LOGO_URI = new RegExp('^data:image/(png|jpeg|gif|webp|svg[+]xml);base64,[A-Za-z0-9+/=]+$');
 async function removeFromList(file, name) {
   const result = await window.pywebview.api.remove_from_list(file);
   if (result && result.success) {
@@ -1786,8 +1797,23 @@ class PickerApi:
     def list_companies(self) -> dict:
         from app.services import company_service
 
+        companies = company_service.manifest_list_companies()
+        # Each company's own logo (2.32.0), for one that turned "Show the
+        # company logo in SlowBooks Pro" on: read from its file as it lies,
+        # never an encrypted one (locked until it is unlocked here).
+        from app.services.company_logo import logo_data_uri_from_file
+
+        for c in companies:
+            path = (
+                None
+                if c.get("missing")
+                else company_service.company_db_path(c.get("file") or "")
+            )
+            logo = logo_data_uri_from_file(path) if path is not None else ""
+            if logo:
+                c["logo"] = logo
         return {
-            "companies": company_service.manifest_list_companies(),
+            "companies": companies,
             "last_opened": company_service.get_last_opened(),
             "auto_open": self._auto_open,
         }

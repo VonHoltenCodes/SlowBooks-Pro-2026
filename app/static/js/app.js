@@ -2848,6 +2848,7 @@ const App = {
     showCompany(s) {
         App.settings = s || {};
         App.applyHiddenMenu(App.settings);
+        App.showCompanyLogo(App.settings);
         const name = App.settings.company_name;
         if (!name || name === 'My Company') return;
         const companyEl = $('#status-company');
@@ -2857,6 +2858,48 @@ const App = {
         App.setWindowTitle(name);
         const brand = $('#topbar-company');
         if (brand) brand.textContent = name;
+    },
+
+    // The company's own logo in the top bar (2.32.0), where the product's
+    // mark sat before #978 moved it to the sidebar: only when the company
+    // turned "Show the company logo in SlowBooks Pro" on and has a logo.
+    // An <img> of the logo's own address (an SVG shown this way runs
+    // nothing), never its markup; named by the company; put away if it
+    // fails to load. Off, the bar is exactly as index.html draws it: the
+    // image is added here and taken out again, never left hidden in it.
+    // topbar_fit.js folds it away, as it did the mark, when the bar is
+    // short of room. Settings re-read on focus (refreshSettings) and a
+    // save both come here, so turning it on or off shows at once.
+    companyLogoSrc(s) {
+        s = s || {};
+        if (s.company_logo_in_app !== 'true') return '';
+        const path = String(s.company_logo_path || '');
+        return /^\/api\/uploads\/logo\/\d{1,12}$/.test(path) ? path : '';
+    },
+
+    showCompanyLogo(s) {
+        const src = App.companyLogoSrc(s);
+        let img = document.getElementById('topbar-logo');
+        if (!src) {
+            if (img) img.remove();
+            return;
+        }
+        const back = document.getElementById('back-btn');
+        if (!img) {
+            if (!back || !back.parentNode) return;
+            img = document.createElement('img');
+            img.id = 'topbar-logo';
+            img.className = 'topbar-logo';
+            img.decoding = 'async';
+            img.addEventListener('error', () => { img.hidden = true; });
+            back.parentNode.insertBefore(img, back);
+        }
+        const name = String((s && s.company_name) || '').trim();
+        img.alt = name || 'Company logo';
+        if (img.getAttribute('src') !== src) {
+            img.hidden = false;
+            img.setAttribute('src', src);
+        }
     },
 
     // Rewrites the static shell into the company's words. index.html is

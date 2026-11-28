@@ -91,8 +91,11 @@ def test_the_top_bar_no_longer_names_the_product():
 
 def test_the_bar_has_no_brand_fold_step():
     assert "tb-fold-brand" not in FIT and "tb-fold-brand" not in CSS
-    assert "return 1 + rackButtons().length + 2;" in FIT
-    assert "bar.classList.toggle('tb-fold-theme', n >= r + 3);" in FIT
+    # 1 + rack + 2, as since #978; the company's own logo (2.32.0), when a
+    # company shows one, adds its step before the theme's
+    # (tests/test_company_logo_in_app.py)
+    assert "return 1 + rackButtons().length + 2 + logoSteps();" in FIT
+    assert "bar.classList.toggle('tb-fold-theme', n >= r + 3 + l);" in FIT
 
 
 def test_the_logo_is_sized_in_px_not_viewport_units():
