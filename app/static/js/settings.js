@@ -597,6 +597,7 @@ const SettingsPage = {
                         SettingsPage._isAdmin() ? { name: 'Logo image', id: 'logo-upload-help', admin: true, text: 'PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.' } : null,
                         s.company_logo_path ? { name: 'Show company logo on invoices', id: 'invoice-show-logo-help', text: 'Applies to PDF, Print, and emailed invoice attachments.' } : null,
                         s.company_logo_path ? { name: 'Logo only', id: 'invoice-logo-only-help', text: 'Print the logo without the company name heading on invoices, estimates, statements and receipts. Only applies when a logo is set.' } : null,
+                        s.company_logo_path && SettingsPage._isAdmin() ? { name: 'Show the company logo in SlowBooks Pro', id: 'company-logo-in-app-help', admin: true, text: 'Shows this logo in the top bar, on the sign-in screen and beside the company in the list of companies. Off by default.' } : null,
                     ])}</div>
                     <div class="form-grid">
                         <div class="form-group">
@@ -614,6 +615,10 @@ const SettingsPage = {
                                     <input type="checkbox" id="invoice-logo-only" name="invoice_logo_only" value="true" data-bool data-write aria-describedby="invoice-logo-only-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_logo_only === 'true' ? 'checked' : ''}>
                                     Logo only
                                 </label>
+                                ${SettingsPage._isAdmin() ? `<label for="company-logo-in-app" style="font-weight:normal; display:block; margin-top:8px;">
+                                    <input type="checkbox" id="company-logo-in-app" name="company_logo_in_app" value="true" data-bool data-admin data-write aria-describedby="company-logo-in-app-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.company_logo_in_app === 'true' ? 'checked' : ''}>
+                                    Show the company logo in SlowBooks Pro
+                                </label>` : ''}
                             </div>` : ''}
                         </div>
                     </div>
@@ -2487,6 +2492,9 @@ const SettingsPage = {
             if (!SettingsPage.isDirty()) { App.navigate('#/settings'); return; }
             document.getElementById('company-logo-preview')?.remove();
             document.getElementById('company-logo-note')?.remove();
+            // The server turned "Show the company logo in SlowBooks Pro" off
+            // with the logo; drop its box so Save Settings never sends it on.
+            document.querySelector('label[for="company-logo-in-app"]')?.remove();
         } catch (err) { toast(err.message, 'error'); }
     },
 

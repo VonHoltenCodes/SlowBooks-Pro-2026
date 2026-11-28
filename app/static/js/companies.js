@@ -32,6 +32,17 @@ const CompaniesPage = {
         window.pywebview.api.show_picker();
     },
 
+    // A company's own logo on its card (2.32.0): only when the list gave
+    // its address, which it does for a company that turned "Show the
+    // company logo in SlowBooks Pro" on (routes/companies.py). An <img> of
+    // the server's own logo route, named by the company, gone if it fails
+    // to load; every other card is drawn as before.
+    _logoHTML(c) {
+        const url = String((c && c.logo_url) || '');
+        if (!/^\/api\/auth\/company-logo\?[A-Za-z0-9=&._%-]+$/.test(url)) return '';
+        return `<img class="company-card-logo" src="${escapeHtml(url)}" alt="${escapeHtml(c.name || 'Company logo')}" onerror="this.remove()">`;
+    },
+
     async render() {
         const companies = await API.get('/companies');
         // a Server Edition host serving several company files (#358)
@@ -72,7 +83,7 @@ const CompaniesPage = {
             for (const c of companies) {
                 const fileLabel = c.file || c.database_name || '';
                 html += `<div class="card">
-                    <div class="card-header">${escapeHtml(c.name)}${c.sample ? ' <span class="badge badge-draft" data-sample style="font-size:9px;">Sample</span>' : ''}${c.is_current ? ' <span style="font-size:9px;color:var(--text-success);">(currently open)</span>' : ''}</div>
+                    ${CompaniesPage._logoHTML(c)}<div class="card-header">${escapeHtml(c.name)}${c.sample ? ' <span class="badge badge-draft" data-sample style="font-size:9px;">Sample</span>' : ''}${c.is_current ? ' <span style="font-size:9px;color:var(--text-success);">(currently open)</span>' : ''}</div>
                     <div style="font-size:10px;color:var(--text-muted);">${escapeHtml(fileLabel)}</div>
                     ${c.description ? `<div style="font-size:11px;margin-top:4px;">${escapeHtml(c.description)}</div>` : ''}
                     ${c.last_accessed ? `<div style="font-size:9px;color:var(--text-light);margin-top:4px;">Last accessed: ${new Date(c.last_accessed).toLocaleDateString()}</div>` : ''}

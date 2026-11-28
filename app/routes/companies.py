@@ -35,7 +35,47 @@ def get_companies(request: Request, db: Session = Depends(get_db)):
         # of that company alone, never the names of the others this install
         # keeps.
         return [c for c in companies if c.get("is_current")]
+    _add_logos(companies, db)
     return companies
+
+
+def _add_logos(companies: list[dict], db: Session) -> None:
+    """Each company's own logo on Company Files (2.32.0), as ``logo_url``,
+    for a company that turned "Show the company logo in SlowBooks Pro" on;
+    the key is absent for every other company, so the list reads as it did.
+    The company in hand, and on a server serving several, each other company
+    whose file is already open. Listing companies never opens, unlocks or
+    upgrades a company file (as on origin/main, it reads only the list): a
+    served company not open now shows no logo here, as the sign-in route
+    would refuse it too; a desktop's other company files are not opened
+    either (the company picker shows theirs)."""
+    import app.database as db_module
+    from app.database import use_company
+    from app.services import company_logo, served_companies
+
+    served = served_companies.enabled()
+    for c in companies:
+        filename = c.get("file") if served else None
+        try:
+            if c.get("is_current"):
+                row = company_logo.shown_logo(db)
+            elif (
+                filename
+                and served_companies.is_served(filename)
+                and db_module.company_engine_is_open(filename)
+            ):
+                with use_company(filename):
+                    other = db_module.SessionLocal()
+                    try:
+                        row = company_logo.shown_logo(other)
+                    finally:
+                        other.close()
+            else:
+                row = None
+        except Exception:  # a company that cannot be opened now: no logo
+            row = None
+        if row is not None:
+            c["logo_url"] = company_logo.public_url(row, filename)
 
 
 @router.post("", status_code=201)

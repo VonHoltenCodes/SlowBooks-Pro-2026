@@ -145,6 +145,11 @@ DEFAULT_SETTINGS = {
     # when a logo prints: without one the heading stays, so a document never
     # goes out nameless. The address block prints either way.
     "invoice_logo_only": "false",
+    # The company's own logo in SlowBooks Pro (2.32.0): "true" shows the logo
+    # above in the top bar while signed in, on the sign-in screen and beside
+    # the company in the lists of companies (app/services/company_logo.py).
+    # Off by default; an administrator's, offered only once a logo is set.
+    "company_logo_in_app": "false",
     # Report PDF paper size: letter | a4
     "pdf_paper_size": "letter",
     # Pre-printed check stock (#440, from discussion #354). "plain" prints

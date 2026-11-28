@@ -111,6 +111,14 @@ def logo_info(db: Session = Depends(get_db)):
 def remove_logo(request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     file_store.remove_logo(db)
+    # "Show the company logo in SlowBooks Pro" goes off with the logo it
+    # showed (2.32.0): a logo uploaded later shows in the app only once an
+    # administrator turns it on again, where Settings offers it.
+    from app.services import company_logo
+    from app.services.settings_service import get_setting_raw, set_setting
+
+    if (get_setting_raw(db, company_logo.SETTING) or "").strip() == "true":
+        set_setting(db, company_logo.SETTING, "false")
     db.commit()
     return {"status": "deleted"}
 
