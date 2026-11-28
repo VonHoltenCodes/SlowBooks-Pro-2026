@@ -189,6 +189,8 @@ and double-click. Fully self-contained (64-bit Windows 10/11); a portable
 — it needs the Microsoft Edge WebView2 runtime, 101 or later, which Windows 11
 has and the installer sets up or updates; without it, or with an older one,
 the app says so and offers to open in your browser instead.
+Unblock the .zip before extracting it (right-click → Properties → tick
+**Unblock** → OK), and extract each version into its own folder.
 Each company is one SQLite file under `%LOCALAPPDATA%\SlowBooksPro` —
 upgrades and even uninstalls never touch your books.
 
