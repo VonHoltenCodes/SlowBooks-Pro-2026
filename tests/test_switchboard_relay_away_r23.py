@@ -17,12 +17,13 @@ import logging
 import secrets
 import socket
 import threading
-import time
+from types import SimpleNamespace
 
 import pytest
 
 from app.models.api_tokens import ApiToken
 from app.services import switchboard_link as link
+from tests.switchboard_clock import BACKSTOP, Holder, PressClock, hold_the_clock
 from tests.test_switchboard_connect_1087 import (  # noqa: F401  (fixture)
     _connected,
     _free_port,
@@ -33,16 +34,66 @@ from tests.test_switchboard_connect_1087 import (  # noqa: F401  (fixture)
 
 @pytest.fixture
 def silent_relay(monkeypatch):
-    """An address that takes the connection and never answers, as a relay
-    behind a firewall that drops the packets looks to a read."""
+    """An address that takes the connection, reads the request and never
+    answers, as a relay behind a firewall that drops the packets looks to a
+    read.
+
+    The press's deadline is a PressClock (tests/switchboard_clock.py): it
+    runs out when the silent relay has the request, and at no other moment.
+    A real half-second deadline here also covered the Connect each test
+    makes first against the fake relay that answers, and a slow runner used
+    it up there: "The relay could not be reached" before the step the test
+    was about (CI, test_disconnect_with_the_relay_silent_is_quick...)."""
+    hold_the_clock(monkeypatch)
+    holder = Holder()
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     sock.listen(8)
-    monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.5)
+
+    def hear_and_say_nothing(conn):
+        try:
+            conn.settimeout(BACKSTOP)
+            head = b""
+            while b"\r\n\r\n" not in head:
+                got = conn.recv(65536)
+                if not got:
+                    return
+                head += got
+            holder.hold()
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    def accept():
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return
+            threading.Thread(
+                target=hear_and_say_nothing, args=(conn,), daemon=True
+            ).start()
+
+    threading.Thread(target=accept, daemon=True).start()
     try:
-        yield f"http://127.0.0.1:{sock.getsockname()[1]}"
+        yield SimpleNamespace(
+            url=f"http://127.0.0.1:{sock.getsockname()[1]}", holder=holder
+        )
     finally:
+        holder.let_go()
         sock.close()
+
+
+def _ended_at_its_deadline(silent_relay, presses: int = 1) -> None:
+    """Each press against the silent relay answered at its deadline, while
+    the relay was still holding the connection without a word: it waited
+    for nothing else (no timer of its own, no socket timeout: the relay's
+    hold reaches its backstop only for a press that waits past its
+    deadline)."""
+    assert silent_relay.holder.holding.is_set()
+    assert len(PressClock.ran_out) == presses
+    assert not silent_relay.holder.held_out.is_set()
 
 
 def test_a_press_waits_ten_seconds_at_most():
@@ -53,19 +104,24 @@ def test_a_press_waits_ten_seconds_at_most():
 def test_connect_with_the_relay_away_says_so_and_leaves_nothing(
     relay, silent_relay, client, db_session, monkeypatch, caplog, where
 ):
-    address = silent_relay if where == "silent" else f"http://127.0.0.1:{_free_port()}"
+    address = (
+        silent_relay.url if where == "silent" else f"http://127.0.0.1:{_free_port()}"
+    )
     monkeypatch.setenv(link.RELAY_ENV, address)
     caplog.set_level(logging.WARNING)
-    started = time.monotonic()
     r = client.post("/api/switchboard/connect")
-    took = time.monotonic() - started
     assert r.status_code == 503, r.text
     assert r.json()["detail"] == (
         "The relay could not be reached. SlowBooks Pro is working normally; try "
         "again in a few minutes."
     )
-    # bounded by the press's own timeout, not the OS's or the client's 30 s
-    assert took < 5
+    # bounded by the press's own deadline, not the OS's or the client's 30 s:
+    # silent, it ended there; refused, the refusal was the answer and its
+    # time never had to run out
+    if where == "silent":
+        _ended_at_its_deadline(silent_relay)
+    else:
+        assert PressClock.ran_out == []
     # no address and no OS text in the sentence; the log has the detail
     assert "127.0.0.1" not in r.text and "Errno" not in r.text
     assert "did not answer" in caplog.text
@@ -137,11 +193,10 @@ def test_disconnect_with_the_relay_silent_is_quick_and_gives_the_fallback(
 ):
     _connected(relay, client)
     record = json.loads(link.link_path().read_text())
-    record["relay"] = silent_relay
+    record["relay"] = silent_relay.url
     link._save(record)
-    started = time.monotonic()
     r = client.post("/api/switchboard/disconnect")
-    assert time.monotonic() - started < 5
+    _ended_at_its_deadline(silent_relay)
     assert r.status_code == 200, r.text
     got = r.json()
     assert got["unlinked"] is False and got["revoked"] is True
@@ -154,11 +209,12 @@ def test_no_secret_reaches_the_log_when_the_relay_is_away(
 ):
     _connected(relay, client)
     record = json.loads(link.link_path().read_text())
-    record["relay"] = silent_relay
+    record["relay"] = silent_relay.url
     link._save(record)
     caplog.set_level(logging.DEBUG)
     client.post("/api/switchboard/code")
     client.post("/api/switchboard/disconnect")
+    _ended_at_its_deadline(silent_relay, presses=2)
     for secret in (record["credential"], record["token"]):
         assert secret not in caplog.text
 
@@ -298,11 +354,17 @@ def test_a_stop_that_runs_out_of_time_still_ends_the_retry(held_retry):
 def test_the_first_try_waits_its_time_after_an_earlier_stop(held_retry, monkeypatch):
     """A stop with no retry running (the app's shutdown, a test's) left its
     wake-up set, and the next retry tried at once instead of after
-    RETRY_FIRST: the try was then under way when the next stop came."""
-    monkeypatch.setattr(link, "RETRY_FIRST", 3.0)
+    RETRY_FIRST: the try was then under way when the next stop came.
+
+    RETRY_FIRST is one no machine reaches during the test (it was 3 s: a
+    runner that stalled the test that long saw the try come on time and
+    failed), and the wake-up itself is checked, not only that no try came
+    in half a second."""
+    monkeypatch.setattr(link, "RETRY_FIRST", 3600.0)
     link.stop_retry()
     link._add_pending(held_retry["record"])
     assert link._retry_thread is not None
+    assert not link._retry_events["wake"].is_set()
     assert not held_retry["entered"].wait(0.5)
 
 

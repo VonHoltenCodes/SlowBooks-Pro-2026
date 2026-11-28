@@ -39,6 +39,7 @@ from app.services import switchboard_link as link
 from app.switchboard import line as line_client
 from app.switchboard.client import Refused
 from app.switchboard.server import build_registry
+from tests.switchboard_clock import hold_the_clock, settle_the_start
 from tests.test_served_companies import _make_company
 from tests.test_switchboard_connect_1087 import (
     _THIS_COMPUTER,
@@ -83,6 +84,9 @@ def relay(monkeypatch, tmp_path):
         line_client.Timings(backoff_first=0.05, backoff_max=0.2, welcome_wait=5),
     )
     monkeypatch.setattr(link, "_books_transport", _in_process_transport)
+    # a press's deadline runs out only when a test runs it out: against
+    # this relay, which answers at once, a press's outcome is its answer
+    hold_the_clock(monkeypatch)
     try:
         yield fake
     finally:
@@ -375,10 +379,13 @@ def test_the_line_opens_with_any_company_open_and_not_with_none(three, relay):
     link.stop()
     _drain(relay)
     _serve(three, ["harbor.db", "lake.db"])
+    lines = relay.paths().count(("GET", "/v1/line"))
     link.start_in_background()
-    time.sleep(0.3)
+    settle_the_start()
+    assert link._line is None and link._waiter["stop"] is None
+    assert relay.paths().count(("GET", "/v1/line")) == lines
     with pytest.raises(queue.Empty):
-        relay.next_line(timeout=0.5)
+        relay.lines.get_nowait()
 
 
 # -- Disconnect, and the leftovers -------------------------------------------------------
@@ -618,9 +625,14 @@ def test_a_second_process_waits_for_the_line_and_takes_it_after(
     other = _child(_HOLD, link.link_path().with_name(link.LINE_FILE))
     try:
         assert other.stdout.readline().strip() == "held"
+        lines = relay.paths().count(("GET", "/v1/line"))
         link.start_in_background()
+        settle_the_start()
+        # no line here: this process waits for the other's to end
+        assert link._line is None and link._waiter["stop"] is not None
+        assert relay.paths().count(("GET", "/v1/line")) == lines
         with pytest.raises(queue.Empty):
-            relay.next_line(timeout=1.0)
+            relay.lines.get_nowait()
         st = client.get("/api/switchboard/status").json()
         assert st["line_elsewhere"] is True and st["state"] == "not_connected"
     finally:
@@ -862,7 +874,17 @@ def test_a_refused_tokens_secret_is_dropped_while_the_record_is_held_a_moment(
     books = link._entries(link._load())[0]["books"]
     let_go = threading.Event()
     holder = _hold_the_record_lock(let_go)
-    threading.Timer(0.5, let_go.set).start()
+    # the holder lets go once the drop is asking for the lock, not after a
+    # while of wall-clock time: the drop came while the record was held
+    real_lock = link._record_lock
+    dropping = threading.current_thread()
+
+    def asked(wait=None, pay=True):
+        if threading.current_thread() is dropping:
+            let_go.set()
+        return real_lock(wait=wait, pay=pay)
+
+    monkeypatch.setattr(link, "_record_lock", asked)
     assert link.drop_secret(books) is True
     holder.join(10)
     entry = _record()["companies"][0]
@@ -882,6 +904,10 @@ def test_a_drop_the_lock_is_not_free_for_in_time_is_made_by_its_next_holder(
     relay.next_line()
     books = link._entries(link._load())[0]["books"]
     monkeypatch.setattr(link, "PRESS_TIMEOUT", 0.2)
+    # the drop's own retry never runs here: it would make the drop instead
+    # of the next holder, and, run at the moment the next holder waits its
+    # 0.2 s for the lock, turn it away (a slow runner reaches it in 2 s)
+    monkeypatch.setattr(link, "OWED_RETRY", 600.0)
     let_go = threading.Event()
     holder = _hold_the_record_lock(let_go)
     try:

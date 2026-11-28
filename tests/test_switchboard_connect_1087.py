@@ -26,6 +26,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,6 +35,7 @@ from app.main import _role_allows, app
 from app.models.api_tokens import ApiToken
 from app.services import switchboard_link as link
 from app.switchboard import line as line_client
+from tests.switchboard_clock import BACKSTOP, hold_the_clock, settle_the_start
 
 GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -288,6 +290,9 @@ def relay(monkeypatch, tmp_path):
     )
     # Each company's token's requests go to the app in-process, not to a port.
     monkeypatch.setattr(link, "_books_transport", _in_process_transport)
+    # a press's deadline runs out only when a test runs it out: against
+    # this relay, which answers at once, a press's outcome is its answer
+    hold_the_clock(monkeypatch)
     try:
         yield fake
     finally:
@@ -335,6 +340,26 @@ def _in_process_transport(entry):
         return r.status_code, payload, dict(r.headers)
 
     return send
+
+
+def _hold_the_start(monkeypatch):
+    """Hold the work link.start_in_background() hands its thread (from its
+    first step) until ``go`` is set: a start that returns, or an app that
+    starts, while ``entered`` is set and ``go`` is not, did not wait for it.
+    ``held_out``: the hold reached its backstop, so something waited."""
+    held = SimpleNamespace(
+        entered=threading.Event(), go=threading.Event(), held_out=threading.Event()
+    )
+    first_step = link.new_start
+
+    def held_start():
+        held.entered.set()
+        if not held.go.wait(BACKSTOP):
+            held.held_out.set()
+        first_step()
+
+    monkeypatch.setattr(link, "new_start", held_start)
+    return held
 
 
 def _connected(fake, client):
@@ -511,11 +536,16 @@ def test_the_relay_down_at_start_holds_nothing_and_the_panel_says_so(
     record = json.loads(link.link_path().read_text())
     record["relay"] = f"http://127.0.0.1:{_free_port()}"
     link._save(record)
-    started = time.monotonic()
+    start = _hold_the_start(monkeypatch)
     link.start_in_background()
-    assert time.monotonic() - started < 0.5
-    # the books answer as before
+    # it returned with its own work still held: nothing of it is waited for
+    # (the hold reaches its backstop only if the start waited for it)
+    assert start.entered.wait(BACKSTOP)
+    # the books answer as before, also while the start's work is held
     assert client.get("/api/accounts").status_code == 200
+    start.go.set()
+    settle_the_start()
+    assert not start.held_out.is_set()
     assert _wait(
         lambda: client.get("/api/switchboard/status").json()["state"] == "unreachable"
     )
@@ -554,11 +584,16 @@ def test_the_app_starts_with_the_relay_down(
         kept = link._format2(kept, link._entries(kept))
         assert kept["companies"] and link._whole2(kept)
     link._save(kept)
+    start = _hold_the_start(monkeypatch)
     try:
-        started = time.monotonic()
         with TestClient(app) as again:
-            assert time.monotonic() - started < 10
+            # started while the line's start is still held: the app's start
+            # waits for nothing of the relay's
+            assert start.entered.wait(BACKSTOP)
             assert again.get("/health").status_code == 200
+            start.go.set()
+            settle_the_start()
+            assert not start.held_out.is_set()
             # the line is trying in its own thread, holding nothing up
             assert _wait(lambda: link.status()["state"] == "unreachable")
             assert again.get("/health").status_code == 200
@@ -677,10 +712,13 @@ def test_another_company_is_offered_add_and_hears_no_name(relay, client):
     assert st.json()["can_add"] is False and "Larkspur" not in st.text
     # and a start where no company on it is open opens no line
     link.stop()
+    lines = relay.paths().count(("GET", "/v1/line"))
     link.start_in_background()
-    time.sleep(0.3)
+    settle_the_start()
+    assert link._line is None and link._waiter["stop"] is None
+    assert relay.paths().count(("GET", "/v1/line")) == lines
     with pytest.raises(queue.Empty):
-        relay.next_line(timeout=0.5)
+        relay.lines.get_nowait()
 
 
 # -- what is kept, and what is never said -------------------------------------------

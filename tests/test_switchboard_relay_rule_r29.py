@@ -26,15 +26,18 @@ import re
 import secrets
 import socket
 import threading
-import time
 
 import pytest
 
 from app.models.api_tokens import ApiToken
 from app.services import switchboard_link as link
+from tests.switchboard_clock import Holder, PressClock, hold_the_clock
 
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-PRESS = 1.0  # the press's deadline in these tests (the product's is 10 s)
+# How long a press waits for the record lock in these tests (PRESS_TIMEOUT;
+# the product's is 10 s). The press's deadline itself is a PressClock: it
+# runs out only when a test says so, never because the machine is slow.
+PRESS = 1.0
 ADDRESS = re.compile(r"127\.0\.0\.1|https?://|localhost")
 # a bare HTTP status code in a sentence, as "answered 403."
 STATUS_CODE = re.compile(r"\b[1-5]\d\d\b")
@@ -181,6 +184,9 @@ def raw(monkeypatch, tmp_path):
     monkeypatch.setenv(link.RELAY_ENV, fake.url)
     monkeypatch.setattr(link, "link_path", lambda: tmp_path / link.LINK_FILE)
     monkeypatch.setattr(link, "PRESS_TIMEOUT", PRESS)
+    # every press's deadline here runs out only when the test runs it out
+    hold_the_clock(monkeypatch)
+    fake.holder = Holder()
     monkeypatch.setattr(link, "RETRY_FIRST", 3600.0)  # the tests try by hand
     # these tests are about the presses: the line is not opened
     fake.started = []
@@ -188,6 +194,7 @@ def raw(monkeypatch, tmp_path):
     try:
         yield fake
     finally:
+        fake.holder.let_go()
         link.stop()
         link.stop_retry()
         fake.close()
@@ -228,39 +235,58 @@ def _plain(r, *, secrets_=()):
 # -- the ways a relay can answer ---------------------------------------------------
 
 
-def _trickle_body(conn):
-    conn.sendall(
-        b"HTTP/1.1 201 X\r\nContent-Type: application/json\r\n"
-        b"Content-Length: 4000\r\nConnection: close\r\n\r\n"
-    )
-    for _ in range(80):
-        conn.sendall(b" ")
-        time.sleep(0.1)
+# The slow answers begin, then hold the rest back (Holder.hold: the press's
+# time runs out there, and the relay keeps its answer until the test ends).
+# A press that answers while the relay still holds its answer did not wait
+# for the relay; nothing but its deadline running out could have ended it.
 
 
-def _trickle_headers(conn):
-    conn.sendall(b"HTTP/1.1 201 X\r\n")
-    for i in range(80):
-        conn.sendall(f"X-Slow-{i}: 1\r\n".encode())
-        time.sleep(0.1)
+def _trickle_body(holder):
+    def answer(conn):
+        conn.sendall(
+            b"HTTP/1.1 201 X\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 4000\r\nConnection: close\r\n\r\n"
+        )
+        for _ in range(3):
+            conn.sendall(b" ")
+        holder.hold()
+
+    return answer
 
 
-def _silent_after_headers(conn):
-    conn.sendall(
-        b"HTTP/1.1 200 X\r\nContent-Type: application/json\r\n"
-        b"Content-Length: 4000\r\n\r\n"
-    )
-    time.sleep(8)
+def _trickle_headers(holder):
+    def answer(conn):
+        conn.sendall(b"HTTP/1.1 201 X\r\n")
+        for i in range(3):
+            conn.sendall(f"X-Slow-{i}: 1\r\n".encode())
+        holder.hold()
+
+    return answer
 
 
-def _endless_body(conn):
-    conn.sendall(b"HTTP/1.1 200 X\r\nContent-Type: application/json\r\n\r\n")
-    chunk = b" " * 65536
-    try:
-        for _ in range(4000):  # up to 260 MB, as fast as it is taken
-            conn.sendall(chunk)
-    except OSError:
-        pass
+def _silent_after_headers(holder):
+    def answer(conn):
+        conn.sendall(
+            b"HTTP/1.1 200 X\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 4000\r\n\r\n"
+        )
+        holder.hold()
+
+    return answer
+
+
+def _endless_body(_holder):
+    # no deadline needed: the press stops reading at MAX_ANSWER
+    def answer(conn):
+        conn.sendall(b"HTTP/1.1 200 X\r\nContent-Type: application/json\r\n\r\n")
+        chunk = b" " * 65536
+        try:
+            for _ in range(4000):  # up to 260 MB, as fast as it is taken
+                conn.sendall(chunk)
+        except OSError:
+            pass
+
+    return answer
 
 
 def _bad_chunk(conn):
@@ -422,13 +448,23 @@ def test_a_press_ends_at_its_deadline_however_the_relay_answers(
     path = {"connect": "/v1/link", "code": "/v1/code", "disconnect": "/v1/forget"}
     if press != "connect":
         _connect(client)
-    raw.behave[path[press]] = SLOW[how]
-    started = time.monotonic()
+    raw.behave[path[press]] = SLOW[how](raw.holder)
+    before = len(PressClock.made)
     r = _plain(client.post(f"/api/switchboard/{press}"))
-    took = time.monotonic() - started
-    # the deadline, and what it takes to notice it: never the 8 s the relay
-    # would have kept the press
-    assert took < PRESS + 1.5, (took, r.text)
+    # the press had one deadline of its own
+    assert len(PressClock.made) == before + 1
+    deadline = PressClock.latest()
+    if how == "an endless body":
+        # ended by the size cap, as soon as MAX_ANSWER was read: its time
+        # was never run out, and nothing waited for it to
+        assert PressClock.ran_out == []
+    else:
+        # the press answered at its deadline while the relay was still
+        # holding back the rest of its answer: it did not wait for the relay
+        # (the relay's hold reached its backstop only if it had)
+        assert raw.holder.holding.is_set()
+        assert PressClock.ran_out == [deadline]
+        assert not raw.holder.held_out.is_set(), r.text
     if press == "disconnect":
         # undone here; the relay did not confirm, so the note and the retry
         assert r.status_code == 200, r.text
@@ -444,19 +480,51 @@ def test_a_press_ends_at_its_deadline_however_the_relay_answers(
             assert _tokens(db_session) == [] and not link.link_path().exists()
 
 
-def test_the_deadline_is_the_whole_presss_not_each_calls(raw, client, monkeypatch):
+def test_the_deadline_is_the_whole_presss_not_each_calls(raw, client):
     """Disconnect on a relay from before /v1/forget makes two calls (forget,
-    then unlink): one deadline covers both."""
+    then unlink): one deadline covers both. The press makes one deadline,
+    both calls are made under it, and its running out during the second
+    call ends the press."""
     _connect(client)
-    raw.behave["/v1/forget"] = lambda conn: (
-        time.sleep(PRESS * 0.7),
-        conn.sendall(http(404, {"error": "No such route."})),
-    )
-    raw.behave["/v1/unlink"] = _silent_after_headers
-    started = time.monotonic()
+    raw.behave["/v1/forget"] = http(404, {"error": "No such route."})
+    raw.behave["/v1/unlink"] = _silent_after_headers(raw.holder)
+    before = len(PressClock.made)
     r = _plain(client.post("/api/switchboard/disconnect"))
-    assert time.monotonic() - started < PRESS + 1.5
+    assert len(PressClock.made) == before + 1
+    assert raw.paths()[-2:] == ["/v1/forget", "/v1/unlink"]
+    assert PressClock.ran_out == [PressClock.latest()]
+    assert not raw.holder.held_out.is_set(), r.text
     assert r.status_code == 200 and r.json()["unlinked"] is False
+
+
+def test_the_products_deadline_is_a_timer_for_the_press_seconds():
+    """The deadline the presses use outside these tests: a daemon timer for
+    the press's seconds that ends it (its _end, what PressClock.run_out
+    calls), counted on the monotonic clock, and cancelled by close()."""
+    held = link._Deadline(3600.0)
+    try:
+        assert held._timer.interval == 3600.0 and held._timer.daemon
+        assert held._timer.function == held._end and held._timer.is_alive()
+        assert not held.over() and 3500 < held.left() <= 3600
+    finally:
+        held.close()
+    assert held._timer.finished.is_set()
+    # with no time at all, it is over at once (no wait), and once its timer
+    # has fired, a connection it is given is shut, as at the deadline
+    done = link._Deadline(0.0)
+    try:
+        assert done.over()
+        done._timer.join(60)
+        assert done._fired
+        mine, theirs = socket.socketpair()
+        try:
+            done.hold(mine)
+            assert mine.recv(1) == b""
+        finally:
+            mine.close()
+            theirs.close()
+    finally:
+        done.close()
 
 
 def test_a_press_waits_about_ten_seconds():
@@ -949,29 +1017,6 @@ def test_a_connect_while_the_record_is_being_changed_waits_then_says_so(
     assert _tokens(db_session) == [("AI assistant (relay)", True)]
 
 
-class _PressClock(link._Deadline):
-    """A press deadline that runs out only when the test says so: no
-    wall-clock timer, so how long the token, the fsynced writes and the
-    relay calls take on a slow runner cannot change which step the press
-    reaches before its time is up. ``made`` holds every one made."""
-
-    made: list = []
-
-    def __init__(self, seconds: float):
-        super().__init__(seconds)
-        self._timer.cancel()
-        _PressClock.made.append(self)
-
-    def left(self) -> float:
-        return 0.0 if self._fired else PRESS
-
-    def over(self) -> bool:
-        return self._fired
-
-    def run_out(self) -> None:
-        self._end()
-
-
 def _another_process_connects_meanwhile(raw) -> dict:
     """Have the relay's /v1/link answer land only after another server
     process (same data folder, not the same lock) has kept its own link."""
@@ -1011,22 +1056,19 @@ def _the_other_is_the_connection(raw, db_session, r, other) -> None:
         assert os.stat(link.link_path()).st_mode & 0o777 == 0o600
 
 
-def test_a_connect_made_by_another_process_meanwhile_wins(
-    raw, client, db_session, monkeypatch
-):
+def test_a_connect_made_by_another_process_meanwhile_wins(raw, client, db_session):
     """Two server processes share the data folder and not the lock: the
     file is made only if it is not there, and the one that finds it there
     undoes what it made (its token, its relay record) within the press.
 
-    The press's time is held still (a 1 s wall-clock deadline shared by the
-    link, the token, two fsynced writes and the forget ran out on a slow
-    Windows runner before the forget was asked, which is the other test
-    below, not this one)."""
-    _PressClock.made = []
-    monkeypatch.setattr(link, "_Deadline", _PressClock)
+    The press's time is held still (the raw fixture's PressClock: a 1 s
+    wall-clock deadline shared by the link, the token, two fsynced writes
+    and the forget ran out on a slow Windows runner before the forget was
+    asked, which is the other test below, not this one)."""
     other = _another_process_connects_meanwhile(raw)
     r = _plain(client.post("/api/switchboard/connect"))
     _the_other_is_the_connection(raw, db_session, r, other)
+    assert PressClock.ran_out == []
     # in order: the link, then the forget with the credential it gave
     assert raw.calls == [("/v1/link", None), ("/v1/forget", raw.credentials[0])]
     assert _pending() == []
@@ -1039,13 +1081,11 @@ def test_a_lost_connect_whose_press_runs_out_before_the_forget_notes_it(
     taken back and before the relay is told: the relay record is not left
     behind unnoted. It is kept as a pending deletion, and the retry has the
     relay delete it with the credential the link gave."""
-    _PressClock.made = []
-    monkeypatch.setattr(link, "_Deadline", _PressClock)
     undo_token = link._undo_token
 
     def undo_then_time_is_up(db, token_id):
         undo_token(db, token_id)
-        _PressClock.made[-1].run_out()
+        PressClock.latest().run_out()
 
     monkeypatch.setattr(link, "_undo_token", undo_then_time_is_up)
     other = _another_process_connects_meanwhile(raw)
