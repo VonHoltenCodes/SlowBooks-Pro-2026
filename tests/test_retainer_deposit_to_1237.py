@@ -170,7 +170,7 @@ def test_a_plain_liability_is_accepted_and_stored_as_a_list(
     client, db_session, seed_accounts
 ):
     a = _liability(client, "2290", "Retainer Payable")
-    b = _liability(client, "2210", "Customer Deposits")
+    b = _liability(client, "2280", "Client Deposits Held")
     _ok(_list(client, [b, a, a]))
     assert _ok(client.get("/api/settings"))["customer_deposit_account_ids"] == (
         f"[{min(a, b)}, {max(a, b)}]"
@@ -377,7 +377,12 @@ def test_a_listed_account_that_no_longer_qualifies_takes_ordinary_deposits(
     elif change == "credit_card":
         _ok(client.put(f"/api/accounts/{acct}", json={"bank_kind": "credit_card"}))
     else:
-        _ok(client.put("/api/settings", json={"payroll_suta_account_id": acct}))
+        # Settings now refuses this overlap (tests/test_retainer_account_
+        # guards.py); a company saved with it before then still has it
+        from app.services.settings_service import set_setting
+
+        set_setting(db_session, "payroll_suta_account_id", str(acct))
+        db_session.commit()
     db_session.expire_all()
     # money left over, and more than the account holds: both as before
     r = _pay(client, seed_customer, acct, inv, "900.00", "300.00")
@@ -424,7 +429,11 @@ def test_a_pay_application_applies_its_deposit_past_a_listed_2210_balance(
     client, db_session, seed_accounts, seed_customer
 ):
     """_apply_deposit sends the override: the job's own deposit is what
-    the application checks, not 2210's company-wide balance."""
+    the application checks, not 2210's company-wide balance. Settings no
+    longer lets 2210 be ticked (tests/test_retainer_account_guards.py); a
+    company that ticked it before then still has it on the list."""
+    from app.services.settings_service import set_setting
+
     from tests.test_pay_applications import (
         _acct,
         _approve,
@@ -439,7 +448,8 @@ def test_a_pay_application_applies_its_deposit_past_a_listed_2210_balance(
     bank = _acct(db_session, "1000")
     assert _deposit(client, job["id"], 10000, bank.id).status_code == 201
     cd = _acct(db_session, "2210")
-    _ok(_list(client, [cd.id]))
+    set_setting(db_session, "customer_deposit_account_ids", f"[{cd.id}]")
+    db_session.commit()
     # 2210 now holds less than the job's deposit: 9,000 moved out by hand
     _ok(
         client.post(

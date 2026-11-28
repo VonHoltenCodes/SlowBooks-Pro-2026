@@ -1080,7 +1080,7 @@ screen: a new change order is **Draft** and nothing moves; **Submit** makes it
 nothing moves); **Approve** makes it
 **Approved**, and only then does it take effect. A change order carries no
 contract time: there is no field for the days it adds (see *What this mode
-does not do yet*).
+does not do*).
 
 **Billed change orders are locked.** Once a pay application has billed a
 change order's schedule-of-values line (#555, below), that change order can no
@@ -1230,6 +1230,15 @@ retainage this period, and the current due is the 5,500 released. Across the
 three, the owner has certified $55,000 and been billed the 5,500 of retainage
 back.
 
+**A final application can release everything in one document.** The release
+does not need an application of its own: the last application can bill its
+period's work and release everything the job holds, the retainage from the
+earlier applications and its own hold on this period's work, so the job closes
+without a release-only application after it. In the example, App 2 could be
+the final one: it bills 20,000 and releases 5,500 in **Release retainage**, so
+retainage to date is 0 and the current due is 23,500 (55,000 completed − 0
+retainage − 31,500 previously certified).
+
 A release followed by more work: bill 30,000 (10% retainage, 3,000 held, 27,000
 due), release 1,500 on the next application (retainage to date 1,500, 1,500
 due), then bill 10,000. Retainage to date is 4,000 − 1,500 = 2,500, the
@@ -1325,12 +1334,13 @@ zero); an application with nothing at all to bill, hold, release, apply or move
 is still refused. Retainage to date can't go below zero either: a release is
 refused (422) when it is more than the retainage held at the application's own
 percent on the work completed, so dropping the percent to 0 and releasing on
-the same application is refused (release at the held percent, or bill the
-release on its own application). A **credit** (a negative line) also takes its
+the same application is refused ("Release less, or keep the retainage percent
+until the release is billed."). A **credit** (a negative line) also takes its
 share of retainage back, so billing one **after** the final release is refused
-(422, "Retainage to date would be −350.00 …: bill the credit before the final
-retainage release, or release less retainage now and the rest after the
-credit"): bill the credit first, then release what is held. We refuse rather
+(422, "Retainage to date would be -$350.00: this application bills a credit
+after the retainage was released, … Bill the credit before the final retainage
+release, or release less retainage now and the rest after the credit."): bill
+the credit first, then release what is held. We refuse rather
 than let retainage go below zero because the release has already paid out the
 credit's share. A lien waiver is for one payment and one
 job, and its amount is the part of the payment applied to that job's invoices. At approval the application keeps the contract sums as they
@@ -1781,10 +1791,10 @@ and any difference from billing is over or under billing. Closed jobs are left
 out unless *include closed* (or the status filter) asks for them. Closing is
 read **as of the date**: the job keeps the day it went to Closed (cleared if it
 reopens), so a job closed in November is an open job, measured as any other,
-in September's schedule and its adjusting entry. A job closed during a day was
-still on the books for it: a schedule dated the close day reads the same that
-evening as it did that morning, and the job leaves the schedule from the next
-day. A job already closed when
+in September's schedule and its adjusting entry. A job closed on a day is
+closed as of that day: schedules dated on or after the day it is closed leave
+it out (or read it 100% complete when closed jobs are included), and a
+schedule dated before that day shows it open. A job already closed when
 this was added takes the day its record was last changed (the latest it can
 have closed); one with no date on file counts as closed on every date.
 
@@ -1801,7 +1811,8 @@ the table, in the PDF note and the CSV):
 - *A finished job still showing cost to come.* A job billed in full (billed to
   date at or over the revised contract), its retainage collected and every
   commitment closed, that still has cost to complete. Enter 0 in the forecast,
-  or close the job: schedules dated after the day you close it leave it out.
+  or close the job: a job closed on or before the schedule's date is left off
+  the schedule.
 
 **Projected loss.** When actual + cost to complete is over the revised contract,
 the whole loss is recognised now, the usual treatment of a loss contract. Earned
@@ -1855,6 +1866,10 @@ change order approved back-dated, a late bill), `posted_differs` is true and a
 sentence in `warnings` (`posted_warning`), and on screen beside Void, gives
 the posted and the current over-billings, under-billings and loss provision
 and says to void the posted entry and post again.
+
+**Year end.** Before posting the year-end WIP entry, a job that is finished but
+not yet closed gets 0 as its cost to complete in the Cost-to-Complete Forecast
+(or is closed on or before the entry's date).
 
 **Posting the same date again is refused** (409) while an entry for it stands,
 two posts sent at the same moment included: Post first writes a row keyed on the
@@ -2074,7 +2089,7 @@ API, the database or the export formats changes name.
 
 Customer:Job in QuickBooks prints with no space around the colon; SlowBooks
 prints "Customer: Job" (with a space) everywhere today, and that is left
-unchanged in Phase 2 — see *What this mode does not do yet*.
+unchanged in Phase 2 — see *What this mode does not do*.
 
 ## The subcontractor vendor type
 
@@ -2138,7 +2153,7 @@ schedule. Retainage also refuses a `status` that is not a job status, and the
 estimate list's `status` takes `lost` for the estimates marked lost (stored as
 `rejected`; `rejected` still works).
 
-## What this mode does not do yet
+## What this mode does not do
 
 - **Field tickets, version 1:** no mobile or foreman app, no on-screen
   signature pad (a typed name and a photo), no daily reports or timesheets
@@ -2146,9 +2161,9 @@ estimate list's `status` takes `lost` for the estimates marked lost (stored as
 
 - **No first-run prompt.** `company_type` still defaults to Business for a
   new company file; Construction is chosen in Settings afterward, as
-  Nonprofit is. A "what kind of company is this?" step at creation is a
-  later issue.
-- **Customer:Job** still prints with a space; the no-space form is deferred.
+  Nonprofit is. There is no "what kind of company is this?" step at
+  creation.
+- **Customer:Job** prints with a space; there is no no-space form.
 - **No cost-plus billing.** Nothing bills a cost-plus or GMP job's cost to
   date plus its fee; enter it on a pay application or an invoice (see *The
   contract on the job*).

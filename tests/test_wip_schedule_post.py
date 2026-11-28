@@ -290,7 +290,11 @@ def test_finished_job_still_showing_cost_to_complete_is_flagged(
     # it says what closing really does on the screen, and promises no
     # 100% row the WIP never shows
     assert "100% complete" not in said[0]
-    assert "schedules dated after the day you close it leave it out" in said[0]
+    assert said[0].endswith(
+        "If the job is finished, enter 0 in the Cost-to-Complete Forecast, or "
+        "close the job: a job closed on or before the schedule's date is left "
+        "off the schedule."
+    )
 
 
 # ── 4. a change order's budget alone is no estimate ─────────────────────
@@ -936,52 +940,10 @@ def test_a_job_closed_in_november_is_in_septembers_wip(
     row, data = _wip_row(db_session, job.id, SEP30_2)
     assert row is not None and row["percent_complete"] == 50.0  # open on 9/30
     assert [j["job_id"] for j in data["adjusting_entry"]["jobs"]] == [job.id]
-    # after the day it closed it is off the board (and 100% with include_closed)
+    # from the day it closed it is off the board (and 100% with include_closed)
     assert _wip_row(db_session, job.id, date(2026, 11, 30))[0] is None
     closed, _ = _wip_row(db_session, job.id, date(2026, 11, 30), include_closed=True)
     assert closed["percent_complete"] == 100.0
-
-
-def test_a_wip_dated_the_close_day_reads_the_same_that_evening(
-    client, db_session, seed_accounts
-):
-    """A schedule run the morning a job is closed can be run again that
-    evening with the same rows: the job was on the books for the day it
-    closed and leaves the WIP from the next day's schedule."""
-    _setup(client, db_session)
-    job = _over_billed_job(db_session)
-    today = date.today()
-    morning, _ = _wip_row(db_session, job.id, today)
-    assert morning is not None and morning["status"] == "in_progress"
-
-    r = client.put(f"/api/jobs/{job.id}", json={"status": "closed"})
-    assert r.status_code == 200, r.text
-    db_session.expire_all()
-    assert db_session.get(Job, job.id).closed_on == today
-
-    evening, _ = _wip_row(db_session, job.id, today)
-    assert evening == morning
-    shown = client.get(f"/api/reports/wip-schedule?as_of={today.isoformat()}")
-    assert shown.status_code == 200, shown.text
-    assert job.id in [r["job_id"] for r in shown.json()["rows"]]
-
-    tomorrow = today + timedelta(days=1)
-    assert _wip_row(db_session, job.id, tomorrow)[0] is None
-    closed, _ = _wip_row(db_session, job.id, tomorrow, include_closed=True)
-    assert closed["status"] == "closed" and closed["percent_complete"] == 100.0
-
-
-def test_a_job_closed_with_no_date_stays_off_the_wip_of_today(
-    db_session, seed_accounts
-):
-    """A job closed before 2.31.11 has no close day on file: it still reads
-    closed on every date, today's schedule too."""
-    job = _job(db_session, status="closed")
-    _budget(db_session, job, None, "material", "80000", source="manual")
-    _cost(db_session, job, None, "material", "40000")
-    db_session.commit()
-    assert job.closed_on is None
-    assert _wip_row(db_session, job.id, date.today())[0] is None
 
 
 def test_closing_a_job_stamps_the_day_and_reopening_clears_it(
@@ -1196,3 +1158,114 @@ def test_post_and_void_refuse_an_unknown_body_field(client, db_session, seed_acc
     assert (
         client.post(f"/api/reports/wip-schedule/void?as_of={AS_OF}").status_code == 200
     )
+
+
+def test_a_job_closed_on_a_day_is_closed_on_that_days_wip(
+    client, db_session, seed_accounts
+):
+    """A job closed on a day is closed as of that day: the schedule dated the
+    day before shows it open, the schedules dated the close day and the day
+    after leave it off, and with closed jobs included it reads 100% complete
+    on the close day."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    today = date.today()
+    yesterday, tomorrow = today - timedelta(days=1), today + timedelta(days=1)
+
+    r = client.put(f"/api/jobs/{job.id}", json={"status": "closed"})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    assert db_session.get(Job, job.id).closed_on == today
+
+    before, _ = _wip_row(db_session, job.id, yesterday)
+    assert before is not None and before["status"] == "in_progress"
+    assert before["percent_complete"] == 50.0
+    assert _wip_row(db_session, job.id, today)[0] is None
+    assert _wip_row(db_session, job.id, tomorrow)[0] is None
+    shown = client.get(f"/api/reports/wip-schedule?as_of={today.isoformat()}")
+    assert shown.status_code == 200, shown.text
+    assert job.id not in [r["job_id"] for r in shown.json()["rows"]]
+    closed, _ = _wip_row(db_session, job.id, today, include_closed=True)
+    assert closed["status"] == "closed" and closed["percent_complete"] == 100.0
+
+
+def test_a_job_closed_with_no_date_stays_off_the_wip_of_today(
+    db_session, seed_accounts
+):
+    """A job closed before 2.31.11 has no close day on file: it still reads
+    closed on every date, today's schedule too."""
+    job = _job(db_session, status="closed")
+    _budget(db_session, job, None, "material", "80000", source="manual")
+    _cost(db_session, job, None, "material", "40000")
+    db_session.commit()
+    assert job.closed_on is None
+    assert _wip_row(db_session, job.id, date.today())[0] is None
+
+
+def test_a_finished_job_closed_today_defers_nothing_on_todays_wip_entry(
+    client, db_session, seed_accounts
+):
+    """Contract 100,000, billed 100,000, cost 70,000 against a budget of
+    80,000, closed today. Today's schedule does not measure it as an open
+    job at 87.5% (which would defer 12,500 of billed revenue), and today's
+    WIP entry books nothing for it."""
+    _setup(client, db_session)
+    done = _job(db_session, name="Done")
+    _budget(db_session, done, None, "material", "80000", source="manual")
+    _cost(db_session, done, None, "material", "70000")
+    _bill_owner(db_session, done, "100000")
+    db_session.commit()
+    today = date.today()
+    # the day before it closed it was open, measured at 87.5%
+    open_row, _ = _wip_row(db_session, done.id, today - timedelta(days=1))
+    assert open_row["percent_complete"] == 87.5
+    assert open_row["over_billing"] == 12500.0
+
+    r = client.put(f"/api/jobs/{done.id}", json={"status": "closed"})
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    assert db_session.get(Job, done.id).closed_on == today
+
+    row, data = _wip_row(db_session, done.id, today)
+    assert row is None
+    assert done.id not in [j["job_id"] for j in data["adjusting_entry"]["jobs"]]
+    closed, _ = _wip_row(db_session, done.id, today, include_closed=True)
+    assert closed["percent_complete"] == 100.0 and closed["over_billing"] == 0.0
+
+    # alone it leaves nothing to post; beside an open job only that job posts
+    alone = client.post(f"/api/reports/wip-schedule/post?as_of={today}")
+    assert alone.status_code == 422, alone.text
+    assert "Nothing to post" in alone.text
+    other = _over_billed_job(db_session, name="Open")
+    posted = _post(client, today)
+    assert posted["total_debits"] == 10000.0
+    db_session.expire_all()
+    entry = job_reports.wip_schedule(db_session, today)["adjusting_entry"]
+    assert [j["job_id"] for j in entry["jobs"]] == [other.id]
+    assert entry["posted"] is True and entry["posted_warning"] is None
+
+
+def test_a_back_dated_change_with_no_close_day_job_keeps_the_plain_sentence(
+    client, db_session, seed_accounts
+):
+    """A back-dated change order after posting: the sentence names the
+    back-dated change and says to void and post again, nothing more."""
+    _setup(client, db_session)
+    dec31 = date(2026, 12, 31)
+    job = _over_billed_job(db_session, name="Open")
+    _post(client, dec31)
+    co = _co(client, job.id, 2000, when=date(2026, 12, 10))
+    _approve(client, co["id"], date(2026, 12, 10))
+    db_session.expire_all()
+
+    sentence = job_reports.wip_schedule(db_session, dec31)["adjusting_entry"][
+        "posted_warning"
+    ]
+    assert (
+        "because something dated on or before 2026-12-31 changed after it was "
+        "posted (a change order approved back-dated, a late bill). Void the "
+        "posted entry and post it again to book the schedule's figures." in sentence
+    )
+    assert sentence.endswith("to book the schedule's figures.")
+    assert "closed on" not in sentence
+    assert "either" not in sentence

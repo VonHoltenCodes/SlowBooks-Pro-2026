@@ -837,6 +837,13 @@ def test_a_connection_made_before_this_change_keeps_working(relay, client):
     _drain(relay)
     link.start_in_background()
     relay.next_line()
+    # the start's thread sweeps the leftovers after the line opens, and a
+    # holder of the record lock makes the drops owed as it takes it: let it
+    # finish, so the drop below is made by drop_secret itself
+    for thread in threading.enumerate():
+        if thread.name == "claude-relay-start":
+            thread.join(10)
+            assert not thread.is_alive()
     assert link.link_path().read_bytes() == before
     # the first write keeps the handle and makes it format 2
     assert link.drop_secret(first[0]["books"]) is True

@@ -387,9 +387,50 @@ def _guard_payroll_accounts(db: Session, cleaned: dict) -> None:
                 status_code=400,
                 detail=f"The {piece.label} account id must be a number.",
             )
-        problem = payroll_accounts.account_problem(db.get(Account, acct_id), piece, db)
+        acct = db.get(Account, acct_id)
+        problem = payroll_accounts.account_problem(acct, piece, db)
         if problem:
             raise HTTPException(status_code=400, detail=problem)
+        _refuse_a_ticked_customer_deposit_account(db, cleaned, piece, acct)
+
+
+def _customer_deposit_ids_after(db: Session, cleaned: dict) -> set[int]:
+    """Customer deposits and retainers (#1237) as it will be after this
+    save: the request's list when it sends one (cleaned to JSON), else the
+    saved one."""
+    from app.services.customer_deposit_accounts import configured_ids
+
+    if "customer_deposit_account_ids" not in cleaned:
+        return configured_ids(db)
+    return {int(i) for i in json.loads(cleaned["customer_deposit_account_ids"])}
+
+
+def _refuse_a_ticked_customer_deposit_account(
+    db: Session, cleaned: dict, piece, acct
+) -> None:
+    """A payroll posting account (#620) may not be one ticked under
+    Customer deposits and retainers (#1237) once this save is made, whether
+    the request sends the list or not: a 400 saying so, rather than a save
+    that leaves the two settings in conflict. An overlap already saved
+    before this save is left for the person to put right (the form sends
+    both settings on every save, so refusing it would refuse every save)."""
+    from app.services.customer_deposit_accounts import configured_ids, payroll_ids
+
+    if acct.id not in _customer_deposit_ids_after(db, cleaned):
+        return
+    if acct.id in configured_ids(db) and acct.id in payroll_ids(db):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=said(
+            "The "
+            + piece.label
+            + " account cannot be {}: it is ticked under Settings → "
+            "Connections → Deposits → Customer deposits and retainers. Untick "
+            "it there, or choose another account. Nothing was saved.",
+            acct.name,
+        ),
+    )
 
 
 def _deposit_bank_account(db: Session, value, label: str):
@@ -424,24 +465,41 @@ def _deposit_bank_account(db: Session, value, label: str):
 
 
 def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
-    """Customer deposits and retainers (#1237): every account on the list
-    (cleaned to a JSON list of ids) is in the chart, a liability, not a bank
-    or credit card account, not a control account (Accounts Payable, Sales
-    Tax Payable and the rest, which their own documents keep), not a payroll
-    account (the 23xx payroll liabilities and any account Settings → Payroll
-    Accounts names) and active.
+    """Customer deposits and retainers (#1237): every account the request
+    ticks (cleaned to a JSON list of ids) is in the chart, a liability, not a
+    bank or credit card account, not a control account (Accounts Payable,
+    Sales Tax Payable and the rest, which their own documents keep), not a
+    construction account the app posts to on its own (Retainage Payable, the
+    WIP accounts, Use Tax Payable, and Customer Deposits, whose job deposits
+    the pay application applies), not a payroll account (the 23xx payroll
+    liabilities and any account Settings → Payroll Accounts names, counting
+    the ones this same request chooses) and active.
     Anything else is refused with a 422 saying why, before any setting is
-    written."""
-    import json
+    written.
 
+    An account already on the saved list is judged only on what this save
+    changes: one that has stopped qualifying since it was ticked (made
+    inactive, deleted, renamed onto a construction account) stays on the
+    list the form sends back, is treated as not ticked, and does not lock
+    every other setting; one this save would make a payroll account is
+    refused."""
     from app.models.accounts import Account
-    from app.services.customer_deposit_accounts import not_usable_because
+    from app.services.customer_deposit_accounts import (
+        configured_ids,
+        not_usable_because,
+    )
 
     if "customer_deposit_account_ids" not in cleaned:
         return
+    saved = configured_ids(db)
     label = "Customer deposits and retainers"
-    for acct_id in json.loads(cleaned["customer_deposit_account_ids"]):
-        acct = db.get(Account, int(acct_id))
+    for acct_id in sorted(_customer_deposit_ids_after(db, cleaned)):
+        acct = db.get(Account, acct_id)
+        if acct_id in saved:
+            if acct is None:
+                continue
+            if not_usable_because(db, acct) is not None or acct.is_active is False:
+                continue
         if acct is None:
             raise HTTPException(
                 status_code=422,
@@ -450,7 +508,7 @@ def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
                     str(acct_id),
                 ),
             )
-        why = not_usable_because(db, acct)
+        why = not_usable_because(db, acct, pending=cleaned)
         if why is None and acct.is_active is False:
             # it qualifies but for being inactive: say how to fix that
             raise HTTPException(
