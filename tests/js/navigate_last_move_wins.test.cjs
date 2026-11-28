@@ -73,3 +73,52 @@ test('awaiting an overtaken move waits for the page the address names', async ()
     assert.equal(pageContent.innerHTML, '<p>later</p>');
     await second;
 });
+
+// a document route (an invoice over its list) overtaken while its list
+// loaded: the list is not drawn, and the document's dialog does not open
+// over the page moved to since
+test('an overtaken document route opens no dialog over the page moved to', async () => {
+    const { App, pageContent } = loadApp();
+    let release;
+    const held = new Promise(r => { release = r; });
+    const opened = [];
+    App.routes['/__doc/:id'] = {
+        page: 'invoices', label: 'Doc', document: true,
+        render: (id) => App.withDocument(async () => { await held; return '<p>list</p>'; }, () => { opened.push(id); }),
+    };
+    App.routes['/__chosen'] = { page: 'expenses', label: 'Chosen', render: async () => '<p>chosen</p>' };
+    const first = App.navigate('#/__doc/7');
+    await new Promise(r => setTimeout(r, 0));
+    await App.navigate('#/__chosen');
+    release();
+    await first;
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(pageContent.innerHTML, '<p>chosen</p>');
+    assert.deepEqual(opened, []);
+    // the same route not overtaken still opens its document
+    const later = heldRoute('');
+    later.release();
+    await App.navigate('#/__doc/8');
+    await new Promise(r => setTimeout(r, 20));
+    assert.deepEqual(opened, ['8']);
+});
+
+// a move started inside another's first steps (before its first wait) is
+// the later one: awaiting either waits for the page it draws
+test('a move started within another move\'s first steps is the one awaited', async () => {
+    const { App, pageContent } = loadApp();
+    const inner = heldRoute('<p>inner</p>');
+    App.routes['/__inner'] = inner.route;
+    App.routes['/__outer'] = { page: 'dashboard', label: 'Outer', render: async () => '<p>outer</p>' };
+    let innerMove;
+    App._pageCleanup = () => { App._pageCleanup = null; innerMove = App.navigate('#/__inner'); };
+    let outerDone = false;
+    const outer = App.navigate('#/__outer').then(() => { outerDone = true; });
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(outerDone, false);
+    assert.equal(pageContent.innerHTML, '');
+    inner.release();
+    await outer;
+    await innerMove;
+    assert.equal(pageContent.innerHTML, '<p>inner</p>');
+});

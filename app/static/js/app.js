@@ -124,8 +124,12 @@ const App = {
         // opened over the page in view (App.openOver): its list isn't drawn
         const over = App._openOver;
         App._openOver = null;
+        // the move this document belongs to (App.navigate): one overtaken
+        // while its list loaded opens nothing over the page moved to since
+        const seq = App._navSeq;
         const html = over ? '' : await list();
         setTimeout(() => {
+            if (App._overtaken(seq)) return;
             // the dialog about to open is the address's own, over the list
             // (App.dialogClosed) — or over the page it was opened from
             App._dialogUnder = over ? (location.hash || '#/') : App.pageUnder(location.hash);
@@ -766,7 +770,9 @@ const App = {
         if (App._stay) { App._stay = false; App.addressShown(); return; }
         const seq = ++App._navSeq;
         let run = App._navigateTo(hash, seq);
-        App._navRun = run;
+        // a move started while this one's first steps ran (before its
+        // first wait) is the later one: its run stays the one awaited
+        if (!App._overtaken(seq)) App._navRun = run;
         await run;
         while (App._navRun !== run) {
             run = App._navRun;
