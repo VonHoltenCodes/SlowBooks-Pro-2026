@@ -57,6 +57,10 @@ class PaymentCreate(StrictModel):
     # The class the payment's own lines carry (#686): the bank, A/R and the
     # discounts taken with it. Unknown is 404, archived 400, as a transfer.
     class_id: Optional[int] = None
+    # Deposit To a customer deposit or retainer account (#1237): apply more
+    # than the account holds. Without it that is refused; ignored for any
+    # other account.
+    allow_overdraw: StrictBool = False
 
 
 class PaymentApply(StrictModel):

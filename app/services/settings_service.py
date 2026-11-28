@@ -345,7 +345,21 @@ _ADDRESS_LIST_SETTINGS = {
 }
 
 
-def _clean_deposit_account_ids(value, text: str) -> str:
+_DEPOSIT_IDS_WANTED = (
+    "Deposit into these accounts must be a list of bank account ids, "
+    "such as [1, 2], or [] for every bank account."
+)
+# Customer deposits and retainers (#1237): the liability accounts Record
+# Payment offers in Deposit To, as the same kind of list
+_CUSTOMER_DEPOSIT_IDS_WANTED = (
+    "Customer deposits and retainers must be a list of liability account "
+    "ids, such as [12], or [] for none."
+)
+
+
+def _clean_deposit_account_ids(
+    value, text: str, wanted: str = _DEPOSIT_IDS_WANTED
+) -> str:
     """Make Deposits' destination list (#735) as stored: a JSON list of
     account ids, each once, in id order; "[]" for every bank account. The
     API may send the list itself or its JSON text; an empty value is the
@@ -362,10 +376,6 @@ def _clean_deposit_account_ids(value, text: str) -> str:
             items = json.loads(text)
         except ValueError:
             items = None
-    wanted = (
-        "Deposit into these accounts must be a list of bank account ids, "
-        "such as [1, 2], or [] for every bank account."
-    )
     if not isinstance(items, list):
         raise SettingValueError(wanted)
     ids = set()
@@ -694,6 +704,8 @@ def clean_setting_value(key: str, value) -> str:
     text = "" if value is None else str(value).strip()
     if key == "deposit_account_ids":
         return _clean_deposit_account_ids(value, text)
+    if key == "customer_deposit_account_ids":
+        return _clean_deposit_account_ids(value, text, _CUSTOMER_DEPOSIT_IDS_WANTED)
     if key == "check_field_layout":
         return _clean_check_field_layout(value, text)
     if key == "deposit_slip_layout":

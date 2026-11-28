@@ -1738,6 +1738,23 @@ const DepositAccounts = {
         const shown = usable.filter(a => chosen.has(String(a.id)) || String(a.id) === keep);
         return chosen.size && usable.some(a => chosen.has(String(a.id))) ? shown : usable;
     },
+    // Customer deposits and retainers (#1237): the liability accounts
+    // Settings → Deposits lists for Record Payment's Deposit To, in the
+    // chart's order. Only active liability accounts that are no bank or
+    // credit card account (the server refuses the rest on save), plus
+    // `keepId` when it is one of them, so an edit keeps it even if
+    // deactivated since. [] when none is listed: the form as before.
+    customerDepositIds(s) {
+        let ids = [];
+        try { ids = JSON.parse(DepositAccounts._settings(s).customer_deposit_account_ids || '[]'); } catch (err) { ids = []; }
+        return Array.isArray(ids) ? ids.map(String).filter(v => /^\d+$/.test(v)) : [];
+    },
+    customerDeposits(accounts, s, keepId = null) {
+        const chosen = new Set(DepositAccounts.customerDepositIds(s));
+        if (!chosen.size) return [];
+        return DepositAccounts.active(accounts, keepId)
+            .filter(a => chosen.has(String(a.id)) && a.account_type === 'liability' && !a.bank_kind);
+    },
     // `banks` with the default first, the rest in their own order
     defaultFirst(banks, s) {
         const d = DepositAccounts.startId(banks, s);

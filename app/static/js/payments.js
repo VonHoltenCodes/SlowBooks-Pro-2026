@@ -232,6 +232,9 @@ const PaymentsPage = {
         for (const a of p.allocations || []) back[a.invoice_id] = (back[a.invoice_id] || 0) + (parseFloat(a.amount) || 0);
         for (const d of p.discounts || []) back[d.invoice_id] = (back[d.invoice_id] || 0) + (parseFloat(d.amount) || 0);
         PaymentsPage._giveBack = back;
+        // what the void gives back to its Deposit To, for the retainer
+        // check on Save (#1237)
+        PaymentsPage._giveBackDeposit = { id: String(p.deposit_to_account_id || ''), cents: PaymentsPage._cents(p.amount) };
         Replace.set(form, 'customer_id', p.customer_id);
         Replace.set(form, 'date', p.date);
         Replace.set(form, 'amount', Number(p.amount).toFixed(2));
@@ -256,6 +259,9 @@ const PaymentsPage = {
         form.querySelector('[data-save-new]')?.remove();
     },
     _giveBack: null,
+    _giveBackDeposit: null,
+    // Customer deposit and retainer accounts on the open form (#1237)
+    _retainerIds: new Set(),
 
     // `keepDepositId`: Edit's payment's own Deposit To account, offered even
     // when Settings' "Deposit into these accounts" leaves it out (#735), or
@@ -265,6 +271,7 @@ const PaymentsPage = {
     async showForm(_ignoredId = null, prefillCustomerId = null, keepDepositId = null, keepMethod = null) {
         PaymentsPage._requestKey = null; // a new form, a new key (#292)
         PaymentsPage._giveBack = null;
+        PaymentsPage._giveBackDeposit = null;
         const [customers, accounts] = await Promise.all([
             API.get('/customers?active_only=true&tree=1'),
             API.get('/accounts'),
@@ -288,7 +295,19 @@ const PaymentsPage = {
             ? DepositAccounts.defaultFirst(DepositAccounts.banks(bankAccts, null, keepDepositId)) : bankAccts;
         const startBank = !undeposited && typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(depositBanks) : '';
         let bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
-        bankOpts += PaymentsPage._keptAccountOption(accounts, depositBanks, keepDepositId);
+        // Customer deposits and retainers (#1237): the liability accounts
+        // Settings → Deposits lists, in a group of their own, each saying
+        // it applies money held rather than deposits any; none listed, no
+        // group
+        const retainers = typeof DepositAccounts !== 'undefined' && DepositAccounts.customerDeposits
+            ? DepositAccounts.customerDeposits(accounts, null, keepDepositId) : [];
+        PaymentsPage._retainerIds = new Set(retainers.map(a => String(a.id)));
+        bankOpts += PaymentsPage._keptAccountOption(accounts, depositBanks.concat(retainers), keepDepositId);
+        if (retainers.length) {
+            bankOpts += '<optgroup label="Apply a customer deposit or retainer (no money moves)">'
+                + retainers.map(a => `<option value="${Number(a.id)}" data-retainer>${escapeHtml(a.name)} (apply a deposit or retainer)</option>`).join('')
+                + '</optgroup>';
+        }
         const methods = ['Check', 'Cash', 'Credit Card', 'ACH/EFT', 'Other'];
         const methodOpts = methods.map(m => `<option>${m}</option>`).join('')
             + (keepMethod && !methods.includes(String(keepMethod))
@@ -336,6 +355,14 @@ const PaymentsPage = {
         // already selected but the change event didn't fire — trigger the
         // invoice list manually so the operator sees the unpaid invoices.
         if (prefillCustomerId) PaymentsPage.loadInvoices(prefillCustomerId);
+    },
+
+    // the customer deposit or retainer account chosen in Deposit To
+    // (#1237), or null
+    _retainerAccount(form) {
+        const v = form && form.deposit_to_account_id ? String(form.deposit_to_account_id.value || '') : '';
+        if (!v || !PaymentsPage._retainerIds.has(v)) return null;
+        return (PaymentsPage._accounts || []).find(a => String(a.id) === v) || null;
     },
 
     // Edit's own Deposit To when no list above offers it (#1237): the
@@ -834,6 +861,13 @@ const PaymentsPage = {
             toast('The Apply amounts add up to more than the payment. Lower one of them or raise the amount.', 'error');
             return;
         }
+        // A customer deposit or retainer account (#1237) is applied in full:
+        // money left over would be a customer credit taken out of it
+        const retainer = PaymentsPage._retainerAccount(form);
+        if (retainer && remaining > 0) {
+            toast(Terms.text(`Deposit To is ${retainer.name}, a customer deposit or retainer account, so the whole payment must be applied to invoices; ${PaymentsPage._fmt(remaining / 100)} is not applied. Apply it, or lower the amount.`), 'error');
+            return;
+        }
         // Leaving money unapplied is a choice the user makes, not a default.
         if (remaining > 0 && !$('#keep-credit')?.checked) {
             toast(Terms.text(`${PaymentsPage._fmt(remaining / 100)} is not applied to an invoice. Apply it, or tick the box to keep it as a credit.`), 'error');
@@ -896,6 +930,19 @@ const PaymentsPage = {
             discount_account_id: discountAccountId,
             class_id: classIdFromForm(form),
         };
+
+        // more than the retainer account holds: asked, then sent with the
+        // server's override (#1237); an edit counts what its void gives back
+        if (retainer) {
+            const back = PaymentsPage._giveBackDeposit && PaymentsPage._giveBackDeposit.id === String(retainer.id)
+                ? PaymentsPage._giveBackDeposit.cents : 0;
+            const held = PaymentsPage._cents(retainer.balance) + back;
+            const wanted = Math.round(data.amount * (foreign ? rate : 1) * 100);
+            if (wanted > held) {
+                if (!confirm(`${retainer.name} holds ${PaymentsPage._fmt(held / 100)}, less than the ${PaymentsPage._fmt(wanted / 100)} applied from it. Apply it anyway?`)) return;
+                data.allow_overdraw = true;
+            }
+        }
 
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;

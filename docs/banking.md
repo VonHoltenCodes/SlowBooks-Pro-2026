@@ -165,6 +165,22 @@ already in it keeps it: the deposit still opens, prints and edits, and the
 payment's edit still offers its own account. A blank Deposit To still
 posts to Undeposited Funds.
 
+**Customer deposits and retainers** (#1237), in the same section, is for
+money a customer paid ahead and you hold in a liability account, such as
+Retainer Payable. It is empty, and changes nothing, until an administrator
+ticks an account; only active liability accounts that are no bank or credit
+card account and no control account (Accounts Payable, Sales Tax Payable and
+the like) can be ticked. A ticked account appears in Deposit To on Receive
+Payment only, below the bank accounts, in its own group, as "Retainer
+Payable (apply a deposit or retainer)". A payment into it applies the money
+held to the customer's invoices: it debits the liability and credits A/R, no
+money moves, and it never waits in Undeposited Funds. Such a payment must be
+applied to invoices in full, and the form asks before applying more than the
+account holds; the API refuses both the same way (`allow_overdraw` on
+`POST /api/payments` applies more than the account holds). Editing any
+payment keeps its own Deposit To and Method, whether or not the account is
+ticked here or is a bank account at all.
+
 Above the register, **From**, **To** and **Class** narrow what it shows. A
 From date adds a *Balance brought forward* row, and the running balance
 counts the lines shown. The dates apply when you press Enter or leave the

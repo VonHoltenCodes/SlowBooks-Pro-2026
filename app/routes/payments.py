@@ -276,6 +276,19 @@ def create_payment(
     alloc_total = sum(a.amount for a in data.allocations)
     if alloc_total > data.amount:
         raise HTTPException(status_code=400, detail="Allocations exceed payment amount")
+    # Deposit To a customer deposit or retainer account (#1237): applied in
+    # full, and no more than the account holds unless the request says so;
+    # any other account as before
+    from app.services.customer_deposit_accounts import refuse_misuse
+
+    refuse_misuse(
+        db,
+        data.deposit_to_account_id,
+        data.amount,
+        alloc_total,
+        to_home(data.amount, pay_rate),
+        data.allow_overdraw,
+    )
 
     # Validate every allocation owner before creating or applying the payment.
     allocated_invoices = []

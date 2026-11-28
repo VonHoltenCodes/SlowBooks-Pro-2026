@@ -421,6 +421,55 @@ def _deposit_bank_account(db: Session, value, label: str):
     return acct
 
 
+def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
+    """Customer deposits and retainers (#1237): every account on the list
+    (cleaned to a JSON list of ids) is in the chart, a liability, not a bank
+    or credit card account, not a control account (Accounts Payable, Sales
+    Tax Payable and the rest, which their own documents keep) and active.
+    Anything else is refused with a 422 saying why, before any setting is
+    written."""
+    import json
+
+    from app.models.accounts import Account
+    from app.services import control_accounts
+
+    if "customer_deposit_account_ids" not in cleaned:
+        return
+    label = "Customer deposits and retainers"
+    for acct_id in json.loads(cleaned["customer_deposit_account_ids"]):
+        acct = db.get(Account, int(acct_id))
+        if acct is None:
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": no account {} in the chart. Nothing was saved.",
+                    str(acct_id),
+                ),
+            )
+        kind = getattr(acct.account_type, "value", acct.account_type)
+        why = None
+        if kind != "liability":
+            why = "is not a liability account"
+        elif acct.bank_kind:
+            why = "is a bank or credit card account"
+        elif control_accounts.is_control(
+            acct.account_number, acct.account_type, acct.name
+        ):
+            why = "is a control account its own documents keep"
+        elif acct.is_active is False:
+            why = "is inactive"
+        if why:
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": {} " + why + ". Choose a liability account that "
+                    "holds money for customers, such as Retainer Payable. "
+                    "Nothing was saved.",
+                    acct.name,
+                ),
+            )
+
+
 def _guard_deposit_accounts(db: Session, cleaned: dict) -> None:
     """Make Deposits' default destination (#734) is "" or an active bank
     account from the chart, and so is every account on its destination
@@ -556,6 +605,7 @@ def update_settings(
     _guard_clearing_accounts(db, cleaned)
     _guard_payroll_accounts(db, cleaned)
     _guard_deposit_accounts(db, cleaned)
+    _guard_customer_deposit_accounts(db, cleaned)
     # The "Taxed as" select is hidden for a non-LLC but the form still submits
     # its last value; drop a stale election so it never lingers (#488).
     if "llc_tax_election" in cleaned:

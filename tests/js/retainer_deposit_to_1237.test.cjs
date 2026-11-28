@@ -114,3 +114,193 @@ test('Edit sends the kept account back: replace() sets the select to it', () => 
     assert.match(body, /Replace\.set\(form, 'deposit_to_account_id', p\.deposit_to_account_id \|\| ''\)/);
     assert.match(body, /Replace\.set\(form, 'method', p\.method \|\| ''\)/);
 });
+
+// --- Customer deposits and retainers (Settings → Deposits) ----------------
+
+const LISTED = { customer_deposit_account_ids: '[7]' };
+
+test('DepositAccounts.customerDeposits: none listed is none', () => {
+    const DA = depositAccounts({ settings: {} });
+    for (const s of [{}, { customer_deposit_account_ids: '' }, { customer_deposit_account_ids: '[]' }, { customer_deposit_account_ids: 'nonsense' }]) {
+        assert.equal(DA.customerDeposits(ALL, s).length, 0);
+    }
+});
+
+test('DepositAccounts.customerDeposits: only listed, active liabilities that are no bank or card', () => {
+    const DA = depositAccounts({ settings: {} });
+    const s = { customer_deposit_account_ids: '[7, 8, 1, 5, 4]' };
+    assert.deepEqual(DA.customerDeposits(ALL, s).map(a => a.id), [7, 8]);
+    const closed = { ...DEPOSITS, is_active: false };
+    assert.deepEqual(DA.customerDeposits([RETAINER, closed], s).map(a => a.id), [7]);
+    // an edit keeps its own account, even deactivated since
+    assert.deepEqual(DA.customerDeposits([RETAINER, closed], s, 8).map(a => a.id), [7, 8]);
+    // read from App.settings when none is passed
+    const fromApp = depositAccounts({ settings: LISTED });
+    assert.deepEqual(fromApp.customerDeposits(ALL).map(a => a.id), [7]);
+});
+
+test('an empty list leaves Record Payment exactly as it is today', async () => {
+    const html = async settings => { const p = loadPayments({ settings }); await p.page.showForm(); return p.modal(); };
+    const today = await html({});
+    assert.equal(await html({ customer_deposit_account_ids: '[]' }), today);
+    assert.ok(!today.includes('optgroup'));
+});
+
+test('a listed account is in its own labelled group, worded as no bank', async () => {
+    const p = loadPayments({ settings: LISTED });
+    await p.page.showForm();
+    const html = p.modal();
+    assert.deepEqual(depositTo(html).map(o => o[0]), ['', '1', '2', '7']);
+    const at = html.indexOf('<optgroup');
+    assert.ok(at > html.indexOf('>Savings<'), 'after the bank accounts');
+    assert.match(html, /<optgroup label="Apply a customer deposit or retainer \(no money moves\)"><option value="7" data-retainer>Retainer Payable \(apply a deposit or retainer\)<\/option><\/optgroup>/);
+    // Edit of a payment on it: once, in the group
+    const q = loadPayments({ settings: LISTED });
+    await q.page.showForm(null, null, 7, 'Retainer');
+    assert.deepEqual(depositTo(q.modal()).map(o => o[0]), ['', '1', '2', '7']);
+});
+
+test('only Record Payment offers them: Sales Receipts and Make Deposits do not', async () => {
+    for (const [file, name, open, marker] of [
+        ['sales_receipts.js', 'SalesReceiptsPage', async page => { page.lineRowHtml = () => ''; page.recalc = () => {}; await page.showForm(); }, 'name="deposit_to_account_id"'],
+        ['deposits.js', 'DepositsPage', async page => page.render(), 'id="deposit-bank-acct"'],
+    ]) {
+        const html = async settings => {
+            const App = { settings, navigate() {} };
+            let modal = '';
+            const ctx = {
+                console, window: {}, location: { hash: '#/' },
+                document: { addEventListener() {}, getElementById: () => null, querySelector: () => null },
+                escapeHtml: s => String(s ?? ''), customerLabel: c => (c && c.name) || '',
+                formatCurrency: n => String(n), formatDate: s => s || '', todayISO: () => '2026-11-27',
+                T: s => s, Terms: { text: s => s, isNonprofit: () => false, isConstruction: () => false }, App,
+                ClassWarn: { enabled: () => false, okValue: () => true }, toast() {}, closeModal() {}, confirm: () => true,
+                openModal: (_t, h) => { modal = h; }, classFormGroupHtml: async () => '', jobFormGroupHtml: async () => '',
+                currencyFormGroupsHtml: () => '', TaxExempt: { enforce() {}, switchHtml: () => '', watchJob() {}, value: () => undefined },
+                PaymentClass: { load: async () => {}, groupHtml: () => '' }, ScanHelper: { scanRowHtml: () => '', wire() {} },
+                DepositAccounts: depositAccounts(App), $: () => null, $$: () => [],
+                PendingFiles: { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} },
+                API: { get: async url => (url.startsWith('/accounts') ? JSON.parse(JSON.stringify(ALL)) : (url === '/settings' ? settings : [])) },
+            };
+            ctx.fetchAllPages = url => ctx.API.get(url);
+            vm.createContext(ctx);
+            vm.runInContext(fs.readFileSync(path.join(JS, 'hint.js'), 'utf8'), ctx);
+            vm.runInContext(fs.readFileSync(path.join(JS, file), 'utf8') + `\nthis.page = ${name};`, ctx);
+            const out = await open(ctx.page);
+            const all = (typeof out === 'string' ? out : '') + modal;
+            const sel = all.slice(all.indexOf(marker), all.indexOf('</select>', all.indexOf(marker)));
+            assert.ok(all.indexOf(marker) >= 0, `${file}: no ${marker}`);
+            return sel;
+        };
+        const listed = await html(LISTED);
+        assert.ok(!listed.includes('Retainer Payable'), file);
+        assert.equal(listed, await html({}), file);
+    }
+});
+
+// Save, with the form's pieces faked: the payment's numbers, the account
+// chosen, and what is sent
+function saving({ settings = LISTED, depositTo, remaining = 0, amount = '300.00', answer = true, giveBack = null } = {}) {
+    const p = loadPayments({ settings });
+    const sent = [];
+    const toasts = [];
+    const asked = [];
+    Object.assign(p.context, {
+        toast: (m, kind) => toasts.push([m, kind]),
+        confirm: m => { asked.push(m); return answer; },
+        TxnWarn: { ok: async () => true }, ClassWarn: { ok: async () => true },
+        PaymentTerms: { asksOverride: () => false, rememberDiscountAccount() {} },
+        Replace: { suffix: () => '', replacing: () => false },
+        toastPosted() {}, classIdFromForm: () => null,
+    });
+    p.context.App.refresh = () => {};
+    p.context.API.post = async (url, data) => { sent.push([url, data]); return { id: 1 }; };
+    const form = {
+        customer_id: { value: '3' }, date: { value: '2026-10-20' }, amount: { value: amount },
+        method: { value: 'Retainer' }, check_number: { value: '' }, reference: { value: '' },
+        deposit_to_account_id: { value: depositTo }, notes: { value: '' },
+    };
+    return {
+        async run() {
+            await p.page.showForm();
+            p.page._remainingCents = () => ({ total: 0, allocated: 0, remaining });
+            p.page._giveBackDeposit = giveBack;
+            await p.page.save({ preventDefault() {}, target: form });
+            return { sent, toasts, asked };
+        },
+    };
+}
+
+test('Save: a retainer payment with money left over is refused, nothing sent', async () => {
+    const { sent, toasts } = await saving({ depositTo: '7', remaining: 5000 }).run();
+    assert.equal(sent.length, 0);
+    assert.match(toasts[0][0], /Retainer Payable, a customer deposit or retainer account, so the whole payment must be applied/);
+    assert.equal(toasts[0][1], 'error');
+});
+
+test('Save: within what the account holds is sent as today, no override', async () => {
+    const { sent, asked } = await saving({ depositTo: '7', amount: '300.00' }).run();
+    assert.equal(asked.length, 0);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0][1].deposit_to_account_id, 7);
+    assert.ok(!('allow_overdraw' in sent[0][1]));
+});
+
+test('Save: more than the account holds asks first; No sends nothing, Yes sends the override', async () => {
+    const no = await saving({ depositTo: '7', amount: '600.00', answer: false }).run();
+    assert.equal(no.sent.length, 0);
+    assert.match(no.asked[0], /Retainer Payable holds \$500\.00, less than the \$600\.00 applied from it/);
+    const yes = await saving({ depositTo: '7', amount: '600.00', answer: true }).run();
+    assert.equal(yes.sent.length, 1);
+    assert.equal(yes.sent[0][1].allow_overdraw, true);
+});
+
+test('Save: an edit counts what its void gives back to the account', async () => {
+    const r = await saving({ depositTo: '7', amount: '600.00', giveBack: { id: '7', cents: 30000 } }).run();
+    assert.equal(r.asked.length, 0);
+    assert.ok(!('allow_overdraw' in r.sent[0][1]));
+});
+
+test('Save: a bank account is never asked about, leftover or not', async () => {
+    const { sent, asked } = await saving({ depositTo: '1', amount: '9000.00' }).run();
+    assert.equal(asked.length, 0);
+    assert.equal(sent.length, 1);
+    assert.ok(!('allow_overdraw' in sent[0][1]));
+});
+
+// Settings → Connections → Deposits
+function settingsPage() {
+    const context = {
+        API: { get: async () => ({}) }, setTimeout() {}, T: v => v,
+        Terms: { text: v => v, isNonprofit: () => false, isConstruction: () => false },
+        escapeHtml: v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+        accountWords: a => `${a.account_number} - ${a.name}`,
+        toast() {}, document: { getElementById: () => null },
+        PendingFiles: { reset() {}, stripHtml: () => '', ids: () => [], saved() {}, render() {}, discard() {} },
+    };
+    vm.createContext(context);
+    vm.runInContext(fs.readFileSync(path.join(JS, 'payment_terms.js'), 'utf8'), context);
+    vm.runInContext(fs.readFileSync(path.join(JS, 'settings.js'), 'utf8') + '\nthis.page = SettingsPage;', context);
+    return context.page;
+}
+const AP = { id: 9, account_number: '2000', name: 'Accounts Payable', account_type: 'liability', is_control: true, bank_kind: null, is_active: true };
+const INCOME = { id: 10, account_number: '4000', name: 'Sales', account_type: 'income', is_control: true, bank_kind: null, is_active: true };
+const OLD = { id: 11, account_number: '2295', name: 'Old Retainers', account_type: 'liability', is_control: false, bank_kind: null, is_active: false };
+
+test('Settings: a box per active plain liability, none ticked by default', () => {
+    const html = settingsPage()._customerDepositAccountsHtml({}, [...ALL, AP, INCOME, OLD]);
+    assert.match(html, /<legend[^>]*>Customer deposits and retainers<\/legend>/);
+    assert.match(html, /aria-describedby="settings-customer-deposit-accounts-help"/);
+    const boxes = [...html.matchAll(/data-customer-deposit-account="(\d+)"( checked)?/g)].map(m => [m[1], !!m[2]]);
+    assert.deepEqual(boxes, [['7', false], ['8', false]]);
+});
+
+test('Settings: a saved account that no longer qualifies stays ticked and named', () => {
+    const html = settingsPage()._customerDepositAccountsHtml({ customer_deposit_account_ids: '[7,11]' }, [...ALL, OLD]);
+    const boxes = [...html.matchAll(/data-customer-deposit-account="(\d+)"( checked)?/g)].map(m => [m[1], !!m[2]]);
+    assert.deepEqual(boxes, [['7', true], ['8', false], ['11', true]]);
+    assert.ok(html.includes('(unavailable) 2295 - Old Retainers'));
+    const page = settingsPage();
+    const box = (id, checked) => ({ checked, getAttribute: () => id });
+    assert.deepEqual([...page._customerDepositAccountsToSave([box('7', true), box('8', false), box('11', true)])], [7, 11]);
+});

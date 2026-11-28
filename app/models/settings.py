@@ -266,6 +266,13 @@ DEFAULT_SETTINGS = {
     # registers, reports), and a deposit already in it keeps it. The default
     # deposit account above must be on the list, or the list empty.
     "deposit_account_ids": "[]",
+    # Customer deposits and retainers (#1237): a JSON list of liability
+    # account ids (active, not a bank or credit card, not a control account)
+    # that Record Payment offers in Deposit To, in a group of their own, to
+    # apply money held for a customer to its invoices (DR the liability / CR
+    # A/R, no money moves). Only Record Payment offers them; a payment to one
+    # is applied to invoices in full. "[]" = none, the form as before.
+    "customer_deposit_account_ids": "[]",
     # Class tracking (#243): "true" starts every entry form with no class
     # chosen and asks before a transaction is saved without one (it would
     # be reported under Uncategorized); "false" starts the picker on
