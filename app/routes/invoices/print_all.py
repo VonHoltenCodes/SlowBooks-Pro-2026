@@ -24,9 +24,10 @@ from app.models.invoices import Invoice
 from app.routes._print import print_html
 from app.routes.invoices._router import router
 from app.services.pdf_service import (
-    doctype_end,
+    GuardedPage,
     drop_guards,
-    find_guard,
+    insert_guard,
+    is_guarded,
     render_invoice_html,
     render_pdf,
 )
@@ -97,12 +98,15 @@ def _parse_ids(ids: str) -> list[int]:
 def combine_documents(pages: list[str]) -> str:
     """Several full HTML documents drawn from one template as one page: the
     first one's head, then each one's body in a section of its own."""
-    # A page drawn by a local template carries a script policy (#1235,
-    # pdf_service._guard_local_page). It holds only in the head, so it is
-    # taken out of every page and put once at the top of the combined one:
-    # any local page in the run guards the whole run.
-    guard = next((g for g in map(find_guard, pages) if g), None)
-    if guard:
+    # A page drawn by a local template carries our script policy (#1235,
+    # pdf_service.guard_meta). It holds only in the head, so it is taken out
+    # of every page and put once at the top of the combined one: any local
+    # page in the run guards the whole run. Whether one is needed is the
+    # renderer's own record (pdf_service.is_guarded), never the pages' text,
+    # which a template's author or a document's data could forge either way;
+    # and the tag put in is always ours, never one found in a page.
+    guarded = any(map(is_guarded, pages))
+    if guarded:
         pages = [drop_guards(page) for page in pages]
     first = pages[0]
     head_end = first.lower().find("<body")
@@ -117,10 +121,11 @@ def combine_documents(pages: list[str]) -> str:
         if inner is None:
             inner = page
         sections.append(f'<section class="sb-print-doc">{inner}</section>')
-    if guard:
-        at = doctype_end(head)
-        head = head[:at] + guard + head[at:]
-    return head + "<body>" + "".join(sections) + "</body></html>"
+    page = head + "<body>" + "".join(sections) + "</body></html>"
+    if not guarded:
+        return page
+    # right after the run's doctype, which lies in the first page's head
+    return GuardedPage(insert_guard(head) + page[len(head) :])
 
 
 def _run(ids: str, db: Session) -> tuple[list, str]:

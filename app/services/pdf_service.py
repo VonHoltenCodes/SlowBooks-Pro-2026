@@ -196,24 +196,69 @@ class _PrintedTemplate(Template):
 # fetch, form or plugin. A policy in the page can only narrow the server's.
 # Built-in pages are untouched.
 _local_drawn: ContextVar[list | None] = ContextVar("local_drawn", default=None)
-_GUARD_START = '<meta http-equiv="Content-Security-Policy"'
+
+
+class GuardedPage(str):
+    """A page a local template drew, as _PrintedTemplate.render returns it:
+    the renderer's own record that the page carries our script guard and
+    needs it wherever it goes (Print all, print_all.combine_documents).
+    Nothing in a page's text can make a page one, or stop it being one."""
+
+
+def is_guarded(page: str) -> bool:
+    """Whether a local template drew ``page`` (see GuardedPage)."""
+    return isinstance(page, GuardedPage)
 
 
 # The page is the template author's text, so these scan it with str.find and
-# never with a pattern that could backtrack: each is linear in its length.
+# patterns that cannot backtrack: each is linear in its length.
+_COMMENT_CLOSE = re.compile(r"--!?>")
+_TAG_STOP = re.compile(r"[>\"']")
+_ATTR = re.compile(r"""([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?""")
+
+
+def _comment_end(html: str, i: int) -> int:
+    """Where the comment opened by the <!-- at ``i`` ends, or -1 when it is
+    never closed. As HTML reads it: <!--> and <!---> are whole comments,
+    and a comment ends at its first --> (or --!>)."""
+    j = i + 4
+    if html.startswith(">", j):
+        return j + 1
+    if html.startswith("->", j):
+        return j + 2
+    close = _COMMENT_CLOSE.search(html, j)
+    return close.end() if close else -1
+
+
+def _tag_end(html: str, i: int) -> int:
+    """Where the tag whose attributes start at ``i`` ends (just past its
+    >), or -1 when it never does. A > inside a quoted value does not end
+    it."""
+    while True:
+        stop = _TAG_STOP.search(html, i)
+        if stop is None:
+            return -1
+        if stop.group() == ">":
+            return stop.end()
+        close = html.find(stop.group(), stop.end())
+        if close < 0:
+            return -1
+        i = close + 1
+
+
 def doctype_end(html: str) -> int:
     """Where the page's doctype ends, or 0 when it has none. Whitespace and
-    whole <!-- ... --> comments may come before it (still standards mode);
-    a comment ends at its first -->, and one never closed ends the search."""
+    whole comments may come before it (still standards mode); a comment
+    ends where HTML ends it (_comment_end), and one never closed ends the
+    search. A doctype inside a comment is not one."""
     i, n = 0, len(html)
     while i < n:
         if html[i].isspace():
             i += 1
         elif html.startswith("<!--", i):
-            close = html.find("-->", i + 4)
-            if close < 0:
+            i = _comment_end(html, i)
+            if i < 0:
                 return 0
-            i = close + 3
         else:
             break
     if html[i : i + 9].lower() != "<!doctype":
@@ -222,28 +267,54 @@ def doctype_end(html: str) -> int:
     return close + 1 if close >= 0 else 0
 
 
-def find_guard(html: str) -> str | None:
-    """The first script-policy meta tag in the page, or None."""
-    start = html.find(_GUARD_START)
-    if start < 0:
-        return None
-    close = html.find(">", start + len(_GUARD_START))
-    return html[start : close + 1] if close >= 0 else None
+def _is_guard_tag(tag: str) -> bool:
+    for m in _ATTR.finditer(tag, 5):
+        if m.group(1).lower() == "http-equiv":
+            value = m.group(2) or m.group(3) or m.group(4) or ""
+            if value.strip().lower() == "content-security-policy":
+                return True
+    return False
+
+
+def _guard_spans(html: str):
+    """Where each script-policy meta tag in the page starts and ends, in
+    any case or quoting. Text inside a comment is not a tag."""
+    k, n = 0, len(html)
+    while True:
+        k = html.find("<", k)
+        if k < 0:
+            return
+        if html.startswith("<!--", k):
+            k = _comment_end(html, k)
+            if k < 0:
+                # the rest of the page is the comment
+                return
+            continue
+        if html[k + 1 : k + 5].lower() == "meta" and (
+            k + 5 == n or html[k + 5] in " \t\n\r\f/>"
+        ):
+            end = _tag_end(html, k + 5)
+            if end < 0:
+                # the rest of the page is this tag; nothing after it closes
+                return
+            if _is_guard_tag(html[k:end]):
+                yield k, end
+            k = end
+            continue
+        k += 1
+
+
+def guard_tags(html: str) -> list[str]:
+    """Every script-policy meta tag in the page, as a browser reads them."""
+    return [html[start:end] for start, end in _guard_spans(html)]
 
 
 def drop_guards(html: str) -> str:
     """The page with every script-policy meta tag taken out."""
     out, pos = [], 0
-    while True:
-        start = html.find(_GUARD_START, pos)
-        if start < 0:
-            break
-        close = html.find(">", start + len(_GUARD_START))
-        if close < 0:
-            # no tag after this one can close either
-            break
+    for start, end in _guard_spans(html):
         out.append(html[pos:start])
-        pos = close + 1
+        pos = end
     out.append(html[pos:])
     return "".join(out)
 
@@ -255,7 +326,10 @@ def _mark_local_drawn() -> str:
     return ""
 
 
-def _guard_local_page(html: str) -> str:
+def guard_meta() -> str:
+    """Our script guard for a page a local template drew: a policy that
+    lets only the print script (print_html adds it) run, and no fetch, form,
+    plugin or base change. Always this tag, never one found in a page."""
     import base64
     import hashlib
 
@@ -263,14 +337,22 @@ def _guard_local_page(html: str) -> str:
 
     script = PRINT_SCRIPT.split("<script>", 1)[1].rsplit("</script>", 1)[0]
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
-    meta = (
+    return (
         '<meta http-equiv="Content-Security-Policy" content="'
         f"script-src 'sha256-{digest}' 'unsafe-eval'; connect-src 'none'; "
         "form-action 'none'; object-src 'none'; base-uri 'none'\">"
     )
-    # after the doctype, so the page keeps its standards mode
+
+
+def insert_guard(html: str) -> str:
+    """``html`` with our guard right after its doctype, so the page keeps
+    its standards mode (or first, when it has none)."""
     at = doctype_end(html)
-    return html[:at] + meta + html[at:]
+    return html[:at] + guard_meta() + html[at:]
+
+
+def _guard_local_page(html: str) -> "GuardedPage":
+    return GuardedPage(insert_guard(html))
 
 
 _jinja_env = Environment(

@@ -418,15 +418,137 @@ def test_print_all_keeps_the_script_guard_in_the_head(
 
 def test_print_all_lifts_a_guard_from_a_later_page():
     from app.routes.invoices.print_all import combine_documents
+    from app.services.pdf_service import _guard_local_page, guard_meta
 
-    meta = '<meta http-equiv="Content-Security-Policy" content="script-src x">'
+    meta = guard_meta()
     plain = "<!DOCTYPE html><html><head></head><body><p>one</p></body></html>"
-    local = f"<!DOCTYPE html>{meta}<html><head></head><body><p>two</p></body></html>"
+    local = _guard_local_page(
+        "<!DOCTYPE html><html><head></head><body><p>two</p></body></html>"
+    )
     page = combine_documents([plain, local])
     assert page.startswith("<!DOCTYPE html>" + meta)
     assert page.count(meta) == 1
     # and a run of built-in pages is unchanged by the guard code
     assert "Content-Security-Policy" not in combine_documents([plain, plain])
+
+
+def _active_policies(page):
+    """The script-policy meta tags a browser would read in ``page``: the
+    ones outside comments."""
+    from app.services.pdf_service import guard_tags
+
+    return guard_tags(page)
+
+
+_FORGED = (
+    '<!-- <meta http-equiv="Content-Security-Policy" '
+    "content=\"script-src * 'unsafe-inline'\"> -->"
+)
+
+
+def _forged_local(text):
+    """A page as a local template draws it: through the renderer, so it
+    carries the renderer's own record (GuardedPage) and our guard."""
+    from jinja2 import DictLoader
+
+    from app.services.pdf_service import _jinja_env
+
+    loader = _jinja_env.loader
+    _jinja_env.loader = DictLoader({"t.html": "{{ _sb_local_template() }}" + text})
+    _jinja_env.cache.clear()
+    try:
+        return _jinja_env.get_template("t.html").render()
+    finally:
+        _jinja_env.loader = loader
+        _jinja_env.cache.clear()
+
+
+def test_print_all_never_takes_a_guard_from_a_page_comment():
+    # the verifier's case: the author's policy in a comment before the
+    # doctype must not become the run's guard; ours must
+    from app.routes.invoices.print_all import combine_documents
+    from app.services.pdf_service import guard_meta, is_guarded
+
+    body = "<!DOCTYPE html><html><head></head><body><p>{n}</p><script>x()</script>"
+    pages = [
+        _forged_local(_FORGED + body.format(n="one") + "</body></html>"),
+        _forged_local(_FORGED + body.format(n="two") + "</body></html>"),
+    ]
+    assert all(map(is_guarded, pages))
+    page = combine_documents(pages)
+    assert is_guarded(page)
+    live = _active_policies(page)
+    assert live == [guard_meta()], live
+    assert page.startswith(_FORGED + "<!DOCTYPE html>" + guard_meta())
+    assert page.count("Content-Security-Policy") == 2  # ours + the comment's
+    assert "<p>one</p>" in page and "<p>two</p>" in page
+
+
+def test_a_local_page_without_its_guard_still_gets_ours():
+    from app.routes.invoices.print_all import combine_documents
+    from app.services.pdf_service import GuardedPage, guard_meta
+
+    plain = "<!DOCTYPE html><html><head></head><body><p>one</p></body></html>"
+    local = _forged_local("<!DOCTYPE html><html><body><p>two</p></body></html>")
+    meta = guard_meta()
+    removed = GuardedPage(local.replace(meta, ""))
+    renamed = GuardedPage(
+        local.replace(meta, meta.replace("Content-Security-Policy", "X-Not-It"))
+    )
+    authored = GuardedPage(
+        local.replace(
+            meta, '<META HTTP-EQUIV=content-security-policy CONTENT="script-src *">'
+        )
+    )
+    for page in (removed, renamed, authored):
+        for run in ([plain, page], [page, plain], [page, page]):
+            combined = combine_documents(run)
+            assert _active_policies(combined) == [meta], combined[:400]
+            assert combined.startswith("<!DOCTYPE html>" + meta)
+
+
+def test_a_built_in_run_gains_no_guard_from_a_documents_data(
+    client, seed_accounts, seed_customer, off
+):
+    meta = '<meta http-equiv="Content-Security-Policy" content="script-src *">'
+    a = _invoice(client, seed_customer.id)
+    b = _invoice(client, seed_customer.id)
+    r = client.put(f"/api/invoices/{a['id']}", json={"notes": meta})
+    assert r.status_code == 200, r.text[:300]
+    r = client.get(f"/api/invoices/print-preview?ids={a['id']},{b['id']}")
+    assert r.status_code == 200, r.text[:300]
+    page = r.text
+    assert "Content-Security-Policy" in page  # the memo is printed, escaped
+    assert meta not in page
+    assert _active_policies(page) == []
+    assert "<meta http-equiv" not in page.lower().replace(
+        '<meta http-equiv="content-type"', ""
+    )
+
+
+def test_the_short_comment_forms_close_the_comment():
+    from app.routes.invoices.print_all import combine_documents
+    from app.services.pdf_service import doctype_end, drop_guards, guard_meta
+
+    for short in ("<!-->", "<!--->"):
+        # HTML: the short form is a whole comment, so this doctype is real
+        page = short + "<!DOCTYPE html>--><!DOCTYPE html><p>"
+        assert doctype_end(page) == len(short + "<!DOCTYPE html>"), short
+        # and the next tag after it is a tag, not comment text
+        live = '<meta http-equiv="Content-Security-Policy" content="x">'
+        assert drop_guards(short + live + "-->") == short + "-->", short
+        local = _forged_local(page.replace("<p>", "<body><p>") + "</body>")
+        combined = combine_documents([local, local])
+        assert combined.startswith(short + "<!DOCTYPE html>" + guard_meta())
+        assert _active_policies(combined) == [guard_meta()]
+    # --!> also ends a comment, as HTML reads it
+    assert doctype_end("<!-- a --!><!DOCTYPE html>") == len(
+        "<!-- a --!><!DOCTYPE html>"
+    )
+    # text inside a comment is never a doctype nor a guard
+    hidden = '<!-- <!DOCTYPE html><meta http-equiv="Content-Security-Policy"> -->'
+    assert doctype_end(hidden + "<p>") == 0
+    assert drop_guards(hidden) == hidden
 
 
 def test_a_comment_before_the_doctype_keeps_the_guard_after_it(
@@ -639,19 +761,31 @@ def test_the_guard_tag_is_found_and_dropped_in_one_pass():
     from time import perf_counter
 
     from app.routes.invoices.print_all import _body_inner, combine_documents
-    from app.services.pdf_service import drop_guards, find_guard
+    from app.services.pdf_service import GuardedPage, drop_guards
 
     meta = '<meta http-equiv="Content-Security-Policy" content="x">'
-    assert find_guard("<p>" + meta + "<p>" + meta) == meta
-    assert find_guard("<p>no guard</p>") is None
     assert drop_guards("a" + meta + "b" + meta + "c") == "abc"
+    assert drop_guards("a<meta http-equiv='content-security-policy'/>b") == "ab"
+    assert drop_guards('a<meta content="a>b" http-equiv=Content-Security-Policy>b') == (
+        "ab"
+    )
+    other = '<meta charset="utf-8"><meta name="x" content="Content-Security-Policy">'
+    assert drop_guards(other) == other
     unclosed = '<meta http-equiv="Content-Security-Policy" content="x"'
-    assert find_guard(unclosed) is None and drop_guards(unclosed) == unclosed
+    assert drop_guards(unclosed) == unclosed
     assert _body_inner("<html><BODY class=x>in</body>a</Body></html>") == "in</body>a"
     assert _body_inner("<html><body>never closed") is None
     assert _body_inner("</body><body>") is None
-    for page in (unclosed * 50_000, "<body" * 50_000, "<body>" * 50_000):
+    for page in (
+        unclosed * 50_000,
+        "<body" * 50_000,
+        "<body>" * 50_000,
+        "<meta " * 50_000,
+        "<meta '" * 50_000,
+        "<!-->" * 50_000,
+        "<!-- --!" * 50_000,
+    ):
         began = perf_counter()
-        find_guard(page), drop_guards(page), _body_inner(page)
-        combine_documents([page, page])
+        drop_guards(page), _body_inner(page)
+        combine_documents([GuardedPage(page), page])
         assert perf_counter() - began < 2, page[:20]
