@@ -560,6 +560,7 @@ def release_retainage(
         get_ap_account_id,
     )
     from app.services.closing_date import check_closing_date
+    from sqlalchemy import func
 
     if data is None:
         data = ReleaseRetainageRequest()
@@ -582,11 +583,39 @@ def release_retainage(
             ),
         )
     # The release is dated the day it is made, not the PO's date (#1227):
-    # the vendor is paid now, so a bill back-dated to a commitment opened in
-    # May posts the release into an already-reported period and shows up in
-    # A/P Aging past due the day it was released. An explicit date (the
+    # the retainage is owed now, so a bill back-dated to a commitment opened
+    # in May posts the release into an already-reported period and shows up
+    # in A/P Aging past due the day it was released. An explicit date (the
     # caller's, e.g. a back-office import) still wins.
     when = data.date or date.today()
+    # Never before the retainage existed: a release dated before the latest
+    # bill that holds it (or before the PO itself) would post Retainage
+    # Payable a debit balance in a period that held nothing.
+    latest_hold = (
+        db.query(func.max(Bill.date))
+        .filter(
+            Bill.po_id == po.id,
+            Bill.status != BillStatus.VOID,
+            Bill.retainage_held > 0,
+        )
+        .scalar()
+    )
+    if latest_hold is not None and (po.date is None or latest_hold >= po.date):
+        floor, what = (
+            latest_hold,
+            f"the latest bill on {po.po_number} that holds retainage",
+        )
+    else:
+        floor, what = po.date, po.po_number
+    if floor is not None and when < floor:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"A retainage release can't be dated {when:%b} {when.day}, "
+                f"{when.year}: that is before {floor:%b} {floor.day}, "
+                f"{floor.year}, the date of {what}."
+            ),
+        )
     check_closing_date(db, when)
     vendor = po.vendor
     terms = (vendor.terms if vendor else None) or "Net 30"
