@@ -106,7 +106,7 @@ document after every upgrade.
 
 The ones a local file can replace (the customer portal, the online pay page
 and the invoice email body are not printed documents and are not covered; the
-email body is customized under Settings → Email templates):
+email body is customized under Settings → Email → Email Templates):
 
 | Template | What it prints |
 |---|---|
@@ -189,7 +189,7 @@ Filters: `currency`, `rate`, `qty`, `tax_percent`, `fdate`, `desc`, `own_width`,
 | `acknowledgment_letter.html` | `customer`, `gift`, `irs`, `body_html`, `today` |
 | `giving_statement_pdf.html` | `statements`, `year`, `opening_message`, `footer_text` |
 | `report_pdf.html` | `sections` (each `title`, `period`, `columns`, `rows`), `landscape`, `generated_on` |
-| `check_pdf.html` (not the shared renderer) | `checks` (each check's payee, amount, `amount_words`, memo and stub lines), `company`, `position`, `field_css`, `field_wrap`, `no_dollar_sign`, `stock`, `nudge_x`, `nudge_y`, and on blank stock `blank` and `logo` |
+| `check_pdf.html` (not the shared renderer) | `checks` (each check's payee, amount, `amount_words`, memo and stub lines), `company`, `position`, `field_css`, `field_wrap`, `no_dollar_sign`, `asterisk_fill` (Fill the amount with asterisks), `stock`, `nudge_x`, `nudge_y`, and on blank stock `blank` and `logo`; the amount in figures prints through `check_amount(no_dollar_sign, asterisk_fill)`, so a check template that leaves `asterisk_fill` out prints no asterisks |
 | `labels_5160_pdf.html` (not the shared renderer) | `pages` (lists of 30 labels, each `line1`, `line2`, `address1`, `address2`, `city_line`) |
 
 The pay stub, tax and payroll forms receive the figures their own render calls
@@ -223,7 +223,7 @@ authority: when this table and the code differ, the code is right.
   template with the built-in one it replaces. After an upgrade, compare your
   copy against the new built-in template, and print a test document before
   you send any.
-- **The release notes say when a template's context changes.** When a
-  release renames, removes or changes a value a template receives, the release
-  notes say so. Read them before you upgrade a server that uses local
-  templates.
+- **A release can change what a template receives.** A value can be renamed,
+  removed or added, and a name that is no longer passed prints as nothing.
+  The tables above list what this version passes; after an upgrade, the new
+  version's built-in templates show what it passes.

@@ -1080,7 +1080,7 @@ screen: a new change order is **Draft** and nothing moves; **Submit** makes it
 nothing moves); **Approve** makes it
 **Approved**, and only then does it take effect. A change order carries no
 contract time: there is no field for the days it adds (see *What this mode
-does not do yet*).
+does not do*).
 
 **Billed change orders are locked.** Once a pay application has billed a
 change order's schedule-of-values line (#555, below), that change order can no
@@ -1230,6 +1230,15 @@ retainage this period, and the current due is the 5,500 released. Across the
 three, the owner has certified $55,000 and been billed the 5,500 of retainage
 back.
 
+**A final application can release everything in one document.** The release
+does not need an application of its own: the last application can bill its
+period's work and release everything the job holds, the retainage from the
+earlier applications and its own hold on this period's work, so the job closes
+without a release-only application after it. In the example, App 2 could be
+the final one: it bills 20,000 and releases 5,500 in **Release retainage**, so
+retainage to date is 0 and the current due is 23,500 (55,000 completed − 0
+retainage − 31,500 previously certified).
+
 A release followed by more work: bill 30,000 (10% retainage, 3,000 held, 27,000
 due), release 1,500 on the next application (retainage to date 1,500, 1,500
 due), then bill 10,000. Retainage to date is 4,000 − 1,500 = 2,500, the
@@ -1325,12 +1334,13 @@ zero); an application with nothing at all to bill, hold, release, apply or move
 is still refused. Retainage to date can't go below zero either: a release is
 refused (422) when it is more than the retainage held at the application's own
 percent on the work completed, so dropping the percent to 0 and releasing on
-the same application is refused (release at the held percent, or bill the
-release on its own application). A **credit** (a negative line) also takes its
+the same application is refused ("Release less, or keep the retainage percent
+until the release is billed."). A **credit** (a negative line) also takes its
 share of retainage back, so billing one **after** the final release is refused
-(422, "Retainage to date would be −350.00 …: bill the credit before the final
-retainage release, or release less retainage now and the rest after the
-credit"): bill the credit first, then release what is held. We refuse rather
+(422, "Retainage to date would be -$350.00: this application bills a credit
+after the retainage was released, … Bill the credit before the final retainage
+release, or release less retainage now and the rest after the credit."): bill
+the credit first, then release what is held. We refuse rather
 than let retainage go below zero because the release has already paid out the
 credit's share. A lien waiver is for one payment and one
 job, and its amount is the part of the payment applied to that job's invoices. At approval the application keeps the contract sums as they
@@ -2074,7 +2084,7 @@ API, the database or the export formats changes name.
 
 Customer:Job in QuickBooks prints with no space around the colon; SlowBooks
 prints "Customer: Job" (with a space) everywhere today, and that is left
-unchanged in Phase 2 — see *What this mode does not do yet*.
+unchanged in Phase 2 — see *What this mode does not do*.
 
 ## The subcontractor vendor type
 
@@ -2138,7 +2148,7 @@ schedule. Retainage also refuses a `status` that is not a job status, and the
 estimate list's `status` takes `lost` for the estimates marked lost (stored as
 `rejected`; `rejected` still works).
 
-## What this mode does not do yet
+## What this mode does not do
 
 - **Field tickets, version 1:** no mobile or foreman app, no on-screen
   signature pad (a typed name and a photo), no daily reports or timesheets
@@ -2146,9 +2156,9 @@ estimate list's `status` takes `lost` for the estimates marked lost (stored as
 
 - **No first-run prompt.** `company_type` still defaults to Business for a
   new company file; Construction is chosen in Settings afterward, as
-  Nonprofit is. A "what kind of company is this?" step at creation is a
-  later issue.
-- **Customer:Job** still prints with a space; the no-space form is deferred.
+  Nonprofit is. There is no "what kind of company is this?" step at
+  creation.
+- **Customer:Job** prints with a space; there is no no-space form.
 - **No cost-plus billing.** Nothing bills a cost-plus or GMP job's cost to
   date plus its fee; enter it on a pay application or an invoice (see *The
   contract on the job*).
