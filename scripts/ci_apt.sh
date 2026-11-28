@@ -31,18 +31,29 @@ if compgen -G "$cache/*.deb" >/dev/null; then
   # a set saved on another image can need newer libraries than this one
   # has, which is how a restore across images broke dpkg on run 44653809362)
   echo "installing $(ls "$cache"/*.deb | wc -l) cached packages with dpkg"
-  if sudo DEBIAN_FRONTEND=noninteractive dpkg -i "$cache"/*.deb >/dev/null \
+  # --auto-deconfigure, as apt itself passes: a cached package can break
+  # the older version of another one the image ships, with that one's newer
+  # version also in the set (libasound2-data 1.2.11-1ubuntu0.5 against the
+  # image's libasound2t64 0.3, 2026-11-27). Without it dpkg refuses the
+  # first and leaves the second unpacked and unconfigured.
+  if sudo DEBIAN_FRONTEND=noninteractive dpkg -i --auto-deconfigure "$cache"/*.deb >/dev/null \
     && dpkg -s "$@" >/dev/null 2>&1 && [ -z "$(dpkg --audit)" ]; then
     echo "from the cache, without the mirror"
     exit 0
   fi
   echo "the cache did not cover it; apt as usual"
+  half_done=1
 fi
 
 # keep what apt downloads, in the cached folder
 printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' "$cache" \
   | sudo tee /etc/apt/apt.conf.d/99ci-keep-debs >/dev/null
 sudo apt-get update
+if [ -n "${half_done:-}" ]; then
+  # a refused dpkg run can leave packages unpacked and unconfigured, and
+  # apt then refuses every install until that is put right
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-broken
+fi
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -f --no-install-recommends "$@"
 if [ -n "$browsers" ]; then
   read -r -a names <<<"$browsers"
