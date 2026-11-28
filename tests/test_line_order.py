@@ -285,3 +285,24 @@ def test_bill_quick_entry_can_remove_a_line():
     src = (JS / "bill_quick_entry.js").read_text(encoding="utf-8")
     assert re.search(r"LineOrder\.attach\('#bqe-lines', \{[^}]*remove: true", src)
     assert 'aria-label="Remove line"' not in src  # the shared module's button
+
+
+# The memorized bill's form draws the bill's grid (#bill-lines) and, like
+# the bill form, has no Remove line of its own, so it too takes the shared
+# module's; it was the one attach left without it. Every attach in the app
+# gives a way to remove a line: remove: true, or the page's own button.
+def test_every_attach_removes_a_line():
+    seen = 0
+    for path in sorted(JS.glob("*.js")):
+        src = path.read_text(encoding="utf-8")
+        for call in re.findall(r"LineOrder\.attach\('[^']+', \{[^}]*\}", src):
+            seen += 1
+            shared = "remove: true" in call
+            assert shared != (path.name in OWN_REMOVE), (path.name, call)
+    assert seen >= 10
+
+
+def test_the_memorized_bill_form_can_remove_a_line():
+    src = (JS / "memorized.js").read_text(encoding="utf-8")
+    assert re.search(r"LineOrder\.attach\('#bill-lines', \{[^}]*remove: true", src)
+    assert 'aria-label="Remove line"' not in src

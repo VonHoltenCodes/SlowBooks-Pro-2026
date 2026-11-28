@@ -84,7 +84,7 @@ const BillQuickEntry = {
     // cleanup, which discards any files left attached to the form (#881).
     mount() {
         if (typeof LineOrder !== 'undefined') {
-            LineOrder.attach('#bqe-lines', { add: () => BillQuickEntry.addLine(), changed: () => BillQuickEntry.recalc(), remove: true });
+            LineOrder.attach('#bqe-lines', { add: (under) => BillQuickEntry.addLine(under), changed: () => BillQuickEntry.recalc(), remove: true });
         }
         return () => PendingFiles.discard();
     },
@@ -93,13 +93,16 @@ const BillQuickEntry = {
     // its own (Nonprofit.lineClassShown, Enter Bill's rule); the empty
     // choice is "No class", there being no header class here. A new line,
     // and the next bill's first line, start with the class of the line
-    // above: the last one chosen.
+    // above: the last one chosen, or, for a line put in with "Insert line
+    // below", the class of the line it goes under.
     _classId: null,
     lineClasses() { return typeof Nonprofit !== 'undefined' && !!Nonprofit.classCellHtml; },
+    classOf(row) {
+        return row && BillQuickEntry.lineClasses() ? Nonprofit.fundFromRow(row, 'line-class') : null;
+    },
     lastClass() {
         const rows = $$('#bqe-lines tr');
-        const last = rows[rows.length - 1];
-        return last && BillQuickEntry.lineClasses() ? Nonprofit.fundFromRow(last, 'line-class') : null;
+        return BillQuickEntry.classOf(rows[rows.length - 1]);
     },
 
     lineHtml(idx) {
@@ -113,8 +116,10 @@ const BillQuickEntry = {
             </tr>`;
     },
 
-    addLine() {
-        BillQuickEntry._classId = BillQuickEntry.lastClass();
+    // `under`: the line an "Insert line below" puts this one under (LineOrder
+    // hands it over); + Add Line gives none and the line goes at the end.
+    addLine(under) {
+        BillQuickEntry._classId = under ? BillQuickEntry.classOf(under) : BillQuickEntry.lastClass();
         $('#bqe-lines').insertAdjacentHTML('beforeend', BillQuickEntry.lineHtml(BillQuickEntry._lineCount++));
     },
 
