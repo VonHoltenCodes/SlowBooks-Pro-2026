@@ -43,9 +43,12 @@ def _add_logos(companies: list[dict], db: Session) -> None:
     """Each company's own logo on Company Files (2.32.0), as ``logo_url``,
     for a company that turned "Show the company logo in SlowBooks Pro" on;
     the key is absent for every other company, so the list reads as it did.
-    The company in hand, and on a server serving several, each of them; a
-    desktop's other company files are not opened here (the company picker
-    shows theirs)."""
+    The company in hand, and on a server serving several, each other company
+    whose file is already open. Listing companies never opens, unlocks or
+    upgrades a company file (as on origin/main, it reads only the list): a
+    served company not open now shows no logo here, as the sign-in route
+    would refuse it too; a desktop's other company files are not opened
+    either (the company picker shows theirs)."""
     import app.database as db_module
     from app.database import use_company
     from app.services import company_logo, served_companies
@@ -56,7 +59,11 @@ def _add_logos(companies: list[dict], db: Session) -> None:
         try:
             if c.get("is_current"):
                 row = company_logo.shown_logo(db)
-            elif filename and served_companies.is_served(filename):
+            elif (
+                filename
+                and served_companies.is_served(filename)
+                and db_module.company_engine_is_open(filename)
+            ):
                 with use_company(filename):
                     other = db_module.SessionLocal()
                     try:

@@ -106,6 +106,30 @@ def test_only_an_administrator_changes_it():
     assert "/api/settings" in _ADMIN_WRITE_PREFIXES
 
 
+def test_removing_the_logo_turns_the_setting_off(client):
+    """A logo uploaded later (say, for invoices alone) never shows in the
+    app, on the sign-in screen or to a visitor until it is turned on again."""
+    _upload(client)
+    _turn(client, True)
+    assert client.delete("/api/uploads/logo").status_code == 200
+    assert client.get("/api/settings").json()["company_logo_in_app"] == "false"
+    _upload(client)
+    _no_logo_answer(_visitor().get("/api/auth/company-logo"))
+    assert "company_logo_url" not in _visitor().get("/api/auth/status").json()
+
+
+def test_removing_a_logo_never_shown_writes_no_setting(client, TestSession):
+    from app.services.settings_service import get_setting_raw
+
+    _upload(client)
+    assert client.delete("/api/uploads/logo").status_code == 200
+    db = TestSession()
+    try:
+        assert get_setting_raw(db, "company_logo_in_app") is None
+    finally:
+        db.close()
+
+
 def test_settings_reads_as_it_did_with_the_setting_off(client, monkeypatch):
     """The one new key, at "false", is all that differs."""
     with_it = client.get("/api/settings").json()
@@ -340,6 +364,11 @@ def test_company_files_gives_each_served_company_its_logo(
     folder = host / "companies"
     _give_logo(folder, "alpha.db", PNG, "image/png", True)
     _give_logo(folder, "bravo.db", SVG, "image/svg+xml", True)
+    # bravo's file is open once its sign-in screen has been shown
+    opener = _visitor()
+    opener.post("/api/auth/company", json={"file": "bravo.db"})
+    opener.get("/api/auth/status")
+    assert db_module.company_engine_is_open("bravo.db")
     c = _visitor()
     assert _sign_in(c, "pat", A_PW).status_code == 200
     rows = {r["file"]: r for r in c.get("/api/companies").json()}
@@ -358,6 +387,32 @@ def test_company_files_reads_as_it_did_with_the_setting_off(
     assert _sign_in(c, "pat", A_PW).status_code == 200
     for row in c.get("/api/companies").json():
         assert "logo_url" not in row
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_company_files_never_opens_a_company_file(host, monkeypatch, on):
+    """Company Files reads the list, as before the setting: a served company
+    whose file is not open is never opened, unlocked or upgraded to find its
+    logo (setting off or on), and shows none."""
+    folder = host / "companies"
+    _give_logo(folder, "alpha.db", PNG, "image/png", on)
+    _give_logo(folder, "bravo.db", SVG, "image/svg+xml", on)
+    c = _visitor()
+    assert _sign_in(c, "pat", A_PW).status_code == 200
+    # bravo is not open (nobody has used it since the server started)
+    found = db_module._company_engines.pop("bravo.db", None)
+    if found is not None:
+        found.dispose()
+    assert not db_module.company_engine_is_open("bravo.db")
+    opened = []
+    real = served_companies.open_engine
+    monkeypatch.setattr(
+        served_companies, "open_engine", lambda f: opened.append(f) or real(f)
+    )
+    rows = {r["file"]: r for r in c.get("/api/companies").json()}
+    assert opened == []
+    assert "logo_url" not in rows["bravo.db"]
+    assert ("logo_url" in rows["alpha.db"]) is on
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +459,20 @@ def test_the_picker_shows_none_for_a_company_not_opted_in_or_with_no_logo(tmp_pa
         == ""
     )
     assert company_logo.logo_data_uri_from_file(tmp_path / "gone.db") == ""
+
+
+def test_the_picker_leaves_out_a_logo_too_large_to_carry(tmp_path, monkeypatch):
+    """Each refresh carries every logo through the window's bridge, so one
+    over the picker's cap shows none there (the company's pages still do)."""
+    assert company_logo.MAX_PICKER_LOGO_BYTES == 512 * 1024
+    big = PNG + b"\0" * (company_logo.MAX_PICKER_LOGO_BYTES - len(PNG) + 1)
+    path = _company_file(tmp_path / "big.db", data=big)
+    assert company_logo.logo_data_uri_from_file(path) == ""
+    at_cap = big[: company_logo.MAX_PICKER_LOGO_BYTES]
+    path = _company_file(tmp_path / "cap.db", data=at_cap)
+    assert company_logo.logo_data_uri_from_file(path).startswith(
+        "data:image/png;base64,"
+    )
 
 
 def test_the_picker_never_opens_an_encrypted_company(tmp_path, monkeypatch):

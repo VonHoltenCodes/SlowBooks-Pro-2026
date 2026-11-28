@@ -31,8 +31,11 @@ logger = logging.getLogger(__name__)
 SETTING = "company_logo_in_app"
 PUBLIC_PATH = "/api/auth/company-logo"
 _LOGO_PATH_KEY = "company_logo_path"
-# The upload limit (app/routes/uploads.py): nothing larger is ever stored.
-MAX_PICKER_LOGO_BYTES = 5 * 1024 * 1024
+# The desktop picker carries each logo as base64 text through the window's
+# bridge on every refresh, so a logo larger than this (uploads take up to
+# 5 MB, app/routes/uploads.py) shows no logo in the picker; the company's
+# own pages still show it, from its address.
+MAX_PICKER_LOGO_BYTES = 512 * 1024
 
 
 def _opted_in_logo_id(db: Session) -> int | None:
@@ -112,20 +115,28 @@ def logo_data_uri_from_file(path: Path) -> str:
         file_id = file_store.logo_id(values.get(_LOGO_PATH_KEY))
         if file_id is None:
             return ""
+        # the size first, so a logo too large for the picker is never read
         found = conn.execute(
-            "SELECT content_type, data FROM stored_files "
+            "SELECT content_type, length(data) FROM stored_files "
             "WHERE id = ? AND kind = ? AND missing = 0",
             (file_id, KIND_LOGO),
         ).fetchone()
+        if not found:
+            return ""
+        content_type, size = found
+        if (
+            content_type not in file_store.LOGO_TYPES
+            or not size
+            or size > MAX_PICKER_LOGO_BYTES
+        ):
+            return ""
+        data = conn.execute(
+            "SELECT data FROM stored_files WHERE id = ?", (file_id,)
+        ).fetchone()[0]
     except Exception:
         return ""
     finally:
         conn.close()
-    if not found:
-        return ""
-    content_type, data = found
-    if content_type not in file_store.LOGO_TYPES or not data:
-        return ""
-    if len(data) > MAX_PICKER_LOGO_BYTES:
+    if not data or len(data) > MAX_PICKER_LOGO_BYTES:
         return ""
     return f"data:{content_type};base64,{base64.b64encode(bytes(data)).decode('ascii')}"
