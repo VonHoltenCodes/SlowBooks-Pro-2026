@@ -760,7 +760,8 @@ def test_back_refocuses_the_charts_account_link_and_the_drill_downs_line():
         'data-row-key="account:${Number(a.id)}" onclick="ReportsPage._leaveFrom(this)"'
         in app
     )
-    nav = app[app.index("async navigate(hash) {") :]
+    # the move that draws the page (App.navigate runs the last one asked for)
+    nav = app[app.index("async _navigateTo(hash, seq) {") :]
     nav = nav[: nav.index("\n    },")]
     hook = "if (history.state && history.state.focus) ReportsPage._refocusRow($('#page-content'));"
     assert hook in nav

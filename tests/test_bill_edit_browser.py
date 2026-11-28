@@ -42,6 +42,8 @@ def test_edit_opens_the_bill_filled_in_and_save_changes_the_total(
         row = page.locator(
             f"#page-content tbody tr:has-text('{bill['bill_number']}')"
         ).first
+        # the list's row for that bill, once drawn: read what is there
+        row.wait_for(state="attached", timeout=5000)
         assert row.locator("button:has-text('Edit')").count() == 1
         page.evaluate(f"async () => {{ await BillsPage.showForm({bill['id']}); }}")
         page.wait_for_function(OPEN, timeout=5000)
@@ -173,6 +175,10 @@ def test_a_read_only_sign_in_sees_no_edit_on_a_bill(
     page, handled = _signed_in(browser, reader, "readonly")
     try:
         _visit(page, handled, "#/bills")
+        # the list's rows, once drawn (an empty page has no Edit either)
+        page.locator("#page-content tbody tr").first.wait_for(
+            state="attached", timeout=5000
+        )
         shown = page.evaluate(
             """() => [...document.querySelectorAll('#page-content tbody tr button')]
                 .filter(b => b.offsetParent !== null).map(b => b.textContent.trim())"""
