@@ -82,6 +82,34 @@ def _write(folder: Path, name: str, text: str) -> Path:
     return path
 
 
+def _link(monkeypatch, link: Path, target: Path) -> None:
+    """A symbolic link at ``link`` to ``target``. Where the system will not
+    make one (Windows without the privilege), the loader is shown one: the
+    link's path reports itself a link and resolves to the target, which is
+    all the loader asks of a link."""
+    try:
+        link.symlink_to(target)
+        return
+    except OSError:
+        pass
+    real_resolve, real_is_symlink = Path.resolve, Path.is_symlink
+    key = real_resolve(link.parent) / link.name
+    to = real_resolve(target)
+
+    def resolve(self, *args, **kwargs):
+        if real_resolve(self.parent) / self.name == key:
+            return to
+        return real_resolve(self, *args, **kwargs)
+
+    def is_symlink(self):
+        if real_resolve(self.parent) / self.name == key:
+            return True
+        return real_is_symlink(self)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+
 # ---- off by default: byte-for-byte what it was ----
 
 
@@ -262,14 +290,13 @@ def test_an_include_that_climbs_out_is_refused(local_dir):
         _jinja_env.get_template("labels_5160_pdf.html").render(pages=[])
 
 
-def test_a_symlink_is_followed_only_inside_the_folder(local_dir):
+def test_a_symlink_is_followed_only_inside_the_folder(local_dir, monkeypatch):
     (local_dir.parent / "outside.html").write_text("OUTSIDE")
     _write(local_dir, "parts/inside.html", "INSIDE")
-    try:
-        (local_dir / "labels_5160_pdf.html").symlink_to(local_dir / "parts/inside.html")
-        (local_dir / "check_pdf.html").symlink_to(local_dir.parent / "outside.html")
-    except OSError:
-        pytest.skip("no symbolic links here")
+    _link(
+        monkeypatch, local_dir / "labels_5160_pdf.html", local_dir / "parts/inside.html"
+    )
+    _link(monkeypatch, local_dir / "check_pdf.html", local_dir.parent / "outside.html")
     assert "INSIDE" in _jinja_env.get_template("labels_5160_pdf.html").render()
     with pytest.raises(LocalTemplateError, match="outside the local templates folder"):
         _jinja_env.get_template("check_pdf.html")
@@ -281,7 +308,7 @@ def test_a_symlink_is_followed_only_inside_the_folder(local_dir):
 def test_the_folder_is_read_from_the_environment_only():
     app_dir = Path(local_templates.__file__).resolve().parent.parent
     readers = [
-        str(p.relative_to(app_dir))
+        p.relative_to(app_dir).as_posix()
         for p in app_dir.rglob("*.py")
         if ENV_VAR in p.read_text(encoding="utf-8")
         or "DATA_SUBFOLDER" in p.read_text(encoding="utf-8")
@@ -429,11 +456,8 @@ def test_a_missing_name_in_a_local_template_shows_jinjas_own_words(
     assert "UndefinedError: 'gone_value' is undefined" in detail
 
 
-def test_a_broken_link_or_a_folder_is_refused_not_the_builtin(local_dir):
-    try:
-        (local_dir / "labels_5160_pdf.html").symlink_to(local_dir / "nothing.html")
-    except OSError:
-        pytest.skip("no symbolic links here")
+def test_a_broken_link_or_a_folder_is_refused_not_the_builtin(local_dir, monkeypatch):
+    _link(monkeypatch, local_dir / "labels_5160_pdf.html", local_dir / "nothing.html")
     (local_dir / "check_pdf.html").mkdir()
     for name in ("labels_5160_pdf.html", "check_pdf.html"):
         with pytest.raises(LocalTemplateError, match="not a readable file"):
@@ -466,16 +490,20 @@ def test_diagnostics_list_what_the_loader_draws_on_a_case_insensitive_disk(
 def test_an_unreadable_data_folder_names_the_data_folder_not_the_setting(
     off, tmp_path, monkeypatch
 ):
-    if os.geteuid() == 0:
-        pytest.skip("root reads any folder")
     folder = tmp_path / "local-templates"
     folder.mkdir()
     monkeypatch.setenv("SLOWBOOKS_DATA_DIR", str(tmp_path))
-    folder.chmod(0)
-    try:
-        problem = local_templates.status(str(TEMPLATE_DIR))["problem"]
-    finally:
-        folder.chmod(0o755)
+    # the folder cannot be read: shown to the code by the check it makes,
+    # not by permissions (root and Windows read through a chmod)
+    real_access = os.access
+
+    def access(path, mode, *args, **kwargs):
+        if Path(path) == folder:
+            return False
+        return real_access(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(local_templates.os, "access", access)
+    problem = local_templates.status(str(TEMPLATE_DIR))["problem"]
     assert problem == (
         "the data folder's local-templates sub-folder is a folder this server"
         " cannot read"
@@ -550,3 +578,80 @@ def test_batch_sends_name_a_broken_local_template(
     assert 'local template "statement_pdf.html"' in answers[1]
     assert 'local template "invoice_pdf.html"' in answers[2]
     assert all(str(local_dir) not in a for a in answers)
+
+
+# ---- the page scans are linear in its length (code scanning py/redos) ----
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        "<!--",  # a comment never closed
+        "--><!--",  # closes and opens over and over
+        "<!-- -->",  # many whole comments, then no doctype
+        "<!-- --> ",
+    ],
+)
+def test_finding_the_doctype_after_many_comments_takes_no_time(start):
+    from time import perf_counter
+
+    from app.services.pdf_service import doctype_end
+
+    for tail in ("", "x", "<!doctype html>", "<!--"):
+        page = "<!--" + start * 50_000 + tail
+        began = perf_counter()
+        doctype_end(page)
+        assert perf_counter() - began < 2, (start, tail)
+
+
+def test_the_doctype_is_found_after_any_comments_and_spacing():
+    from app.services.pdf_service import doctype_end
+
+    for page, before in [
+        ("<!DOCTYPE html><html>", "<!DOCTYPE html>"),
+        ("<!doctype HTML><p>", "<!doctype HTML>"),
+        ("  \n\t<!DocType html >x", "  \n\t<!DocType html >"),
+        ("<!-- one -->\n<!DOCTYPE html><html>", "<!-- one -->\n<!DOCTYPE html>"),
+        (
+            "<!--a--> <!-- b\n-- c -->\r\n<!---->\n<!doctype html><p>",
+            "<!--a--> <!-- b\n-- c -->\r\n<!---->\n<!doctype html>",
+        ),
+        (
+            "<!--x--><!--y-->\n\n<!--z--><!DOCTYPE html>.",
+            "<!--x--><!--y-->\n\n<!--z--><!DOCTYPE html>",
+        ),
+    ]:
+        assert doctype_end(page) == len(before), page
+    # no doctype, or one hidden in a comment or behind text: 0, as before
+    for page in [
+        "",
+        "<html><body>",
+        "<p>x</p><!DOCTYPE html>",
+        "<!-- <!DOCTYPE html> --><html>",
+        "<!-- never closed <!DOCTYPE html>",
+        "<!DOCTYPE html",
+        "<!-- a --> text <!-- b --><!DOCTYPE html>",
+    ]:
+        assert doctype_end(page) == 0, page
+
+
+def test_the_guard_tag_is_found_and_dropped_in_one_pass():
+    from time import perf_counter
+
+    from app.routes.invoices.print_all import _body_inner, combine_documents
+    from app.services.pdf_service import drop_guards, find_guard
+
+    meta = '<meta http-equiv="Content-Security-Policy" content="x">'
+    assert find_guard("<p>" + meta + "<p>" + meta) == meta
+    assert find_guard("<p>no guard</p>") is None
+    assert drop_guards("a" + meta + "b" + meta + "c") == "abc"
+    unclosed = '<meta http-equiv="Content-Security-Policy" content="x"'
+    assert find_guard(unclosed) is None and drop_guards(unclosed) == unclosed
+    assert _body_inner("<html><BODY class=x>in</body>a</Body></html>") == "in</body>a"
+    assert _body_inner("<html><body>never closed") is None
+    assert _body_inner("</body><body>") is None
+    for page in (unclosed * 50_000, "<body" * 50_000, "<body>" * 50_000):
+        began = perf_counter()
+        find_guard(page), drop_guards(page), _body_inner(page)
+        combine_documents([page, page])
+        assert perf_counter() - began < 2, page[:20]

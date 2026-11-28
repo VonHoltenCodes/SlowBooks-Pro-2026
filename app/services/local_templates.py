@@ -276,7 +276,11 @@ def status(builtin_dir: str) -> dict:
             continue
         if path is not None:
             out["replaced"].append(n)
+            # the file's own name in the folder (resolve gives the on-disk
+            # spelling on Windows) and, where the disk has one, its identity
+            taken.add(path.relative_to(folder).as_posix())
             taken.add(_same_file_key(path))
+    taken.discard(None)
     for n in local:
         key = _same_file_key(folder / n)
         if n not in taken and (key is None or key not in taken):
@@ -288,6 +292,10 @@ def _same_file_key(path: Path):
     try:
         st = path.stat()
     except OSError:
+        return None
+    # some Windows file systems (FAT, some network shares) give every file
+    # inode 0: no identity there, so the name alone decides
+    if not st.st_ino:
         return None
     return (st.st_dev, st.st_ino)
 

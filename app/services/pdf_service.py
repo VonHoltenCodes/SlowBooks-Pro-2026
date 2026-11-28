@@ -196,9 +196,56 @@ class _PrintedTemplate(Template):
 # fetch, form or plugin. A policy in the page can only narrow the server's.
 # Built-in pages are untouched.
 _local_drawn: ContextVar[list | None] = ContextVar("local_drawn", default=None)
-# a comment or two may come before the doctype (still standards mode)
-_DOCTYPE = re.compile(r"(?:\s|<!--.*?-->)*<!doctype[^>]*>", re.I | re.S)
-_GUARD = re.compile(r'<meta http-equiv="Content-Security-Policy"[^>]*>')
+_GUARD_START = '<meta http-equiv="Content-Security-Policy"'
+
+
+# The page is the template author's text, so these scan it with str.find and
+# never with a pattern that could backtrack: each is linear in its length.
+def doctype_end(html: str) -> int:
+    """Where the page's doctype ends, or 0 when it has none. Whitespace and
+    whole <!-- ... --> comments may come before it (still standards mode);
+    a comment ends at its first -->, and one never closed ends the search."""
+    i, n = 0, len(html)
+    while i < n:
+        if html[i].isspace():
+            i += 1
+        elif html.startswith("<!--", i):
+            close = html.find("-->", i + 4)
+            if close < 0:
+                return 0
+            i = close + 3
+        else:
+            break
+    if html[i : i + 9].lower() != "<!doctype":
+        return 0
+    close = html.find(">", i + 9)
+    return close + 1 if close >= 0 else 0
+
+
+def find_guard(html: str) -> str | None:
+    """The first script-policy meta tag in the page, or None."""
+    start = html.find(_GUARD_START)
+    if start < 0:
+        return None
+    close = html.find(">", start + len(_GUARD_START))
+    return html[start : close + 1] if close >= 0 else None
+
+
+def drop_guards(html: str) -> str:
+    """The page with every script-policy meta tag taken out."""
+    out, pos = [], 0
+    while True:
+        start = html.find(_GUARD_START, pos)
+        if start < 0:
+            break
+        close = html.find(">", start + len(_GUARD_START))
+        if close < 0:
+            # no tag after this one can close either
+            break
+        out.append(html[pos:start])
+        pos = close + 1
+    out.append(html[pos:])
+    return "".join(out)
 
 
 def _mark_local_drawn() -> str:
@@ -222,8 +269,7 @@ def _guard_local_page(html: str) -> str:
         "form-action 'none'; object-src 'none'; base-uri 'none'\">"
     )
     # after the doctype, so the page keeps its standards mode
-    head = _DOCTYPE.match(html)
-    at = head.end() if head else 0
+    at = doctype_end(html)
     return html[:at] + meta + html[at:]
 
 

@@ -23,7 +23,13 @@ from app.database import get_db
 from app.models.invoices import Invoice
 from app.routes._print import print_html
 from app.routes.invoices._router import router
-from app.services.pdf_service import _DOCTYPE, _GUARD, render_invoice_html, render_pdf
+from app.services.pdf_service import (
+    doctype_end,
+    drop_guards,
+    find_guard,
+    render_invoice_html,
+    render_pdf,
+)
 from app.services.request_utils import content_disposition
 from app.services.settings_service import get_all_settings as get_settings
 
@@ -51,7 +57,25 @@ _PAGE_STYLE = (
     "</style>"
 )
 
-_BODY_RE = re.compile(r"<body[^>]*>(.*)</body>", re.S | re.I)
+_BODY_OPEN = re.compile(r"<body", re.I)
+_BODY_CLOSE = re.compile(r"</body>", re.I)
+
+
+def _body_inner(page: str) -> str | None:
+    """What lies between the page's first <body ...> tag and its last
+    </body>, or None when it has no such pair. Found with plain literal
+    searches, so a page full of <body tags with no end costs one pass, not
+    one pass per tag (the page may be a local template's, #1235)."""
+    m = _BODY_OPEN.search(page)
+    if m is None:
+        return None
+    start = page.find(">", m.end())
+    if start < 0:
+        return None
+    end = None
+    for close in _BODY_CLOSE.finditer(page, start + 1):
+        end = close.start()
+    return None if end is None else page[start + 1 : end]
 
 
 def _parse_ids(ids: str) -> list[int]:
@@ -77,9 +101,9 @@ def combine_documents(pages: list[str]) -> str:
     # pdf_service._guard_local_page). It holds only in the head, so it is
     # taken out of every page and put once at the top of the combined one:
     # any local page in the run guards the whole run.
-    guard = _GUARD.search("".join(pages))
+    guard = next((g for g in map(find_guard, pages) if g), None)
     if guard:
-        pages = [_GUARD.sub("", page) for page in pages]
+        pages = [drop_guards(page) for page in pages]
     first = pages[0]
     head_end = first.lower().find("<body")
     head = first[:head_end] if head_end >= 0 else ""
@@ -89,13 +113,13 @@ def combine_documents(pages: list[str]) -> str:
         head += _PAGE_STYLE
     sections = []
     for page in pages:
-        m = _BODY_RE.search(page)
-        inner = m.group(1) if m else page
+        inner = _body_inner(page)
+        if inner is None:
+            inner = page
         sections.append(f'<section class="sb-print-doc">{inner}</section>')
     if guard:
-        at = _DOCTYPE.match(head)
-        at = at.end() if at else 0
-        head = head[:at] + guard.group(0) + head[at:]
+        at = doctype_end(head)
+        head = head[:at] + guard + head[at:]
     return head + "<body>" + "".join(sections) + "</body></html>"
 
 
