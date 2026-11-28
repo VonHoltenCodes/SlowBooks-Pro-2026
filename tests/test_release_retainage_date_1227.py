@@ -312,3 +312,20 @@ def test_a_back_dated_release_that_fits_every_later_day_is_allowed(
     assert over.status_code == 422, over.text
     assert "on Mar 1, 2026" in over.json()["detail"]
     assert "held $0.00 of retainage not yet released" in over.json()["detail"]
+
+
+def test_a_release_over_the_total_held_names_both_amounts_as_money(
+    client, db_session, seed_accounts
+):
+    """$500 held in all: a $1,200 release is refused, and the sentence shows
+    both amounts as money, as the date refusals do."""
+    v = _vendor(client, db_session)
+    po = _sent_po(client, v["id"], date(2026, 1, 1))
+    _held(client, po, date(2026, 1, 15))
+
+    rel = _release(client, po, 1200, date(2026, 2, 1))
+    assert rel.status_code == 422, rel.text
+    assert rel.json()["detail"] == (
+        "Release $1,200.00 is more than the $500.00 of retainage held on "
+        "this commitment."
+    )

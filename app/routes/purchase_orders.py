@@ -578,7 +578,8 @@ def release_retainage(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Release {amount:.2f} is more than the {outstanding:.2f} of "
+                f"Release {money_text(amount)} is more than the "
+                f"{money_text(outstanding)} of "
                 "retainage held on this commitment."
             ),
         )

@@ -799,10 +799,14 @@ def _posted_view(
         return entry, None
     p, c = entry["totals"], computed["totals"]
     # A job closed on the schedule's own date and missing from the posted
-    # entry: the entry was posted reading the job as closed that day (as
-    # releases before the close-day rule did), while the schedule keeps a
-    # job on it through the day it closed. Nothing in the books changed, so
-    # the sentence says that, not "something changed after it was posted".
+    # entry. An entry posted reading the job as closed that day (as releases
+    # before the close-day rule did) leaves it out, while the schedule keeps
+    # a job on it through the day it closed. But today's rule leaves a job
+    # out too when its figures were zero at posting, and then a later change
+    # is what moved them; the books cannot tell the two apart. So, with no
+    # other job differing, the sentence gives both as possibilities; with
+    # another job differing, a later change is certain and the close-day
+    # reading may add to it.
     posted_figs, computed_figs = _entry_figures(entry), _entry_figures(computed)
     close_day = []
     for jid in computed_figs:
@@ -821,13 +825,15 @@ def _posted_view(
     )
     if close_day:
         names = ", ".join(sorted(j.name for j in close_day))
-        cause = (
-            f"the posted entry leaves out {names}, closed on "
-            f"{as_of.isoformat()}, and a schedule dated the day a job closed "
-            "keeps the job on it, measured as open"
+        close_reading = (
+            f"posted reading {names}, closed on {as_of.isoformat()}, as closed "
+            "(as earlier releases did), while a schedule dated the day a job "
+            "closed keeps the job on it, measured as open"
         )
         if other_change:
-            cause += f", and {later_change}"
+            cause = f"{later_change}, and the entry may also have been {close_reading}"
+        else:
+            cause = f"either the entry was {close_reading}, or {later_change}"
         advice = (
             " If a job closed that day is finished, enter 0 in its "
             "Cost-to-Complete Forecast first."
