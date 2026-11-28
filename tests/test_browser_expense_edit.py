@@ -192,8 +192,15 @@ def test_a_vendor_credits_edit_keeps_its_lines_accounts_outside_the_list(
         page.close()
 
 
-def _row(page, payee):
-    return page.locator(f"#page-content tbody tr:has-text('{payee}')").first
+def _row(page, expense_id):
+    """The Expenses list's row for that expense, once the list has drawn it:
+    every row, void or not, has its View button, named by the expense."""
+    row = page.locator(
+        "#page-content tbody tr:has("
+        f"button[onclick='ExpensesPage.showDetail({int(expense_id)})'])"
+    )
+    row.wait_for(state="attached", timeout=5000)
+    return row
 
 
 def _buttons(locator):
@@ -308,9 +315,9 @@ def test_the_list_offers_edit_beside_view_and_void_and_not_on_a_void_expense(
     page, handled = _open(browser, company)
     try:
         _visit(page, handled, "#/expenses")
-        assert _buttons(_row(page, "Harbor Mortgage")) == ["View", "Edit", "Void"]
-        assert _buttons(_row(page, "Twice Entered Co.")) == ["View"]
-        edit = _row(page, "Harbor Mortgage").locator("button:has-text('Edit')")
+        assert _buttons(_row(page, mortgage["id"])) == ["View", "Edit", "Void"]
+        assert _buttons(_row(page, voided)) == ["View"]
+        edit = _row(page, mortgage["id"]).locator("button:has-text('Edit')")
         assert edit.get_attribute("data-write") is not None
         assert edit.get_attribute("data-destructive") is None
 

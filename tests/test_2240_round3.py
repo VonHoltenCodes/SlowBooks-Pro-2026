@@ -94,7 +94,8 @@ def test_the_first_page_waits_for_the_sign_ins_state():
     # a page refused to the one-time sign-in draws the form
     catch = app[
         app.index(
-            "} catch (err) {\n            if (adminOnly()) return showAdminOnly();"
+            "} catch (err) {\n            if (App._overtaken(seq)) return;"
+            "\n            if (adminOnly()) return showAdminOnly();"
         ) :
     ][:600]
     assert (

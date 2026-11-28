@@ -124,8 +124,12 @@ const App = {
         // opened over the page in view (App.openOver): its list isn't drawn
         const over = App._openOver;
         App._openOver = null;
+        // the move this document belongs to (App.navigate): one overtaken
+        // while its list loaded opens nothing over the page moved to since
+        const seq = App._navSeq;
         const html = over ? '' : await list();
         setTimeout(() => {
+            if (App._overtaken(seq)) return;
             // the dialog about to open is the address's own, over the list
             // (App.dialogClosed) — or over the page it was opened from
             App._dialogUnder = over ? (location.hash || '#/') : App.pageUnder(location.hash);
@@ -750,10 +754,36 @@ const App = {
         return { path, query };
     },
 
+    // The last move wins. Two can be under way at once: the app's first
+    // page (App.init) still loading when a sidebar link, a shortcut or a
+    // save moves on, and whichever finished last was drawn, so a slow
+    // Dashboard landed over the Expenses list just chosen, with the address
+    // and the sidebar saying Expenses. Each move has a number; one
+    // overtaken by a later one draws nothing, and waiting on any of them
+    // waits until the page the address names is drawn.
+    _navSeq: 0,
+    _navRun: null,
+
     async navigate(hash) {
         // the way back to the entry a declined move left (App.stayPut):
         // the page is still that entry's, nothing to render
         if (App._stay) { App._stay = false; App.addressShown(); return; }
+        const seq = ++App._navSeq;
+        let run = App._navigateTo(hash, seq);
+        // a move started while this one's first steps ran (before its
+        // first wait) is the later one: its run stays the one awaited
+        if (!App._overtaken(seq)) App._navRun = run;
+        await run;
+        while (App._navRun !== run) {
+            run = App._navRun;
+            try { await run; } catch (e) { /* that move's own caller hears of it */ }
+        }
+    },
+
+    // a move overtaken by a later one (App.navigate)
+    _overtaken(seq) { return seq !== App._navSeq; },
+
+    async _navigateTo(hash, seq) {
         // an invited sign-in with its one-time password sets its own
         // before any page (#345); the server refuses everything else
         if (App.mustChangePassword) {
@@ -849,9 +879,11 @@ const App = {
         if (typeof API !== 'undefined' && API && typeof API.revalidate === 'function') {
             await App.refreshSettings('page');
         }
+        if (App._overtaken(seq)) return;
 
         try {
             const html = await route.render(param, query);
+            if (App._overtaken(seq)) return;
             if (adminOnly()) return showAdminOnly();
             $('#page-content').innerHTML = html;
             // Another page opens at its top. A register opens at its foot
@@ -874,6 +906,7 @@ const App = {
             // goes back on the row, as a report's rows have it (W-7)
             if (history.state && history.state.focus) ReportsPage._refocusRow($('#page-content'));
         } catch (err) {
+            if (App._overtaken(seq)) return;
             if (adminOnly()) return showAdminOnly();
             // a sign-in that must set its password first: the form, not
             // the refusal its page met (NEW-149)
