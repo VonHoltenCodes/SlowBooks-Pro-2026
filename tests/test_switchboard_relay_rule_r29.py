@@ -31,7 +31,14 @@ import pytest
 
 from app.models.api_tokens import ApiToken
 from app.services import switchboard_link as link
-from tests.switchboard_clock import Holder, PressClock, hold_the_clock
+from tests.switchboard_clock import (
+    Holder,
+    NoWait,
+    PressClock,
+    at_once,
+    ended_by_its_deadline,
+    hold_the_clock,
+)
 
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 # How long a press waits for the record lock in these tests (PRESS_TIMEOUT;
@@ -236,9 +243,10 @@ def _plain(r, *, secrets_=()):
 
 
 # The slow answers begin, then hold the rest back (Holder.hold: the press's
-# time runs out there, and the relay keeps its answer until the test ends).
-# A press that answers while the relay still holds its answer did not wait
-# for the relay; nothing but its deadline running out could have ended it.
+# time runs out there, and the relay keeps the rest of its answer until the
+# press closes the connection or the test ends). The deadline's own end
+# step must have shut the held connection, and the relay must have seen the
+# press close it (ended_by_its_deadline): nothing else may end the press.
 
 
 def _trickle_body(holder):
@@ -249,7 +257,7 @@ def _trickle_body(holder):
         )
         for _ in range(3):
             conn.sendall(b" ")
-        holder.hold()
+        holder.hold(conn)
 
     return answer
 
@@ -259,7 +267,7 @@ def _trickle_headers(holder):
         conn.sendall(b"HTTP/1.1 201 X\r\n")
         for i in range(3):
             conn.sendall(f"X-Slow-{i}: 1\r\n".encode())
-        holder.hold()
+        holder.hold(conn)
 
     return answer
 
@@ -270,7 +278,7 @@ def _silent_after_headers(holder):
             b"HTTP/1.1 200 X\r\nContent-Type: application/json\r\n"
             b"Content-Length: 4000\r\n\r\n"
         )
-        holder.hold()
+        holder.hold(conn)
 
     return answer
 
@@ -440,31 +448,49 @@ def test_a_link_is_a_link_on_200_or_201(raw, client, db_session):
 # -- rule 1: one deadline for a whole press ---------------------------------------
 
 
+def _quick_press(client, monkeypatch, press: str, ended):
+    """POST the press, proving it asked its own thread for no wait but the
+    relay's answer (which its deadline ends): no sleep, no wait for an
+    event, a thread or a lock (NoWait), then ``ended`` (how it ended), and,
+    as a last line of defence only, that it took under AT_ONCE of
+    wall-clock time."""
+    name = {"connect": "connect", "code": "new_code", "disconnect": "disconnect"}
+    waits = NoWait(f"the {press} press", sockets=True)
+    waits.watch(monkeypatch, link, name[press])
+    with at_once(f"the {press} press"):
+        r = client.post(f"/api/switchboard/{press}")
+        waits.check()
+        ended()
+    return _plain(r)
+
+
 @pytest.mark.parametrize("how", sorted(SLOW))
 @pytest.mark.parametrize("press", ["connect", "code", "disconnect"])
 def test_a_press_ends_at_its_deadline_however_the_relay_answers(
-    raw, client, db_session, press, how
+    raw, client, db_session, monkeypatch, press, how
 ):
     path = {"connect": "/v1/link", "code": "/v1/code", "disconnect": "/v1/forget"}
     if press != "connect":
         _connect(client)
     raw.behave[path[press]] = SLOW[how](raw.holder)
     before = len(PressClock.made)
-    r = _plain(client.post(f"/api/switchboard/{press}"))
-    # the press had one deadline of its own
-    assert len(PressClock.made) == before + 1
-    deadline = PressClock.latest()
-    if how == "an endless body":
-        # ended by the size cap, as soon as MAX_ANSWER was read: its time
-        # was never run out, and nothing waited for it to
-        assert PressClock.ran_out == []
-    else:
-        # the press answered at its deadline while the relay was still
-        # holding back the rest of its answer: it did not wait for the relay
-        # (the relay's hold reached its backstop only if it had)
-        assert raw.holder.holding.is_set()
-        assert PressClock.ran_out == [deadline]
-        assert not raw.holder.held_out.is_set(), r.text
+
+    def ended():
+        # the press had one deadline of its own
+        assert len(PressClock.made) == before + 1
+        deadline = PressClock.latest()
+        if how == "an endless body":
+            # ended by the size cap, as soon as MAX_ANSWER was read: its
+            # time was never run out, and nothing waited for it to
+            assert PressClock.ran_out == []
+        else:
+            # the press's deadline ran out while the relay held back the
+            # rest of its answer, its end step shut that connection, and the
+            # relay saw the press close it: the deadline, nothing else, ended it
+            assert PressClock.ran_out == [deadline]
+            ended_by_its_deadline(raw.holder, [deadline])
+
+    r = _quick_press(client, monkeypatch, press, ended)
     if press == "disconnect":
         # undone here; the relay did not confirm, so the note and the retry
         assert r.status_code == 200, r.text
@@ -480,20 +506,23 @@ def test_a_press_ends_at_its_deadline_however_the_relay_answers(
             assert _tokens(db_session) == [] and not link.link_path().exists()
 
 
-def test_the_deadline_is_the_whole_presss_not_each_calls(raw, client):
+def test_the_deadline_is_the_whole_presss_not_each_calls(raw, client, monkeypatch):
     """Disconnect on a relay from before /v1/forget makes two calls (forget,
     then unlink): one deadline covers both. The press makes one deadline,
     both calls are made under it, and its running out during the second
-    call ends the press."""
+    call ends the press: its end step shut the second call's connection."""
     _connect(client)
     raw.behave["/v1/forget"] = http(404, {"error": "No such route."})
     raw.behave["/v1/unlink"] = _silent_after_headers(raw.holder)
     before = len(PressClock.made)
-    r = _plain(client.post("/api/switchboard/disconnect"))
-    assert len(PressClock.made) == before + 1
-    assert raw.paths()[-2:] == ["/v1/forget", "/v1/unlink"]
-    assert PressClock.ran_out == [PressClock.latest()]
-    assert not raw.holder.held_out.is_set(), r.text
+
+    def ended():
+        assert len(PressClock.made) == before + 1
+        assert raw.paths()[-2:] == ["/v1/forget", "/v1/unlink"]
+        assert PressClock.ran_out == [PressClock.latest()]
+        ended_by_its_deadline(raw.holder, [PressClock.latest()])
+
+    r = _quick_press(client, monkeypatch, "disconnect", ended)
     assert r.status_code == 200 and r.json()["unlinked"] is False
 
 

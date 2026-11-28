@@ -11,6 +11,7 @@ says so in its own sentence; Disconnect then undoes nothing, so it can be
 pressed again.
 """
 
+import functools
 import json
 import os
 import logging
@@ -23,7 +24,15 @@ import pytest
 
 from app.models.api_tokens import ApiToken
 from app.services import switchboard_link as link
-from tests.switchboard_clock import BACKSTOP, Holder, PressClock, hold_the_clock
+from tests.switchboard_clock import (
+    BACKSTOP,
+    Holder,
+    NoWait,
+    PressClock,
+    at_once,
+    ended_by_its_deadline,
+    hold_the_clock,
+)
 from tests.test_switchboard_connect_1087 import (  # noqa: F401  (fixture)
     _connected,
     _free_port,
@@ -59,7 +68,7 @@ def silent_relay(monkeypatch):
                 if not got:
                     return
                 head += got
-            holder.hold()
+            holder.hold(conn)
         except OSError:
             pass
         finally:
@@ -86,14 +95,30 @@ def silent_relay(monkeypatch):
 
 
 def _ended_at_its_deadline(silent_relay, presses: int = 1) -> None:
-    """Each press against the silent relay answered at its deadline, while
-    the relay was still holding the connection without a word: it waited
-    for nothing else (no timer of its own, no socket timeout: the relay's
-    hold reaches its backstop only for a press that waits past its
-    deadline)."""
-    assert silent_relay.holder.holding.is_set()
+    """Each press against the silent relay ended at its deadline: the
+    deadline's own end step shut the connection the relay was holding
+    without a word, and the relay saw the press close it before the test
+    let it go (tests/switchboard_clock.py, ended_by_its_deadline). A press
+    that waits out a socket timeout of its own, or whose deadline shuts
+    nothing, fails here whatever the time it took."""
     assert len(PressClock.ran_out) == presses
-    assert not silent_relay.holder.held_out.is_set()
+    ended_by_its_deadline(silent_relay.holder, PressClock.ran_out)
+
+
+def _press(client, monkeypatch, path: str, name: str, ended=None):
+    """POST the press at ``path`` (link.``name``), proving it asked its own
+    thread for no wait but the relay's answer (which its deadline ends):
+    no sleep, no wait for an event, a thread or a lock (NoWait), then
+    ``ended`` (how it ended), and, as a last line of defence only, that it
+    took under AT_ONCE of wall-clock time."""
+    waits = NoWait(f"the {name} press", sockets=True)
+    waits.watch(monkeypatch, link, name)
+    with at_once(f"the {name} press"):
+        r = client.post(path)
+        waits.check()
+        if ended is not None:
+            ended()
+    return r
 
 
 def test_a_press_waits_ten_seconds_at_most():
@@ -109,19 +134,22 @@ def test_connect_with_the_relay_away_says_so_and_leaves_nothing(
     )
     monkeypatch.setenv(link.RELAY_ENV, address)
     caplog.set_level(logging.WARNING)
-    r = client.post("/api/switchboard/connect")
+    # bounded by the press's own deadline, not the OS's or the client's 30 s:
+    # silent, it ended there; refused, the refusal was the answer and its
+    # time never had to run out
+    if where == "silent":
+        ended = functools.partial(_ended_at_its_deadline, silent_relay)
+    else:
+
+        def ended():
+            assert PressClock.ran_out == []
+
+    r = _press(client, monkeypatch, "/api/switchboard/connect", "connect", ended)
     assert r.status_code == 503, r.text
     assert r.json()["detail"] == (
         "The relay could not be reached. SlowBooks Pro is working normally; try "
         "again in a few minutes."
     )
-    # bounded by the press's own deadline, not the OS's or the client's 30 s:
-    # silent, it ended there; refused, the refusal was the answer and its
-    # time never had to run out
-    if where == "silent":
-        _ended_at_its_deadline(silent_relay)
-    else:
-        assert PressClock.ran_out == []
     # no address and no OS text in the sentence; the log has the detail
     assert "127.0.0.1" not in r.text and "Errno" not in r.text
     assert "did not answer" in caplog.text
@@ -189,14 +217,19 @@ def test_disconnect_on_a_server_error_undoes_nothing_and_can_be_pressed_again(
 
 
 def test_disconnect_with_the_relay_silent_is_quick_and_gives_the_fallback(
-    relay, silent_relay, client
+    relay, silent_relay, client, monkeypatch
 ):
     _connected(relay, client)
     record = json.loads(link.link_path().read_text())
     record["relay"] = silent_relay.url
     link._save(record)
-    r = client.post("/api/switchboard/disconnect")
-    _ended_at_its_deadline(silent_relay)
+    r = _press(
+        client,
+        monkeypatch,
+        "/api/switchboard/disconnect",
+        "disconnect",
+        functools.partial(_ended_at_its_deadline, silent_relay),
+    )
     assert r.status_code == 200, r.text
     got = r.json()
     assert got["unlinked"] is False and got["revoked"] is True
@@ -205,16 +238,24 @@ def test_disconnect_with_the_relay_silent_is_quick_and_gives_the_fallback(
 
 
 def test_no_secret_reaches_the_log_when_the_relay_is_away(
-    relay, silent_relay, client, caplog
+    relay, silent_relay, client, caplog, monkeypatch
 ):
     _connected(relay, client)
     record = json.loads(link.link_path().read_text())
     record["relay"] = silent_relay.url
     link._save(record)
     caplog.set_level(logging.DEBUG)
-    client.post("/api/switchboard/code")
-    client.post("/api/switchboard/disconnect")
-    _ended_at_its_deadline(silent_relay, presses=2)
+    for path, name, presses in (
+        ("code", "new_code", 1),
+        ("disconnect", "disconnect", 2),
+    ):
+        _press(
+            client,
+            monkeypatch,
+            f"/api/switchboard/{path}",
+            name,
+            functools.partial(_ended_at_its_deadline, silent_relay, presses),
+        )
     for secret in (record["credential"], record["token"]):
         assert secret not in caplog.text
 

@@ -24,6 +24,7 @@ import socket
 import struct
 import threading
 import time
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -35,7 +36,13 @@ from app.main import _role_allows, app
 from app.models.api_tokens import ApiToken
 from app.services import switchboard_link as link
 from app.switchboard import line as line_client
-from tests.switchboard_clock import BACKSTOP, hold_the_clock, settle_the_start
+from tests.switchboard_clock import (
+    BACKSTOP,
+    NoWait,
+    at_once,
+    hold_the_clock,
+    settle_the_start,
+)
 
 GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -362,6 +369,15 @@ def _hold_the_start(monkeypatch):
     return held
 
 
+def _watch_the_start(monkeypatch) -> NoWait:
+    """link.start_in_background() asks the thread that calls it for no
+    wait at all: no sleep, no wait for an event, a thread or a lock, no
+    socket and no name lookup (NoWait). Checked with ``check()``."""
+    waits = NoWait("link.start_in_background()")
+    waits.watch(monkeypatch, link, "start_in_background")
+    return waits
+
+
 def _connected(fake, client):
     r = client.post("/api/switchboard/connect")
     assert r.status_code == 200, r.text
@@ -537,9 +553,14 @@ def test_the_relay_down_at_start_holds_nothing_and_the_panel_says_so(
     record["relay"] = f"http://127.0.0.1:{_free_port()}"
     link._save(record)
     start = _hold_the_start(monkeypatch)
-    link.start_in_background()
-    # it returned with its own work still held: nothing of it is waited for
-    # (the hold reaches its backstop only if the start waited for it)
+    waits = _watch_the_start(monkeypatch)
+    with at_once("link.start_in_background()"):
+        link.start_in_background()
+    # it asked its caller to wait for nothing (a start that sleeps, joins,
+    # calls the relay or does its work in the caller's thread asks to)
+    waits.check()
+    # and it returned with its own work still held: nothing of it is waited
+    # for (the hold reaches its backstop only if the start waited for it)
     assert start.entered.wait(BACKSTOP)
     # the books answer as before, also while the start's work is held
     assert client.get("/api/accounts").status_code == 200
@@ -585,10 +606,15 @@ def test_the_app_starts_with_the_relay_down(
         assert kept["companies"] and link._whole2(kept)
     link._save(kept)
     start = _hold_the_start(monkeypatch)
+    waits = _watch_the_start(monkeypatch)
     try:
-        with TestClient(app) as again:
-            # started while the line's start is still held: the app's start
-            # waits for nothing of the relay's
+        with ExitStack() as running:
+            with at_once("the app's start"):
+                again = running.enter_context(TestClient(app))
+            # the lifespan's start of the line asked the app's start to wait
+            # for nothing, and the app started while the line's start was
+            # still held: the app's start waits for nothing of the relay's
+            waits.check()
             assert start.entered.wait(BACKSTOP)
             assert again.get("/health").status_code == 200
             start.go.set()
