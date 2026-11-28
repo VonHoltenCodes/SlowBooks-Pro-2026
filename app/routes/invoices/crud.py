@@ -53,6 +53,7 @@ from app.routes.invoices.helpers import (
     kept_tax,
     refuse_moving_money,
     refuse_negative_lines,
+    refuse_negative_sale,
     _reverse_and_delete_journal,
     warn_or_refuse_oversell,
 )
@@ -204,6 +205,9 @@ def post_invoice(data: InvoiceCreate, db: Session, *, number: str | None = None)
     if data.tax_rate is None:
         data.tax_rate = default_sales_tax_rate(db)
     subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
+    # discounts past the lines, or a taxable one past the taxed lines: said
+    # in a sentence before the $0.00 question, never a 500 at the posting
+    refuse_negative_sale(data.lines, data.tax_rate, total, noun)
     confirm_zero_total(total, data.allow_zero_total, noun)
     _check_fair_value(data.fair_value_amount, total)
 
@@ -553,6 +557,15 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         kept = kept_tax(invoice, tax_rate, effective_lines)
         if kept is not None:
             tax_amount, total = kept, _q(subtotal + kept)
+        # before the $0.00 question and the amount-paid check, so an edit
+        # to a negative total is told what is wrong (an unpaid invoice was
+        # told it was "less than the amount already paid")
+        refuse_negative_sale(
+            effective_lines,
+            tax_rate if kept is None else 0,
+            total,
+            document_label(invoice, words).lower(),
+        )
         confirm_zero_total(
             total, data.allow_zero_total, document_label(invoice, words).lower()
         )

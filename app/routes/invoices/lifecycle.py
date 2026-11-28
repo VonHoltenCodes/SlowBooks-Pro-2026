@@ -34,6 +34,7 @@ from app.routes.invoices.helpers import (
     confirm_credit_limit,
     confirm_zero_total,
     opening_status,
+    refuse_negative_sale,
 )
 from app.services.donor_documents import document_label
 from app.services.sub_customers import invoice_addresses
@@ -695,6 +696,10 @@ def duplicate_invoice(
     copied = taxed_copy_lines(original.lines, original.customer, exempt)
     subtotal, tax_amount, total = compute_line_totals(copied, original.tax_rate)
     noun = document_label(original, words).lower()
+    # an invoice stored before this check, or brought by an import, can
+    # already be past its lines; refused in a sentence, not a 500 at the
+    # posting
+    refuse_negative_sale(copied, original.tax_rate, total, noun)
     confirm_zero_total(
         total,
         bool(data and data.allow_zero_total),

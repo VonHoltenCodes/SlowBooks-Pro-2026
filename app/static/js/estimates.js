@@ -828,7 +828,7 @@ const EstimatesPage = {
     itemSelected(idx) {
         const row = $(`[data-eline="${idx}"]`);
         if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), EstimatesPage._items, () => EstimatesPage.itemSelected(idx))) return;
-        const item = row && SalesLines.fillFromItem(row, EstimatesPage._items);
+        const item = row && SalesLines.fillFromItem(row, EstimatesPage._items, { allowNegative: false });
         if (item) {
             // the item's standard cost is the budget side of the line; blank
             // when the item carries none, and the user can overwrite it

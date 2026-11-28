@@ -32,7 +32,11 @@ const SalesLines = {
 
     // Fill a line from the item picked in its .line-item select: description,
     // price and the item's tax flag. Returns the item, or null for "--".
-    fillFromItem(row, items) {
+    // `allowNegative: false` is for a form whose server takes no discount
+    // line (estimate, credit memo, recurring schedule): a Discount item's
+    // price box keeps its floor there, so the form never offers a negative
+    // price the save then refuses.
+    fillFromItem(row, items, { allowNegative = true } = {}) {
         const itemId = row.querySelector('.line-item')?.value;
         const item = (items || []).find(i => i.id == itemId);
         if (!item) return null;
@@ -43,7 +47,7 @@ const SalesLines = {
             rate.value = item.rate;
             // A Discount item's price is entered negative (-10.00); any other
             // item gets back the floor its box had.
-            if (item.is_discount && rate.dataset) {
+            if (item.is_discount && allowNegative && rate.dataset) {
                 if (rate.dataset.floor === undefined) rate.dataset.floor = rate.getAttribute('min') || '';
                 rate.removeAttribute('min');
                 rate.placeholder = '-10.00';

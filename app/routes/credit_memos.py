@@ -336,6 +336,17 @@ def apply_credit(
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    # A voided invoice owes nothing, so the balance check below refused it
+    # as "Amount exceeds invoice balance"; say what it is, as vendor
+    # credits do for a voided bill.
+    if invoice.status == InvoiceStatus.VOID:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invoice {invoice.invoice_number} is voided, so no credit "
+                "can be applied to it."
+            ),
+        )
     # A credit belongs to one customer: it pays down that customer's invoices
     # only (the payment-side rule, #189), and those of a sub-customer billed
     # with it (#638), as a payment does.

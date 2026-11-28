@@ -21,6 +21,7 @@ from app.routes.invoices.helpers import (
     confirm_credit_limit,
     confirm_zero_total,
     opening_status,
+    refuse_negative_sale,
     resolve_line_taxable,
 )
 from app.routes._helpers import (
@@ -1139,6 +1140,16 @@ def convert_to_invoice(
         ml.rate = ml.amount
     subtotal, tax_amount, total = compute_line_totals(
         list(copied) + markup_lines, estimate.tax_rate
+    )
+    # an accepted deduct alternate is a negative line: past the scope, or a
+    # taxable one past the taxed lines, it is said in a sentence (it was a
+    # 500 at the invoice's posting)
+    refuse_negative_sale(
+        list(copied) + markup_lines,
+        estimate.tax_rate,
+        total,
+        "estimate",
+        deducts=True,
     )
     confirm_zero_total(
         total,
