@@ -450,7 +450,15 @@ def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
             )
         why = not_usable_because(db, acct)
         if why is None and acct.is_active is False:
-            why = "is inactive"
+            # it qualifies but for being inactive: say how to fix that
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": {} is inactive. Make it active in the Chart of "
+                    "Accounts, or untick it here. Nothing was saved.",
+                    acct.name,
+                ),
+            )
         if why:
             raise HTTPException(
                 status_code=422,

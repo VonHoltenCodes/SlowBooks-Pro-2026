@@ -466,3 +466,202 @@ def test_a_pay_application_applies_its_deposit_past_a_listed_2210_balance(
     r = _approve(client, app["id"])
     assert r.status_code == 200, r.text
     assert _gl(db_session, "2210") == Decimal("9000.00")
+
+
+# --- Final verification round ------------------------------------------------
+
+
+def _replace(client, seed_customer, payment_id, acct, inv, amount, applied, **extra):
+    body = {
+        "customer_id": seed_customer.id,
+        "date": "2026-10-20",
+        "amount": amount,
+        "method": "Retainer",
+        "deposit_to_account_id": acct,
+        "allocations": (
+            [{"invoice_id": inv["id"], "amount": applied}] if applied else []
+        ),
+    }
+    body.update(extra)
+    return client.post(f"/api/payments/{payment_id}/replace", json=body)
+
+
+def test_an_edit_keeping_a_listed_account_cannot_leave_money_unapplied(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The verified hole: $300 applied in full, then an edit keeping the
+    account raised the amount to $5,000 with $300 applied, and $4,700 sat as
+    a customer credit taken out of the liability. Refused as a new payment
+    would be, and the payment is left as it was."""
+    acct, inv = _retainer_setup(client, seed_accounts, seed_customer)
+    first = _ok(_pay(client, seed_customer, acct, inv, "300.00", "300.00"))
+    r = _replace(client, seed_customer, first["id"], acct, inv, "5000.00", "300.00")
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "Retainer Payable, a customer deposit or retainer account" in detail
+    assert "$4,700.00 is not applied" in detail
+    # the override is only about the balance
+    r = _replace(
+        client,
+        seed_customer,
+        first["id"],
+        acct,
+        inv,
+        "5000.00",
+        "300.00",
+        allow_overdraw=True,
+    )
+    assert r.status_code == 422, r.text
+    db_session.expire_all()
+    assert db_session.get(Payment, first["id"]).is_voided is False
+    assert db_session.query(Payment).count() == 1
+    assert db_session.get(Account, acct).balance == Decimal("200.00")
+
+
+def test_an_edit_keeping_a_listed_account_asks_before_taking_more_than_it_holds(
+    client, db_session, seed_accounts, seed_customer
+):
+    """$500 held, $300 applied from it: the edit's void gives the 300 back,
+    so up to $500 saves unasked; $600 is asked, and saves with the override."""
+    acct, inv = _retainer_setup(client, seed_accounts, seed_customer)
+    first = _ok(_pay(client, seed_customer, acct, inv, "300.00", "300.00"))
+    r = _replace(client, seed_customer, first["id"], acct, inv, "600.00", "600.00")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith(
+        "Retainer Payable holds $500.00, less than the $600.00 applied from it."
+    )
+    db_session.expire_all()
+    assert db_session.get(Payment, first["id"]).is_voided is False
+    assert db_session.get(Account, acct).balance == Decimal("200.00")
+    second = _ok(
+        _replace(client, seed_customer, first["id"], acct, inv, "500.00", "500.00")
+    )
+    db_session.expire_all()
+    assert db_session.get(Account, acct).balance == Decimal("0.00")
+    third = _ok(
+        _replace(
+            client,
+            seed_customer,
+            second["id"],
+            acct,
+            inv,
+            "600.00",
+            "600.00",
+            allow_overdraw=True,
+        )
+    )
+    db_session.expire_all()
+    assert db_session.get(Payment, third["id"]).deposit_to_account_id == acct
+    assert db_session.get(Account, acct).balance == Decimal("-100.00")
+
+
+def test_an_edit_of_an_overdrawn_payment_that_takes_no_more_saves_unasked(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Applied past the balance with the override once: a memo fixed on it
+    takes no more than it did, so it is not asked again."""
+    acct, inv = _retainer_setup(client, seed_accounts, seed_customer)
+    first = _ok(
+        _pay(client, seed_customer, acct, inv, "700.00", "700.00", allow_overdraw=True)
+    )
+    new = _ok(
+        _replace(
+            client,
+            seed_customer,
+            first["id"],
+            acct,
+            inv,
+            "700.00",
+            "700.00",
+            notes="memo fixed",
+        )
+    )
+    assert new["notes"] == "memo fixed"
+    # one cent more is asked
+    r = _replace(client, seed_customer, new["id"], acct, inv, "700.01", "700.01")
+    assert r.status_code == 422, r.text
+    assert "holds $500.00, less than the $700.01" in r.json()["detail"]
+
+
+def test_an_old_payment_kept_on_its_account_may_not_leave_more_unapplied(
+    client, db_session, seed_accounts, seed_customer
+):
+    """$400 with $300 applied, saved before the account was ticked: an edit
+    may keep or lower the $100 left over, not raise it."""
+    acct, inv = _retainer_setup(client, seed_accounts, seed_customer, listed=False)
+    first = _ok(_pay(client, seed_customer, acct, inv, "400.00", "300.00"))
+    _ok(_list(client, [acct]))
+    r = _replace(client, seed_customer, first["id"], acct, inv, "500.00", "300.00")
+    assert r.status_code == 422, r.text
+    assert "$200.00 is not applied" in r.json()["detail"]
+    lower = _ok(
+        _replace(client, seed_customer, first["id"], acct, inv, "350.00", "300.00")
+    )
+    assert Decimal(str(lower["unapplied"])) == Decimal("50.00")
+
+
+def test_a_sales_receipt_to_a_listed_account_posts_as_before(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Sales receipts are not Receive Payment: one deposited to a ticked
+    account for more than it holds posts as it did before the setting."""
+    acct, _inv = _retainer_setup(client, seed_accounts, seed_customer)
+    r = client.post(
+        "/api/sales-receipts",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-10-20",
+            "tax_rate": "0",
+            "method": "Cash",
+            "deposit_to_account_id": acct,
+            "lines": [
+                {
+                    "description": "Design work",
+                    "quantity": "1",
+                    "rate": "800.00",
+                    "line_order": 0,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    db_session.expire_all()
+    pay = db_session.get(Payment, r.json()["payment"]["id"])
+    assert pay.deposit_to_account_id == acct
+    assert db_session.get(Account, acct).balance == Decimal("-300.00")
+
+
+def test_a_negative_balance_reads_with_the_sign_before_the_dollar(
+    client, db_session, seed_accounts, seed_customer
+):
+    acct, inv = _retainer_setup(client, seed_accounts, seed_customer)
+    _ok(_pay(client, seed_customer, acct, inv, "600.00", "600.00", allow_overdraw=True))
+    r = _pay(client, seed_customer, acct, inv, "50.00", "50.00")
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith(
+        "Retainer Payable holds -$100.00, less than the $50.00 applied from it."
+    )
+    assert "$-" not in detail
+
+
+def test_an_inactive_account_is_refused_with_how_to_fix_it(
+    client, db_session, seed_accounts
+):
+    old = _liability(client, "2295", "Old Retainers")
+    db_session.get(Account, old).is_active = False
+    db_session.commit()
+    r = _list(client, [old])
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "Old Retainers is inactive" in detail
+    assert "Make it active" in detail and "untick it" in detail
+    assert "Choose a liability account" not in detail
+
+
+def test_a_control_account_is_refused_in_plain_words(client, seed_accounts):
+    r = _list(client, [seed_accounts["2000"].id])
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "is a control account, which the app posts to on its own" in detail
+    assert "its own documents keep" not in detail

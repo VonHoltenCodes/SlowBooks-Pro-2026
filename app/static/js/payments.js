@@ -232,9 +232,18 @@ const PaymentsPage = {
         for (const a of p.allocations || []) back[a.invoice_id] = (back[a.invoice_id] || 0) + (parseFloat(a.amount) || 0);
         for (const d of p.discounts || []) back[d.invoice_id] = (back[d.invoice_id] || 0) + (parseFloat(d.amount) || 0);
         PaymentsPage._giveBack = back;
-        // the edited payment's own Deposit To: kept, it saves as it was,
-        // with no retainer check on Save (#1237)
-        PaymentsPage._giveBackDeposit = { id: String(p.deposit_to_account_id || '') };
+        // the edited payment's own Deposit To, what it left unapplied and
+        // its home-currency amount, in cents: an edit keeping a customer
+        // deposit or retainer account is weighed against them on Save
+        // (#1237). A foreign payment's home amount is the server's to say
+        // (null): the form leaves that question to the server's answer.
+        const homeCur = String((typeof App !== 'undefined' && App.settings && App.settings.home_currency) || 'USD').toUpperCase();
+        const foreignPay = !!p.currency && String(p.currency).toUpperCase() !== homeCur;
+        PaymentsPage._giveBackDeposit = {
+            id: String(p.deposit_to_account_id || ''),
+            unapplied: PaymentsPage._cents(p.unapplied),
+            home: foreignPay ? null : PaymentsPage._cents(p.amount),
+        };
         Replace.set(form, 'customer_id', p.customer_id);
         Replace.set(form, 'date', p.date);
         Replace.set(form, 'amount', Number(p.amount).toFixed(2));
@@ -305,7 +314,7 @@ const PaymentsPage = {
         bankOpts += PaymentsPage._keptAccountOption(accounts, depositBanks.concat(retainers), keepDepositId);
         if (retainers.length) {
             bankOpts += '<optgroup label="Apply a customer deposit or retainer (no money moves)">'
-                + retainers.map(a => `<option value="${Number(a.id)}" data-retainer>${escapeHtml(a.name)} (apply a deposit or retainer)</option>`).join('')
+                + retainers.map(a => `<option value="${Number(a.id)}" data-retainer>${escapeHtml(a.name)}</option>`).join('')
                 + '</optgroup>';
         }
         const methods = ['Check', 'Cash', 'Credit Card', 'ACH/EFT', 'Other'];
@@ -363,6 +372,19 @@ const PaymentsPage = {
         const v = form && form.deposit_to_account_id ? String(form.deposit_to_account_id.value || '') : '';
         if (!v || !PaymentsPage._retainerIds.has(v)) return null;
         return (PaymentsPage._accounts || []).find(a => String(a.id) === v) || null;
+    },
+
+    // The server's "holds less than applied" refusal for a customer deposit
+    // or retainer account (#1237), when the form did not ask (a foreign
+    // amount rounded a cent apart): the same question, true on Yes. Once
+    // the override was sent it is never asked again.
+    OVERDRAW: 'confirm applying more than it holds',
+    _asksOverdraw(err, data) {
+        const msg = String((err && err.message) || '');
+        if (data.allow_overdraw || err?.status !== 422 || !msg.includes(PaymentsPage.OVERDRAW)) return false;
+        const at = msg.indexOf(' Lower the amount');
+        const why = at > 0 ? msg.slice(0, at) : msg;
+        return confirm(`${why} Apply it anyway?`);
     },
 
     // Edit's own Deposit To when no list above offers it (#1237): the
@@ -863,14 +885,13 @@ const PaymentsPage = {
         }
         // A customer deposit or retainer account (#1237) is applied in full:
         // money left over would be a customer credit taken out of it. An
-        // edit keeping its own account saves as it was (the server lets it
-        // through too): one saved before the account was ticked may have
-        // left money unapplied
+        // edit keeping its own account may leave no more unapplied than the
+        // payment had (one saved before the account was ticked may have
+        // left some), as the server weighs it
+        const retainer = PaymentsPage._retainerAccount(form);
         const kept = PaymentsPage._giveBackDeposit;
-        const retainerChosen = PaymentsPage._retainerAccount(form);
-        const retainer = retainerChosen && !(kept && kept.id === String(retainerChosen.id))
-            ? retainerChosen : null;
-        if (retainer && remaining > 0) {
+        const keptHere = retainer && kept && kept.id === String(retainer.id) ? kept : null;
+        if (retainer && remaining > (keptHere ? keptHere.unapplied || 0 : 0)) {
             toast(Terms.text(`Deposit To is ${retainer.name}, a customer deposit or retainer account, so the whole payment must be applied to invoices; ${PaymentsPage._fmt(remaining / 100)} is not applied. Apply it, or lower the amount.`), 'error');
             return;
         }
@@ -938,12 +959,16 @@ const PaymentsPage = {
         };
 
         // more than the retainer account holds: asked, then sent with the
-        // server's override (#1237); an edit keeping its own account is not
-        // asked (above)
-        if (retainer) {
-            const held = PaymentsPage._cents(retainer.balance);
+        // server's override (#1237). An edit keeping its own account gets
+        // the payment's money back from its void first, and is asked only
+        // when it takes more than the payment did. A foreign amount the
+        // form rounds a cent apart from the server is asked on the server's
+        // answer instead (`_asksOverdraw`).
+        if (retainer && !(keptHere && keptHere.home === null)) {
+            const keptHome = keptHere ? keptHere.home || 0 : 0;
+            const held = PaymentsPage._cents(retainer.balance) + keptHome;
             const wanted = Math.round(data.amount * (foreign ? rate : 1) * 100);
-            if (wanted > held) {
+            if (wanted > held && !(keptHere && wanted <= keptHome)) {
                 if (!confirm(`${retainer.name} holds ${PaymentsPage._fmt(held / 100)}, less than the ${PaymentsPage._fmt(wanted / 100)} applied from it. Apply it anyway?`)) return;
                 data.allow_overdraw = true;
             }
@@ -965,15 +990,22 @@ const PaymentsPage = {
         if (!PaymentsPage._requestKey) PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
         let saved = null;
         try {
-            try {
-                saved = await API.post('/payments' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
-            } catch (err) {
-                // a discount the terms don't offer is the person's call:
-                // asked, and sent again with the override (#664)
-                if (!PaymentTerms.asksOverride(err, data)) throw err;
-                data.allow_discount_override = true;
-                PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
-                saved = await API.post('/payments' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
+            // each override is asked at most once: once sent, its question
+            // no longer matches, and the refusal is shown
+            for (;;) {
+                try {
+                    saved = await API.post('/payments' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
+                    break;
+                } catch (err) {
+                    // a discount the terms don't offer is the person's call:
+                    // asked, and sent again with the override (#664)
+                    if (PaymentTerms.asksOverride(err, data)) data.allow_discount_override = true;
+                    // more than a retainer account holds, by the server's
+                    // own rounding (#1237): asked, and sent again with it
+                    else if (retainer && PaymentsPage._asksOverdraw(err, data)) data.allow_overdraw = true;
+                    else throw err;
+                    PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
+                }
             }
             PaymentsPage._requestKey = null;
             if ((typeof Replace !== 'undefined' && Replace.replacing(form)) && saved) toastPosted(`Payment voided and replaced by payment #${saved.id}`);

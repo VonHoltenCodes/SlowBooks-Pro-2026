@@ -161,26 +161,31 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
     invoice.is_sales_receipt = True
     db.commit()
 
+    # a sales receipt posts its payment as it always has: the customer
+    # deposit and retainer checks (#1237) are Receive Payment's alone
+    from app.services.customer_deposit_accounts import not_checked
+
     try:
-        pay_resp = create_payment(
-            PaymentCreate(
-                customer_id=customer_id,
-                date=data.date,
-                amount=inv_resp.total,
-                method=data.method,
-                check_number=data.check_number,
-                reference=data.reference,
-                deposit_to_account_id=data.deposit_to_account_id,
-                currency=data.currency,
-                exchange_rate=data.exchange_rate,
-                allocations=[
-                    PaymentAllocationCreate(
-                        invoice_id=inv_resp.id, amount=inv_resp.total
-                    )
-                ],
-            ),
-            db,
-        )
+        with not_checked():
+            pay_resp = create_payment(
+                PaymentCreate(
+                    customer_id=customer_id,
+                    date=data.date,
+                    amount=inv_resp.total,
+                    method=data.method,
+                    check_number=data.check_number,
+                    reference=data.reference,
+                    deposit_to_account_id=data.deposit_to_account_id,
+                    currency=data.currency,
+                    exchange_rate=data.exchange_rate,
+                    allocations=[
+                        PaymentAllocationCreate(
+                            invoice_id=inv_resp.id, amount=inv_resp.total
+                        )
+                    ],
+                ),
+                db,
+            )
     except Exception:
         # The invoice committed but its payment didn't: void the invoice so
         # a failed receipt never leaves a stray open balance, then surface

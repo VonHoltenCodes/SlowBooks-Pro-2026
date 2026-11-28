@@ -200,7 +200,9 @@ test('a listed account is in its own labelled group, worded as no bank', async (
     assert.deepEqual(depositTo(html).map(o => o[0]), ['', '1', '2', '7']);
     const at = html.indexOf('<optgroup');
     assert.ok(at > html.indexOf('>Savings<'), 'after the bank accounts');
-    assert.match(html, /<optgroup label="Apply a customer deposit or retainer \(no money moves\)"><option value="7" data-retainer>Retainer Payable \(apply a deposit or retainer\)<\/option><\/optgroup>/);
+    assert.match(html, /<optgroup label="Apply a customer deposit or retainer \(no money moves\)"><option value="7" data-retainer>Retainer Payable<\/option><\/optgroup>/);
+    // the option does not repeat its group's words
+    assert.ok(!html.includes('(apply a deposit or retainer)'));
     // Edit of a payment on it: once, in the group
     const q = loadPayments({ settings: LISTED });
     await q.page.showForm(null, null, 7, 'Retainer');
@@ -261,14 +263,19 @@ function saving({ settings = LISTED, depositTo, remaining = 0, amount = '300.00'
         toastPosted() {}, classIdFromForm: () => null,
     });
     p.context.App.refresh = () => {};
-    p.context.API.post = async (url, data) => { sent.push([url, data]); return { id: 1 }; };
+    let post = null;
+    p.context.API.post = async (url, data) => {
+        if (post) return post(url, data, sent);
+        sent.push([url, data]); return { id: 1 };
+    };
     const form = {
         customer_id: { value: '3' }, date: { value: '2026-10-20' }, amount: { value: amount },
         method: { value: 'Retainer' }, check_number: { value: '' }, reference: { value: '' },
         deposit_to_account_id: { value: depositTo }, notes: { value: '' },
     };
     return {
-        async run() {
+        async run(poster = null) {
+            post = poster;
             await p.page.showForm();
             p.page._remainingCents = () => ({ total: 0, allocated: 0, remaining });
             p.page._giveBackDeposit = giveBack;
@@ -302,16 +309,84 @@ test('Save: more than the account holds asks first; No sends nothing, Yes sends 
     assert.equal(yes.sent[0][1].allow_overdraw, true);
 });
 
-test('Save: an edit keeping its own retainer account saves as it was', async () => {
-    // saved before the account was ticked: money left over, more than it holds
+test('Save: an edit keeping its own retainer account that changes nothing saves as it was', async () => {
+    // saved before the account was ticked: $100 left over, more than it holds
     // (money left over then takes the keep-as-credit box, as any payment's)
-    const left = await saving({ depositTo: '7', remaining: 10000, giveBack: { id: '7' } }).run();
+    const left = await saving({ depositTo: '7', remaining: 10000, giveBack: { id: '7', unapplied: 10000, home: 70000 } }).run();
     assert.ok(!left.toasts.some(x => /customer deposit or retainer/.test(x[0])), JSON.stringify(left.toasts));
     assert.match(left.toasts[0][0], /tick the box to keep it as a credit/);
-    const r = await saving({ depositTo: '7', amount: '600.00', giveBack: { id: '7' } }).run();
+    const r = await saving({ depositTo: '7', amount: '600.00', giveBack: { id: '7', unapplied: 0, home: 60000 } }).run();
     assert.equal(r.asked.length, 0);
     assert.equal(r.sent.length, 1);
     assert.ok(!('allow_overdraw' in r.sent[0][1]));
+});
+
+test('Save: an edit keeping its own retainer account may not leave more unapplied', async () => {
+    // $300 applied in full, raised to $5,000 with $300 applied
+    const r = await saving({ depositTo: '7', amount: '5000.00', remaining: 470000, giveBack: { id: '7', unapplied: 0, home: 30000 } }).run();
+    assert.equal(r.sent.length, 0);
+    assert.match(r.toasts[0][0], /must be applied to invoices; \$4700\.00 is not applied/);
+    const more = await saving({ depositTo: '7', remaining: 20000, giveBack: { id: '7', unapplied: 10000, home: 40000 } }).run();
+    assert.equal(more.sent.length, 0);
+    assert.match(more.toasts[0][0], /must be applied to invoices/);
+});
+
+test('Save: an edit keeping its own retainer account counts its own money back, then asks', async () => {
+    // $500 held, the payment took $300: up to $800 is within what its void gives back
+    const within = await saving({ depositTo: '7', amount: '800.00', giveBack: { id: '7', unapplied: 0, home: 30000 } }).run();
+    assert.equal(within.asked.length, 0);
+    assert.equal(within.sent.length, 1);
+    const over = await saving({ depositTo: '7', amount: '900.00', answer: false, giveBack: { id: '7', unapplied: 0, home: 30000 } }).run();
+    assert.equal(over.sent.length, 0);
+    assert.match(over.asked[0], /Retainer Payable holds \$800\.00, less than the \$900\.00 applied from it/);
+    const yes = await saving({ depositTo: '7', amount: '900.00', answer: true, giveBack: { id: '7', unapplied: 0, home: 30000 } }).run();
+    assert.equal(yes.sent[0][1].allow_overdraw, true);
+});
+
+test('_asksOverdraw: the server\'s "holds less" answer is the form\'s own question, asked once', () => {
+    // the form rounded a foreign amount a cent apart and did not ask
+    const msg = 'Retainer Payable holds $500.00, less than the $500.01 applied from it. Lower the amount, or confirm applying more than it holds. Nothing was recorded.';
+    const p = loadPayments({ settings: LISTED });
+    const asked = [];
+    p.context.confirm = m => { asked.push(m); return true; };
+    const err = Object.assign(new Error(msg), { status: 422 });
+    const data = {};
+    assert.equal(p.page._asksOverdraw(err, data), true);
+    assert.equal(asked[0], 'Retainer Payable holds $500.00, less than the $500.01 applied from it. Apply it anyway?');
+    // once the override was sent, or for any other refusal, never asked
+    assert.equal(p.page._asksOverdraw(err, { allow_overdraw: true }), false);
+    assert.equal(p.page._asksOverdraw(Object.assign(new Error('Customer not found'), { status: 404 }), {}), false);
+    assert.equal(asked.length, 1);
+});
+
+test('Save: on the server\'s "holds less" answer the form asks and sends again', async () => {
+    const msg = 'Retainer Payable holds $500.00, less than the $500.01 applied from it. Lower the amount, or confirm applying more than it holds. Nothing was recorded.';
+    for (const answer of [true, false]) {
+        const s = saving({ depositTo: '7', amount: '300.00', answer });
+        const r = await s.run(async (url, data, sent) => {
+            sent.push([url, JSON.parse(JSON.stringify(data))]);
+            if (!data.allow_overdraw) throw Object.assign(new Error(msg), { status: 422 });
+            return { id: 2 };
+        });
+        assert.equal(r.asked.length, 1, String(answer));
+        assert.match(r.asked[0], /Apply it anyway\?$/);
+        if (answer) {
+            assert.equal(r.sent.length, 2);
+            assert.ok(!('allow_overdraw' in r.sent[0][1]));
+            assert.equal(r.sent[1][1].allow_overdraw, true);
+            assert.equal(r.toasts.length, 0, JSON.stringify(r.toasts));
+        } else {
+            assert.equal(r.sent.length, 1);
+            assert.match(r.toasts[0][0], /confirm applying more than it holds/);
+        }
+    }
+});
+
+test('Edit remembers what the payment left unapplied and its home amount', () => {
+    const src = fs.readFileSync(path.join(JS, 'payments.js'), 'utf8');
+    const body = src.slice(src.indexOf('async replace(id)'), src.indexOf('_giveBack: null'));
+    assert.match(body, /unapplied: PaymentsPage\._cents\(p\.unapplied\)/);
+    assert.match(body, /home: foreignPay \? null : PaymentsPage\._cents\(p\.amount\)/);
 });
 
 test('Save: an edit moving a payment onto a retainer account is checked as new', async () => {

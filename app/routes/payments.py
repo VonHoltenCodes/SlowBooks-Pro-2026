@@ -1076,10 +1076,15 @@ def replace_payment(
     invoices given back their balances) and post `data` in its place, the
     two linked, under the void's refusals: a closed period, money already
     deposited, a deposit a payment application applied."""
+    from app.services.customer_deposit_accounts import keeping_payment
     from app.services.replace_transaction import replace
     from app.services.undeposited_funds import keeping_deposit_account
 
-    # the edit keeps its own Deposit To even if deactivated since (#741)
+    # the edit keeps its own Deposit To even if deactivated since (#741),
+    # and one keeping a customer deposit or retainer account is weighed
+    # against the payment it replaces (#1237)
     original = db.get(Payment, payment_id)
-    with keeping_deposit_account(original.deposit_to_account_id if original else None):
+    with keeping_deposit_account(
+        original.deposit_to_account_id if original else None
+    ), keeping_payment(original):
         return replace(db, "payment", payment_id, data)
