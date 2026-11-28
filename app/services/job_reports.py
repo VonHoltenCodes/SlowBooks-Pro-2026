@@ -54,17 +54,16 @@ def _local_date(ts: datetime) -> date:
 
 def job_closed_by(job: Job, as_of: Optional[date] = None) -> bool:
     """Whether the job was closed on `as_of`: its status is Closed and it
-    went to Closed before that day. A job closed during a day was still on
-    the books for it, so a schedule dated the close day reads the same that
-    evening as it did that morning. A job closed with no date on file counts
-    as closed on every date. None: closed now."""
+    went to Closed by then, the close day included: a job closed on a day is
+    closed as of that day (a job closed with no date on file counts as
+    closed on every date). None: closed today."""
     if job.status not in _CLOSED:
         return False
-    return as_of is None or job.closed_on is None or job.closed_on < as_of
+    return as_of is None or job.closed_on is None or job.closed_on <= as_of
 
 
 def status_on(job: Job, as_of: Optional[date] = None) -> str:
-    """The job's status as it read on `as_of`: a job closed on or after the day was
+    """The job's status as it read on `as_of`: a job closed after the day was
     still in progress on it."""
     if job.status in _CLOSED and not job_closed_by(job, as_of):
         return "in_progress"
@@ -160,8 +159,8 @@ def select_jobs(
 
     `status` names one job status and wins; otherwise not-awarded jobs are
     always left out and closed ones too unless `include_closed`. With
-    `as_of`, a job closed on or after that day was still open on it, so it
-    stays in (see job_closed_by)."""
+    `as_of`, a job closed after that day was still open on it, so it stays
+    in."""
     q = db.query(Job).options(joinedload(Job.customer))
     if job_id is not None:
         q = q.filter(Job.id == job_id)
@@ -175,7 +174,7 @@ def select_jobs(
         if not include_closed:
             closed = Job.status.in_(_CLOSED)
             if as_of is not None:
-                closed = closed & (Job.closed_on.is_(None) | (Job.closed_on < as_of))
+                closed = closed & (Job.closed_on.is_(None) | (Job.closed_on <= as_of))
             q = q.filter(~closed)
     jobs = q.all()
     if status and as_of is not None:
@@ -528,8 +527,8 @@ def _wip_row_warnings(
             f"{job.name}: billed in full, retainage collected and every "
             f"commitment closed, yet {_money_text(ctc)} of cost to complete "
             "remains. If the job is finished, enter 0 in the Cost-to-Complete "
-            "Forecast, or close the job: schedules dated after the day you "
-            "close it leave it out."
+            "Forecast, or close the job: a job closed on or before the "
+            "schedule's date is left off the schedule."
         )
     return out
 
@@ -571,7 +570,7 @@ def wip_schedule(
     posted revenue to that date, billing and retainage from the applications
     approved by then, the revised contract with the change orders approved by
     then. The estimated total cost takes the budget with the change orders
-    in effect by then, and a job closed on or after the date reads as it did: open.
+    in effect by then, and a job closed after the date reads as it did: open.
     The WIP adjusting entry itself is in none of these figures."""
     as_of = as_of or date.today()
     jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
@@ -798,48 +797,6 @@ def _posted_view(
     if not differs:
         return entry, None
     p, c = entry["totals"], computed["totals"]
-    # A job closed on the schedule's own date and missing from the posted
-    # entry. An entry posted reading the job as closed that day (as releases
-    # before the close-day rule did) leaves it out, while the schedule keeps
-    # a job on it through the day it closed. But today's rule leaves a job
-    # out too when its figures were zero at posting, and then a later change
-    # is what moved them; the books cannot tell the two apart. So, with no
-    # other job differing, the sentence gives both as possibilities; with
-    # another job differing, a later change is certain and the close-day
-    # reading may add to it.
-    posted_figs, computed_figs = _entry_figures(entry), _entry_figures(computed)
-    close_day = []
-    for jid in computed_figs:
-        if jid in posted_figs:
-            continue
-        job = db.get(Job, jid) if jid is not None else None
-        if job is not None and job.status in _CLOSED and job.closed_on == as_of:
-            close_day.append(job)
-    left_out = {j.id for j in close_day}
-    other_change = posted_figs != {
-        jid: f for jid, f in computed_figs.items() if jid not in left_out
-    }
-    later_change = (
-        f"something dated on or before {as_of.isoformat()} changed after it "
-        "was posted (a change order approved back-dated, a late bill)"
-    )
-    if close_day:
-        names = ", ".join(sorted(j.name for j in close_day))
-        close_reading = (
-            f"posted reading {names}, closed on {as_of.isoformat()}, as closed "
-            "(as earlier releases did), while a schedule dated the day a job "
-            "closed keeps the job on it, measured as open"
-        )
-        if other_change:
-            cause = f"{later_change}, and the entry may also have been {close_reading}"
-        else:
-            cause = f"either the entry was {close_reading}, or {later_change}"
-        advice = (
-            " If a job closed that day is finished, enter 0 in its "
-            "Cost-to-Complete Forecast first."
-        )
-    else:
-        cause, advice = later_change, ""
     warning = (
         f"The WIP entry posted for {as_of.isoformat()} (journal entry "
         f"{info['transaction_id']}) books over-billings "
@@ -848,9 +805,10 @@ def _posted_view(
         f"of {_money_text(Decimal(str(p['loss_provision'])))}; the schedule now "
         f"reads {_money_text(Decimal(str(c['over_billing'])))}, "
         f"{_money_text(Decimal(str(c['under_billing'])))} and "
-        f"{_money_text(Decimal(str(c['loss_provision'])))}, because {cause}. "
-        "Void the posted entry and post it again to book the schedule's "
-        f"figures.{advice}"
+        f"{_money_text(Decimal(str(c['loss_provision'])))}, because something "
+        f"dated on or before {as_of.isoformat()} changed after it was posted "
+        "(a change order approved back-dated, a late bill). Void the posted "
+        "entry and post it again to book the schedule's figures."
     )
     entry["posted_warning"] = warning
     return entry, warning

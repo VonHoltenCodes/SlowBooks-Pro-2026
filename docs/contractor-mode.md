@@ -1781,10 +1781,10 @@ and any difference from billing is over or under billing. Closed jobs are left
 out unless *include closed* (or the status filter) asks for them. Closing is
 read **as of the date**: the job keeps the day it went to Closed (cleared if it
 reopens), so a job closed in November is an open job, measured as any other,
-in September's schedule and its adjusting entry. A job closed during a day was
-still on the books for it: a schedule dated the close day reads the same that
-evening as it did that morning, and the job leaves the schedule from the next
-day. A job already closed when
+in September's schedule and its adjusting entry. A job closed on a day is
+closed as of that day: schedules dated on or after the day it is closed leave
+it out (or read it 100% complete when closed jobs are included), and a
+schedule dated before that day shows it open. A job already closed when
 this was added takes the day its record was last changed (the latest it can
 have closed); one with no date on file counts as closed on every date.
 
@@ -1801,7 +1801,8 @@ the table, in the PDF note and the CSV):
 - *A finished job still showing cost to come.* A job billed in full (billed to
   date at or over the revised contract), its retainage collected and every
   commitment closed, that still has cost to complete. Enter 0 in the forecast,
-  or close the job: schedules dated after the day you close it leave it out.
+  or close the job: a job closed on or before the schedule's date is left off
+  the schedule.
 
 **Projected loss.** When actual + cost to complete is over the revised contract,
 the whole loss is recognised now, the usual treatment of a loss contract. Earned
@@ -1855,6 +1856,10 @@ change order approved back-dated, a late bill), `posted_differs` is true and a
 sentence in `warnings` (`posted_warning`), and on screen beside Void, gives
 the posted and the current over-billings, under-billings and loss provision
 and says to void the posted entry and post again.
+
+**Year end.** Before posting the year-end WIP entry, a job that is finished but
+not yet closed gets 0 as its cost to complete in the Cost-to-Complete Forecast
+(or is closed on or before the entry's date).
 
 **Posting the same date again is refused** (409) while an entry for it stands,
 two posts sent at the same moment included: Post first writes a row keyed on the
