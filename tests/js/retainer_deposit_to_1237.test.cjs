@@ -129,12 +129,13 @@ test('DepositAccounts.customerDeposits: none listed is none', () => {
 
 test('DepositAccounts.customerDeposits: only listed, active liabilities that are no bank or card', () => {
     const DA = depositAccounts({ settings: {} });
-    const s = { customer_deposit_account_ids: '[7, 8, 1, 5, 4]' };
-    assert.deepEqual(DA.customerDeposits(ALL, s).map(a => a.id), [7, 8]);
-    const closed = { ...DEPOSITS, is_active: false };
+    const held = { id: 16, account_number: '2280', name: 'Client Deposits Held', account_type: 'liability', is_control: false, bank_kind: null, balance: '0.00', is_active: true };
+    const s = { customer_deposit_account_ids: '[7, 16, 1, 5, 4]' };
+    assert.deepEqual(DA.customerDeposits([...ALL, held], s).map(a => a.id), [7, 16]);
+    const closed = { ...held, is_active: false };
     assert.deepEqual(DA.customerDeposits([RETAINER, closed], s).map(a => a.id), [7]);
     // an edit keeps its own account, even deactivated since
-    assert.deepEqual(DA.customerDeposits([RETAINER, closed], s, 8).map(a => a.id), [7, 8]);
+    assert.deepEqual(DA.customerDeposits([RETAINER, closed], s, 16).map(a => a.id), [7, 16]);
     // read from App.settings when none is passed
     const fromApp = depositAccounts({ settings: LISTED });
     assert.deepEqual(fromApp.customerDeposits(ALL).map(a => a.id), [7]);
@@ -430,13 +431,14 @@ test('Settings: a box per active plain liability, none ticked by default', () =>
     assert.match(html, /<legend[^>]*>Customer deposits and retainers<\/legend>/);
     assert.match(html, /aria-describedby="settings-customer-deposit-accounts-help"/);
     const boxes = [...html.matchAll(/data-customer-deposit-account="(\d+)"( checked)?/g)].map(m => [m[1], !!m[2]]);
-    assert.deepEqual(boxes, [['7', false], ['8', false]]);
+    // 8 is Customer Deposits, which job deposits post to: no box
+    assert.deepEqual(boxes, [['7', false]]);
 });
 
 test('Settings: a saved account that no longer qualifies stays ticked and named', () => {
     const html = settingsPage()._customerDepositAccountsHtml({ customer_deposit_account_ids: '[7,11]' }, [...ALL, OLD]);
     const boxes = [...html.matchAll(/data-customer-deposit-account="(\d+)"( checked)?/g)].map(m => [m[1], !!m[2]]);
-    assert.deepEqual(boxes, [['7', true], ['8', false], ['11', true]]);
+    assert.deepEqual(boxes, [['7', true], ['11', true]]);
     assert.ok(html.includes('(unavailable) 2295 - Old Retainers'));
     const page = settingsPage();
     const box = (id, checked) => ({ checked, getAttribute: () => id });
@@ -449,6 +451,48 @@ test('Settings: no box for a payroll account, seeded or named by a payroll setti
     const held = { id: 13, account_number: '2296', name: 'Withholding Held', account_type: 'liability', is_control: false, bank_kind: null, is_active: true };
     const accounts = [...ALL, payroll, ss, held];
     const boxes = s => [...settingsPage()._customerDepositAccountsHtml(s, accounts).matchAll(/data-customer-deposit-account="(\d+)"/g)].map(m => m[1]);
-    assert.deepEqual(boxes({}), ['7', '8', '13']);
-    assert.deepEqual(boxes({ payroll_futa_account_id: '13' }), ['7', '8']);
+    assert.deepEqual(boxes({}), ['7', '13']);
+    assert.deepEqual(boxes({ payroll_futa_account_id: '13' }), ['7']);
+});
+
+// --- Pre-release review: the accounts the app posts to on its own -----------
+
+// the construction liabilities, by the name the posting code finds them by
+const CONSTRUCTION = [
+    { id: 20, account_number: '2050', name: 'Retainage Payable' },
+    { id: 21, account_number: '2060', name: 'Billings in Excess of Costs and Estimated Earnings' },
+    { id: 22, account_number: '2070', name: 'Provision for Loss on Uncompleted Contracts' },
+    { id: 23, account_number: '2220', name: 'Use Tax Payable' },
+    { id: 24, account_number: '2299', name: 'Customer Deposits' },
+].map(a => ({ ...a, account_type: 'liability', is_control: false, bank_kind: null, balance: '0.00', is_active: true }));
+
+test('Customer Deposits and the construction accounts are never a customer deposit account, even listed', () => {
+    const DA = depositAccounts({ settings: {} });
+    const accounts = [...ALL, ...CONSTRUCTION];
+    for (const a of [DEPOSITS, ...CONSTRUCTION]) assert.equal(DA.canHoldCustomerDeposits(a, {}, accounts), false, a.name);
+    // a company that ticked 2210 before it was refused: not offered in Deposit To
+    const s = { customer_deposit_account_ids: '[7, 8, 20, 21, 22, 23, 24]' };
+    assert.deepEqual(DA.customerDeposits(accounts, s).map(a => a.id), [7]);
+    // the number alone decides nothing: an unrelated 2050 of the company's own is a plain liability
+    const loan = { id: 25, account_number: '2050', name: 'Loan From Owner', account_type: 'liability', is_control: false, bank_kind: null, is_active: true };
+    assert.equal(DA.canHoldCustomerDeposits(loan, {}, [loan]), true);
+});
+
+test('Settings: no box for them; one ticked before stays ticked as (unavailable)', () => {
+    const accounts = [...ALL, ...CONSTRUCTION];
+    const html = settingsPage()._customerDepositAccountsHtml({ customer_deposit_account_ids: '[7, 8]' }, accounts);
+    const boxes = [...html.matchAll(/data-customer-deposit-account="(\d+)"( checked)?/g)].map(m => [m[1], !!m[2]]);
+    assert.deepEqual(boxes, [['7', true], ['8', true]]);
+    assert.ok(html.includes('(unavailable) 2210 - Customer Deposits'));
+});
+
+test('Settings help says which accounts cannot be ticked and what (unavailable) means', () => {
+    const src = fs.readFileSync(path.join(JS, 'settings.js'), 'utf8');
+    const at = src.indexOf("id: 'settings-customer-deposit-accounts-help'");
+    const help = src.slice(at, src.indexOf("') }", at));
+    for (const words of ['Bank, credit card, control and payroll accounts cannot be ticked', 'Retainage Payable', "'Customer Deposits'", '(job deposits are applied on the pay application)', '(unavailable)']) {
+        assert.ok(help.includes(words), words);
+    }
+    // the account's name is its name, never put in a nonprofit's words
+    assert.ok(help.includes("') + 'Customer Deposits' + Terms.text('"));
 });

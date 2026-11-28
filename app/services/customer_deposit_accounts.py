@@ -5,6 +5,9 @@ Payable") and later applies it to an invoice as a payment deposited to that
 liability: DR the liability / CR A/R, no money moves. Settings → Deposits
 names the liability accounts used this way (`customer_deposit_account_ids`,
 "[]" by default), and Record Payment then offers them in Deposit To.
+Never an account the app posts to on its own (`not_usable_because`): 2210
+Customer Deposits holds job deposits, which the pay application applies, so
+a Record Payment from it would apply the same money a second time.
 
 A customer payment to one of them, new or edited, must be applied to
 invoices in full (left over, it would sit as a customer credit taken out of
@@ -65,9 +68,11 @@ PAYROLL_NUMBERS = frozenset(
 )
 
 
-def payroll_ids(db: Session) -> set[int]:
+def payroll_ids(db: Session, pending: Optional[dict] = None) -> set[int]:
     """The accounts payroll posts to: the seeded 23xx payroll liabilities
-    and every account a `payroll_*_account_id` setting names."""
+    and every account a `payroll_*_account_id` setting names. `pending`, a
+    Settings save's cleaned values, is laid over the saved settings, so a
+    save is judged by the settings as they will be after it."""
     from app.models.accounts import Account
     from app.services import payroll_accounts
     from app.services.settings_service import get_setting_raw
@@ -79,17 +84,37 @@ def payroll_ids(db: Session) -> set[int]:
         )
     }
     for piece in payroll_accounts.PIECES:
-        acct_id = payroll_accounts.parse_id(get_setting_raw(db, piece.key) or "")
+        if pending is not None and piece.key in pending:
+            value = pending[piece.key]
+        else:
+            value = get_setting_raw(db, piece.key)
+        acct_id = payroll_accounts.parse_id(value or "")
         if acct_id is not None:
             out.add(acct_id)
     return out
 
 
-def not_usable_because(db: Session, acct) -> Optional[str]:
+# Why a construction liability the app posts to on its own cannot be ticked
+# (accounting.CONSTRUCTION_ACCOUNTS, found by name as the posting code finds
+# them). Job deposits (2210 Customer Deposits) have their own sentence: the
+# pay application applies them, and a Record Payment from the same account
+# would apply that money a second time.
+_CONSTRUCTION_POSTED = "is a construction account, which the app posts to on its own"
+_JOB_DEPOSITS = (
+    "holds job deposits, which are applied on the pay application, not in "
+    "Record Payment"
+)
+
+
+def not_usable_because(
+    db: Session, acct, pending: Optional[dict] = None
+) -> Optional[str]:
     """Why `acct` cannot hold customer deposits and retainers ("is not a
     liability account" and the rest), or None when it can. Being inactive
-    is a separate matter the caller decides."""
+    is a separate matter the caller decides. `pending` (a Settings save's
+    cleaned values) counts over the saved payroll settings."""
     from app.services import control_accounts
+    from app.services.accounting import JOB_DEPOSITS_NUMBER, construction_number_of
 
     kind = getattr(acct.account_type, "value", acct.account_type)
     if kind != "liability":
@@ -98,7 +123,12 @@ def not_usable_because(db: Session, acct) -> Optional[str]:
         return "is a bank or credit card account"
     if control_accounts.is_control(acct.account_number, acct.account_type, acct.name):
         return "is a control account, which the app posts to on its own"
-    if acct.id in payroll_ids(db):
+    number = construction_number_of(acct)
+    if number == JOB_DEPOSITS_NUMBER:
+        return _JOB_DEPOSITS
+    if number is not None:
+        return _CONSTRUCTION_POSTED
+    if acct.id in payroll_ids(db, pending):
         return "is a payroll account"
     return None
 
