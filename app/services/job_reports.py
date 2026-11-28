@@ -798,6 +798,42 @@ def _posted_view(
     if not differs:
         return entry, None
     p, c = entry["totals"], computed["totals"]
+    # A job closed on the schedule's own date and missing from the posted
+    # entry: the entry was posted reading the job as closed that day (as
+    # releases before the close-day rule did), while the schedule keeps a
+    # job on it through the day it closed. Nothing in the books changed, so
+    # the sentence says that, not "something changed after it was posted".
+    posted_figs, computed_figs = _entry_figures(entry), _entry_figures(computed)
+    close_day = []
+    for jid in computed_figs:
+        if jid in posted_figs:
+            continue
+        job = db.get(Job, jid) if jid is not None else None
+        if job is not None and job.status in _CLOSED and job.closed_on == as_of:
+            close_day.append(job)
+    left_out = {j.id for j in close_day}
+    other_change = posted_figs != {
+        jid: f for jid, f in computed_figs.items() if jid not in left_out
+    }
+    later_change = (
+        f"something dated on or before {as_of.isoformat()} changed after it "
+        "was posted (a change order approved back-dated, a late bill)"
+    )
+    if close_day:
+        names = ", ".join(sorted(j.name for j in close_day))
+        cause = (
+            f"the posted entry leaves out {names}, closed on "
+            f"{as_of.isoformat()}, and a schedule dated the day a job closed "
+            "keeps the job on it, measured as open"
+        )
+        if other_change:
+            cause += f", and {later_change}"
+        advice = (
+            " If a job closed that day is finished, enter 0 in its "
+            "Cost-to-Complete Forecast first."
+        )
+    else:
+        cause, advice = later_change, ""
     warning = (
         f"The WIP entry posted for {as_of.isoformat()} (journal entry "
         f"{info['transaction_id']}) books over-billings "
@@ -806,10 +842,9 @@ def _posted_view(
         f"of {_money_text(Decimal(str(p['loss_provision'])))}; the schedule now "
         f"reads {_money_text(Decimal(str(c['over_billing'])))}, "
         f"{_money_text(Decimal(str(c['under_billing'])))} and "
-        f"{_money_text(Decimal(str(c['loss_provision'])))}, because something "
-        f"dated on or before {as_of.isoformat()} changed after it was posted "
-        "(a change order approved back-dated, a late bill). Void the posted "
-        "entry and post it again to book the schedule's figures."
+        f"{_money_text(Decimal(str(c['loss_provision'])))}, because {cause}. "
+        "Void the posted entry and post it again to book the schedule's "
+        f"figures.{advice}"
     )
     entry["posted_warning"] = warning
     return entry, warning

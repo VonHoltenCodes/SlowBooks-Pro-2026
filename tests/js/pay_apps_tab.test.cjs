@@ -122,7 +122,7 @@ test('the Sub pay app and Release retainage calls wire to their routes', () => {
     const po = fs.readFileSync(path.join(__dirname, '../../app/static/js/purchase_orders.js'), 'utf8');
     assert.match(po, /subPayApp\(id\)/);
     assert.match(po, /purchase-orders\/\$\{id\}\/pay-app/);
-    assert.match(po, /releaseRetainage\(id\)/);
+    assert.match(po, /releaseRetainage\(id(, fromView = false)?\)/);
     assert.match(po, /purchase-orders\/\$\{id\}\/release-retainage/);
 });
 

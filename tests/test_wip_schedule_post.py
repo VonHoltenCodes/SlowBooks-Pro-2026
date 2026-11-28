@@ -1196,3 +1196,91 @@ def test_post_and_void_refuse_an_unknown_body_field(client, db_session, seed_acc
     assert (
         client.post(f"/api/reports/wip-schedule/void?as_of={AS_OF}").status_code == 200
     )
+
+
+def test_an_entry_posted_reading_a_close_day_job_as_closed_says_so(
+    client, db_session, seed_accounts
+):
+    """A WIP posted for 12/31 under the earlier reading (a job closed 12/31
+    was off the 12/31 schedule) no longer matches the schedule, which keeps
+    a job on through its close day. Nothing in the books changed, so the
+    sentence names the job and the close day, not a back-dated change."""
+    _setup(client, db_session)
+    dec31 = date(2026, 12, 31)
+    _over_billed_job(db_session, name="Open")
+    done = _over_billed_job(db_session, name="Done")
+    # off the schedule as the earlier reading had it, then the close day
+    # it really has
+    done.status, done.closed_on = "closed", date(2026, 12, 30)
+    db_session.commit()
+    _post(client, dec31)
+    done.closed_on = dec31
+    db_session.commit()
+    db_session.expire_all()
+
+    entry = job_reports.wip_schedule(db_session, dec31)["adjusting_entry"]
+    assert entry["posted_differs"] is True
+    assert entry["posted_warning"] == (
+        "The WIP entry posted for 2026-12-31 (journal entry "
+        f"{entry['posted_entry']['transaction_id']}) books over-billings "
+        "$10,000.00, under-billings $0.00 and a loss provision of $0.00; the "
+        "schedule now reads $20,000.00, $0.00 and $0.00, because the posted "
+        "entry leaves out Done, closed on 2026-12-31, and a schedule dated the "
+        "day a job closed keeps the job on it, measured as open. Void the "
+        "posted entry and post it again to book the schedule's figures. If a "
+        "job closed that day is finished, enter 0 in its Cost-to-Complete "
+        "Forecast first."
+    )
+    assert "changed after it was posted" not in entry["posted_warning"]
+
+
+def test_a_close_day_job_and_a_later_change_are_both_named(
+    client, db_session, seed_accounts
+):
+    """The close-day job left out and a back-dated change order on another
+    job: the sentence gives both causes."""
+    _setup(client, db_session)
+    dec31 = date(2026, 12, 31)
+    other = _over_billed_job(db_session, name="Open")
+    done = _over_billed_job(db_session, name="Done")
+    done.status, done.closed_on = "closed", date(2026, 12, 30)
+    db_session.commit()
+    _post(client, dec31)
+    done.closed_on = dec31
+    db_session.commit()
+    co = _co(client, other.id, 2000, when=date(2026, 12, 10))
+    _approve(client, co["id"], date(2026, 12, 10))
+    db_session.expire_all()
+
+    sentence = job_reports.wip_schedule(db_session, dec31)["adjusting_entry"][
+        "posted_warning"
+    ]
+    assert "leaves out Done, closed on 2026-12-31" in sentence
+    assert (
+        ", and something dated on or before 2026-12-31 changed after it was "
+        "posted (a change order approved back-dated, a late bill)." in sentence
+    )
+
+
+def test_a_job_closed_on_the_date_and_in_the_posted_entry_is_no_close_day_cause(
+    client, db_session, seed_accounts
+):
+    """Posted with the close-day job on it (today's reading), then a
+    back-dated change order on that job: the plain sentence, since the
+    entry did not leave the job out."""
+    _setup(client, db_session)
+    dec31 = date(2026, 12, 31)
+    done = _over_billed_job(db_session, name="Done")
+    done.status, done.closed_on = "closed", dec31
+    db_session.commit()
+    _post(client, dec31)
+    co = _co(client, done.id, 2000, when=date(2026, 12, 10))
+    _approve(client, co["id"], date(2026, 12, 10))
+    db_session.expire_all()
+
+    sentence = job_reports.wip_schedule(db_session, dec31)["adjusting_entry"][
+        "posted_warning"
+    ]
+    assert "leaves out" not in sentence
+    assert "changed after it was posted" in sentence
+    assert "Cost-to-Complete Forecast" not in sentence

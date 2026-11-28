@@ -588,12 +588,14 @@ def release_retainage(
     # in A/P Aging past due the day it was released. An explicit date (the
     # caller's, e.g. a back-office import) still wins.
     when = data.date or date.today()
-    # Never more than was held by the release date: what the commitment's
-    # standing bills dated on or before it hold, less what its standing
-    # release (RET-) bills dated on or before it already released. A release
-    # past that would post Retainage Payable a debit balance in a period that
-    # held less. Same definitions as _commitment_retainage (non-void bills'
-    # retainage_held) and a release bill's retainage_released.
+    # Never more than was held by the release date, nor on any later day:
+    # what the commitment's standing bills dated on or before a day hold,
+    # less what its standing release (RET-) bills dated on or before it
+    # already released. A release past that on the release date, or on a
+    # later day a release already posted on (a release back-dated before an
+    # existing one), would post Retainage Payable a debit balance in a period
+    # that held less. Same definitions as _commitment_retainage (non-void
+    # bills' retainage_held) and a release bill's retainage_released.
     dated = [
         (b.date, _q(b.retainage_held or 0), _q(b.retainage_released or 0))
         for b in db.query(Bill).filter(
@@ -605,21 +607,37 @@ def release_retainage(
     def _available_on(day: date) -> Decimal:
         return _q(sum((h - r for d, h, r in dated if d <= day), Decimal("0")))
 
-    held_by_then = _available_on(when)
-    if held_by_then < amount:
+    def _short_from(start: date) -> Optional[date]:
+        """The first day, from ``start`` on, that a release of ``amount``
+        dated ``start`` would leave holding less than nothing."""
+        days = [start] + sorted({d for d, _h, _r in dated if d > start})
+        return next((d for d in days if _available_on(d) < amount), None)
+
+    short_on = _short_from(when)
+    if short_on is not None:
         enough_on = next(
             (
                 d
                 for d in sorted({d for d, _h, _r in dated if d > when})
-                if _available_on(d) >= amount
+                if _short_from(d) is None
             ),
             None,
         )
-        detail = (
-            f"A retainage release of {money_text(amount)} can't be dated "
-            f"{date_text(when)}: by then {po.po_number} held "
-            f"{money_text(held_by_then)} of retainage not yet released."
-        )
+        if short_on == when:
+            detail = (
+                f"A retainage release of {money_text(amount)} can't be dated "
+                f"{date_text(when)}: by then {po.po_number} held "
+                f"{money_text(_available_on(when))} of retainage not yet "
+                "released."
+            )
+        else:
+            detail = (
+                f"A retainage release of {money_text(amount)} can't be dated "
+                f"{date_text(when)}: on {date_text(short_on)} {po.po_number} "
+                f"held {money_text(_available_on(short_on))} of retainage not "
+                "yet released, so the release would be more than was held "
+                "that day."
+            )
         if enough_on is not None:
             detail += f" Enough is held from {date_text(enough_on)}."
         raise HTTPException(status_code=422, detail=detail)

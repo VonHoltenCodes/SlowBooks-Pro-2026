@@ -94,7 +94,7 @@ const PurchaseOrdersPage = {
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/print-preview','_blank')">Print</button>
                 ${con && po.status === 'draft' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.issue(${po.id})">Issue</button>` : ''}
                 ${con && po.status !== 'closed' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.subPayApp(${po.id})">Sub pay app</button>` : (po.status !== 'closed' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : '')}
-                ${con && (po.retainage_pct || Number(po.retainage_released)) ? `<button class="btn btn-secondary" onclick="PurchaseOrdersPage.releaseRetainage(${po.id})">Release retainage</button>` : ''}
+                ${con && (po.retainage_pct || Number(po.retainage_released)) ? `<button class="btn btn-secondary" onclick="PurchaseOrdersPage.releaseRetainage(${po.id}, true)">Release retainage</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
         InvoicesPage.loadAttachments('purchase_order', po.id);
@@ -410,8 +410,12 @@ const PurchaseOrdersPage = {
     // Release retainage (#555): a small dialog for the amount (default the
     // whole outstanding) and the release date (a date input, default today —
     // the release is dated the day it is made, #1227) → a bill DR Retainage
-    // Payable / CR A/P, payable in Pay Bills.
-    async releaseRetainage(id) {
+    // Payable / CR A/P, payable in Pay Bills. Opened from the order's View
+    // (fromView), the dialog takes the view's place, so Cancel opens the
+    // order again rather than leaving the person on the list; a refused
+    // release keeps the dialog open with the reason, and a release goes on
+    // to Bills, as To Bill does.
+    async releaseRetainage(id, fromView = false) {
         let sched;
         try { sched = await API.get(`/purchase-orders/${id}/pay-app`); }
         catch (err) { toast(err.message, 'error'); return; }
@@ -424,7 +428,7 @@ const PurchaseOrdersPage = {
             <div class="form-group" style="max-width:200px;"><label for="po-ret-date">Release date</label>
                 <input type="date" id="po-ret-date" value="${todayISO()}"></div>
             <div class="form-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="button" class="btn btn-secondary" onclick="${fromView ? `PurchaseOrdersPage.view(${Number(id)})` : 'closeModal()'}">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="PurchaseOrdersPage.doReleaseRetainage(${id})">Release</button>
             </div>`);
     },
