@@ -677,7 +677,9 @@ jobs:
           # test_browser_set_on_save_reason_r31.py, one module without playwright.
           # 476 with the register's sub-account paths:
           # test_browser_register_sub_account_paths.py, one module without playwright.
-          MAX_SKIPS: "476"
+          # 478 with the check amount's asterisks (#1239): two WeasyPrint tests in
+          # test_check_amount_asterisk_fill_1239.py that loop over their PDF cases.
+          MAX_SKIPS: "478"
         run: |
           total=0
           for f in shards/*/skips.txt; do
