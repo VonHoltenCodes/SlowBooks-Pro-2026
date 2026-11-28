@@ -12,16 +12,16 @@ const vm = require('node:vm');
 const JS = path.join(__dirname, '../../app/static/js');
 const SRC = fs.readFileSync(path.join(JS, 'purchase_orders.js'), 'utf8');
 
-function page({ amount = '1000.00', date = '2026-11-24' } = {}) {
+function page({ amount = '1000.00', date = '2026-11-24', refuse = null } = {}) {
     const seen = { modal: null, posts: [], toasts: [], closed: 0, prompts: 0 };
     const fields = { '#po-ret-amount': { value: amount, focus() {} }, '#po-ret-date': { value: date, focus() {} } };
     const context = {
         console, window: {}, document: { addEventListener() {} },
         location: { hash: '#/purchase-orders' },
-        App: { navigate() {} },
+        App: { navigate(h) { seen.navigated = h; } },
         API: {
             get: async () => ({ po_number: 'PO-7', retainage_outstanding: 1000 }),
-            post: async (url, body) => { seen.posts.push({ url, body }); return { message: 'Released' }; },
+            post: async (url, body) => { seen.posts.push({ url, body }); if (refuse) throw new Error(refuse); return { message: 'Released' }; },
         },
         formatCurrency: (v) => '$' + Number(v).toFixed(2),
         escapeHtml: (s) => String(s ?? ''),
@@ -77,4 +77,33 @@ test('no amount is refused before anything posts', async () => {
 test('the source no longer asks with prompt()', () => {
     const body = SRC.slice(SRC.indexOf('async releaseRetainage('), SRC.indexOf('// To Bill asks'));
     assert.doesNotMatch(body, /\bprompt\(/);
+});
+
+test('opened from the order view, Cancel opens the order again; from the list it just closes', async () => {
+    const fromView = page();
+    await fromView.P.releaseRetainage(7, true);
+    assert.match(fromView.seen.modal.html, /onclick="PurchaseOrdersPage\.view\(7\)">Cancel<\/button>/);
+    const fromList = page();
+    await fromList.P.releaseRetainage(7);
+    assert.match(fromList.seen.modal.html, /onclick="closeModal\(\)">Cancel<\/button>/);
+});
+
+test("the order view's Release retainage button says it came from the view", () => {
+    const body = SRC.slice(SRC.indexOf('async view('), SRC.indexOf('fillsInvoiceHtml(po) {'));
+    assert.match(body, /PurchaseOrdersPage\.releaseRetainage\(\$\{po\.id\}, true\)/);
+    // the list row's button stays a plain open
+    const list = SRC.slice(0, SRC.indexOf('async view('));
+    assert.match(list, /PurchaseOrdersPage\.releaseRetainage\(\$\{po\.id\}\)"/);
+});
+
+test('a refused release keeps the dialog open with the reason; a release closes it', async () => {
+    const no = page({ refuse: 'The release date is in a closed period.' });
+    await no.P.doReleaseRetainage(7);
+    assert.equal(no.seen.posts.length, 1);
+    assert.equal(no.seen.closed, 0);
+    assert.deepEqual(no.seen.toasts, [{ m: 'The release date is in a closed period.', kind: 'error' }]);
+
+    const yes = page();
+    await yes.P.doReleaseRetainage(7);
+    assert.equal(yes.seen.closed, 1);
 });

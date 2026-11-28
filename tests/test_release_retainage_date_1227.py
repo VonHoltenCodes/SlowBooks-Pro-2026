@@ -247,3 +247,85 @@ def test_a_voided_holding_bill_no_longer_counts(client, db_session, seed_account
     assert _release(client, po, 600, date(2026, 5, 20)).status_code == 422
     rel = _release(client, po, 500, date(2026, 5, 20))
     assert rel.status_code == 200, rel.text
+
+
+def _net_on(db, po_id, day):
+    rows = db.query(Bill).filter(Bill.po_id == po_id).all()
+    return sum(
+        (
+            (b.retainage_held or 0) - (b.retainage_released or 0)
+            for b in rows
+            if b.status.value != "void" and b.date <= day
+        ),
+        Decimal("0"),
+    )
+
+
+def test_a_release_dated_before_a_later_release_cannot_overdraw_between_them(
+    client, db_session, seed_accounts
+):
+    """$500 held Jan 15, all of it released Mar 1, $500 more held Jun 1. A
+    second $500 release dated Feb 1 had $500 held by its own date, but it
+    would leave the commitment released more than held from Mar 1 to Jun 1:
+    refused, naming Mar 1 and what was held that day, and the first day a
+    release of that size fits."""
+    v = _vendor(client, db_session)
+    po = _sent_po(client, v["id"], date(2026, 1, 1))
+    _held(client, po, date(2026, 1, 15))
+    assert _release(client, po, 500, date(2026, 3, 1)).status_code == 200
+    _held(client, po, date(2026, 6, 1))
+    bills_before = db_session.query(Bill).count()
+
+    rel = _release(client, po, 500, date(2026, 2, 1))
+    assert rel.status_code == 422, rel.text
+    assert rel.json()["detail"] == (
+        "A retainage release of $500.00 can't be dated Feb 1, 2026: on "
+        f"Mar 1, 2026 {po['po_number']} held $0.00 of retainage not yet "
+        "released, so the release would be more than was held that day. "
+        "Enough is held from Jun 1, 2026."
+    )
+    assert db_session.query(Bill).count() == bills_before
+
+    # dated the day the second hold lands, it goes through, and the
+    # commitment never shows less than nothing held on any day
+    ok = _release(client, po, 500, date(2026, 6, 1))
+    assert ok.status_code == 200, ok.text
+    for day in (date(2026, 2, 1), date(2026, 3, 1), date(2026, 5, 31)):
+        assert _net_on(db_session, po["id"], day) >= 0
+
+
+def test_a_back_dated_release_that_fits_every_later_day_is_allowed(
+    client, db_session, seed_accounts
+):
+    """$500 held Jan 15, $200 released Mar 1, $500 more held Jun 1: a $300
+    release dated Feb 1 leaves $200 on Feb 1, $0 from Mar 1 and $500 from
+    Jun 1, never less than nothing, so it posts."""
+    v = _vendor(client, db_session)
+    po = _sent_po(client, v["id"], date(2026, 1, 1))
+    _held(client, po, date(2026, 1, 15))
+    assert _release(client, po, 200, date(2026, 3, 1)).status_code == 200
+    _held(client, po, date(2026, 6, 1))
+
+    rel = _release(client, po, 300, date(2026, 2, 1))
+    assert rel.status_code == 200, rel.text
+    over = _release(client, po, 1, date(2026, 2, 1))
+    assert over.status_code == 422, over.text
+    assert "on Mar 1, 2026" in over.json()["detail"]
+    assert "held $0.00 of retainage not yet released" in over.json()["detail"]
+
+
+def test_a_release_over_the_total_held_names_both_amounts_as_money(
+    client, db_session, seed_accounts
+):
+    """$500 held in all: a $1,200 release is refused, and the sentence shows
+    both amounts as money, as the date refusals do."""
+    v = _vendor(client, db_session)
+    po = _sent_po(client, v["id"], date(2026, 1, 1))
+    _held(client, po, date(2026, 1, 15))
+
+    rel = _release(client, po, 1200, date(2026, 2, 1))
+    assert rel.status_code == 422, rel.text
+    assert rel.json()["detail"] == (
+        "Release $1,200.00 is more than the $500.00 of retainage held on "
+        "this commitment."
+    )
