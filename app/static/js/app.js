@@ -1145,7 +1145,7 @@ const App = {
         'JobsPage.coMakeSub', 'JobsPage.coSubmitSubOrder',
         'JobsPage.paNew', 'JobsPage.paEdit', 'JobsPage.paSave', 'JobsPage.paSubmit', 'JobsPage.paApprove',
         'JobsPage.paVoid', 'JobsPage.paDelete', 'JobsPage.paMakeWaiver', 'JobsPage.paAddDeposit', 'JobsPage.paSaveDeposit', 'JobsPage.paVoidDeposit',
-        'PurchaseOrdersPage.subPayApp', 'PurchaseOrdersPage.releaseRetainage',
+        'PurchaseOrdersPage.subPayApp', 'PurchaseOrdersPage.releaseRetainage', 'PurchaseOrdersPage.doReleaseRetainage',
         'InKindPage.voidEntry', 'ReleasesPage.voidEntry',
         'AllocationsPage.voidEntry', 'AllocationsPage.deleteRule', 'AllocationsPage.showRun', 'RecurringPage.generateNow',
         'RecurringPage.del', 'MemorizedPage.enter', 'MemorizedPage.doEnter', 'MemorizedPage.pause', 'MemorizedPage.resume',

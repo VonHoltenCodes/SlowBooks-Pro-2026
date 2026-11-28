@@ -1382,7 +1382,12 @@ previous / this period / remaining). Its held retainage is released with
 **Release retainage** (`POST /api/purchase-orders/{id}/release-retainage`),
 which writes a bill for the vendor carrying no expense account: DR **Retainage
 Payable** (2050) / CR Accounts Payable for the amount, payable through Pay Bills
-like any bill. A release over what is held is refused (422), and voiding the
+like any bill. The release bill is dated the day of the release unless a date
+is given, and is due by the vendor's terms from that date. A release of more
+than the commitment held by its date (the retainage on its standing bills dated
+on or before it, less what standing release bills dated on or before it already
+released) is refused (422), naming what was held by then and the first date
+enough is held. A release over what is held is refused (422), and voiding the
 release bill gives the retainage back to the commitment. A release bill's lines,
 tax, job, class or number can't be edited (409, "A retainage release bill can't
 be re-lined; void it and release again."), since a re-post would put its line on an

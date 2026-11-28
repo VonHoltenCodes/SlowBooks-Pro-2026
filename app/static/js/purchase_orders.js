@@ -407,25 +407,50 @@ const PurchaseOrdersPage = {
         return PurchaseOrdersPage.convertToBill(id);
     },
 
-    // Release retainage (#555): a prompt for the amount (default the whole
-    // outstanding) and the release date (default today — the release is
-    // dated the day it is made, #1227) → a bill DR Retainage Payable / CR
-    // A/P, payable in Pay Bills.
+    // Release retainage (#555): a small dialog for the amount (default the
+    // whole outstanding) and the release date (a date input, default today —
+    // the release is dated the day it is made, #1227) → a bill DR Retainage
+    // Payable / CR A/P, payable in Pay Bills.
     async releaseRetainage(id) {
         let sched;
         try { sched = await API.get(`/purchase-orders/${id}/pay-app`); }
         catch (err) { toast(err.message, 'error'); return; }
         const outstanding = sched.retainage_outstanding || 0;
         if (outstanding <= 0) { toast('No retainage outstanding to release.'); return; }
-        const raw = prompt(`Retainage outstanding is ${formatCurrency(outstanding)}. Amount to release:`, outstanding.toFixed(2));
-        if (raw === null) return;
-        const amount = parseFloat(raw);
-        if (isNaN(amount) || amount <= 0) { toast('Enter an amount to release.', 'error'); return; }
-        const when = await prompt('Release date:', todayISO());
-        if (when === null) return;
+        openModal(`Release retainage on ${sched.po_number}`, `
+            <p style="margin:0 0 12px;">Retainage outstanding is ${formatCurrency(outstanding)}.</p>
+            <div class="form-group" style="max-width:200px;"><label for="po-ret-amount">Amount to release</label>
+                <input type="number" step="0.01" min="0.01" id="po-ret-amount" value="${outstanding.toFixed(2)}"></div>
+            <div class="form-group" style="max-width:200px;"><label for="po-ret-date">Release date</label>
+                <input type="date" id="po-ret-date" value="${todayISO()}"></div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="PurchaseOrdersPage.doReleaseRetainage(${id})">Release</button>
+            </div>`);
+    },
+
+    async doReleaseRetainage(id) {
+        const amountEl = $('#po-ret-amount');
+        const dateEl = $('#po-ret-date');
+        const amount = parseFloat(amountEl?.value);
+        if (isNaN(amount) || amount <= 0) {
+            toast('Enter an amount to release.', 'error');
+            amountEl?.focus();
+            return;
+        }
+        // A date input hands back YYYY-MM-DD or nothing; anything else (a
+        // half-typed date) gets a plain sentence, never the server's raw
+        // validation message.
+        const when = (dateEl?.value || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(when)) {
+            toast('Enter the release date.', 'error');
+            dateEl?.focus();
+            return;
+        }
         try {
-            const r = await API.post(`/purchase-orders/${id}/release-retainage`, { amount, date: when || undefined });
+            const r = await API.post(`/purchase-orders/${id}/release-retainage`, { amount, date: when });
             toast(r.message);
+            closeModal();
             if (location.hash === '#/bills') App.navigate('#/bills'); else location.hash = '#/bills';
         } catch (err) { toast(err.message, 'error'); }
     },
