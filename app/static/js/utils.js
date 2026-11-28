@@ -1738,6 +1738,48 @@ const DepositAccounts = {
         const shown = usable.filter(a => chosen.has(String(a.id)) || String(a.id) === keep);
         return chosen.size && usable.some(a => chosen.has(String(a.id))) ? shown : usable;
     },
+    // Customer deposits and retainers (#1237): the liability accounts
+    // Settings → Deposits lists for Record Payment's Deposit To, in the
+    // chart's order. Only active liability accounts that are no bank or
+    // credit card account (the server refuses the rest on save), plus
+    // `keepId` when it is one of them, so an edit keeps it even if
+    // deactivated since. [] when none is listed: the form as before.
+    customerDepositIds(s) {
+        let ids = [];
+        try { ids = JSON.parse(DepositAccounts._settings(s).customer_deposit_account_ids || '[]'); } catch (err) { ids = []; }
+        return Array.isArray(ids) ? ids.map(String).filter(v => /^\d+$/.test(v)) : [];
+    },
+    customerDeposits(accounts, s, keepId = null) {
+        const chosen = new Set(DepositAccounts.customerDepositIds(s));
+        if (!chosen.size) return [];
+        return DepositAccounts.active(accounts, keepId)
+            .filter(a => chosen.has(String(a.id)) && DepositAccounts.canHoldCustomerDeposits(a, s, accounts));
+    },
+    // The payroll liabilities (#1237): the seeded 23xx accounts a pay run,
+    // a benefits posting or a PTO accrual finds by number, and every account
+    // a payroll_*_account_id setting names, as id strings. Never a customer
+    // deposit account (the server refuses them on save, and ignores one
+    // ticked before it became one).
+    PAYROLL_NUMBERS: ['2300', '2310', '2320', '2330', '2340', '2350', '2360', '2370', '2380', '2390'],
+    payrollIds(accounts, s) {
+        const out = new Set((accounts || [])
+            .filter(a => DepositAccounts.PAYROLL_NUMBERS.includes(String(a.account_number || '')))
+            .map(a => String(a.id)));
+        const set = DepositAccounts._settings(s);
+        for (const key of Object.keys(set)) {
+            if (!/^payroll_.+_account_id$/.test(key)) continue;
+            const v = String(set[key] || '').trim();
+            if (/^\d+$/.test(v)) out.add(v);
+        }
+        return out;
+    },
+    // a liability that is no bank or credit card account, no control account
+    // and no payroll account (#1237): the rule the server's save applies,
+    // less being active, which the caller decides
+    canHoldCustomerDeposits(a, s, accounts) {
+        return !!a && a.account_type === 'liability' && !a.bank_kind && !a.is_control
+            && !DepositAccounts.payrollIds(accounts, s).has(String(a.id));
+    },
     // `banks` with the default first, the rest in their own order
     defaultFirst(banks, s) {
         const d = DepositAccounts.startId(banks, s);

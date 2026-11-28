@@ -165,6 +165,31 @@ already in it keeps it: the deposit still opens, prints and edits, and the
 payment's edit still offers its own account. A blank Deposit To still
 posts to Undeposited Funds.
 
+**Customer deposits and retainers** (#1237), in the same section, is for
+money a customer paid ahead and you hold in a liability account, such as
+Retainer Payable. It is empty, and changes nothing, until an administrator
+ticks an account; only active liability accounts that are no bank or credit
+card account, no control account (Accounts Payable, Sales Tax Payable and
+the like) and no payroll account (the 2300 to 2390 payroll liabilities, and
+any account Settings → Payroll and checks → Payroll Accounts posts to) can be ticked. A ticked account appears in Deposit To on Receive
+Payment only, below the bank accounts, in a group of its own, "Apply a
+customer deposit or retainer (no money moves)". A payment into it applies the money
+held to the customer's invoices: it debits the liability and credits A/R, no
+money moves, and it never waits in Undeposited Funds. Such a payment must be
+applied to invoices in full, and the form asks before applying more than the
+account holds; the API refuses both the same way on `POST /api/payments` and
+on an edit (`POST /api/payments/{id}/replace`), and `allow_overdraw` applies
+more than the account holds. Batch Payments, the importers and the bank feed
+are not checked, and a sales receipt deposited to a ticked account posts as
+it always has. An account ticked
+here and later changed so it no longer qualifies (made a bank or credit card
+account, or chosen for payroll) takes deposits as any such account does.
+Editing any payment keeps its own Deposit To and Method, whether or not the
+account is ticked here or is a bank account at all. An edit that keeps a
+ticked account may not leave more unapplied than the payment had, and asks
+before taking more than the account holds once it takes more than the payment
+did, so a payment saved before the account was ticked can still be corrected.
+
 Above the register, **From**, **To** and **Class** narrow what it shows. A
 From date adds a *Balance brought forward* row, and the running balance
 counts the lines shown. The dates apply when you press Enter or leave the

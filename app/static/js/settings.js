@@ -203,6 +203,43 @@ const SettingsPage = {
         return h;
     },
 
+    // Customer deposits and retainers (#1237): a labelled box per active
+    // liability account that is no bank or credit card account, no
+    // control account and no payroll account, none ticked by default. Ticked ones appear in Record
+    // Payment's Deposit To, in their own group. A saved id that no longer
+    // qualifies stays ticked and named, so Save says what is wrong.
+    _customerDepositAccountsHtml(s, accounts) {
+        const all = Array.isArray(accounts) ? accounts : [];
+        // utils.js loads first in the app; a probe that loads this file alone
+        // gets none, as it got no Deposits section
+        const can = typeof DepositAccounts !== 'undefined' ? a => DepositAccounts.canHoldCustomerDeposits(a, s, all) : () => false;
+        const usable = all.filter(a => a.is_active !== false && can(a));
+        let chosen = [];
+        try { chosen = JSON.parse(s.customer_deposit_account_ids || '[]'); } catch (err) { chosen = []; }
+        chosen = (Array.isArray(chosen) ? chosen : []).map(String);
+        const ticked = new Set(chosen);
+        let h = '<fieldset class="form-group full-width" aria-describedby="settings-customer-deposit-accounts-help" style="border:0; padding:0; margin:8px 0 0;">';
+        h += '<legend style="font-weight:700; font-size:11px; padding:0;">' + escapeHtml(T('Customer')) + ' deposits and retainers</legend>';
+        const box = (id, words) => '<label style="display:block; font-weight:normal; text-transform:none; letter-spacing:0;">'
+            + '<input type="checkbox" name="customer-deposit-account:' + escapeHtml(id) + '" data-customer-deposit-account="' + escapeHtml(id) + '"'
+            + (ticked.has(id) ? ' checked' : '') + ' style="width:auto; vertical-align:middle; margin-right:6px;">'
+            + escapeHtml(words) + '</label>';
+        for (const a of usable) h += box(String(Number(a.id)), accountWords(a));
+        for (const id of chosen) {
+            if (usable.some(a => String(a.id) === id)) continue;
+            const gone = all.find(a => String(a.id) === id);
+            h += box(id, '(unavailable) ' + (gone ? accountWords(gone) : '#' + id));
+        }
+        if (!usable.length && !chosen.length) h += '<div style="font-size:11px; color:var(--text-muted);">' + escapeHtml(Terms.text('The chart has no liability account that can hold customer deposits.')) + '</div>';
+        h += '</fieldset>';
+        return h;
+    },
+
+    // the ticked Customer deposits and retainers boxes (#1237), as the list to save
+    _customerDepositAccountsToSave(boxes) {
+        return boxes.filter(b => b.checked).map(b => parseInt(b.getAttribute('data-customer-deposit-account'), 10)).filter(n => n > 0);
+    },
+
     // the ticked Deposit into these accounts boxes (#735), as the list to save
     _depositAccountsToSave(boxes) {
         return boxes.filter(b => b.checked).map(b => parseInt(b.getAttribute('data-deposit-account'), 10)).filter(n => n > 0);
@@ -855,8 +892,10 @@ const SettingsPage = {
                         { id: 'settings-deposits-help', text: 'Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.' },
                         { name: 'Default deposit account', id: 'settings-default-deposit-account-help', text: 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.' },
                         { name: 'Deposit into these accounts', id: 'settings-deposit-accounts-help', text: 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.' },
+                        { name: `${T('Customer')} deposits and retainers`, id: 'settings-customer-deposit-accounts-help', text: Terms.text('Liability accounts that hold money a customer paid ahead, such as Retainer Payable. Ticked ones appear in Deposit To on Receive Payment only, in a group of their own, to apply that money to invoices: the payment takes it out of the account and no money moves. Such a payment must be applied to invoices in full, and the form asks before applying more than the account holds. None ticked leaves Deposit To as it is.') },
                     ])}</div>
                     ${SettingsPage._depositAccountsHtml(s, accounts)}
+                    ${SettingsPage._customerDepositAccountsHtml(s, accounts)}
                 </div>
 
                 <div class="settings-section" data-group="connections" role="group" aria-labelledby="settings-h-online-payments">
@@ -2357,6 +2396,12 @@ const SettingsPage = {
         for (const key of Object.keys(data)) if (key.startsWith('deposit-account:')) delete data[key];
         if (depositBoxes.length || 'default_deposit_account_id' in data) {
             data.deposit_account_ids = JSON.stringify(SettingsPage._depositAccountsToSave(depositBoxes));
+        }
+        // Customer deposits and retainers (#1237), as a list; the boxes are not form fields
+        const customerDepositBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-customer-deposit-account]')] : [];
+        for (const key of Object.keys(data)) if (key.startsWith('customer-deposit-account:')) delete data[key];
+        if (customerDepositBoxes.length) {
+            data.customer_deposit_account_ids = JSON.stringify(SettingsPage._customerDepositAccountsToSave(customerDepositBoxes));
         }
         const btn = document.getElementById('settings-save-btn');
         if (btn) btn.disabled = true;

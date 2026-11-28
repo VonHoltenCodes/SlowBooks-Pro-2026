@@ -1007,6 +1007,10 @@ def _apply_deposit(db, app, invoice, customer, amount, when):
         deposit_to_account_id=deposits_acct,
         notes=f"Deposit applied — {app.number}",
         allocations=[PaymentAllocationCreate(invoice_id=invoice.id, amount=amount)],
+        # the application applies its own job's deposit, figured with the
+        # job; listing 2210 under Customer deposits and retainers (#1237)
+        # must not refuse an approval over the account's company-wide total
+        allow_overdraw=True,
     )
     resp = create_payment(data, db)  # commits
     app.deposit_payment_id = resp.id

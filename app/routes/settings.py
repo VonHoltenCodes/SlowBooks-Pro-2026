@@ -423,6 +423,55 @@ def _deposit_bank_account(db: Session, value, label: str):
     return acct
 
 
+def _guard_customer_deposit_accounts(db: Session, cleaned: dict) -> None:
+    """Customer deposits and retainers (#1237): every account on the list
+    (cleaned to a JSON list of ids) is in the chart, a liability, not a bank
+    or credit card account, not a control account (Accounts Payable, Sales
+    Tax Payable and the rest, which their own documents keep), not a payroll
+    account (the 23xx payroll liabilities and any account Settings → Payroll
+    Accounts names) and active.
+    Anything else is refused with a 422 saying why, before any setting is
+    written."""
+    import json
+
+    from app.models.accounts import Account
+    from app.services.customer_deposit_accounts import not_usable_because
+
+    if "customer_deposit_account_ids" not in cleaned:
+        return
+    label = "Customer deposits and retainers"
+    for acct_id in json.loads(cleaned["customer_deposit_account_ids"]):
+        acct = db.get(Account, int(acct_id))
+        if acct is None:
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": no account {} in the chart. Nothing was saved.",
+                    str(acct_id),
+                ),
+            )
+        why = not_usable_because(db, acct)
+        if why is None and acct.is_active is False:
+            # it qualifies but for being inactive: say how to fix that
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": {} is inactive. Make it active in the Chart of "
+                    "Accounts, or untick it here. Nothing was saved.",
+                    acct.name,
+                ),
+            )
+        if why:
+            raise HTTPException(
+                status_code=422,
+                detail=said(
+                    label + ": {} " + why + ". Choose a liability account that "
+                    "holds money customers paid ahead. Nothing was saved.",
+                    acct.name,
+                ),
+            )
+
+
 def _guard_deposit_accounts(db: Session, cleaned: dict) -> None:
     """Make Deposits' default destination (#734) is "" or an active bank
     account from the chart, and so is every account on its destination
@@ -582,6 +631,7 @@ def update_settings(
     _guard_clearing_accounts(db, cleaned)
     _guard_payroll_accounts(db, cleaned)
     _guard_deposit_accounts(db, cleaned)
+    _guard_customer_deposit_accounts(db, cleaned)
     # The "Taxed as" select is hidden for a non-LLC but the form still submits
     # its last value; drop a stale election so it never lingers (#488).
     if "llc_tax_election" in cleaned:
