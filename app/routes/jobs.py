@@ -349,39 +349,94 @@ def get_job_budgets(job_id: int, db: Session = Depends(get_db)):
     return [_budget_response(r) for r in rows]
 
 
+def _budget_sum(rows) -> tuple:
+    """(cost, revenue) of a set of budget rows, rounded."""
+    return (
+        _q(sum((Decimal(str(r.amount or 0)) for r in rows), Decimal("0"))),
+        _q(sum((Decimal(str(r.revenue_amount or 0)) for r in rows), Decimal("0"))),
+    )
+
+
+def _fold_twins(rows: list) -> tuple[list, list]:
+    """Split one cost code's rows into (kept, twins). Before this fix a plain
+    Save Budget after "Seed from an estimate" wrote a manual (code, no type)
+    copy of the code's typed estimate rows, so the reports counted the budget
+    twice. A manual untyped row whose cost and revenue equal the sum of the
+    code's other rows is such a copy; the save deletes it and the screen
+    leaves it out."""
+    manual = [r for r in rows if r.source == "manual" and r.cost_type is None]
+    others = [r for r in rows if not (r.source == "manual" and r.cost_type is None)]
+    if not others or not manual:
+        return rows, []
+    total = _budget_sum(others)
+    twins = [r for r in manual if _budget_sum([r]) == total]
+    return [r for r in rows if r not in twins], twins
+
+
 @router.put("/{job_id}/budgets", response_model=list[JobBudgetResponse])
 def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get_db)):
-    """Replace the job's MANUAL budget rows with the given set (estimate-
-    seeded rows are kept unless the same key is supplied, which then takes
-    over as manual). Zero-amount rows are dropped. A row an accepted estimate
-    locked (#551) can't be overwritten — only that row's key is refused, so
-    manual rows on other codes still save after acceptance."""
+    """Save the budget screen. A coded row stands for every row on that cost
+    code (estimate rows carry the code's cost type, #550), a type row or the
+    whole-job row for its own key. A row sent with the amounts already stored
+    changes nothing, also on a locked budget. A changed row replaces what it
+    stands for with one manual row (zero amounts clear it); a changed row
+    over a locked one (#551) or a change order's key (#554) is refused, but
+    a code set back to its estimate rows' sum drops its manual extras.
+    Manual rows not sent are deleted; estimate rows not sent are kept.
+    Change-order rows are never touched."""
     _get(db, job_id)
     types = cost_type_map(db)
     all_rows = db.query(JobBudget).filter(JobBudget.job_id == job_id).all()
     # Change-order rows (source="change", #554) are owned by their change order
     # and keep their own slot under the widened unique key — the manual save
-    # neither maps them nor overwrites them.
-    existing = {
-        (r.cost_code_id, r.cost_type): r for r in all_rows if r.source != "change"
-    }
+    # neither counts them nor overwrites them.
+    own = [r for r in all_rows if r.source != "change"]
     change_keys = {
         (r.cost_code_id, r.cost_type) for r in all_rows if r.source == "change"
     }
-    locked_keys = {k: r for k, r in existing.items() if r.locked}
-    keep: set = set()
+    handled: set = set()  # ids of rows a sent row stood for
     for row in data.rows:
         key = (row.cost_code_id, row.cost_type)
-        # a locked row's key is refused before anything else — it is the
-        # contract budget, moved only by a change order (#551)
-        if key in locked_keys:
-            _locked_budget_409(db, locked_keys[key])
         if row.cost_type and row.cost_type not in types:
             raise HTTPException(
                 status_code=422, detail=said("Unknown cost type '{}'", row.cost_type)
             )
         if row.cost_code_id and not db.get(CostCode, row.cost_code_id):
             raise HTTPException(status_code=404, detail="Cost code not found")
+        if row.cost_code_id:
+            group = [r for r in own if r.cost_code_id == row.cost_code_id]
+            group, twins = _fold_twins(group)
+        else:
+            group = [r for r in own if (r.cost_code_id, r.cost_type) == key]
+            twins = []
+        handled.update(r.id for r in group + twins)
+        for twin in twins:
+            db.delete(twin)
+        if _budget_sum(group) == (_q(row.amount), _q(row.revenue_amount)):
+            # sent back as stored (or blank where nothing is stored): nothing
+            # changes; a lone manual row on the same key still takes the
+            # notes sent, as it always did
+            if (
+                len(group) == 1
+                and group[0].source == "manual"
+                and ((group[0].cost_code_id, group[0].cost_type) == key)
+            ):
+                group[0].notes = row.notes
+            continue
+        # set back to the estimate (or locked) rows' own sum: the code's
+        # manual rows are extras, such as the stray row an older save wrote
+        # past the lock, and are dropped so the code reads as its estimate
+        kept = [r for r in group if r.source != "manual"]
+        if kept and len(kept) < len(group):
+            if _budget_sum(kept) == (_q(row.amount), _q(row.revenue_amount)):
+                for r in group:
+                    if r.source == "manual":
+                        db.delete(r)
+                continue
+        # a locked row is the contract budget, moved only by a change order
+        locked = next((r for r in group if r.locked), None)
+        if locked is not None:
+            _locked_budget_409(db, locked)
         if key in change_keys:
             raise HTTPException(
                 status_code=409,
@@ -390,17 +445,27 @@ def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get
                     "message": "That budget line is owned by a change order; edit it there.",
                 },
             )
+        cur = next(
+            (
+                r
+                for r in group
+                if r.source == "manual" and (r.cost_code_id, r.cost_type) == key
+            ),
+            None,
+        )
+        for r in group:
+            if r is not cur:
+                db.delete(r)
         if row.amount == 0 and row.revenue_amount == 0:
+            if cur is not None:
+                db.delete(cur)
             continue
-        keep.add(key)
-        cur = existing.get(key)
-        if cur:
+        if cur is not None:
             cur.amount, cur.revenue_amount, cur.notes = (
                 row.amount,
                 row.revenue_amount,
                 row.notes,
             )
-            cur.source = "manual"
         else:
             db.add(
                 JobBudget(
@@ -413,8 +478,8 @@ def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get
                     source="manual",
                 )
             )
-    for key, cur in existing.items():
-        if key not in keep and cur.source == "manual":
+    for cur in own:
+        if cur.id not in handled and cur.source == "manual":
             db.delete(cur)
     db.commit()
     return get_job_budgets(job_id, db)
