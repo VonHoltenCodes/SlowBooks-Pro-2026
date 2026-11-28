@@ -90,6 +90,7 @@ def test_the_setting_is_off_by_default(client):
 
 
 def test_the_setting_takes_true_or_false_and_nothing_else(client):
+    _upload(client)
     _turn(client, True)
     assert client.get("/api/settings").json()["company_logo_in_app"] == "true"
     _turn(client, False)
@@ -116,6 +117,39 @@ def test_removing_the_logo_turns_the_setting_off(client):
     _upload(client)
     _no_logo_answer(_visitor().get("/api/auth/company-logo"))
     assert "company_logo_url" not in _visitor().get("/api/auth/status").json()
+
+
+def test_a_save_sent_on_after_the_removal_stores_it_off(client):
+    """A form drawn before Remove logo (unsaved edits, a second window) still
+    sends the box as on: the server stores it off, the rest of the save
+    lands, and a logo uploaded later reads to a visitor exactly as no logo."""
+    _upload(client)
+    _turn(client, True)
+    assert client.delete("/api/uploads/logo").status_code == 200
+    r = client.put(
+        "/api/settings",
+        json={"company_logo_in_app": "true", "company_city": "Springfield"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["company_logo_in_app"] == "false"
+    assert r.json()["company_city"] == "Springfield"
+    visitor = _visitor()
+    with_no_logo = visitor.get("/api/auth/company-logo")
+    _upload(client)
+    assert client.get("/api/settings").json()["company_logo_in_app"] == "false"
+    uploaded_again = visitor.get("/api/auth/company-logo")
+    assert _no_logo_answer(uploaded_again) == _no_logo_answer(with_no_logo)
+    assert uploaded_again.content == with_no_logo.content
+    assert "company_logo_url" not in visitor.get("/api/auth/status").json()
+
+
+def test_clearing_the_logo_path_turns_the_setting_off(client):
+    _upload(client)
+    _turn(client, True)
+    r = client.put("/api/settings", json={"company_logo_path": ""})
+    assert r.status_code == 200, r.text
+    assert r.json()["company_logo_in_app"] == "false"
+    _no_logo_answer(_visitor().get("/api/auth/company-logo"))
 
 
 def test_removing_a_logo_never_shown_writes_no_setting(client, TestSession):
@@ -180,12 +214,20 @@ def test_a_company_that_opted_in_has_its_logo_served_without_a_session(client):
     assert "set-cookie" not in r.headers
 
 
-def test_not_opted_in_reads_exactly_as_no_logo(client):
+def test_not_opted_in_reads_exactly_as_no_logo(client, TestSession):
+    from app.services.settings_service import set_setting
+
     visitor = _visitor()
     # no logo, not opted in
     none_at_all = _no_logo_answer(visitor.get("/api/auth/company-logo"))
-    # no logo, opted in
-    _turn(client, True)
+    # no logo, opted in: a save stores that off now, so write the stored
+    # state as a database from before that rule could hold it
+    db = TestSession()
+    try:
+        set_setting(db, "company_logo_in_app", "true")
+        db.commit()
+    finally:
+        db.close()
     opted_no_logo = _no_logo_answer(visitor.get("/api/auth/company-logo"))
     # a logo, not opted in
     _turn(client, False)

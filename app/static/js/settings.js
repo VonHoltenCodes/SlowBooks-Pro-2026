@@ -2492,6 +2492,9 @@ const SettingsPage = {
             if (!SettingsPage.isDirty()) { App.navigate('#/settings'); return; }
             document.getElementById('company-logo-preview')?.remove();
             document.getElementById('company-logo-note')?.remove();
+            // The server turned "Show the company logo in SlowBooks Pro" off
+            // with the logo; drop its box so Save Settings never sends it on.
+            document.querySelector('label[for="company-logo-in-app"]')?.remove();
         } catch (err) { toast(err.message, 'error'); }
     },
 
