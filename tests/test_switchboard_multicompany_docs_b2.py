@@ -28,8 +28,10 @@ def _read(name):
 
 
 def _unreleased():
+    # The newest section: "Unreleased" while it is open, else the release
+    # section the release commit wrote in its place.
     log = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    start = log.index("### Unreleased")
+    start = log.index("\n### ") + 1
     return _flat(log[start : log.index("\n### ", start + 1)])
 
 
