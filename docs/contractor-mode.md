@@ -1124,7 +1124,9 @@ no lines and a zero total is voided like any other (#723).
 **Submit, Approve and the printed application.** **Submit** marks the
 application as sent to the owner; nothing posts. **Approve** is the
 contractor's own button, not the owner's approval: it posts the invoice (from
-a draft or a submitted application). So when the owner's architect or rep
+a draft or a submitted application). That invoice starts as **Sent**, which
+means it was issued with the application, not that it was emailed: email it
+to the owner from the invoice. So when the owner's architect or rep
 certifies less than you asked for, open the submitted application, change its
 amounts to the certified figures, then Approve. The PDF (titled *Application
 for Payment*) prints the application's **Status** (Draft, Submitted,
@@ -1774,7 +1776,10 @@ and any difference from billing is over or under billing. Closed jobs are left
 out unless *include closed* (or the status filter) asks for them. Closing is
 read **as of the date**: the job keeps the day it went to Closed (cleared if it
 reopens), so a job closed in November is an open job, measured as any other,
-in September's schedule and its adjusting entry. A job already closed when
+in September's schedule and its adjusting entry. A job closed during a day was
+still on the books for it: a schedule dated the close day reads the same that
+evening as it did that morning, and the job leaves the schedule from the next
+day. A job already closed when
 this was added takes the day its record was last changed (the latest it can
 have closed); one with no date on file counts as closed on every date.
 
@@ -1790,8 +1795,8 @@ the table, in the PDF note and the CSV):
   spend).
 - *A finished job still showing cost to come.* A job billed in full (billed to
   date at or over the revised contract), its retainage collected and every
-  commitment closed, that still has cost to complete. Close the job (it then
-  reads 100% complete) or enter 0 in the forecast.
+  commitment closed, that still has cost to complete. Enter 0 in the forecast,
+  or close the job: schedules dated after the day you close it leave it out.
 
 **Projected loss.** When actual + cost to complete is over the revised contract,
 the whole loss is recognised now, the usual treatment of a loss contract. Earned
